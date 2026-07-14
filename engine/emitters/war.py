@@ -12,12 +12,13 @@ season_closed for season N fires when the rollover to N+1 is observed.
 
 Q2 at season close: War Champ = top cumulative season fame (the honor,
 unconditional); the Free Pass rotates — never the same player in sequential
-seasons; falls to rank 2. The Q5 award pass consumes the season_closed event;
-this module never writes the awards ledger.
+seasons; falls to rank 2. The close change set writes the season row, event,
+and required awards as one invariant-checked transition.
 """
 
 from __future__ import annotations
 
+from engine.change_sets import ChangeSetInvariantError, SeasonCloseChangeSet
 from engine.db import canon_tag, utcnow
 from engine.emitters import insert_stream_event
 from engine.normalize import war_day as normalize_war_day
@@ -324,9 +325,10 @@ def emit_award_races(conn, entity_tag, old: dict, new: dict, observed_at, window
     return n
 
 
-def close_season(conn, season_id: int, final_state: dict, observed_at: str) -> int:
-    """Season death (§16.1): compute Q2's honor + rotation outcome into
-    war_seasons and emit season_closed. Idempotent via the event dedup key."""
+def _build_season_close_change_set(
+    conn, season_id: int, final_state: dict, observed_at: str,
+) -> SeasonCloseChangeSet:
+    """Derive the complete durable season-close transition before writing it."""
     from engine.award_outcomes import compute_season_award_outcome
 
     outcome = compute_season_award_outcome(conn, season_id)
@@ -347,47 +349,125 @@ def close_season(conn, season_id: int, final_state: dict, observed_at: str) -> i
     weeks = conn.execute(
         "SELECT COUNT(*) FROM war_weeks WHERE season_id = ?", (season_id,)
     ).fetchone()[0]
+    payload = {
+        "final_rank": final_rank,
+        "weeks": weeks,
+        "war_champ_tag": champ,
+        "free_pass_tag": free_pass,
+        "standings_top": standings[:3],
+    }
+    return SeasonCloseChangeSet(
+        season_id=season_id,
+        observed_at=observed_at,
+        final_rank=final_rank,
+        weeks=weeks,
+        war_champ_tag=champ,
+        free_pass_tag=free_pass,
+        outcome=outcome,
+        event_payload=payload,
+        event_dedup_key=f"season_closed:{season_id}",
+    )
+
+
+def _required_season_awards(changes: SeasonCloseChangeSet) -> set[tuple[str, str, int]]:
+    """Minimum award rows implied by the authoritative close outcome."""
+    outcome = changes.outcome
+    required = {
+        ("war_champ", entry["tag"], entry["official_rank"])
+        for entry in outcome["standings"][:3]
+    }
+    if outcome.get("free_pass"):
+        required.add(("free_pass", outcome["free_pass"]["tag"], 1))
+    required.update(
+        ("donation_champ", entry["tag"], entry["official_rank"])
+        for entry in outcome["donation_champs"][:3]
+    )
+    required.update(
+        ("rookie_mvp", entry["tag"], entry["official_rank"])
+        for entry in outcome["rookie_mvps"][:3]
+    )
+    required.update(
+        ("war_participant", entry["tag"], 1)
+        for entry in outcome["war_participants"]
+    )
+    return required
+
+
+def _verify_season_close_change_set(conn, changes: SeasonCloseChangeSet) -> None:
+    """Refuse a partial close: season, event, and mandatory awards must agree."""
+    failures: list[str] = []
+    season = conn.execute(
+        "SELECT ended_at, final_rank, weeks, war_champ_tag, free_pass_tag "
+        "FROM war_seasons WHERE season_id = ?",
+        (changes.season_id,),
+    ).fetchone()
+    expected_season = (
+        changes.observed_at,
+        changes.final_rank,
+        changes.weeks,
+        changes.war_champ_tag,
+        changes.free_pass_tag,
+    )
+    actual_season = tuple(season) if season is not None else None
+    if actual_season != expected_season:
+        failures.append(f"season row={actual_season!r}")
+    event = conn.execute(
+        "SELECT 1 FROM war_events WHERE dedup_key = ? AND event_type = 'season_closed'",
+        (changes.event_dedup_key,),
+    ).fetchone()
+    if event is None:
+        failures.append("season_closed event missing")
+    actual_awards = {
+        (row["award_type"], row["player_tag"], row["rank"])
+        for row in conn.execute(
+            "SELECT award_type, player_tag, rank FROM awards WHERE season_id = ?",
+            (changes.season_id,),
+        ).fetchall()
+    }
+    missing_awards = _required_season_awards(changes) - actual_awards
+    if missing_awards:
+        failures.append(f"awards missing={sorted(missing_awards)!r}")
+    if failures:
+        raise ChangeSetInvariantError(
+            "season close change set invariant failed: " + "; ".join(failures)
+        )
+
+
+def _apply_season_close_change_set(conn, changes: SeasonCloseChangeSet) -> int:
     conn.execute(
         """UPDATE war_seasons SET ended_at = ?, final_rank = ?, weeks = ?,
                war_champ_tag = ?, free_pass_tag = ?
            WHERE season_id = ?""",
-        (observed_at, final_rank, weeks, champ, free_pass, season_id),
+        (changes.observed_at, changes.final_rank, changes.weeks,
+         changes.war_champ_tag, changes.free_pass_tag, changes.season_id),
     )
-    n = _emit(conn, season_id, None, observed_at, None, "season_closed",
-              f"season_closed:{season_id}",
-              {"final_rank": final_rank, "weeks": weeks,
-               "war_champ_tag": champ, "free_pass_tag": free_pass,
-               "standings_top": standings[:3]})
-    # Q5: awards fire on the season-death event and land durably in the same
-    # transaction. The awareness brain is the sole proactive poster; it reads
-    # season_closed + the award rows on its next turn. Do not enqueue a legacy
-    # communication intent here: production deliberately no longer consumes
-    # the deterministic recognition/delivery pipeline.
-    try:
-        from engine import awards as engine_awards
+    n = _emit(
+        conn, changes.season_id, None, changes.observed_at, None,
+        "season_closed", changes.event_dedup_key, dict(changes.event_payload),
+    )
+    from engine import awards as engine_awards
 
-        engine_awards.grant_season_awards(
-            conn, season_id, observed_at, outcome=outcome,
-        )
-    except Exception:  # award failure must never lose the season_closed event
-        import logging
-
-        logging.getLogger("engine.war").exception(
-            "season award grant failed for season %s", season_id
-        )
+    engine_awards.grant_season_awards(
+        conn, changes.season_id, changes.observed_at, outcome=dict(changes.outcome),
+    )
+    _verify_season_close_change_set(conn, changes)
     # D7: the season's chronicle memory — deterministic prose from the rows
-    # just written (no LLM in the tick path), guarded like the awards.
-    try:
-        from engine import chronicles
+    # just written (no LLM in the tick path). Chronicle failure is explicitly
+    # best-effort and records an incident inside write_season_chronicle.
+    from engine import chronicles
 
-        chronicles.write_season_chronicle(conn, "war", season_id, observed_at)
-    except Exception:
-        import logging
-
-        logging.getLogger("engine.war").exception(
-            "season chronicle failed for season %s", season_id
-        )
+    chronicles.write_season_chronicle(
+        conn, "war", changes.season_id, changes.observed_at,
+    )
     return n
+
+
+def close_season(conn, season_id: int, final_state: dict, observed_at: str) -> int:
+    """Apply one invariant-checked season death inside the caller transaction."""
+    changes = _build_season_close_change_set(
+        conn, season_id, final_state, observed_at,
+    )
+    return _apply_season_close_change_set(conn, changes)
 
 
 def emit_race(conn, entity_tag, old, new, observed_at, window_start) -> int:
