@@ -17,6 +17,7 @@ from db import managed_connection
 __all__ = [
     "summarize_event_windows",
     "list_recent_events",
+    "list_events_after_cursors",
     "summarize_battle_modes",
 ]
 
@@ -33,6 +34,83 @@ _ALL_STREAMS = (
     ("game", "game_events", "subject_tag", "NULL", True),
 )
 _DEFAULT_STREAMS = ("player", "clan", "war")
+
+
+def _decode_event(row, stream: str) -> dict:
+    item = dict(row)
+    item["stream"] = stream
+    item["stream_position"] = int(item.pop("event_id"))
+    try:
+        item["payload"] = json.loads(item.pop("payload_json") or "{}")
+    except (TypeError, ValueError):
+        item["payload"] = {}
+    return item
+
+
+@managed_connection
+def list_events_after_cursors(
+    cursors: dict[str, int],
+    *,
+    streams: tuple[str, ...] = ("player", "clan", "war", "game"),
+    limit: int = 80,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    """Return the oldest bounded batch after durable per-stream positions.
+
+    Positions are SQLite ``event_id`` values, not timestamps. Each stream is
+    read independently and the results are merged by insertion time; advancing
+    the returned checkpoints can therefore never skip an unseen row in that
+    stream. Backfilled game rows remain in the batch so their positions can be
+    acknowledged, but callers decide whether they are member-facing context.
+    """
+    wanted = set(streams)
+    cap = max(1, int(limit))
+    candidates: list[dict] = []
+    heads: dict[str, int] = {}
+
+    for stream, table, subject_expr, timing_expr, has_backfilled in _ALL_STREAMS:
+        if stream not in wanted:
+            continue
+        start = max(0, int(cursors.get(stream, 0) or 0))
+        heads[stream] = int(
+            conn.execute(f"SELECT COALESCE(MAX(event_id), 0) FROM {table}").fetchone()[0]
+        )
+        backfilled_expr = "backfilled" if has_backfilled else "0"
+        rows = conn.execute(
+            f"SELECT event_id, dedup_key, event_type, {subject_expr} AS subject_tag, "
+            f"observed_at, created_at, {timing_expr} AS timing, scope, payload_json, "
+            f"{backfilled_expr} AS backfilled FROM {table} "
+            "WHERE event_id > ? ORDER BY event_id ASC LIMIT ?",
+            (start, cap + 1),
+        ).fetchall()
+        candidates.extend(_decode_event(row, stream) for row in rows)
+
+    # created_at is the insertion clock shared by all four streams. event_id and
+    # stream make ties deterministic without pretending ids are cross-stream.
+    candidates.sort(
+        key=lambda e: (
+            str(e.get("created_at") or e.get("observed_at") or ""),
+            str(e.get("stream") or ""),
+            int(e.get("stream_position") or 0),
+        )
+    )
+    batch = candidates[:cap]
+    checkpoints = {stream: max(0, int(cursors.get(stream, 0) or 0)) for stream in wanted}
+    for event in batch:
+        stream = event["stream"]
+        checkpoints[stream] = max(checkpoints.get(stream, 0), event["stream_position"])
+
+    remaining = {
+        stream: max(0, heads.get(stream, 0) - checkpoints.get(stream, 0))
+        for stream in wanted
+    }
+    return {
+        "events": batch,
+        "checkpoints": checkpoints,
+        "heads": heads,
+        "remaining_by_stream": remaining,
+        "has_more": any(heads.get(s, 0) > checkpoints.get(s, 0) for s in wanted),
+    }
 
 
 def _anchor(now: Optional[str] = None) -> datetime:

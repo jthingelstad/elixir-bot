@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS watches (
 CREATE INDEX IF NOT EXISTS idx_watches_status ON watches(status, opened_at DESC);
 """
 
+AWARENESS_EVENT_STREAMS = {
+    "player": "player_events",
+    "clan": "clan_events",
+    "war": "war_events",
+    "game": "game_events",
+}
+AWARENESS_CURSOR_PREFIX = "awareness:events:"
+
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -116,6 +124,93 @@ def ensure_awareness_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def ensure_event_cursors(conn: sqlite3.Connection) -> tuple[dict[str, int], bool]:
+    """Return durable awareness positions, initializing the cutover once.
+
+    Existing installations already have successful awareness thoughts but no
+    event-id cursors. For that one-time bridge, seed each stream to the greatest
+    row that existed when the last successful thought was recorded. Rows created
+    later remain pending even when their observed timestamp is old. A genuinely
+    fresh installation starts at zero: without a successful thought there is no
+    evidence that any stream row has been reviewed, so skipping to the head would
+    recreate the silent-loss behavior this cursor is meant to remove.
+
+    The caller owns the transaction. ``build_read`` commits initialization only
+    when it owns its connection; borrowed connections follow the normal project
+    discipline.
+    """
+    ensure_awareness_schema(conn)
+    last_success = last_tick_at(conn=conn)
+    positions: dict[str, int] = {}
+    initialized = False
+    for stream, table in AWARENESS_EVENT_STREAMS.items():
+        consumer_key = f"{AWARENESS_CURSOR_PREFIX}{stream}"
+        row = conn.execute(
+            "SELECT cursor_int FROM stream_cursors "
+            "WHERE consumer_key = ? AND scope_key = ''",
+            (consumer_key,),
+        ).fetchone()
+        if row is not None and row[0] is not None:
+            positions[stream] = int(row[0])
+            continue
+
+        if last_success:
+            position = int(
+                conn.execute(
+                    # Timestamps have one-second precision. Strictly-before may
+                    # replay a same-second row, but <= can silently consume a row
+                    # inserted just after the thought in that same second.
+                    f"SELECT COALESCE(MAX(event_id), 0) FROM {table} WHERE created_at < ?",
+                    (last_success,),
+                ).fetchone()[0]
+            )
+        else:
+            position = 0
+        conn.execute(
+            "INSERT INTO stream_cursors "
+            "(consumer_key, scope_key, cursor_int, updated_at, metadata_json) "
+            "VALUES (?, '', ?, ?, ?) "
+            "ON CONFLICT(consumer_key, scope_key) DO UPDATE SET "
+            "cursor_int = excluded.cursor_int, updated_at = excluded.updated_at, "
+            "metadata_json = excluded.metadata_json",
+            (
+                consumer_key,
+                position,
+                _utcnow(),
+                json.dumps({"initialized_from": "last_success" if last_success else "stream_start"}),
+            ),
+        )
+        positions[stream] = position
+        initialized = True
+    return positions, initialized
+
+
+@managed_connection
+def event_cursor_positions(*, conn: sqlite3.Connection = None) -> dict[str, int]:
+    positions, _ = ensure_event_cursors(conn)
+    return positions
+
+
+@managed_connection
+def advance_event_cursors(
+    positions: dict[str, int], *, conn: sqlite3.Connection = None
+) -> None:
+    """Advance only known awareness streams; positions never move backward."""
+    now = _utcnow()
+    for stream, position in (positions or {}).items():
+        if stream not in AWARENESS_EVENT_STREAMS:
+            continue
+        consumer_key = f"{AWARENESS_CURSOR_PREFIX}{stream}"
+        conn.execute(
+            "INSERT INTO stream_cursors "
+            "(consumer_key, scope_key, cursor_int, updated_at) VALUES (?, '', ?, ?) "
+            "ON CONFLICT(consumer_key, scope_key) DO UPDATE SET "
+            "cursor_int = MAX(COALESCE(stream_cursors.cursor_int, 0), excluded.cursor_int), "
+            "updated_at = excluded.updated_at",
+            (consumer_key, max(0, int(position or 0)), now),
+        )
+
+
 @managed_connection
 def last_tick_at(*, conn: sqlite3.Connection = None) -> str | None:
     """The timestamp of the most recent *successful* thought — the cursor for
@@ -143,6 +238,7 @@ def persist_thought(
     *,
     model: str | None = None,
     tool_trace: list | None = None,
+    cursor_positions: dict[str, int] | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
     """Record one awareness turn. Returns ``{"thought_id", "loop_number"}``.
@@ -185,6 +281,10 @@ def persist_thought(
             model,
         ),
     )
+    # Thought + cursor acknowledgement are one transaction. Defensively ignore
+    # positions on a failed plan even if a caller accidentally supplies them.
+    if outcome != "failed" and cursor_positions:
+        advance_event_cursors(cursor_positions, conn=conn)
     return {"thought_id": thought_id, "loop_number": loop_number}
 
 
@@ -267,5 +367,8 @@ __all__ = [
     "list_recent_thoughts",
     "open_watches",
     "last_tick_at",
+    "event_cursor_positions",
+    "ensure_event_cursors",
+    "advance_event_cursors",
     "classify_plan",
 ]
