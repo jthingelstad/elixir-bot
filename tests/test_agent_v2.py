@@ -441,7 +441,7 @@ def test_execute_tool_get_war_season_summary_uses_db():
         # [] under this mocked db) — the this-week contributors fix.
         assert result["season_id"] == 129 and result["races"] == 4
         assert result["current_week_top"] == []
-        mock_db.get_war_season_summary.assert_called_once_with(season_id=None, top_n=10)
+        mock_db.get_war_season_summary.assert_called_once_with(top_n=10)
 
 
 def test_execute_tool_get_clan_roster_max_cards_and_clan_health_hot_streaks():
@@ -679,6 +679,7 @@ def test_execute_tool_get_river_race_standings():
             "war_state": "full",
             "season_id": 129,
             "race_rank": 1,
+            "boat_scored": True,
             "race_standings": [{"rank": 1, "clan_name": "POAP KINGS", "fame": 5000, "is_us": True}],
             "season_week_label": "Season 129 Week 1",
             "period_type": "warDay",
@@ -717,6 +718,12 @@ def test_execute_tool_get_river_race_engagement():
             "is_final_battle_day": False,
             "is_final_practice_day": False,
             "race_standings": [],
+        }
+        mock_db.get_current_war_status.return_value = {
+            "season_id": 129,
+            "phase": "battle",
+            "boat_scored": False,
+            "day_scored": False,
         }
         mock_db.get_current_war_day_state.return_value = {
             "war_day_key": "s00129-w01-p010",
@@ -777,7 +784,7 @@ def test_execute_tool_get_war_season_standings_default_points():
     with (
         patch("elixir_agent.db") as mock_db,
         patch("agent.tool_exec._enrich_war_player_types") as mock_enrich,
-        patch("agent.tool_exec._war_standings_freshness") as mock_fresh,
+        patch("capabilities.war._standings_freshness") as mock_fresh,
     ):
         mock_db.get_war_champ_standings.return_value = [
             {"name": "Player", "total_points": 5000}
@@ -943,21 +950,24 @@ def test_respond_in_channel_injects_war_context_for_war_question():
     with (
         patch("elixir_agent._chat_with_tools", return_value={"event_type": "channel_response", "content": "ok"}) as mock_chat,
         patch("agent.workflows.db.build_clan_trend_summary_context", return_value="trends"),
-        patch("agent.workflows.db.build_war_now_context", return_value={
-            "season_id": 129,
-            "week": 3,
-            "phase": "battle",
-            "phase_display": "Battle Day 2",
-            "day_number": 2,
-            "day_total": 4,
-            "time_left_text": "12h 30m",
-            "is_colosseum_week": False,
-            "is_final_battle_day": False,
-            "is_final_practice_day": False,
-            "race_standings": [
-                {"rank": 1, "clan_name": "POAP KINGS", "fame": 12000, "is_us": True},
-                {"rank": 2, "clan_name": "Dragon Riders", "fame": 11000, "is_us": False},
-            ],
+        patch("agent.workflows.war_capability.get_war_intelligence", return_value={
+            "available": True,
+            "clock": {
+                "season_id": 129,
+                "week": 3,
+                "phase": "battle",
+                "phase_display": "Battle Day 2",
+                "day_number": 2,
+                "day_total": 4,
+                "time_left_text": "12h 30m",
+                "is_colosseum_week": False,
+                "is_final_battle_day": False,
+                "is_final_practice_day": False,
+                "race_standings": [
+                    {"rank": 1, "clan_name": "POAP KINGS", "fame": 12000, "is_us": True},
+                    {"rank": 2, "clan_name": "Dragon Riders", "fame": 11000, "is_us": False},
+                ],
+            },
         }),
     ):
         elixir_agent.respond_in_channel(
@@ -1071,12 +1081,15 @@ def test_analyze_arena_relay_screenshot_passes_image_and_action_context():
     }
     with (
         patch("elixir_agent._chat_with_tools", return_value={"event_type": "arena_relay_screenshot_observation", "content": "ok"}) as mock_chat,
-        patch("agent.workflows.db.build_war_now_context", return_value={
-            "season_id": 130, "week": 1, "phase": "practice",
-            "phase_display": "Training Day 1", "day_number": 1, "day_total": None,
-            "time_left_text": None, "is_colosseum_week": False,
-            "is_final_battle_day": False, "is_final_practice_day": False,
-            "race_standings": [], "day_standings": [],
+        patch("agent.workflows.war_capability.get_war_intelligence", return_value={
+            "available": True,
+            "clock": {
+                "season_id": 130, "week": 1, "phase": "practice",
+                "phase_display": "Training Day 1", "day_number": 1, "day_total": None,
+                "time_left_text": None, "is_colosseum_week": False,
+                "is_final_battle_day": False, "is_final_practice_day": False,
+                "race_standings": [], "day_standings": [],
+            },
         }),
         patch("agent.workflows.db.list_leader_actions", return_value=[
             {

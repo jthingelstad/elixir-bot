@@ -3517,7 +3517,7 @@ def test_build_clan_status_report_summarizes_operational_clan_state():
         patch("elixir.db.get_members_at_risk", return_value={"members": [{"member_ref": "Vijay"}]}),
         patch("elixir.db.get_members_on_losing_streak", return_value=[{"member_ref": "Finn", "current_streak": 3}]),
         patch("elixir.db.list_recent_joins", return_value=[{"member_ref": "New Guy"}]),
-        patch("elixir.db.get_war_deck_status_today", return_value={
+        patch("elixir.db.get_current_war_day_state", return_value={
             "total_participants": 21,
             "used_all_4": [{}, {}],
             "used_some": [{}, {}, {}],
@@ -3720,7 +3720,13 @@ def test_build_clan_status_report_uses_non_war_risk_watchlist():
     ):
         elixir._build_clan_status_report({"name": "POAP KINGS", "members": 21}, {})
 
-    mock_risk.assert_called_once_with(require_war_participation=False)
+        mock_risk.assert_called_once_with(
+            inactivity_days=7,
+            min_donations_week=20,
+            require_war_participation=False,
+            min_war_races=1,
+            season_id=None,
+        )
 
 
 def test_build_clan_status_report_formats_recent_joins_as_relative_days():
@@ -3852,11 +3858,13 @@ def test_build_kick_risk_report_uses_inactivity_only():
     }) as mock_risk:
         report = elixir._build_kick_risk_report()
 
-    mock_risk.assert_called_once_with(
-        inactivity_days=7,
-        min_donations_week=0,
-        require_war_participation=False,
-    )
+        mock_risk.assert_called_once_with(
+            inactivity_days=7,
+            min_donations_week=0,
+            require_war_participation=False,
+            min_war_races=1,
+            season_id=None,
+        )
     assert report == "**Kick Risk (Inactive 7+ Days)**\n- Vijay — last seen 8 days ago"
 
 
@@ -3946,7 +3954,13 @@ def test_build_clan_status_short_report_uses_non_war_risk_watchlist():
     ):
         elixir._build_clan_status_short_report({"name": "POAP KINGS", "members": 21}, {})
 
-    mock_risk.assert_called_once_with(require_war_participation=False)
+        mock_risk.assert_called_once_with(
+            inactivity_days=7,
+            min_donations_week=20,
+            require_war_participation=False,
+            min_war_races=1,
+            season_id=None,
+        )
 
 
 def test_recap_context_leads_with_public_story_arcs():

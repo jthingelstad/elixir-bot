@@ -28,6 +28,15 @@
 > change sets and must satisfy postconditions before their baselines advance.
 > Post-cut schema changes are ordered in `db/schema.py`; runtime modules do not
 > mutate schema on first use.
+>
+> **Read-layer amendment (2026-07-15):** product surfaces no longer assemble
+> high-level domain meaning independently. Versioned contracts in
+> `capabilities/` sit between storage/projections and tools, awareness, reports,
+> memory, and admin reads. They currently own game-mode, war, member,
+> management-decision, and awards semantics. These are read-only contracts:
+> external API refresh remains ingress work, and deterministic engine policy
+> (especially `member_management`) remains authoritative rather than being
+> re-evaluated in the capability layer.
 
 ---
 
