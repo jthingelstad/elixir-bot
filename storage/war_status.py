@@ -41,12 +41,16 @@ from storage.war_calendar import (
     war_day_key,
     war_reset_window_utc,
 )
+from engine.game_rules import (
+    NORMAL_RIVER_RACE_FINISH_LINE,
+    river_race_completed_from_score,
+    river_race_finish_line,
+)
 
 HOME_CLAN = "#J2RGCRVG"
 
-# Game constants (architecture §16.4): finish lines per week type.
-FAME_FINISH_LINE = 10_000
-FAME_FINISH_LINE_COLOSSEUM = 5_000
+# Compatibility export; the canonical rule lives in engine.game_rules.
+FAME_FINISH_LINE = NORMAL_RIVER_RACE_FINISH_LINE
 
 # Fame ("movement points") a clan banks at day close for its daily period-point
 # rank (Clash wiki). Intact boat defenses add a further diminishing survival
@@ -144,7 +148,7 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
     offset = period_offset(period_index)
     colosseum = is_colosseum_week(period_type)
     our_fame = _coerce_int(projection.get("our_fame"))
-    finish_line = FAME_FINISH_LINE_COLOSSEUM if colosseum else FAME_FINISH_LINE
+    finish_line = river_race_finish_line(period_type)
 
     trophy_change = None
     if latest_logged and season_id == latest_logged["season_id"] and section_index == latest_logged["section_index"]:
@@ -191,11 +195,10 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
         projected_fame_at_close = our_fame + projected_day_fame + (projected_defense_fame or 0)
         # We'd cross the finish line at TODAY's close (winning the week early) if
         # holding this rank + defenses gets us there and we're not already over.
-        clinches_finish_today = our_fame < finish_line <= projected_fame_at_close
-    # Finish-line / completion pace against the field that actually accumulates
-    # for this week type — NEVER the daily number on a normal week (that would
-    # falsely "complete" the race on a big battle day, e.g. 10,525 period points).
-    accumulating_score = _coerce_int(our_period_points) if colosseum else our_fame
+        clinches_finish_today = (
+            finish_line is not None
+            and our_fame < finish_line <= projected_fame_at_close
+        )
 
     observed_dt = coerce_utc_datetime(observed_at)
     _, period_ends_at = war_reset_window_utc(observed_dt or observed_at)
@@ -249,7 +252,11 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
         "day_standings": day_standings,
         "war_day_key": war_day_key(season_id, section_index, period_index, observed_at),
         "finish_time": None,
-        "race_completed": phase != "practice" and _coerce_int(accumulating_score) >= finish_line,
+        "race_completed": river_race_completed_from_score(
+            period_type,
+            our_fame,
+            active_battle_phase=phase != "practice",
+        ),
         "race_completed_at": None,
         "race_completed_early": False,
         "trophy_change": int(trophy_change) if isinstance(trophy_change, (int, float)) else None,

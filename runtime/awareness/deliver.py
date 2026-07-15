@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 
 from engine.recognition import compose as engine_compose
+from capabilities.game_truth import awareness_post_facts
 from runtime.awareness.policy import validate_plan, validate_repair
 
 log = logging.getLogger("elixir")
@@ -138,7 +139,8 @@ def deliver_posts(
         covers = post.get("covers_signal_keys") or []
         try:
             record_fn(lane=channel, content=copy, covers=covers,
-                      message_id=message_id, loop_number=loop_number)
+                      message_id=message_id, loop_number=loop_number,
+                      post=post, evidence=awareness_post_facts(read, post))
         except Exception:
             # Recording is dedup-memory only; a failure here must not fail an
             # already-delivered post (it's landed in Discord).

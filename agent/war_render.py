@@ -43,6 +43,11 @@ def render_war_now(data: dict) -> str:
         parts.append("Final practice day")
 
     lines = ["=== RIVER RACE — CURRENT MOMENT ===", " · ".join(parts)]
+    if data.get("is_colosseum_week"):
+        lines.append(
+            "Canonical Colosseum rule: no finish line; every battle across all "
+            "four battle days continues to count toward clan and member standings."
+        )
     if data.get("time_left_text"):
         lines.append(f"Period ends in {data['time_left_text']}")
 

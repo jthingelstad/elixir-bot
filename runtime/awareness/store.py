@@ -248,6 +248,8 @@ def record_awareness_post(
     covers: list | None = None,
     message_id: str | int | None = None,
     loop_number: int | None = None,
+    post: dict | None = None,
+    evidence: dict | None = None,
     conn: sqlite3.Connection = None,
 ) -> None:
     """Record a delivered brain post in its purpose-built durable ledger.
@@ -266,6 +268,17 @@ def record_awareness_post(
             (lane, preview, json.dumps(list(covers or [])), loop_number, now,
              str(message_id) if message_id is not None else None),
         )
+        if post is not None:
+            from engine.editor import record_active_awareness_quality
+
+            record_active_awareness_quality(
+                conn,
+                post=post,
+                evidence=evidence or {},
+                lane=lane,
+                content=content,
+                discord_message_id=message_id,
+            )
     except Exception as exc:
         log.exception("record_awareness_post: failed to record %s post", lane)
         # The post is already visible in Discord, so this remains fail-soft to
@@ -279,6 +292,28 @@ def record_awareness_post(
             context={"lane": lane, "discord_message_id": message_id},
             conn=conn,
         )
+
+
+@managed_connection
+def attach_awareness_posts_to_loop(
+    loop_number: int,
+    *,
+    since: str,
+    conn: sqlite3.Connection = None,
+) -> int:
+    """Link receipts written during this loop to its persisted thought.
+
+    Delivery necessarily happens before the thought is committed, so the
+    receipt cannot know the future loop number when inserted. The awareness
+    job is single-instance; linking still-null receipts created after this
+    read began is deterministic and crash-safe.
+    """
+    cur = conn.execute(
+        "UPDATE awareness_posts SET loop_number = ? "
+        "WHERE loop_number IS NULL AND datetime(posted_at) >= datetime(?)",
+        (int(loop_number), since),
+    )
+    return max(0, cur.rowcount)
 
 
 @managed_connection
@@ -315,6 +350,7 @@ __all__ = [
     "ensure_awareness_schema",
     "persist_thought",
     "record_awareness_post",
+    "attach_awareness_posts_to_loop",
     "list_recent_thoughts",
     "open_watches",
     "last_tick_at",

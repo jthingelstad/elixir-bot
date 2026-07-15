@@ -73,9 +73,10 @@ I checked the new war design against captured `currentriverrace` payloads and `c
   exactly the sediment v5.1 wants gone — **fix the stored endpoint name to
   `riverracelog` at the cut** so the new raw log isn't born with a misleading alias.
 
-*(Not verified: the "10,000 fame / 5,000 in Colosseum" finish lines in §16.4 — those are
-game constants, not obviously present as a field in the payload. Low risk; flag only if
-you want them sourced rather than hard-coded.)*
+*Subsequently corrected (2026-07-15): normal weeks use the 10,000-fame finish
+line; Colosseum has no finish line. Every battle across all four Colosseum battle
+days continues to count. The old 5,000 assumption was false and is now enforced
+through the canonical game-truth contract rather than prompt prose.*
 
 ### New-2. §16.1 — "dormant between seasons" is wrong; reword (LOCKED, Ask #2)
 

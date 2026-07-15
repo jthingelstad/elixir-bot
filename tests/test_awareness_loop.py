@@ -44,6 +44,10 @@ def test_compact_signal_tiers_badges_and_arena():
                              "payload": {"arena_name": "Spirit Square"}})
     assert arena["arena_name"] == "Spirit Square"
 
+    annual = _compact_signal({"event_type": "join_anniversary", "subject_tag": "#A",
+                              "payload": {"years": 2, "is_annual": True}})
+    assert annual["years"] == 2 and annual["is_annual"] is True
+
 
 def test_posting_pulse_flags_quiet_stretch():
     """posting_pulse marks a long silence so the brain can keep a heartbeat."""

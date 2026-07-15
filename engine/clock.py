@@ -10,8 +10,8 @@ Facts grounded in the archive's payloads (2026-07):
 - `periodType` is exactly 'training' | 'warDay' | 'colosseum'.
 - `seasonId` was absent in ALL 259 captured payloads — the season is always
   inferred (port of event_core/ingest/war.py infer_live_season_id).
-- Finish lines are game constants, not payload fields (§16.4): 10,000 fame in
-  normal weeks, 5,000 in Colosseum.
+- Finish lines are game constants, not payload fields: 10,000 fame in normal
+  weeks; Colosseum has no finish line and runs through all four battle days.
 - CR war days roll at ~10:00 UTC (observed finishTime ≈ 09:37Z); the clock uses
   10:00 UTC as the period boundary. Approximation, documented.
 """
@@ -27,8 +27,13 @@ from engine.normalize import (  # single source for war-week structure
     WAR_DAYS,
     parse_cr_time,
 )
+from engine.game_rules import (
+    NORMAL_RIVER_RACE_FINISH_LINE,
+    river_race_completed_from_score,
+    river_race_finish_line,
+)
 
-FAME_FINISH_LINE = 10_000
+FAME_FINISH_LINE = NORMAL_RIVER_RACE_FINISH_LINE
 # Colosseum has NO finish line — fame accrues across all four battle days
 # (verified live 2026-07-03: 20,600 fame on Colosseum day 2, race still on).
 # The spec's 5,000 constant (§16.4) was wrong; feedback.md New-1 had flagged
@@ -108,9 +113,11 @@ def war_clock(
 
     clan = payload.get("clan") or {}
     our_fame = int(clan.get("fame") or 0)
-    finish_line = None if is_colosseum else FAME_FINISH_LINE
-    race_finished = (
-        not is_colosseum and phase != "training" and our_fame >= FAME_FINISH_LINE
+    finish_line = river_race_finish_line(period_type)
+    race_finished = river_race_completed_from_score(
+        period_type,
+        our_fame,
+        active_battle_phase=phase != "training",
     )
 
     if phase == "training":

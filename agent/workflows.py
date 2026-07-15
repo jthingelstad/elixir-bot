@@ -61,12 +61,42 @@ def _war_status_prompt_context():
     from agent.war_render import render_war_now
 
     try:
-        snapshot = war_capability.get_war_intelligence(source=db)
+        snapshot = _war_status_snapshot()
         data = snapshot.get("clock") if snapshot.get("available") else None
     except Exception as exc:
         log.warning("War status context unavailable: %s", exc)
         return ""
     return render_war_now(data) if data else ""
+
+
+def _war_status_snapshot():
+    return war_capability.get_war_intelligence(source=db)
+
+
+def _repair_channel_game_facts(response: dict, findings: list[dict], facts: dict):
+    """One no-tools wording repair; factual contract and response shape stay fixed."""
+    system = (
+        "Repair a structured Discord response that contradicts canonical Clash Royale "
+        "mechanics. Return JSON only. Preserve event_type, summary, metadata, decisions, "
+        "member identities, and every field except content/share_content. Change only the "
+        "minimum wording needed to agree with CANONICAL FACTS. Do not add tools or claims. "
+        "For Colosseum: there is no finish line and every battle across all four battle "
+        "days continues to count toward clan and member standings."
+    )
+    return _chat_with_tools(
+        system,
+        json.dumps(
+            {"canonical_facts": facts, "findings": findings, "response": response},
+            indent=2,
+            default=str,
+        ),
+        workflow="game_factual_repair",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["game_factual_repair"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["game_factual_repair"],
+        strict_json=True,
+        return_errors=True,
+        max_tokens=1600,
+    )
 
 
 _WAR_MENTION_PATTERNS = tuple(re.compile(pat, re.IGNORECASE) for pat in (
@@ -549,10 +579,19 @@ def repair_awareness_plan(situation: dict, plan: dict, violations: list[str]):
         "relay decision. Change only the minimum wording needed to clear the violations. "
         "Refer to every member with they/them/their or repeat the member name; never guess "
         "gender. If the race is explicitly unranked, remove any claim about its current "
-        "numeric rank without inventing a replacement. Do not add posts, facts, or tools."
+        "numeric rank without inventing a replacement. Colosseum has NO finish line and "
+        "every battle across all four battle days continues to count toward clan and member "
+        "standings; remove any contrary claim. Do not add posts, facts, or tools."
     )
+    from capabilities.game_truth import get_game_truth
+
+    live_war = {
+        "period": situation.get("time") or {},
+        "current_state": (((situation.get("war_season") or {}).get("state") or {}).get("race") or {}),
+    }
     truth = {
         "race_ranked": (situation.get("war_season") or {}).get("race_ranked"),
+        "canonical_game_truth": get_game_truth(topic="river_race", live_war=live_war),
         "violations": violations,
         "plan": plan,
     }
@@ -989,8 +1028,22 @@ def respond_in_channel(question, author_name, channel_name, workflow, clan_data,
     if trend_context:
         user_msg += f"\n\n{trend_context}"
     # Add war status context (with competing clan standings) when relevant
+    war_snapshot = None
     if not lightweight_turn and war_relevant:
-        war_ctx = _war_status_prompt_context()
+        try:
+            war_snapshot = _war_status_snapshot()
+        except Exception as exc:
+            log.warning("War status admission snapshot unavailable: %s", exc)
+            war_snapshot = None
+        from agent.war_render import render_war_now
+
+        war_ctx = (
+            render_war_now(war_snapshot.get("clock"))
+            if isinstance(war_snapshot, dict)
+            and war_snapshot.get("available")
+            and war_snapshot.get("clock")
+            else ""
+        )
         if war_ctx:
             user_msg += f"\n\n{war_ctx}"
     user_msg += _format_memory_context(memory_context)
@@ -1008,7 +1061,7 @@ def respond_in_channel(question, author_name, channel_name, workflow, clan_data,
         if workflow == "interactive"
         else _clanops_system(channel_name)
     )
-    return _chat_with_tools(
+    result = _chat_with_tools(
         system_prompt,
         user_msg,
         conversation_history=conversation_history,
@@ -1019,6 +1072,23 @@ def respond_in_channel(question, author_name, channel_name, workflow, clan_data,
         strict_json=True,
         return_errors=True,
     )
+    if war_relevant and isinstance(war_snapshot, dict) and war_snapshot.get("available"):
+        from agent.factual_admission import admit_structured_response
+        from capabilities.game_truth import live_war_claim_facts
+
+        result, trace = admit_structured_response(
+            result,
+            live_war_claim_facts(war_snapshot),
+            repair_fn=_repair_channel_game_facts,
+        )
+        if trace.get("decision") != "pass":
+            log.warning(
+                "game factual admission %s for %s (%d finding(s))",
+                trace.get("decision"),
+                workflow,
+                len(trace.get("findings") or []),
+            )
+    return result
 
 
 # ── Event-driven message generation ──────────────────────────────────────────

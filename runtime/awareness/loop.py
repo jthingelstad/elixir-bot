@@ -40,6 +40,7 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
     from agent.workflows import run_awareness_tick
     from runtime.awareness import diagnostic as diag_mod
     from runtime.awareness import gate as gate_mod
+    from runtime.awareness import policy as policy_mod
     from runtime.awareness import read as read_mod
     from runtime.awareness import store
 
@@ -116,6 +117,9 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
     if not isinstance(plan, dict):
         plan = {}
 
+    plan, suppressed = policy_mod.apply_editorial_admission(read, plan)
+    counters["posts_suppressed"] = len(suppressed)
+
     outcome, reason = store.classify_plan(plan)
     counters["posts_planned"] = len(plan.get("posts") or [])
 
@@ -182,6 +186,15 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
         counters["thought_id"] = rec["thought_id"]
         counters["loop_number"] = loop_number = rec["loop_number"]
         counters["event_cursors_advanced"] = bool(cursor_positions)
+        if deliver_fn is not None:
+            try:
+                counters["post_receipts_linked"] = store.attach_awareness_posts_to_loop(
+                    loop_number,
+                    since=read.get("generated_at") or "9999-12-31T23:59:59Z",
+                )
+            except Exception as exc:
+                log.warning("awareness loop: post receipt linking failed", exc_info=True)
+                counters["error"] = counters["error"] or f"receipt_link: {exc}"
     except Exception as exc:
         log.exception("awareness loop: persist_thought failed")
         counters["error"] = counters["error"] or f"persist_thought: {exc}"

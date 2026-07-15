@@ -127,7 +127,9 @@ tools make them visible:
    findings) that unifies open incidents + smoke/integration test status + the
    latest post-quality scorecard. "Is Elixir healthy?" in one answer. Run it
    before/after any change; it's what the unattended `confidence-monitor` routine
-   executes.
+   executes. The scorecard samples the active awareness and assistant-message
+   paths; deterministic accuracy/repetition findings become idempotent editorial
+   memories that the next awareness read consumes as composition guidance.
 
 ### Review discipline
 
@@ -334,14 +336,14 @@ This keeps feature announcements discoverable: future changes should usually mea
 
 ## Query Layer (Current)
 
-Elixir’s core member/leader questions should be answered from structured capabilities, query helpers, and tools, not prompt reconstruction. Shared domain answers live in `capabilities/`; LLM tools are adapters over those contracts rather than their sole owners. The versioned capability layer covers clan game modes, live/season war intelligence, facet-based member intelligence, authoritative management decisions, and provisional-versus-durable awards. These contracts feed tools, awareness, reports, memory synthesis, and admin/Observatory reads. External API refresh remains outside member capabilities, and management capabilities package the engine verdict without rescoring it.
+Elixir’s core member/leader questions should be answered from structured capabilities, query helpers, and tools, not prompt reconstruction. Shared domain answers live in `capabilities/`; LLM tools are adapters over those contracts rather than their sole owners. The versioned capability layer covers canonical game truth, clan game modes, live/season war intelligence, facet-based member intelligence, deck and clan-local metagame intelligence, authoritative management decisions, and provisional-versus-durable awards. These contracts feed tools, awareness, reports, memory synthesis, and admin/Observatory reads. External API refresh remains outside member capabilities, and management capabilities package the engine verdict without rescoring it.
 
 The LLM has a set of domain-aligned tools (defined in `agent/tool_defs.py`) organized into five groups:
 
 - **Member domain**: `resolve_member`, `get_member` (include: profile, form, battles, war, trend, deck, losses, history, memories, chests, awards), `get_member_war_detail` (aspect: summary, attendance, battles, missed_days, vs_clan_avg, war_decks)
 - **River Race domain**: `get_river_race` (live race state + competing clan standings, read off the war clock), `get_war_season` (aspect: summary, standings, win_rates, boat_battles, score_trend, season_comparison, trending, perfect_attendance, no_participation), `get_clan_intel_report`
 - **Clan domain**: `get_clan_roster` (aspect: list, summary, recent_joins, longest_tenure, role_changes, max_cards, trends), `get_clan_health` (aspect: at_risk, hot_streaks, losing_streaks, trophy_drops, promotion_candidates — at_risk and promotion_candidates read the `member_management` projection, so tools and the leader-action pipeline can never disagree), `get_clan_game_modes` (aspect: summary, ranked, side_modes, events)
-- **Card + awards domain**: `lookup_cards`, `get_member_card_profile`, `lookup_member_cards`, `get_awards`
+- **Deck, card + awards domain**: `get_deck_intelligence` (member primary deck/variants/stability, clan-local archetype spread, leadership-gated named-card balance impact with source/date/direction), `lookup_cards`, `get_member_card_profile`, `lookup_member_cards`, `get_awards`
 - **Elixir state + utility**: `get_elixir_state` (aspects: recent stream events / event windows / game modes, plus decision cases, communication intents, recognition state, season window), `cr_api` (live Clash Royale API bridge for any external player/clan/tournament), `update_member`, `save_clan_memory`, `flag_member_watch`, `record_leadership_followup`, `schedule_revisit`
 
 War tools include `war_player_type` (regular/occasional/rare/never) per member. Leadership evaluations include CR account age. Sensitive aspects (at_risk, promotion_candidates) are gated to leadership workflows at execution time.

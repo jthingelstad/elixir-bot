@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from storage import war as war_storage
+from capabilities.game_truth import get_game_truth
 
 CAPABILITY_ID = "war_intelligence"
 CONTRACT_VERSION = 1
@@ -134,7 +135,7 @@ def get_war_intelligence(*, source=None, conn=None) -> dict:
     day_state["race_rank"] = status.get("race_rank") if boat_scored else None
     day_state["day_rank"] = status.get("day_rank") if day_scored else None
 
-    return {
+    result = {
         "capability": CAPABILITY_ID,
         "contract_version": CONTRACT_VERSION,
         "available": True,
@@ -202,6 +203,8 @@ def get_war_intelligence(*, source=None, conn=None) -> dict:
             "used_none": [_participant(m) for m in (day.get("used_none") or [])],
         },
     }
+    result["game_truth"] = get_game_truth(topic="river_race", live_war=result)
+    return result
 
 
 def _standings_freshness(source, season_id=None, *, conn=None) -> dict:
