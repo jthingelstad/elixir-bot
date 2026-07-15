@@ -170,6 +170,11 @@ def _ensure_season(conn, season_id: int, observed_at: str) -> None:
 
 
 def _upsert_week(conn, season_id, section_index, period_type, observed_at, defense_fame=None) -> None:
+    from engine.normalize import canonical_utc_timestamp
+
+    created_at = canonical_utc_timestamp(observed_at)
+    if created_at is None:
+        raise ValueError(f"unparseable war-week timestamp: {observed_at!r}")
     conn.execute(
         """INSERT INTO war_weeks (season_id, section_index, period_type, created_date, defense_fame)
            VALUES (?, ?, ?, ?, ?)
@@ -177,7 +182,7 @@ def _upsert_week(conn, season_id, section_index, period_type, observed_at, defen
            DO UPDATE SET
                period_type = excluded.period_type,
                defense_fame = MAX(COALESCE(war_weeks.defense_fame, 0), COALESCE(excluded.defense_fame, 0))""",
-        (season_id, section_index, period_type, observed_at[:10], defense_fame),
+        (season_id, section_index, period_type, created_at, defense_fame),
     )
 
 
@@ -461,6 +466,25 @@ def _apply_season_close_change_set(conn, changes: SeasonCloseChangeSet) -> int:
 
 def close_season(conn, season_id: int, final_state: dict, observed_at: str) -> int:
     """Apply one invariant-checked season death inside the caller transaction."""
+    season = conn.execute(
+        "SELECT ended_at FROM war_seasons WHERE season_id = ?",
+        (season_id,),
+    ).fetchone()
+    event = conn.execute(
+        "SELECT 1 FROM war_events WHERE dedup_key = ? AND event_type = 'season_closed'",
+        (f"season_closed:{season_id}",),
+    ).fetchone()
+    ended = bool(season and season["ended_at"])
+    emitted = event is not None
+    if ended or emitted:
+        if not (ended and emitted):
+            raise ChangeSetInvariantError(
+                "season close is partially durable: "
+                f"season_id={season_id} ended={ended} event={emitted}"
+            )
+        # The close outcome is a fact at the time of the transition. Replays
+        # must not recompute it from today's active roster/daily metrics.
+        return 0
     changes = _build_season_close_change_set(
         conn, season_id, final_state, observed_at,
     )

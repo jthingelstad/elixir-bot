@@ -71,6 +71,20 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
     if dupes:
         problems.append(f"duplicate open memberships: {[tuple(d) for d in dupes]}")
 
+    overlaps = q1(
+        "SELECT COUNT(*) FROM clan_memberships a JOIN clan_memberships b "
+        "ON a.player_tag = b.player_tag AND a.clan_tag = b.clan_tag "
+        "AND a.membership_id < b.membership_id "
+        "WHERE a.joined_at < COALESCE(b.left_at, '9999-12-31') "
+        "AND b.joined_at < COALESCE(a.left_at, '9999-12-31')"
+    )
+    if overlaps:
+        problems.append(f"clan_memberships has {overlaps} overlapping interval(s)")
+
+    fk_violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+    if fk_violations:
+        problems.append(f"foreign_key_check has {len(fk_violations)} violation(s)")
+
     # 2) recognition ledger: one claim per key (one-claim-wins)
     if q1("SELECT COUNT(*) FROM recognition_ledger") != q1(
         "SELECT COUNT(DISTINCT recognition_key) FROM recognition_ledger"
@@ -131,6 +145,52 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
     ]
     if bad_status:
         problems.append(f"unknown intent statuses: {bad_status}")
+
+    # 6) profile-owned facts cannot be erased by a sparse roster refresh.
+    projection_mismatches = q1(
+        "WITH profile AS (SELECT entity_tag AS player_tag, "
+        "CAST(json_extract(payload_json, '$.best_trophies') AS INTEGER) AS best, "
+        "CAST(json_extract(payload_json, '$.exp_level') AS INTEGER) AS exp "
+        "FROM state_baselines WHERE entity_kind='player' AND aspect='profile') "
+        "SELECT COUNT(*) FROM profile p JOIN player_current_state cs USING(player_tag) "
+        "WHERE (p.best IS NOT NULL AND cs.best_trophies IS NOT p.best) "
+        "OR (p.exp > 0 AND cs.exp_level IS NOT p.exp)"
+    )
+    if projection_mismatches:
+        problems.append(
+            f"player_current_state has {projection_mismatches} profile-owned mismatch(es)"
+        )
+
+    best_drops = q1(
+        "WITH ordered AS (SELECT player_tag, metric_date, best_trophies, "
+        "LAG(best_trophies) OVER (PARTITION BY player_tag ORDER BY metric_date) AS prior "
+        "FROM player_daily_metrics) SELECT COUNT(*) FROM ordered "
+        "WHERE best_trophies IS NULL AND prior IS NOT NULL"
+    )
+    if best_drops:
+        problems.append(f"player_daily_metrics has {best_drops} best-trophy null regression(s)")
+
+    # 7) internal war timestamps use dashed ISO/date text. Battle timestamps are
+    # deliberately raw CR compact and are not part of this check.
+    for table, col in (
+        ("war_seasons", "started_at"),
+        ("war_seasons", "ended_at"),
+        ("war_weeks", "created_date"),
+        ("war_weeks", "finish_time"),
+        ("war_week_clans", "completed_at"),
+        ("war_week_clans", "observed_at"),
+        ("war_participation", "observed_at"),
+        ("war_attendance_days", "observed_at"),
+        ("war_events", "observed_at"),
+        ("war_events", "window_start"),
+        ("war_events", "created_at"),
+    ):
+        n = q1(
+            f"SELECT COUNT(*) FROM {table} WHERE {col} IS NOT NULL "
+            f"AND (length({col}) < 10 OR substr({col},5,1)<>'-' OR substr({col},8,1)<>'-')"
+        )
+        if n:
+            problems.append(f"{table}.{col}: {n} noncanonical timestamp(s)")
 
     assert not problems, (
         f"DB invariants violated{f' ({label})' if label else ''}:\n"

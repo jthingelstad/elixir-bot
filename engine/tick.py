@@ -335,7 +335,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
     # -- step 4: PROJECT — refresh what the polls touched
     with _guard(counters, "project", conn):
         roster_by_tag = {
-            canon_tag(m.get("tag")): m
+            canon_tag(m.get("tag")): projections.roster_state_from_api(m)
             for m in (clan_payload or {}).get("memberList", [])
         }
         touched = set(player_payloads) | set(battlelogs) | set(roster_by_tag)

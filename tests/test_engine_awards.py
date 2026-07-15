@@ -160,6 +160,36 @@ def test_season_close_invariant_catches_silent_award_omission(
     ).fetchone()[0] is None
 
 
+def test_replayed_season_close_preserves_recorded_outcome(engine_conn):
+    from engine.emitters.war import close_season
+
+    _seed_season(engine_conn)
+    engine_conn.execute(
+        "UPDATE war_seasons SET ended_at = NULL WHERE season_id = ?", (SEASON,)
+    )
+    close_season(engine_conn, SEASON, {}, AT)
+    recorded = engine_conn.execute(
+        "SELECT player_tag, rank FROM awards "
+        "WHERE season_id = ? AND award_type = 'donation_champ' ORDER BY rank",
+        (SEASON,),
+    ).fetchall()
+
+    # Later state can change every input used by the live preview. Replaying
+    # the same boundary still treats the recorded close as historical fact.
+    engine_conn.execute(
+        "UPDATE clan_memberships SET left_at = '2026-07-07' WHERE player_tag = '#C'"
+    )
+    engine_conn.execute(
+        "UPDATE player_daily_metrics SET donations_week = 9999 WHERE player_tag = '#A'"
+    )
+    assert close_season(engine_conn, SEASON, {}, "2026-07-08T00:00:00Z") == 0
+    assert engine_conn.execute(
+        "SELECT player_tag, rank FROM awards "
+        "WHERE season_id = ? AND award_type = 'donation_champ' ORDER BY rank",
+        (SEASON,),
+    ).fetchall() == recorded
+
+
 def test_tie_aware_ranks_share_a_rank_and_flag_ties():
     """Competition ranking (1,2,2,4) with tie flags — so Elixir can say
     'three tied for 2nd' instead of inventing an order between equal points."""
@@ -239,7 +269,9 @@ def test_war_champ_tie_breaks_on_cards_donated(engine_conn):
     c = engine_conn
     c.execute("INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
               "VALUES ('#J2RGCRVG','POAP KINGS','2026-02-04','2026-07-06',1)")
-    c.execute("INSERT INTO war_seasons (season_id, started_at, ended_at) VALUES (150, '2026-06-10', ?)", (AT,))
+    c.execute(
+        "INSERT INTO war_seasons (season_id, started_at) VALUES (150, '2026-06-10')"
+    )
     c.execute("INSERT INTO war_weeks (season_id, section_index, created_date, finish_time) "
               "VALUES (150, 0, '2026-06-11', '2026-06-18')")
     for tag, name, don in (("#HI", "HiDonor", 500), ("#LO", "LoDonor", 100)):
@@ -399,7 +431,7 @@ def test_iron_king_grants_with_full_coverage():
         conn.close()
 
 
-def test_refresh_player_state_reads_projected_roster_keys():
+def test_refresh_player_state_enforces_profile_and_roster_field_ownership():
     conn = db.get_connection()
     try:
         conn.execute(
@@ -415,8 +447,11 @@ def test_refresh_player_state_reads_projected_roster_keys():
             "SELECT exp_level, clan_rank, previous_clan_rank, donations_received_week "
             "FROM player_current_state WHERE player_tag='#X'").fetchone()
         assert (row["exp_level"], row["clan_rank"], row["previous_clan_rank"],
-                row["donations_received_week"]) == (44, 7, 9, 8)
-        # roster-only refresh without those keys preserves existing values
+                row["donations_received_week"]) == (None, 7, 9, 8)
+        # A deep profile owns exp_level; a later sparse roster refresh preserves it.
+        projections.refresh_player_state(
+            conn, "#X", {"expLevel": 44}, None, AT
+        )
         projections.refresh_player_state(conn, "#X", None, {"trophies": 5150}, AT)
         row = conn.execute(
             "SELECT exp_level, clan_rank FROM player_current_state "

@@ -135,12 +135,13 @@ def _apply_roster_change_set(
              "trophies": info.get("trophies"),
              "role": info.get("role"), "exp_level": info.get("exp_level")},
         )
-        open_row = conn.execute(
+        membership_at_event = conn.execute(
             "SELECT 1 FROM clan_memberships "
-            "WHERE player_tag = ? AND clan_tag = ? AND left_at IS NULL",
-            (join.player_tag, clan_tag),
+            "WHERE player_tag = ? AND clan_tag = ? AND joined_at <= ? "
+            "AND (left_at IS NULL OR left_at > ?)",
+            (join.player_tag, clan_tag, changes.observed_at, changes.observed_at),
         ).fetchone()
-        if open_row is None:
+        if membership_at_event is None:
             conn.execute(
                 "INSERT INTO clan_memberships (player_tag, clan_tag, joined_at, join_source) "
                 "VALUES (?, ?, ?, 'roster_diff')",
@@ -152,8 +153,11 @@ def _apply_roster_change_set(
         tenure = conn.execute(
             "SELECT CAST(julianday(?) - julianday(joined_at) AS INTEGER) "
             "FROM clan_memberships "
-            "WHERE player_tag = ? AND clan_tag = ? AND left_at IS NULL",
-            (changes.observed_at, leave.player_tag, clan_tag),
+            "WHERE player_tag = ? AND clan_tag = ? AND joined_at <= ? "
+            "AND (left_at IS NULL OR left_at > ?) "
+            "ORDER BY joined_at DESC LIMIT 1",
+            (changes.observed_at, leave.player_tag, clan_tag,
+             changes.observed_at, changes.observed_at),
         ).fetchone()
         n += _emit(
             conn, clan_tag, leave.player_tag, changes.observed_at, window_start,
@@ -165,8 +169,10 @@ def _apply_roster_change_set(
         )
         conn.execute(
             "UPDATE clan_memberships SET left_at = ?, leave_source = 'roster_diff' "
-            "WHERE player_tag = ? AND clan_tag = ? AND left_at IS NULL",
-            (changes.observed_at, leave.player_tag, clan_tag),
+            "WHERE player_tag = ? AND clan_tag = ? AND joined_at <= ? "
+            "AND (left_at IS NULL OR left_at > ?)",
+            (changes.observed_at, leave.player_tag, clan_tag,
+             changes.observed_at, changes.observed_at),
         )
 
     for role in changes.role_transitions:
@@ -189,8 +195,9 @@ def _verify_roster_change_set(conn, clan_tag: str, changes: RosterChangeSet) -> 
         ).fetchone()
         memberships = conn.execute(
             "SELECT COUNT(*) FROM clan_memberships "
-            "WHERE player_tag = ? AND clan_tag = ? AND left_at IS NULL",
-            (join.player_tag, clan_tag),
+            "WHERE player_tag = ? AND clan_tag = ? AND joined_at <= ? "
+            "AND (left_at IS NULL OR left_at > ?)",
+            (join.player_tag, clan_tag, changes.observed_at, changes.observed_at),
         ).fetchone()[0]
         if event is None or memberships != 1:
             failures.append(
@@ -203,8 +210,9 @@ def _verify_roster_change_set(conn, clan_tag: str, changes: RosterChangeSet) -> 
         ).fetchone()
         memberships = conn.execute(
             "SELECT COUNT(*) FROM clan_memberships "
-            "WHERE player_tag = ? AND clan_tag = ? AND left_at IS NULL",
-            (leave.player_tag, clan_tag),
+            "WHERE player_tag = ? AND clan_tag = ? AND joined_at <= ? "
+            "AND (left_at IS NULL OR left_at > ?)",
+            (leave.player_tag, clan_tag, changes.observed_at, changes.observed_at),
         ).fetchone()[0]
         if event is None or memberships:
             failures.append(

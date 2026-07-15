@@ -401,6 +401,16 @@ def _date_cutoff(days):
 # stale name here silently disabled battle_events retention entirely.)
 _CR_TIMESTAMP_TABLES = {"battle_events"}
 
+# These carried war tables historically mixed CR-compact and ISO timestamps.
+# Normalize-at-write/data-repair is the primary rule; date-prefix retention is
+# the defense in depth that prevents one legacy compact row living forever.
+_MIXED_TIMESTAMP_TABLES = {
+    "war_weeks",
+    "war_week_clans",
+    "war_participation",
+    "war_attendance_days",
+}
+
 
 # Ordered list of (table, column, retention_days) for all purge targets.
 # v5.1 retention (docs/v5.1/schema.md §1). Durable, never purged: rollups,
@@ -430,8 +440,14 @@ def purge_old_data(conn: Optional[sqlite3.Connection] = None) -> dict[str, int]:
     """Delete expired rows and return per-table deletion counts."""
     stats = {}
     for table, column, days in _PURGE_TARGETS:
-        cutoff = _cr_cutoff(days) if table in _CR_TIMESTAMP_TABLES else _utc_cutoff(days)
-        cursor = conn.execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff,))
+        if table in _CR_TIMESTAMP_TABLES:
+            predicate, cutoff = column, _cr_cutoff(days)
+        elif table in _MIXED_TIMESTAMP_TABLES:
+            predicate = f"substr(REPLACE({column}, '-', ''), 1, 8)"
+            cutoff = _date_cutoff(days).replace("-", "")
+        else:
+            predicate, cutoff = column, _utc_cutoff(days)
+        cursor = conn.execute(f"DELETE FROM {table} WHERE {predicate} < ?", (cutoff,))
         stats[table] = cursor.rowcount
     for table, column, days in _PURGE_DATE_TARGETS:
         cutoff = _date_cutoff(days)

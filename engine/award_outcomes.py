@@ -11,13 +11,20 @@ from engine.normalize import parse_cr_time
 
 
 def _season_date_bounds(conn, season_id: int) -> tuple[str | None, str | None]:
-    row = conn.execute(
-        """SELECT MIN(COALESCE(created_date, finish_time)) AS start,
-                  MAX(COALESCE(finish_time, created_date)) AS end
-             FROM war_weeks WHERE season_id = ?""",
+    first = conn.execute(
+        "SELECT COALESCE(created_date, finish_time) AS boundary FROM war_weeks "
+        "WHERE season_id = ? AND COALESCE(created_date, finish_time) IS NOT NULL "
+        "ORDER BY section_index ASC LIMIT 1",
         (int(season_id),),
     ).fetchone()
-    start, end = (row["start"], row["end"]) if row else (None, None)
+    last = conn.execute(
+        "SELECT COALESCE(finish_time, created_date) AS boundary FROM war_weeks "
+        "WHERE season_id = ? AND COALESCE(finish_time, created_date) IS NOT NULL "
+        "ORDER BY section_index DESC LIMIT 1",
+        (int(season_id),),
+    ).fetchone()
+    start = first["boundary"] if first else None
+    end = last["boundary"] if last else None
     if not start or not end:
         row = conn.execute(
             "SELECT started_at, ended_at FROM war_seasons WHERE season_id = ?",

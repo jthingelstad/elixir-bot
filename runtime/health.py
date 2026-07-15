@@ -112,6 +112,57 @@ def check_new_incidents(conn) -> list[str]:
     return [f"{n} unresolved incident(s) in the last 24h — see /incidents"] if n else []
 
 
+def check_data_integrity(conn) -> list[str]:
+    """Relational + semantic invariants that a plain integrity_check misses."""
+    problems: list[str] = []
+    foreign_keys = conn.execute("PRAGMA foreign_key_check").fetchall()
+    if foreign_keys:
+        problems.append(f"{len(foreign_keys)} foreign-key violation(s)")
+    overlaps = conn.execute(
+        "SELECT COUNT(*) FROM clan_memberships a JOIN clan_memberships b "
+        "ON a.player_tag=b.player_tag AND a.clan_tag=b.clan_tag "
+        "AND a.membership_id<b.membership_id "
+        "WHERE a.joined_at < COALESCE(b.left_at, '9999-12-31') "
+        "AND b.joined_at < COALESCE(a.left_at, '9999-12-31')"
+    ).fetchone()[0]
+    if overlaps:
+        problems.append(f"{overlaps} overlapping membership interval(s)")
+    mismatches = conn.execute(
+        "WITH profile AS (SELECT entity_tag AS player_tag, "
+        "CAST(json_extract(payload_json, '$.best_trophies') AS INTEGER) AS best, "
+        "CAST(json_extract(payload_json, '$.exp_level') AS INTEGER) AS exp "
+        "FROM state_baselines WHERE entity_kind='player' AND aspect='profile') "
+        "SELECT COUNT(*) FROM profile p JOIN player_current_state cs USING(player_tag) "
+        "WHERE (p.best IS NOT NULL AND cs.best_trophies IS NOT p.best) "
+        "OR (p.exp > 0 AND cs.exp_level IS NOT p.exp)"
+    ).fetchone()[0]
+    if mismatches:
+        problems.append(f"{mismatches} profile-owned player projection mismatch(es)")
+    best_drops = conn.execute(
+        "WITH ordered AS (SELECT player_tag, metric_date, best_trophies, "
+        "LAG(best_trophies) OVER (PARTITION BY player_tag ORDER BY metric_date) prior "
+        "FROM player_daily_metrics) SELECT COUNT(*) FROM ordered "
+        "WHERE best_trophies IS NULL AND prior IS NOT NULL"
+    ).fetchone()[0]
+    if best_drops:
+        problems.append(f"{best_drops} daily best-trophy null regression(s)")
+    compact_war = 0
+    for table, column in (
+        ("war_weeks", "created_date"),
+        ("war_participation", "observed_at"),
+        ("war_week_clans", "observed_at"),
+        ("war_attendance_days", "observed_at"),
+    ):
+        compact_war += conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE {column} IS NOT NULL "
+            f"AND (length({column}) < 10 OR substr({column},5,1)<>'-' "
+            f"OR substr({column},8,1)<>'-')"
+        ).fetchone()[0]
+    if compact_war:
+        problems.append(f"{compact_war} noncanonical war timestamp(s)")
+    return problems
+
+
 SILENCE_HOURS = 14  # no Discord output at all in this window → investigate
 LEADER_ACTION_STALE_HOURS = 2  # a proposed card unposted this long → posting broken
 
@@ -155,7 +206,8 @@ def _cutoff_iso(conn, offset: str) -> str:
 def run_all(conn, previous_size: int | None = None) -> tuple[list[str], int]:
     problems: list[str] = []
     for check in (check_tick_errors, check_ledger_duplicates, check_poll_starvation,
-                  check_memory_writes, check_new_incidents, check_output_silence):
+                  check_memory_writes, check_new_incidents, check_output_silence,
+                  check_data_integrity):
         try:
             problems.extend(check(conn))
         except Exception as exc:  # a broken check is itself a finding
