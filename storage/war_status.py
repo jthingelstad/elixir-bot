@@ -1,4 +1,4 @@
-"""War read layer — v5.1 sources (docs/v5.1/schema.md §9).
+"""War read layer — v5.1 sources (docs/reference/v5.1/schema.md §9).
 
 Live race state reads the engine's riverrace baseline
 (state_baselines('riverrace'), the race-aspect projection); logged weeks read

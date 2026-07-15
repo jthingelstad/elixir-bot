@@ -1,4 +1,4 @@
-"""v5.1 migration transforms T1–T14 (docs/v5.1/migration.md Phase 3).
+"""v5.1 migration transforms T1–T14 (docs/reference/v5.1/migration.md Phase 3).
 
 Reads the read-only archive, writes the new DB. Every transform is
 idempotent: it clears its target table(s) and reloads. Run order matters

@@ -1,7 +1,7 @@
-"""v5.1 baseline schema — migration Phase 2 (docs/v5.1/schema.md).
+"""v5.1 baseline schema — migration Phase 2 (docs/reference/v5.1/schema.md).
 
 Creates elixir-v51.db: hand-written DDL for every NEW or CHANGED table
-(reproduced from docs/v5.1/schema.md §3–§7 and runtime.md §4), plus a verbatim
+(reproduced from docs/reference/v5.1/schema.md §3–§7 and runtime.md §4), plus a verbatim
 DDL export from the read-only archive for carried-as-is tables (README/schema
 convention: carried tables ship via the archive's live DDL).
 

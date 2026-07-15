@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compact elixir.db: purge expired rows, then VACUUM to return space to disk.
+"""Compact the operational v5.1 DB: purge expired rows, then VACUUM.
 
 Run this during a maintenance window with the bot stopped — VACUUM needs an
 exclusive lock and rewrites the whole file (needs ~2x the DB size in free disk
@@ -31,7 +31,7 @@ def _size_mb(path: str) -> float:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Purge expired rows and VACUUM elixir.db.")
+    parser = argparse.ArgumentParser(description="Purge expired rows and VACUUM the v5.1 DB.")
     parser.add_argument("--purge-only", action="store_true", help="Skip VACUUM (no file shrink).")
     args = parser.parse_args()
 

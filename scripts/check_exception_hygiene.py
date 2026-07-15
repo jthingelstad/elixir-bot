@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRS = ("agent", "capabilities", "db", "engine", "memory_store", "runtime", "storage")
 ROOT_SOURCES = ("cr_api.py", "elixir.py", "elixir_agent.py", "prompts.py")
-EXCLUDED = {"db/_migrations.py"}  # Retired reference code; never imported.
+EXCLUDED: set[str] = set()
 
 # This is a reviewed migration baseline, not a target. Any broad catch added,
 # removed, or moved requires an explicit baseline update in the same change.
@@ -47,7 +47,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/activity_runner.py": 3,
     "runtime/admin.py": 4,
     "runtime/alerts.py": 1,
-    "runtime/app.py": 42,
+    "runtime/app.py": 33,
     "runtime/awareness/deliver.py": 4,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
@@ -66,7 +66,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/jobs/_intel.py": 4,
     "runtime/jobs/_maintenance.py": 4,
     "runtime/jobs/_memory.py": 22,
-    "runtime/jobs/_site.py": 3,
+    "runtime/jobs/_promotion.py": 3,
     "runtime/jobs/_tournament.py": 6,
     "runtime/leader_action_feedback.py": 1,
     "runtime/leader_action_ui.py": 8,

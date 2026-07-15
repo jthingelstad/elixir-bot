@@ -1,9 +1,9 @@
-# Signal Inventory and Guardrails
+# Pre-v5.1 Signal Inventory and Guardrails (historical)
 
-This document catalogs the signal types Elixir can emit into proactive
-awareness and delivery flows. It also defines the guardrails for the internal
-data subsystem pivot: event identity, event-stream retention, and which
-workflow layers may write which durable objects.
+This document preserves the retired v4 signal/delivery architecture for
+historical incident analysis. It is not current runtime guidance. The v5.1
+event catalog and production awareness flow live in
+`../reference/v5.1/events.md` and `../reference/v5.1/runtime.md`.
 
 Last updated: 2026-06-19, after formalizing `signal_log` as a completed-signal marker.
 

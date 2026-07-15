@@ -120,7 +120,7 @@ Elixir should sound like it belongs in a clan that is trying to win while also b
 - clan_founded: 2026-02-04
 
 Clan-management constants (ratified 2026-07-03; the transition rules live in
-`docs/v5.1/management.md` — these are the policy numbers the engine reads):
+`docs/reference/v5.1/management.md` — these are the policy numbers the engine reads):
 
 - donor_week_min: 50            # weekly donations that count as a donor week
 - war_qualify_rate: 0.75        # decks used / decks available per war week

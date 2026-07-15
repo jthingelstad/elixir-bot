@@ -1,4 +1,4 @@
-"""War analytics — v5.1 sources (docs/v5.1/schema.md §9).
+"""War analytics — v5.1 sources (docs/reference/v5.1/schema.md §9).
 
 The headline upgrade: at_risk / promotion / demotion read the deterministic
 member_management projection (management.md states + evidence columns) instead
@@ -957,9 +957,6 @@ def _war_decks_confidence(
     if skipped:
         return "low" if len(skipped) >= len(selected) else "medium"
     return "medium"
-
-
-@managed_connection
 
 
 @managed_connection

@@ -1,7 +1,7 @@
 # Elixir v5.1 — Event Catalog
 
-> **Status:** ✅ Build-ready (completeness pass applied 2026-07-03; feedback.md rev 4).
-> **Owner:** Jamie · **Last worked:** 2026-07-03
+> **Status:** Implemented (completeness pass applied 2026-07-03; feedback.md rev 4).
+> **Owner:** Jamie · **Last reviewed:** 2026-07-15
 >
 > Every `event_type` per stream: payload shape, dedup key, timing, and owner.
 > Grounded against the current Gen C detectors (`event_core/mind/detectors.py`,

@@ -1,14 +1,15 @@
 # Elixir v5.1 — Runtime Engine
 
-> **Status:** ✅ Build-ready (§8 defaults + weekly-review hour ratified 2026-07-03).
-> **Owner:** Jamie · **Last worked:** 2026-07-03
+> **Status:** Implemented; the pre-cut evidence in §1 is retained as historical
+> design input and the production amendment in §2 is authoritative.
+> **Owner:** Jamie · **Last reviewed:** 2026-07-15
 >
 > The driver `architecture.md` omits (§17.3): what runs each tick, in what order,
 > with what cursor and delivery guarantees. Grounded in the current live loop
 > (`event_core/live/tick.py`, `service.py`, `discord_consumer.py`,
 > `runtime/activities.py`) — the proven semantics carry; the framework does not.
 
-## 1. What exists today (grounded)
+## 1. What existed before the clean break (historical)
 
 - `v5-reactive-tick` runs every **30 min** (`HEARTBEAT_INTERVAL_MINUTES`,
   `runtime/activities.py:36–47`, `max_instances=1, coalesce=True`). One tick =

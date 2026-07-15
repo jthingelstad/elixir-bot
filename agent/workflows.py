@@ -478,8 +478,8 @@ def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None,
 
     ``tool_stats`` is optional; when provided, it is populated in-place with
     ``write_calls_issued``, ``write_calls_succeeded``, and ``write_calls_denied``
-    so the caller can persist the awareness write budget usage in
-    ``awareness_ticks``.
+    so the caller can persist the complete call trace with the awareness
+    thought.
 
     The turn runs with the brain's full read + write tool surface
     (``AWARENESS_TOOLS``) — writes are still bounded per tick by

@@ -42,8 +42,7 @@ erDiagram
     war_seasons ||--o{ awards : grants
     players ||--o{ awards : receives
 
-    awareness_loops ||--o{ awareness_posts : plans
-    awareness_loops ||--o{ awareness_actions : acts
+    awareness_thoughts ||--o{ awareness_posts : plans
     conversation_threads ||--o{ messages : contains
     memories ||--o{ memory_tags : classified_by
     memories ||--o{ memory_log : changes
@@ -60,7 +59,7 @@ erDiagram
 | Identity and tenure | `players`, `clans`, `clan_memberships`, `player_aliases`, `discord_users`, `discord_links` | Clash Royale tag is the natural player key; membership is an open tenure row. |
 | Projections | `player_current_state`, `player_card_collection`, `player_recent_form`, `member_management` | Rebuildable query models, not primary history. |
 | War and awards | `war_seasons`, `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days`, `awards` | Bounded war truth plus durable honors. |
-| Awareness and leadership | `awareness_loops`, `awareness_posts`, `awareness_actions`, `decision_cases`, `leader_action_recommendations`, `revisits` | Deliberation, delivery bookkeeping, and policy outcomes. |
+| Awareness and leadership | `awareness_thoughts`, `awareness_posts`, `watches`, `decision_cases`, `leader_action_recommendations`, `revisits` | Deliberation, confirmed delivery, standing concerns, and policy outcomes. |
 | Conversation and memory | `conversation_threads`, `messages`, `memories`, `memory_tags`, `memory_log`, `memories_fts` | Channel-scoped conversation and public/leadership durable memory. |
 | Runtime control | `stream_cursors`, `poll_state`, `runtime_job_status`, `runtime_incidents` | Progress, adaptive polling, job health, and best-effort failure visibility. |
 

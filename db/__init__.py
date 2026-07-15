@@ -41,7 +41,7 @@ def _resolve_db_path() -> str:
 
 CHICAGO_TZ = ZoneInfo("America/Chicago")
 
-# v5.1 retention (docs/v5.1/schema.md §1). Names kept where semantics carried.
+# v5.1 retention (docs/reference/v5.1/schema.md §1). Names kept where semantics carried.
 RAW_PAYLOAD_RETENTION_DAYS = 14
 BATTLE_EVENT_RETENTION_DAYS = 180
 PLAYER_EVENT_RETENTION_DAYS = 180
@@ -530,9 +530,9 @@ def _schema_is_compatible(conn: sqlite3.Connection) -> bool:
     return True
 
 
-# Legacy migrations (db/_migrations.py) no longer run. The clean-break v5.1
-# baseline is scripts/migrate_v51/schema_v51.py; bounded post-cut forward
-# migrations live exclusively in db.schema.
+# Pre-v5.1 migration history lives in Git and the immutable archive. The
+# clean-break baseline is scripts/migrate_v51/schema_v51.py; bounded post-cut
+# forward migrations live exclusively in db.schema.
 
 
 def _configure_connection(conn: sqlite3.Connection, path: str) -> None:
@@ -565,7 +565,7 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
             f"{', '.join(tables[:12]) or '<none>'}…). Refusing to start — this build "
             f"never upgrades a pre-v5.1 database in place. Point ELIXIR_DB_PATH at "
             f"the v5.1 database (elixir-v51.db) or restore it from the archive per "
-            f"docs/v5.1/migration.md."
+            f"docs/reference/v5.1/migration.md."
         )
     _configure_connection(conn, path)
     if not tables:
@@ -802,36 +802,28 @@ _FACADE_EXPORT_GROUPS = {
         "get_llm_call",
         "get_message_by_discord_message_id",
         "get_signal_detector_cursor",
-        "get_signal_outcome",
         "list_channel_messages",
         "list_llm_calls",
         "list_pending_system_signals",
         "list_prompt_failures",
         "list_prompt_feedback",
         "list_prompt_review_items",
-        "list_recent_signal_outcomes",
         "list_signal_detector_cursors",
-        "list_signal_outcomes",
         "list_thread_messages",
-        "mark_announcement_sent",
         "mark_prompt_feedback_retry_invited",
         "mark_signal_completed",
         "mark_signal_sent",
         "mark_system_signal_announced",
         "purge_old_conversations",
         "queue_system_signal",
-        "record_awareness_tick",
         "record_llm_call",
         "record_prompt_failure",
         "save_message",
         "update_message_summary",
         "upsert_prompt_feedback",
         "upsert_signal_detector_cursor",
-        "upsert_signal_outcome",
-        "was_announcement_sent",
         "was_signal_completed",
         "was_signal_completed_any_date",
-        "was_signal_outcome_delivered",
         "was_signal_sent",
         "was_signal_sent_any_date",
     ),

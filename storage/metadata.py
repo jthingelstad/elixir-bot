@@ -413,7 +413,7 @@ _MIXED_TIMESTAMP_TABLES = {
 
 
 # Ordered list of (table, column, retention_days) for all purge targets.
-# v5.1 retention (docs/v5.1/schema.md §1). Durable, never purged: rollups,
+# v5.1 retention (docs/reference/v5.1/schema.md §1). Durable, never purged: rollups,
 # identity/tenure, awards, war_seasons, recognition_ledger, curated memories.
 _PURGE_TARGETS = [
     ("raw_api_payloads", "fetched_at", RAW_PAYLOAD_RETENTION_DAYS),

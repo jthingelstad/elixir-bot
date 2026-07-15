@@ -195,7 +195,7 @@ async def _maybe_alert_llm_failure(context: str) -> bool:
 def schedule_llm_failure_alert(context: str) -> None:
     # This is the alert path of last resort — if it fails, an LLM outage and
     # the failure to report it both go unseen. Every exit short of a
-    # scheduled alert logs at critical so elixir.log still tells the story.
+    # scheduled alert logs at critical so elixir-v5.log still tells the story.
     from runtime import app as runtime_app
 
     loop = getattr(runtime_app.bot, "loop", None)

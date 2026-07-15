@@ -11,6 +11,7 @@ import sqlite3
 from typing import Optional
 
 from db import managed_connection
+from capabilities.contracts import ClanGameModesResult, ClanGameModeWindowsResult
 from engine.normalize import ranked_league_name
 from storage import player as player_storage
 
@@ -60,7 +61,7 @@ def get_clan_game_modes(
     limit: int = 10,
     top_members: int = 3,
     conn: Optional[sqlite3.Connection] = None,
-) -> dict:
+) -> ClanGameModesResult:
     """Return one stable, audience-neutral view of clan game-mode activity."""
     days = max(1, int(days or 30))
     limit = max(1, min(int(limit or 10), 50))
@@ -125,7 +126,7 @@ def get_clan_game_mode_windows(
     limit: int = 10,
     top_members: int = 3,
     conn: Optional[sqlite3.Connection] = None,
-) -> dict:
+) -> ClanGameModeWindowsResult:
     """Return a compact activity view of the capability for several windows.
 
     Cross-window consumers need comparable mode totals and named leaders, not

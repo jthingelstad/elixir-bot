@@ -1,11 +1,11 @@
 ---
 name: log-triage
-description: Analyze elixir.log for errors, recurring failures, and operational signals, then recommend concrete actions
+description: Analyze elixir-v5.log for errors, recurring failures, and operational signals, then recommend concrete actions
 ---
 
 # Log Triage
 
-Read `/Users/jamie/Projects/elixir-bot/elixir.log`, surface what's actually going wrong (vs. noise), group recurring issues, and hand the user a short prioritized action list. The goal is to answer "what should I fix next?" — not to paraphrase the log.
+Read `/Users/otto/Projects/elixir-bot/elixir-v5.log`, surface what's actually going wrong (vs. noise), group recurring issues, and hand the user a short prioritized action list. The goal is to answer "what should I fix next?" — not to paraphrase the log.
 
 ## Scope
 
@@ -38,8 +38,8 @@ If the log is very large (>10k lines), start by tailing the last ~2000 lines. On
 
 After triaging failures, spot-check these even if nothing errored:
 
-- Are heartbeats still firing on their expected cadence (roughly every 30–60 min)? Long gaps mean the scheduler stalled.
-- Are agent_loop entries for each scheduled channel update (river-race, clan-events, leader-lounge) landing on time?
+- Is `engine-tick` firing roughly every 10 minutes and `awareness-loop` on its registered cadence? Long gaps mean the scheduler stalled.
+- Are `runtime_job_status` failures or open `runtime_incidents` corroborated in the log?
 - Any signal that silently went to zero — e.g. no `agent_loop` entries for a workflow that usually runs hourly?
 
 ## Grouping and dedup

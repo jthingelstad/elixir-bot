@@ -5,13 +5,13 @@ description: Cross-check live Clash Royale API payloads stored in raw_api_payloa
 
 # CR API Doc Audit
 
-Read live API responses out of `elixir.db` and compare them to the agent-facing reference in `docs/cr-api-docs/`. The goal is a tight, evidence-backed list of **doc patches worth making** — not a wall of field tables.
+Read live API responses out of `elixir-v51.db` and compare them to the agent-facing reference in `docs/cr-api-docs/`. The goal is a tight, evidence-backed list of **doc patches worth making** — not a wall of field tables.
 
 Pairs with `log-triage` (runtime health) and `awareness-report` (agent quality). This skill answers: *is our CR API reference keeping up with what Supercell is actually shipping?*
 
 ## Scope
 
-Source of truth for live behavior: `/Users/jamie/Projects/elixir-bot/elixir.db` → table `raw_api_payloads`.
+Source of truth for live behavior: `/Users/otto/Projects/elixir-bot/elixir-v51.db` → table `raw_api_payloads`.
 
 Every successful Supercell API call is persisted as a raw payload (hash-deduped) by the hook in `cr_api._persist_raw_payload`. Endpoint labels in `raw_api_payloads`:
 
@@ -29,7 +29,7 @@ Every successful Supercell API call is persisted as a raw payload (hash-deduped)
 
 Coverage caveat: a payload only lands in the table when the corresponding `cr_api.get_*` function is actually called. `get_tournament` and `get_clan_by_tag`, for example, only fire when an agent or user references a specific tag — there can be long stretches with zero rows.
 
-Default window: the full retained history in `raw_api_payloads`. Payload retention is 180 days (see `storage/metadata.py:RAW_PAYLOAD_RETENTION_DAYS`). The user can narrow: "just the last week", "only since 2026-04-01", "one payload per player".
+Default window: the full retained history in `raw_api_payloads`. Payload retention is 14 days (see `db.RAW_PAYLOAD_RETENTION_DAYS`). The user can narrow: "just the last week", "only since 2026-04-01", "one payload per player".
 
 ## Sampling strategy
 
@@ -111,7 +111,7 @@ Put this in a temporary file or run it inline via `Bash`. Do **not** commit it �
 import json, sqlite3
 from collections import defaultdict
 
-conn = sqlite3.connect("/Users/jamie/Projects/elixir-bot/elixir.db")
+conn = sqlite3.connect("file:/Users/otto/Projects/elixir-bot/elixir-v51.db?mode=ro", uri=True)
 conn.row_factory = sqlite3.Row
 
 def flatten(obj, prefix=""):

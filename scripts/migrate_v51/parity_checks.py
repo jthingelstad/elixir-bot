@@ -1,4 +1,4 @@
-"""v5.1 migration parity checks (docs/v5.1/migration.md Phase 6).
+"""v5.1 migration parity checks (docs/reference/v5.1/migration.md Phase 6).
 
 Two modes:
 
@@ -18,7 +18,7 @@ Checks (migration.md Phase 6):
   identity, links, tenure, awards, war_history, rollups, calendar_seed.
 The "Q&A smoke" check is runtime-level (every coverage-matrix tool aspect via
 the bot's tool layer) and lives outside this script — run it at Phase 6 per
-the matrix in docs/v5.1/schema.md §9.
+the matrix in docs/reference/v5.1/schema.md §9.
 
 Calendar-detection types must match migration T14 and events.md §4.
 """

@@ -1,4 +1,4 @@
-"""Clan-recruiting promotion content (Discord/Reddit copy).
+"""Clan-recruiting promotion jobs (Discord/Reddit copy).
 
 POAP KINGS *website* publishing was removed 2026-06-21 — the site now has its own
 standalone update script and Elixir no longer writes to it. What remains is the
