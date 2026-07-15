@@ -241,9 +241,15 @@ def test_build_context_includes_operations_context(memdb, monkeypatch):
         "season_id": 133,
         "summary": "Season 133; rank 1",
     })
-    monkeypatch.setattr(memory_job.event_facades, "summarize_battle_modes", lambda **kwargs: {
-        "7d": {"modes": {"ranked": {"battles": 12}}},
-    })
+    monkeypatch.setattr(
+        memory_job.game_mode_capability,
+        "get_clan_game_mode_windows",
+        lambda **kwargs: {
+            "capability": "clan_game_modes",
+            "contract_version": 1,
+            "windows": {"7d": {"modes": {"ranked": {"battles": 12}}}},
+        },
+    )
     monkeypatch.setattr(memory_job.db, "get_season_window", lambda: {
         "season_id": 133, "weeks_recorded": 2,
     })
@@ -269,7 +275,7 @@ def test_build_context_includes_operations_context(memdb, monkeypatch):
     assert operations["event_windows"]["7d"]["total"] == 2
     assert operations["recent_events"][0]["event_key"] == "game_event:join"
     assert operations["war_season"]["season_id"] == 133
-    assert operations["game_modes"]["7d"]["modes"]["ranked"]["battles"] == 12
+    assert operations["game_modes"]["windows"]["7d"]["modes"]["ranked"]["battles"] == 12
     assert operations["season_window"]["weeks_recorded"] == 2
     assert operations["decision_cases"]["due"][0]["case_id"] == 1
     assert operations["recent_intents"][0]["intent_id"] == 5
@@ -351,18 +357,23 @@ def test_reduce_memory_synthesis_context_for_retry_bounds_large_payload():
                 },
             },
             "game_modes": {
-                "7d": {
-                    "modes": {
-                        "ranked": {
-                            "label": "Ranked",
-                            "battles": 12,
-                            "top_members": [
-                                {"name": f"Player {idx}", "tag": f"#{idx}", "battles": idx}
-                                for idx in range(6)
-                            ],
+                "capability": "clan_game_modes",
+                "contract_version": 1,
+                "windows": {
+                    "7d": {
+                        "modes": {
+                            "ranked": {
+                                "label": "Ranked",
+                                "battles": 12,
+                                "top_members": [
+                                    {"member_ref": f"Player {idx}",
+                                     "player_tag": f"#{idx}", "battles": idx}
+                                    for idx in range(6)
+                                ],
+                            }
                         }
                     }
-                }
+                },
             },
             "season_window": {"season_id": 131},
             "decision_cases": {
@@ -389,7 +400,9 @@ def test_reduce_memory_synthesis_context_for_retry_bounds_large_payload():
     assert len(operations["recent_intents"]) == memory_job.MEMORY_SYNTHESIS_RETRY_RECENT_INTENTS_LIMIT
     assert len(operations["decision_cases"]["due"]) == memory_job.MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT
     assert len(operations["war_season"]["state"]["race"]["standings"]) == 5
-    assert len(operations["game_modes"]["7d"]["modes"]["ranked"]["top_members"]) == 3
+    assert len(
+        operations["game_modes"]["windows"]["7d"]["modes"]["ranked"]["top_members"]
+    ) == 3
 
 
 def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():

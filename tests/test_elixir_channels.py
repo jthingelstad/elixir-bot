@@ -3993,6 +3993,43 @@ def test_recap_context_omits_arc_block_when_no_public_memories():
     assert "STORY ARCS" not in context
 
 
+def test_recap_context_uses_shared_game_mode_capability():
+    capability = {
+        "capability": "clan_game_modes",
+        "contract_version": 1,
+        "windows": {
+            "7d": {
+                "modes": {
+                    "ranked": {
+                        "label": "Ranked",
+                        "battles": 42,
+                        "members_active": 7,
+                        "win_rate": 0.571,
+                        "top_members": [
+                            {"member_ref": "Alpha", "battles": 12},
+                            {"member_ref": "Bravo", "battles": 10},
+                        ],
+                    }
+                }
+            }
+        },
+    }
+    with (
+        patch("memory_store.list_memories", return_value=[]),
+        patch("elixir.db.get_weekly_digest_summary", return_value={"window_days": 7}),
+        patch("elixir.db.build_clan_trend_summary_context", return_value=""),
+        patch(
+            "runtime.helpers._reports.game_mode_capability.get_clan_game_mode_windows",
+            return_value=capability,
+        ),
+    ):
+        context = elixir._build_weekly_clan_recap_context({"name": "POAP KINGS"}, {})
+
+    assert "game-mode activity beyond Trophy Road" in context
+    assert "Ranked: 42 battles across 7 member(s), 57% win rate" in context
+    assert "most active: Alpha, Bravo" in context
+
+
 def test_build_weekly_clan_recap_context_summarizes_week():
     with (
         patch("memory_store.list_memories", return_value=[]),

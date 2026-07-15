@@ -5,6 +5,7 @@ import cr_api
 
 from agent.core import log
 from agent.cr_api_tool import _execute_cr_api
+from capabilities import game_modes as game_mode_capability
 from storage import events_read as event_facades
 
 
@@ -951,42 +952,6 @@ def _execute_get_clan_health(arguments, workflow=None):
         return {"error": f"Unknown aspect: {aspect}"}
 
 
-def _ranked_current_standings(limit: int = 10) -> list[dict]:
-    """Current Ranked standings for active members: league desc, rating desc.
-    Reads player_current_state (rating source fixed 2026-07-04 — it was
-    trophy-road trophies)."""
-    from engine.normalize import ranked_league_name
-
-    try:
-        conn = _facade_db().get_connection()
-    except Exception:
-        return []
-    try:
-        rows = conn.execute(
-            """SELECT COALESCE(p.display_name, p.current_name) AS name, pcs.ranked_league AS league,
-                      pcs.ranked_trophies AS rating
-               FROM player_current_state pcs
-               JOIN players p ON p.player_tag = pcs.player_tag
-               JOIN clan_memberships cm ON cm.player_tag = pcs.player_tag
-                    AND cm.left_at IS NULL
-               WHERE pcs.ranked_league IS NOT NULL
-               ORDER BY pcs.ranked_league DESC,
-                        COALESCE(pcs.ranked_trophies, 0) DESC
-               LIMIT ?""",
-            (limit,),
-        ).fetchall()
-        return [
-            {"name": r["name"], "league": r["league"],
-             "league_name": ranked_league_name(r["league"]),
-             "rating": r["rating"]}
-            for r in rows
-        ]
-    except Exception:
-        return []
-    finally:
-        conn.close()
-
-
 def _execute_get_clan_game_modes(arguments):
     aspect = arguments.get("aspect", "summary")
     days = arguments.get("days", 30)
@@ -996,77 +961,75 @@ def _execute_get_clan_game_modes(arguments):
         mode_group = "ranked"
     elif aspect == "events":
         mode_group = "special_event"
-    summary = db.get_clan_game_mode_summary(days=days, mode_group=mode_group, limit=limit)
+    snapshot = game_mode_capability.get_clan_game_modes(
+        days=days,
+        mode_group=mode_group,
+        limit=limit,
+    )
+    modes = list((snapshot.get("modes") or {}).values())
     if aspect == "ranked":
         return {
             "aspect": aspect,
-            "window_days": summary["window_days"],
-            "mode_mix": summary["by_group"],
-            "ranked_activity": summary["ranked_activity"],
-            "ranked_profiles": summary["ranked_profiles"],
-            # "Top Ranked player" = standings (league, then rating) — NOT
-            # battle volume; rehearsal 2026-07-04: the volume framing crowned
-            # the wrong player. Era-correct names from the normalizer.
-            "current_standings": _ranked_current_standings(),
+            "window_days": snapshot["window_days"],
+            "mode_mix": modes,
+            "ranked_activity": snapshot["ranked"]["activity"],
+            "ranked_profiles": snapshot["ranked"]["profiles"],
+            "current_standings": snapshot["ranked"]["standings"],
         }
     if aspect == "duos":
-        # 2v2 teammate pairs from battle_events.teammate_tag (battery case 31:
-        # the data existed but no tool exposed pair aggregation).
-        conn = db.get_connection()
-        try:
-            rows = conn.execute(
-                """SELECT COALESCE(p1.display_name, p1.current_name) AS player, COALESCE(p2.display_name, p2.current_name) AS teammate,
-                          COUNT(*) AS battles, SUM(b.outcome = 'W') AS wins
-                   FROM battle_events b
-                   JOIN players p1 ON p1.player_tag = b.player_tag
-                   JOIN players p2 ON p2.player_tag = b.teammate_tag
-                   WHERE b.teammate_tag IS NOT NULL
-                     AND b.battle_time >= strftime('%Y%m%dT%H%M%S', 'now', ?)
-                   GROUP BY b.player_tag, b.teammate_tag
-                   HAVING battles >= 2
-                   ORDER BY battles DESC LIMIT ?""",
-                (f"-{days} days", limit),
-            ).fetchall()
-        finally:
-            conn.close()
         return {
             "aspect": aspect,
-            "window_days": days,
+            "window_days": snapshot["window_days"],
             # QA L14: the JOIN is against `players` (not the active roster), so a
             # teammate who has LEFT the clan but is still known WILL appear;
             # only never-seen external teammates are absent.
             "note": "pairs are directional (player's own logged battles); a teammate "
                     "who has since left the clan can still appear, but a teammate never "
                     "seen in our data (a random / non-roster player) does not",
-            "duos": [dict(r) for r in rows],
+            "duos": snapshot["duos"],
         }
     if aspect == "side_modes":
         # QA M13: side_mode_progress + leaderboards are not populated yet (no
         # progress_json / leaderboard-context source). Empty means NOT TRACKED,
         # not "nothing happening" — say so rather than imply a quiet clan.
-        side_progress = summary["side_mode_progress"]
-        leaderboards = summary["leaderboards"]
+        side_progress = snapshot["side_modes"]["progress"]
+        leaderboards = snapshot["side_modes"]["leaderboards"]
         return {
             "aspect": aspect,
-            "window_days": summary["window_days"],
+            "window_days": snapshot["window_days"],
             "side_mode_progress": side_progress,
             "leaderboards": leaderboards,
-            "mode_mix": summary["by_group"],
-            "side_mode_progress_tracked": bool(side_progress),
-            "leaderboards_tracked": bool(leaderboards),
+            "mode_mix": modes,
+            "side_mode_progress_tracked": snapshot["side_modes"]["progress_tracked"],
+            "leaderboards_tracked": snapshot["side_modes"]["leaderboards_tracked"],
             "note": "side_mode_progress / leaderboards are not tracked yet; empty here means no data source, not clan inactivity — use mode_mix for side-mode activity.",
         }
     if aspect == "events":
         return {
             "aspect": aspect,
-            "window_days": summary["window_days"],
-            "event_activity": summary["by_game_mode"],
-            "event_participation": summary["event_participation"],
-            "event_badge_completions": summary["event_badge_completions"],
-            "active_events": summary["active_events"],
-            "mode_mix": summary["by_group"],
+            "window_days": snapshot["window_days"],
+            "event_activity": snapshot["events"]["activity"],
+            "event_participation": snapshot["events"]["participation"],
+            "event_badge_completions": snapshot["events"]["badge_completions"],
+            "active_events": snapshot["events"]["active"],
+            "mode_mix": modes,
         }
-    return {"aspect": aspect, **summary}
+    return {
+        "aspect": aspect,
+        "window_days": snapshot["window_days"],
+        "mode_group": snapshot["mode_group"],
+        "by_group": modes,
+        "by_game_mode": snapshot["game_modes"],
+        "ranked_activity": snapshot["ranked"]["activity"],
+        "ranked_profiles": snapshot["ranked"]["profiles"],
+        "side_mode_progress": snapshot["side_modes"]["progress"],
+        "event_participation": snapshot["events"]["participation"],
+        "event_badge_completions": snapshot["events"]["badge_completions"],
+        "active_events": snapshot["events"]["active"],
+        "leaderboards": snapshot["side_modes"]["leaderboards"],
+        "capability": snapshot["capability"],
+        "contract_version": snapshot["contract_version"],
+    }
 
 
 _ELIXIR_STATE_WINDOWS = (7, 28, 56, 90)
@@ -1217,7 +1180,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
         return out
 
     if aspect == "game_modes":
-        return event_facades.summarize_battle_modes(
+        return game_mode_capability.get_clan_game_mode_windows(
             windows=_state_windows(arguments),
             top_members=int(arguments.get("top_members") or 5),
         )
@@ -1280,7 +1243,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
         return {
             "event_windows": event_facades.summarize_event_windows(windows=_ELIXIR_STATE_WINDOWS, scope=None),
             "recent_events": event_facades.list_recent_events(days=7, limit=10),
-            "game_modes": event_facades.summarize_battle_modes(windows=(7,)),
+            "game_modes": game_mode_capability.get_clan_game_mode_windows(windows=(7,)),
             "war_season": db.get_war_season_snapshot(),
             "decision_cases": db.decision_case_snapshot(
                 open_limit=case_limit, due_limit=case_limit, dedupe=True

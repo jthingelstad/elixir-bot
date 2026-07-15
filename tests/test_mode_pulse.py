@@ -10,34 +10,43 @@ from unittest.mock import patch
 from runtime.awareness import read as read_mod
 
 
-_SUMMARY = {
+_CAPABILITY = {
+    "capability": "clan_game_modes",
+    "contract_version": 1,
     "window_days": 7,
-    "by_group": [
-        {"mode_group": "ranked", "label": "Ranked", "members_active": 8,
-         "battles": 254, "wins": 125, "losses": 129, "win_rate": 0.49, "trophy_delta": 540},
-        {"mode_group": "two_v_two", "label": "2v2", "members_active": 14,
-         "battles": 332, "wins": 161, "losses": 171, "win_rate": 0.485, "trophy_delta": 0},
-    ],
-    "by_game_mode": [{"x": "y"}] * 50,   # heavy keys that must NOT leak into the block
-    "leaderboards": {"big": "blob"},
-}
-
-# What get_clan_mode_top_members returns: named members per mode label; ranked
-# rows carry the PoL league.
-_TOP_BY_MODE = {
-    "Ranked": [{"member_ref": "Fullboat", "battles": 57, "wins": 33, "losses": 24,
-                "win_rate": 0.579, "trophy_delta": 990, "league": 5}],
-    "2v2": [{"member_ref": "bonus", "battles": 151, "wins": 83, "losses": 68,
-             "win_rate": 0.55, "trophy_delta": 0}],
-    "Events": [{"member_ref": "sikander sidhu", "battles": 185, "wins": 32,
-                "losses": 153, "win_rate": 0.173, "trophy_delta": 0}],
+    "modes": {
+        "ranked": {
+            "mode_group": "ranked", "label": "Ranked", "members_active": 8,
+            "battles": 254, "wins": 125, "losses": 129, "win_rate": 0.49,
+            "trophy_delta": 540,
+            "top_members": [{"member_ref": "Fullboat", "battles": 57, "wins": 33,
+                             "losses": 24, "win_rate": 0.579,
+                             "trophy_delta": 990, "league": 5}],
+        },
+        "two_v_two": {
+            "mode_group": "two_v_two", "label": "2v2", "members_active": 14,
+            "battles": 332, "wins": 161, "losses": 171, "win_rate": 0.485,
+            "trophy_delta": 0,
+            "top_members": [{"member_ref": "bonus", "battles": 151, "wins": 83,
+                             "losses": 68, "win_rate": 0.55, "trophy_delta": 0}],
+        },
+        "special_event": {
+            "mode_group": "special_event", "label": "Events", "members_active": 9,
+            "battles": 185, "wins": 32, "losses": 153, "win_rate": 0.173,
+            "trophy_delta": 0,
+            "top_members": [{"member_ref": "sikander sidhu", "battles": 185,
+                             "wins": 32, "losses": 153, "win_rate": 0.173,
+                             "trophy_delta": 0}],
+        },
+    },
+    "game_modes": [{"x": "y"}] * 50,
+    "side_modes": {"leaderboards": {"big": "blob"}},
 }
 
 
 def test_mode_pulse_surfaces_named_activity_across_all_modes():
-    with (
-        patch.object(read_mod.db, "get_clan_game_mode_summary", return_value=_SUMMARY),
-        patch.object(read_mod.db, "get_clan_mode_top_members", return_value=_TOP_BY_MODE),
+    with patch.object(
+        read_mod.game_mode_capability, "get_clan_game_modes", return_value=_CAPABILITY
     ):
         mp = read_mod._mode_pulse(conn=None)
 
@@ -63,7 +72,11 @@ def test_mode_pulse_surfaces_named_activity_across_all_modes():
 
 def test_mode_pulse_degrades_to_empty_shape_on_error():
     # _mode_pulse raising is caught by build_read's _load → default shape + _degraded.
-    with patch.object(read_mod.db, "get_clan_game_mode_summary", side_effect=RuntimeError("boom")):
+    with patch.object(
+        read_mod.game_mode_capability,
+        "get_clan_game_modes",
+        side_effect=RuntimeError("boom"),
+    ):
         r = read_mod.build_read()
     assert r["mode_pulse"] == {"mode_mix": [], "top_by_mode": {}, "window_days": read_mod._MODE_PULSE_DAYS}
     assert "mode_pulse" in r.get("_degraded", [])

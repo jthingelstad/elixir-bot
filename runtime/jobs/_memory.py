@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 import db
 import elixir_agent
 import prompts
+from capabilities import game_modes as game_mode_capability
 from runtime.helpers import _stream_facades as event_facades
 from memory_store import update_memory
 from storage.contextual_memory import upsert_weekly_summary_memory
@@ -334,10 +335,13 @@ def _compact_retry_war_season(snapshot) -> dict:
 def _compact_retry_game_modes(snapshot) -> dict:
     if not isinstance(snapshot, dict):
         return {}
-    compact = {}
-    for window, payload in snapshot.items():
+    windows = snapshot.get("windows")
+    if not isinstance(windows, dict):
+        windows = snapshot
+    compact_windows = {}
+    for window, payload in windows.items():
         if not isinstance(payload, dict):
-            compact[window] = payload
+            compact_windows[window] = payload
             continue
         window_payload = {}
         for key, value in payload.items():
@@ -358,8 +362,8 @@ def _compact_retry_game_modes(snapshot) -> dict:
                     "active_members": mode.get("active_members"),
                     "top_members": [
                         {
-                            "name": member.get("name"),
-                            "tag": member.get("tag"),
+                            "member_ref": member.get("member_ref") or member.get("name"),
+                            "player_tag": member.get("player_tag") or member.get("tag"),
                             "battles": member.get("battles"),
                             "wins": member.get("wins"),
                             "losses": member.get("losses"),
@@ -370,8 +374,14 @@ def _compact_retry_game_modes(snapshot) -> dict:
                     ],
                 }
             window_payload["modes"] = modes
-        compact[window] = window_payload
-    return compact
+        compact_windows[window] = window_payload
+    if "windows" not in snapshot:
+        return compact_windows
+    return {
+        "capability": snapshot.get("capability"),
+        "contract_version": snapshot.get("contract_version"),
+        "windows": compact_windows,
+    }
 
 
 def _compact_retry_operations_context(operations_context) -> dict:
@@ -599,7 +609,9 @@ def _build_memory_synthesis_context():
     except Exception:
         log.warning("memory synthesis: war season context load failed", exc_info=True)
     try:
-        operations_context["game_modes"] = event_facades.summarize_battle_modes(windows=(7, 28))
+        operations_context["game_modes"] = game_mode_capability.get_clan_game_mode_windows(
+            windows=(7, 28)
+        )
     except Exception:
         log.warning("memory synthesis: game modes context load failed", exc_info=True)
     try:

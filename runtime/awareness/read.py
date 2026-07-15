@@ -19,6 +19,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 
 import db
+from capabilities import game_modes as game_mode_capability
 from storage import cases, events_read, leader_actions, revisits, war_analytics, war_status
 
 log = logging.getLogger("elixir")
@@ -209,7 +210,12 @@ def _mode_pulse(conn) -> dict:
         is grinding each mode, not just aggregates.
     Both are compact (~1.5K vs the ~14K raw summary). The brain drills deeper via
     the get_clan_game_modes tool."""
-    summary = db.get_clan_game_mode_summary(days=_MODE_PULSE_DAYS, limit=5)
+    snapshot = game_mode_capability.get_clan_game_modes(
+        days=_MODE_PULSE_DAYS,
+        limit=5,
+        top_members=3,
+        conn=conn,
+    )
 
     def _mode_row(g: dict) -> dict:
         return {
@@ -221,9 +227,12 @@ def _mode_pulse(conn) -> dict:
         }
 
     return {
-        "window_days": summary.get("window_days"),
-        "mode_mix": [_mode_row(g) for g in (summary.get("by_group") or [])],
-        "top_by_mode": db.get_clan_mode_top_members(days=_MODE_PULSE_DAYS, per_mode=3, conn=conn),
+        "window_days": snapshot.get("window_days"),
+        "mode_mix": [_mode_row(g) for g in (snapshot.get("modes") or {}).values()],
+        "top_by_mode": {
+            mode.get("label") or key: list(mode.get("top_members") or [])
+            for key, mode in (snapshot.get("modes") or {}).items()
+        },
     }
 
 

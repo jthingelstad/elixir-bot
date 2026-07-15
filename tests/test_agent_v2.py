@@ -547,22 +547,37 @@ def test_execute_tool_get_clan_health_at_risk_uses_db():
 
 
 def test_execute_tool_get_clan_game_modes_events_exposes_event_participation():
-    with patch("elixir_agent.db") as mock_db:
-        mock_db.get_clan_game_mode_summary.return_value = {
+    with patch(
+        "agent.tool_exec.game_mode_capability.get_clan_game_modes",
+        return_value={
+            "capability": "clan_game_modes",
+            "contract_version": 1,
             "window_days": 30,
-            "by_game_mode": [{"game_mode_name": "All_Random_Princess", "battles": 52}],
-            "event_participation": [{"tag": "#ABC123", "event_battles": 52}],
-            "event_badge_completions": [{"tag": "#ABC123", "badge_name": "AnarchyLeagueCompletion"}],
-            "active_events": [],
-            "by_group": [{"mode_group": "special_event", "battles": 52}],
-        }
-
+            "mode_group": "special_event",
+            "modes": {"special_event": {"mode_group": "special_event", "battles": 52}},
+            "events": {
+                "activity": [{"game_mode_name": "All_Random_Princess", "battles": 52}],
+                "participation": [{"tag": "#ABC123", "event_battles": 52}],
+                "badge_completions": [
+                    {"tag": "#ABC123", "badge_name": "AnarchyLeagueCompletion"}
+                ],
+                "active": [],
+            },
+            "ranked": {"activity": [], "profiles": [], "standings": []},
+            "side_modes": {
+                "progress": [], "leaderboards": [],
+                "progress_tracked": False, "leaderboards_tracked": False,
+            },
+            "game_modes": [],
+            "duos": [],
+        },
+    ) as capability:
         result = json.loads(elixir_agent._execute_tool("get_clan_game_modes", {"aspect": "events"}))
 
     assert result["event_activity"][0]["game_mode_name"] == "All_Random_Princess"
     assert result["event_participation"][0]["event_battles"] == 52
     assert result["event_badge_completions"][0]["badge_name"] == "AnarchyLeagueCompletion"
-    mock_db.get_clan_game_mode_summary.assert_called_once_with(days=30, mode_group="special_event", limit=10)
+    capability.assert_called_once_with(days=30, mode_group="special_event", limit=10)
 
 
 def test_execute_tool_get_clan_health_sensitive_aspect_blocked_in_interactive():
