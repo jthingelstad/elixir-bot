@@ -1,6 +1,7 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+xfail_strict = true
 
 [tool.ruff]
 extend-exclude = ["venv"]

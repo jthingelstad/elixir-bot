@@ -297,7 +297,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "hour": _attr("DB_BACKUP_HOUR", 3),
             "minute": 37,
         },
-        delivery_targets=(),
+        delivery_targets=("Backup: timestamped iCloud database snapshot",),
         activity_role="observer",
     ),
     # player-pulse retired 2026-07-10: its #battle-feed posts rode the engine
@@ -384,9 +384,10 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "coalesce": True,
         },
         delivery_targets=(
-            "Discord webhook: #elixir-log (SHADOW — nothing member-facing)",
+            "Discord: member-facing lanes selected by the validated awareness plan",
+            "Discord webhook: #elixir-log diagnostics",
         ),
-        activity_role="observer",
+        activity_role="observer+communicator",
         manual_trigger_allowed=True,
         enabled_by_default=True,
     ),

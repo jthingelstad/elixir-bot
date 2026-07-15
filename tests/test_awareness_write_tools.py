@@ -359,32 +359,6 @@ def test_awareness_write_budget_rejects_fourth_call(memdb):
     assert len(memories) == AWARENESS_WRITE_BUDGET_PER_TICK
 
 
-# ---------------------------------------------------------------------------
-# Budget counters flow into record_awareness_tick
-# ---------------------------------------------------------------------------
-
-@pytest.mark.xfail(reason="awareness write-budget audit (awareness_ticks) retired at v5.1; record_awareness_tick is a documented no-op", strict=False)
-def test_record_awareness_tick_persists_write_counts(memdb):
-    from storage.messages import record_awareness_tick
-
-    tick_id = record_awareness_tick(
-        workflow="clan_awareness",
-        signals_in=2,
-        posts_delivered=1,
-        write_calls_issued=2,
-        write_calls_succeeded=2,
-        write_calls_denied=0,
-    )
-    row = memdb.execute(
-        "SELECT write_calls_issued, write_calls_succeeded, write_calls_denied "
-        "FROM awareness_ticks WHERE tick_id = ?",
-        (tick_id,),
-    ).fetchone()
-    assert row["write_calls_issued"] == 2
-    assert row["write_calls_succeeded"] == 2
-    assert row["write_calls_denied"] == 0
-
-
 def test_save_clan_memory_awareness_is_idempotent(memdb):
     """QA M28: a repeated identical awareness observation dedups instead of
     piling up duplicate memories (the leader path already upserts)."""

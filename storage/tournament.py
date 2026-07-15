@@ -93,11 +93,19 @@ def _api_status_to_internal(api_status: str) -> str:
     }.get(api_status, api_status)
 
 
-def _member_id_for_tag(conn, tag: str):
+def _is_current_clan_member(conn, tag: str) -> bool:
+    """Return whether ``tag`` has an open home-clan membership.
+
+    Tournament rows are tag-keyed in v5.1. Membership is a current
+    relationship, not a synthetic id copied into tournament storage.
+    """
     row = conn.execute(
-        "SELECT player_tag FROM players WHERE player_tag = ?", (_canon_tag(tag),)
+        """SELECT 1 FROM clan_memberships
+           WHERE player_tag = ? AND left_at IS NULL
+           LIMIT 1""",
+        (_canon_tag(tag),),
     ).fetchone()
-    return row["player_tag"] if row else None
+    return row is not None
 
 
 # ---------------------------------------------------------------------------
@@ -524,13 +532,16 @@ def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sql
     card_names_a = _card_names_from_deck(cards_a)
     card_names_b = _card_names_from_deck(cards_b)
 
-    # Canonicalize order: player1_tag is always the lexicographically smaller tag
+    # Canonicalize order: player1_tag is always the lexicographically smaller tag.
     if tag_a <= tag_b:
-        p1_tag, p1_name, p1_mid, p1_crowns, p1_deck, p1_card_names = tag_a, team.get("name"), _member_id_for_tag(conn, tag_a), crowns_a, deck_a, card_names_a
-        p2_tag, p2_name, p2_mid, p2_crowns, p2_deck, p2_card_names = tag_b, opp.get("name"), _member_id_for_tag(conn, tag_b), crowns_b, deck_b, card_names_b
+        p1_tag, p1_name, p1_crowns, p1_deck, p1_card_names = tag_a, team.get("name"), crowns_a, deck_a, card_names_a
+        p2_tag, p2_name, p2_crowns, p2_deck, p2_card_names = tag_b, opp.get("name"), crowns_b, deck_b, card_names_b
     else:
-        p1_tag, p1_name, p1_mid, p1_crowns, p1_deck, p1_card_names = tag_b, opp.get("name"), _member_id_for_tag(conn, tag_b), crowns_b, deck_b, card_names_b
-        p2_tag, p2_name, p2_mid, p2_crowns, p2_deck, p2_card_names = tag_a, team.get("name"), _member_id_for_tag(conn, tag_a), crowns_a, deck_a, card_names_a
+        p1_tag, p1_name, p1_crowns, p1_deck, p1_card_names = tag_b, opp.get("name"), crowns_b, deck_b, card_names_b
+        p2_tag, p2_name, p2_crowns, p2_deck, p2_card_names = tag_a, team.get("name"), crowns_a, deck_a, card_names_a
+
+    p1_is_clan_member = _is_current_clan_member(conn, p1_tag)
+    p2_is_clan_member = _is_current_clan_member(conn, p2_tag)
 
     arena = battle.get("arena") or {}
     game_mode = battle.get("gameMode") or {}
@@ -538,15 +549,15 @@ def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sql
     cursor = conn.execute(
         """INSERT OR IGNORE INTO tournament_battles (
             tournament_id, battle_time,
-            player1_tag, player1_name, player1_member_id, player1_crowns, player1_deck_json,
-            player2_tag, player2_name, player2_member_id, player2_crowns, player2_deck_json,
+            player1_tag, player1_name, player1_crowns, player1_deck_json,
+            player2_tag, player2_name, player2_crowns, player2_deck_json,
             winner_tag, deck_selection, game_mode_id, arena_name, raw_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             tournament_id,
             battle.get("battleTime"),
-            p1_tag, p1_name, p1_mid, p1_crowns, p1_deck,
-            p2_tag, p2_name, p2_mid, p2_crowns, p2_deck,
+            p1_tag, p1_name, p1_crowns, p1_deck,
+            p2_tag, p2_name, p2_crowns, p2_deck,
             winner_tag,
             battle.get("deckSelection"),
             game_mode.get("id"),
@@ -580,14 +591,14 @@ def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sql
         "battle_time": battle.get("battleTime"),
         "player1_tag": p1_tag,
         "player1_name": p1_name,
-        "player1_is_clan_member": bool(p1_mid),
+        "player1_is_clan_member": p1_is_clan_member,
         "player1_crowns": p1_crowns,
         "player1_deck": p1_deck_enriched,
         "player1_deck_avg_elixir": p1_avg_elixir,
         "player1_context": _player_enrichment(conn, p1_tag),
         "player2_tag": p2_tag,
         "player2_name": p2_name,
-        "player2_is_clan_member": bool(p2_mid),
+        "player2_is_clan_member": p2_is_clan_member,
         "player2_crowns": p2_crowns,
         "player2_deck": p2_deck_enriched,
         "player2_deck_avg_elixir": p2_avg_elixir,
@@ -829,12 +840,16 @@ def get_tournament_card_stats(tournament_id: int, conn: Optional[sqlite3.Connect
 # Recap context
 # ---------------------------------------------------------------------------
 
-def _recap_audience(participants: list[dict]) -> str:
+def _recap_audience(conn, participants: list[dict]) -> str:
     """Tournament-level audience tag for recap tone selection."""
     total = len(participants or [])
     if total == 0:
         return "external_observed"
-    clan_members = sum(1 for p in participants if p.get("member_id"))
+    clan_members = sum(
+        1
+        for participant in participants
+        if _is_current_clan_member(conn, participant.get("player_tag") or "")
+    )
     if clan_members == 0:
         return "external_observed"
     if clan_members == total:
@@ -859,7 +874,7 @@ def build_tournament_recap_context(tournament_tag: str, conn: Optional[sqlite3.C
     participants = get_tournament_participants(tid, conn=conn)
     battles = get_tournament_battles(tid, conn=conn)
     card_stats = get_tournament_card_stats(tid, conn=conn)
-    audience = _recap_audience(participants)
+    audience = _recap_audience(conn, participants)
 
     sections = []
 
@@ -881,7 +896,11 @@ def build_tournament_recap_context(tournament_tag: str, conn: Optional[sqlite3.C
     # --- Final standings ---
     standings_lines = []
     for p in participants:
-        clan_member = " (clan)" if p.get("member_id") else ""
+        clan_member = (
+            " (clan)"
+            if _is_current_clan_member(conn, p.get("player_tag") or "")
+            else ""
+        )
         enrichment = _player_enrichment(conn, p.get("player_tag") or "")
         extras = []
         if enrichment.get("trophies") is not None:

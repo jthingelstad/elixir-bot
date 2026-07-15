@@ -1347,96 +1347,6 @@ def _v5_collection_level_metadata():
     }
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture/flow (Gen-B channel semantics, old schema seeds); subjects live - fixture rewrite pending", strict=False)
-def test_v5_post_persists_delivery_audit_rows():
-    channel = SimpleNamespace(
-        id=1482352147029950474,
-        name="player-highlights",
-        type="text",
-        guild=None,
-    )
-    sent_messages = [
-        SimpleNamespace(id=1001, content="TDuck just hit 6,000 trophies."),
-        SimpleNamespace(id=1002, content="That is a clean new peak."),
-    ]
-
-    with (
-        patch.object(elixir.bot, "get_channel", return_value=channel),
-        patch("elixir._post_to_elixir", new=AsyncMock(return_value=sent_messages)) as mock_post,
-    ):
-        ok = asyncio.run(
-            elixir._v5_post(
-                channel.id,
-                "TDuck just hit 6,000 trophies.\n\nThat is a clean new peak.",
-                metadata=_v5_delivery_metadata(),
-            )
-        )
-
-    assert ok is True
-    mock_post.assert_awaited_once()
-
-    intent = elixir.db.get_communication_intent(
-        "v5:intent:detection:best_trophies_peak:#A:6000"
-    )
-    assert intent["status"] == "delivered"
-    assert intent["workflow"] == "v5-reactive"
-    assert intent["intent_type"] == "celebrate:best_trophies_peak"
-    assert intent["target_channel_key"] == "player-highlights"
-    assert intent["target_channel_id"] == str(channel.id)
-    assert intent["covers_signal_keys"] == ["best_trophies_peak:#A:6000"]
-    assert intent["payload"]["posted_messages"][0]["discord_message_id"] == "1001"
-    assert intent["payload"]["posted_messages"][0]["content"] == "TDuck just hit 6,000 trophies."
-
-    trace = elixir.db.get_communication_trace_for_message("1001")
-    assert trace["intent"]["intent_id"] == intent["intent_id"]
-    assert trace["message"]["content"] == "TDuck just hit 6,000 trophies."
-    assert trace["message"]["workflow"] == "v5-reactive"
-    assert trace["message"]["event_type"] == "celebrate:best_trophies_peak"
-
-
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture/flow (Gen-B channel semantics, old schema seeds); subjects live - fixture rewrite pending", strict=False)
-def test_v5_post_preserves_long_trace_summary_json():
-    channel = SimpleNamespace(
-        id=1482352147029950474,
-        name="player-highlights",
-        type="text",
-        guild=None,
-    )
-    metadata = _v5_delivery_metadata()
-    metadata["summary"] = {
-        "detection_type": "best_trophies_peak",
-        "peak": 6000,
-        "recognition_policy": "player_highlight_score:v1",
-        "recognition_decision": "bypass",
-        "recognition_evidence": [
-            {
-                "dedup_key": f"battle_trophy_push:#A:{index}",
-                "detection_type": "battle_trophy_push",
-                "score": 25 + index,
-                "occurred_at": f"2026-06-26T18:{index:02d}:00Z",
-            }
-            for index in range(20)
-        ],
-    }
-    text = "TDuck just hit 6,000 trophies. " * 30
-
-    elixir._record_v5_delivery_success(
-        channel,
-        text,
-        [SimpleNamespace(id=1001, content="TDuck just hit 6,000 trophies.")],
-        metadata,
-    )
-
-    intent = elixir.db.get_communication_intent(
-        "v5:intent:detection:best_trophies_peak:#A:6000"
-    )
-    summary = json.loads(intent["summary"])
-    assert len(intent["summary"]) > 500
-    assert summary["detection_type"] == "best_trophies_peak"
-    assert summary["recognition_evidence"][-1]["dedup_key"] == "battle_trophy_push:#A:19"
-    assert len(intent["content_preview"]) == 500
-
-
 def test_v5_post_creates_leader_action_for_required_event():
     public_channel = SimpleNamespace(
         id=1482352147029950475,
@@ -1571,68 +1481,6 @@ def test_v5_event_leader_action_copy_falls_back_signed_when_generation_empty():
     assert copy.endswith(" - E")
     assert "3-month anniversary" in copy
     assert metadata == {"used_fallback": True, "reason": "empty_generation"}
-
-
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture/flow (Gen-B channel semantics, old schema seeds); subjects live - fixture rewrite pending", strict=False)
-def test_v5_event_leader_action_backfill_scans_delivered_intents():
-    public_channel = SimpleNamespace(
-        id=1482352147029950475,
-        name="clan-events",
-        type="text",
-        guild=None,
-    )
-    relay_channel = SimpleNamespace(
-        id=1482352147029950499,
-        name="leader-actions",
-        type="text",
-        guild=None,
-    )
-    metadata = _v5_join_anniversary_metadata()
-    elixir._record_v5_delivery_success(
-        public_channel,
-        "OllieTurtle has been here three months.",
-        [SimpleNamespace(id=1001, content="OllieTurtle has been here three months.")],
-        metadata,
-    )
-
-    with (
-        patch.object(elixir.bot, "get_channel", return_value=relay_channel),
-        patch(
-            "elixir._channel_config_by_key",
-            return_value={"id": relay_channel.id, "name": "#leader-actions", "lane_key": "arena-relay"},
-        ),
-        patch(
-            "elixir.generate_clan_chat_copy",
-            new=AsyncMock(return_value=ClanChatCopyResult(
-                messages=["Happy 3-month anniversary, OllieTurtle. Glad you're still battling with us. - E"],
-            )),
-        ),
-        patch("elixir.post_leader_action_card", new=AsyncMock(return_value=[SimpleNamespace(id=2001)])) as mock_card,
-    ):
-        count = asyncio.run(elixir._post_missing_v5_event_leader_actions())
-
-    assert count == 1
-    mock_card.assert_awaited_once()
-
-
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture/flow (Gen-B channel semantics, old schema seeds); subjects live - fixture rewrite pending", strict=False)
-def test_v5_post_records_failed_audit_when_channel_missing():
-    with patch.object(elixir.bot, "get_channel", return_value=None):
-        ok = asyncio.run(
-            elixir._v5_post(
-                1482352147029950474,
-                "TDuck just hit 6,000 trophies.",
-                metadata=_v5_delivery_metadata(),
-            )
-        )
-
-    assert ok is False
-    intent = elixir.db.get_communication_intent(
-        "v5:intent:detection:best_trophies_peak:#A:6000"
-    )
-    assert intent["status"] == "failed"
-    assert intent["error_detail"] == "channel_not_found"
-    assert intent["payload"]["original_copy"] == "TDuck just hit 6,000 trophies."
 
 
 def test_post_startup_message_posts_build_hash_to_elixir_log_webhook():
@@ -2413,18 +2261,17 @@ def test_dispatch_admin_command_returns_runtime_job_failure_text():
     assert result == "`weekly-recap` failed: weekly recap post failed: missing Discord permissions in #weekly-digest"
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture/flow (Gen-B channel semantics, old schema seeds); subjects live - fixture rewrite pending", strict=False)
 def test_dispatch_admin_command_rejects_non_manual_activity():
     result = asyncio.run(
         elixir.dispatch_admin_command(
             "activity.run",
             preview=False,
             short=False,
-            args={"activity": "war-poll"},
+            args={"activity": "war-attendance-snapshot"},
         )
     )
 
-    assert result == "`war-poll` cannot be run manually."
+    assert result == "`war-attendance-snapshot` cannot be run manually."
 
 
 def test_dispatch_admin_command_handles_activity_run():
@@ -3017,8 +2864,7 @@ def test_build_schedule_report_includes_weekly_clan_recap():
     assert "Every Mon at 09:00 CT." in report
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture/flow (Gen-B channel semantics, old schema seeds); subjects live - fixture rewrite pending", strict=False)
-def test_build_schedule_report_shows_30_minute_player_intel_refresh():
+def test_build_schedule_report_shows_engine_tick_interval():
     scheduler = SimpleNamespace(
         running=True,
         get_jobs=lambda: [],
@@ -3026,17 +2872,16 @@ def test_build_schedule_report_shows_30_minute_player_intel_refresh():
 
     with (
         patch("elixir.scheduler", scheduler),
-        patch.object(elixir, "PLAYER_INTEL_REFRESH_MINUTES", 30),
+        patch.object(elixir, "ENGINE_TICK_MINUTES", 10),
     ):
         report = elixir._build_schedule_report()
 
-    assert "member-highlights" in report
-    assert "player-progression" in report
-    assert "Every 30 minutes." in report
+    assert "player-highlights" in report
+    assert "engine-tick" in report
+    assert "Every 10 minutes." in report
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture/flow (Gen-B channel semantics, old schema seeds); subjects live - fixture rewrite pending", strict=False)
-def test_build_schedule_report_includes_clock_aligned_war_pipeline():
+def test_build_schedule_report_includes_awareness_owner():
     scheduler = SimpleNamespace(
         running=True,
         get_jobs=lambda: [],
@@ -3044,16 +2889,16 @@ def test_build_schedule_report_includes_clock_aligned_war_pipeline():
 
     with (
         patch("elixir.scheduler", scheduler),
-        patch.object(elixir, "WAR_POLL_MINUTE", 0),
+        patch.object(elixir, "AWARENESS_LOOP_MINUTE", 5),
     ):
         report = elixir._build_schedule_report()
 
-    assert "river-race" in report
-    assert "war-poll" in report
-    assert "Every hour at :00 CT." in report
+    assert "elixir-log" in report
+    assert "awareness-loop" in report
+    assert "Every hour at :05 CT." in report
+    assert "member-facing lanes selected by the validated awareness plan" in report
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture/flow (Gen-B channel semantics, old schema seeds); subjects live - fixture rewrite pending", strict=False)
 def test_activity_registry_has_unique_keys_and_required_fields():
     activities = list_registered_activities()
 
@@ -3071,36 +2916,28 @@ def test_activity_registry_has_unique_keys_and_required_fields():
     assert all(activity.delivery_targets for activity in activities)
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture/flow (Gen-B channel semantics, old schema seeds); subjects live - fixture rewrite pending", strict=False)
 def test_activity_registry_exposes_war_and_promotion_visibility():
-    # Pin war schedule defaults so the test is stable regardless of what
-    # finishTime history the local DB happens to carry (anchor derivation
-    # now shifts these minutes per season — see #20).
-    with (
-        patch.object(elixir, "WAR_POLL_MINUTE", 0),
-    ):
-        specs = {spec["activity_key"]: spec for spec in schedule_specs_from_registry(elixir)}
+    specs = {spec["activity_key"]: spec for spec in schedule_specs_from_registry(elixir)}
 
-    assert "war-poll" in specs
-    assert specs["war-poll"]["owner_lane"] == "river-race"
-    assert specs["war-poll"]["activity_role"] == "observer"
-    assert specs["war-poll"]["schedule"] == "Every hour at :00 CT."
-    assert "war-awareness" not in specs
+    assert specs["engine-tick"]["owner_lane"] == "player-highlights"
+    assert specs["engine-tick"]["activity_role"] == "observer"
+    assert specs["engine-tick"]["schedule"] == "Every 10 minutes."
+    assert "war-poll" not in specs
+    assert specs["awareness-loop"]["activity_role"] == "observer+communicator"
+    assert specs["awareness-loop"]["schedule"] == "Every hour at :05 CT."
     assert "daily-clan-insight" in specs
     assert specs["daily-clan-insight"]["owner_lane"] == "ask-elixir"
     assert specs["daily-clan-insight"]["activity_role"] == "communicator"
     assert "Discord: #ask-elixir" in specs["daily-clan-insight"]["delivery_targets"]
     assert specs["daily-clan-insight"]["schedule"] == "Daily at 12:00 CT."
-    assert "leadership-action-scan" in specs
-    assert specs["leadership-action-scan"]["owner_lane"] == "arena-relay"
-    assert specs["leadership-action-scan"]["activity_role"] == "observer+communicator"
-    assert specs["leadership-action-scan"]["schedule"] == "Every 240 minutes."
-    assert "Discord: #leader-actions singular leader action cards" in specs["leadership-action-scan"]["delivery_targets"]
+    assert "weekly-leadership-review" in specs
+    assert specs["weekly-leadership-review"]["owner_lane"] == "arena-relay"
+    assert specs["weekly-leadership-review"]["activity_role"] == "observer+communicator"
     assert "weekly-discord-invite-relay" in specs
     assert specs["weekly-discord-invite-relay"]["owner_lane"] == "arena-relay"
     assert specs["weekly-discord-invite-relay"]["activity_role"] == "communicator"
-    assert specs["weekly-discord-invite-relay"]["schedule"] == "Every Sat at 11:00 CT."
-    assert "Discord: #leader-actions weekly no-link Discord invite copy" in specs["weekly-discord-invite-relay"]["delivery_targets"]
+    assert specs["weekly-discord-invite-relay"]["schedule"] == "Daily at 13:00 CT."
+    assert "Discord: #actions in-game-relay nudge card (quiet periods only)" in specs["weekly-discord-invite-relay"]["delivery_targets"]
     assert "db-maintenance" in specs
     assert specs["db-maintenance"]["owner_lane"] == "elixir-log"
     assert specs["db-maintenance"]["activity_role"] == "observer+communicator"
@@ -3115,7 +2952,6 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert "Discord: #recruiting" in specs["promotion-content"]["delivery_targets"]
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture/flow (Gen-B channel semantics, old schema seeds); subjects live - fixture rewrite pending", strict=False)
 def test_activity_registry_registers_scheduler_jobs_from_one_source():
     added = []
 
@@ -3130,32 +2966,22 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
     )
 
     job_ids = {item["id"] for item in added}
-    # v5: the event-driven reactive tick replaces the schedule-first public
-    # awareness jobs. #leader-actions still uses the action-card scan until the
-    # v5 leadership intents have a direct card adapter.
-    assert {item["activity_key"] for item in registered} == {
-        "v5-reactive-tick",
-        "war-poll",
-        "award-detection",
-        "player-progression",
-        "daily-clan-insight",
-        "leadership-action-scan",
-        "weekly-discord-invite-relay",
-        "memory-synthesis",
-        "weekly-recap",
-        "promotion-content",
-        "card-catalog-sync",
-        "api-sentinel",
-        "db-maintenance",
+    expected = {
+        activity.activity_key
+        for activity in list_registered_activities()
+        if activity.enabled_by_default
     }
-    assert "v5-reactive-tick" in job_ids
-    assert "war-poll" in job_ids
+    assert {item["activity_key"] for item in registered} == expected
+    assert "engine-tick" in job_ids
+    assert "awareness-loop" in job_ids
     assert "daily-clan-insight" in job_ids
-    assert "leadership-action-scan" in job_ids
+    assert "weekly-leadership-review" in job_ids
     assert "weekly-discord-invite-relay" in job_ids
     assert "promotion-content" in job_ids
     assert "api-sentinel" in job_ids
-    # disabled v4 scheduled-awareness jobs are not registered
+    # Retired generation-specific jobs are not registered.
+    assert "v5-reactive-tick" not in job_ids
+    assert "war-poll" not in job_ids
     assert "clan-awareness" not in job_ids
     assert "war-awareness" not in job_ids
 

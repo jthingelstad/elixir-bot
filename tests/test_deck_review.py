@@ -2,8 +2,6 @@
 war deck reconstruction, request classification, and war-suggest validation.
 """
 
-import json
-
 import db
 
 
@@ -77,8 +75,7 @@ def _battle(battle_time, *, battle_type="riverRacePvP", outcome_crowns=(1, 0),
 
 # ── Phase 1: opponent deck capture ────────────────────────────────────────────
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture (seeds members/member_battle_facts, old db.list_member_* names); deck subject works - fixture rewrite pending", strict=False)
-def test_opponent_deck_captured_on_battlelog_ingest():
+def test_opponent_deck_is_not_claimed_by_v51_battle_ingest():
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
@@ -90,20 +87,21 @@ def test_opponent_deck_captured_on_battlelog_ingest():
                     team_cards=_deck("Knight"), opp_cards=opp_cards, deck_selection="collection")],
             conn=conn,
         )
-        row = conn.execute(
-            "SELECT opponent_deck_json FROM member_battle_facts"
-        ).fetchone()
-        stored = json.loads(row["opponent_deck_json"])
-        names = [c["name"] for c in stored]
-        assert "Hog Rider" in names and len(stored) == 8
+        columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(battle_events)")
+        }
+        assert "opponent_deck_json" not in columns
+        result = db.get_member_recent_losses(
+            "#PLAYER", scope="ladder_ranked_10", conn=conn
+        )
+        assert result["opponent_decks_captured"] is False
     finally:
         conn.close()
 
 
 # ── Phase 2a: get_member_recent_losses ────────────────────────────────────────
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture (seeds members/member_battle_facts, old db.list_member_* names); deck subject works - fixture rewrite pending", strict=False)
-def test_get_member_recent_losses_aggregates_top_opponent_cards():
+def test_get_member_recent_losses_reports_opponent_deck_limit_honestly():
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
@@ -135,11 +133,8 @@ def test_get_member_recent_losses_aggregates_top_opponent_cards():
         assert out["losses_examined"] == 3
         # Most recent battle was a win, so current loss streak is 0.
         assert out["current_loss_streak"] == 0
-        names = [c["name"] for c in out["top_opponent_cards"]]
-        assert "Mega Knight" in names
-        mk = next(c for c in out["top_opponent_cards"] if c["name"] == "Mega Knight")
-        assert mk["appearances"] == 3
-        assert mk["pct_of_losses"] == 100
+        assert out["opponent_decks_captured"] is False
+        assert "top_opponent_cards" not in out
         # Tag exposure: opponent_tags must surface the opponent's player tag so the
         # LLM can chain into cr_api. All three losses shared #OPP.
         assert len(out["opponent_tags"]) == 1
@@ -164,9 +159,8 @@ def test_get_member_recent_losses_returns_empty_when_no_battles():
         conn.close()
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture (seeds members/member_battle_facts, old db.list_member_* names); deck subject works - fixture rewrite pending", strict=False)
-def test_get_member_recent_losses_splits_by_played_as_mode():
-    """Opponent cards played as Evo/Hero aggregate separately from the same card played vanilla."""
+def test_get_member_recent_losses_does_not_infer_opponent_card_modes():
+    """The v5.1 event stream does not persist opponent decks or card modes."""
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
@@ -190,20 +184,14 @@ def test_get_member_recent_losses_splits_by_played_as_mode():
         db.snapshot_player_battlelog("#PLAYER", battles, conn=conn)
 
         out = db.get_member_recent_losses("#PLAYER", scope="ladder_ranked_10", limit=10, conn=conn)
-        knights = [c for c in out["top_opponent_cards"] if c["name"] == "Knight"]
-        assert len(knights) == 2, "Knight should split into evo and vanilla buckets"
-        evo_entry = next(c for c in knights if c.get("played_as") == "evo")
-        plain_entry = next(c for c in knights if "played_as" not in c)
-        assert evo_entry["appearances"] == 2
-        assert plain_entry["appearances"] == 1
+        assert out["losses_examined"] == 3
+        assert out["opponent_decks_captured"] is False
+        assert "top_opponent_cards" not in out
     finally:
         conn.close()
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture (seeds members/member_battle_facts, old db.list_member_* names); deck subject works - fixture rewrite pending", strict=False)
-def test_signature_cards_split_by_played_as_mode():
-    """signature_cards aggregation tags the dominant played-as mode per card so
-    the LLM can say 'Evo Archers is X's signature card' specifically."""
+def test_signature_cards_aggregate_by_card_name():
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
@@ -220,21 +208,13 @@ def test_signature_cards_split_by_played_as_mode():
 
         sig = db.get_member_signature_cards("#PLAYER", mode_scope="overall", conn=conn)
         archers = next(c for c in sig["cards"] if c["name"] == "Archers")
-        # The aggregation tags Archers with played_as='evo' because every play was as evo
-        assert archers.get("played_as") == "evo"
-        assert archers["usage_pct"] == 100
-        # Non-evo cards do not carry a played_as field
-        hog = next(c for c in sig["cards"] if c["name"] == "Hog Rider")
-        assert "played_as" not in hog
+        assert archers["usage_rate"] == 1.0
+        assert "played_as" not in archers
     finally:
         conn.close()
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture (seeds members/member_battle_facts, old db.list_member_* names); deck subject works - fixture rewrite pending", strict=False)
-def test_signature_cards_mixed_evo_and_vanilla_dominant_bucket_wins():
-    """When a card is sometimes played as evo and sometimes vanilla, the top-N surfaces
-    each variant separately by play count — a player running Evo X 80% of the time shows
-    up with played_as='evo' while the vanilla bucket is a different entry with lower usage."""
+def test_signature_cards_do_not_invent_variant_precision():
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
@@ -263,11 +243,9 @@ def test_signature_cards_mixed_evo_and_vanilla_dominant_bucket_wins():
 
         sig = db.get_member_signature_cards("#PLAYER", mode_scope="overall", conn=conn)
         archers_entries = [c for c in sig["cards"] if c["name"] == "Archers"]
-        assert len(archers_entries) == 2, "Archers should split into evo and vanilla buckets"
-        evo = next(c for c in archers_entries if c.get("played_as") == "evo")
-        plain = next(c for c in archers_entries if "played_as" not in c)
-        assert evo["usage_pct"] == 50
-        assert plain["usage_pct"] == 50
+        assert len(archers_entries) == 1
+        assert archers_entries[0]["usage_rate"] == 1.0
+        assert "played_as" not in archers_entries[0]
     finally:
         conn.close()
 
@@ -317,7 +295,6 @@ def _war_duel_battle(battle_time, deck_names_per_round, *, outcome_crowns=(2, 1)
     }
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture (seeds members/member_battle_facts, old db.list_member_* names); deck subject works - fixture rewrite pending", strict=False)
 def test_reconstruct_war_decks_insufficient_data():
     conn = db.get_connection(":memory:")
     try:
@@ -330,8 +307,8 @@ def test_reconstruct_war_decks_insufficient_data():
         )
         out = db.reconstruct_member_war_decks("#PLAYER", conn=conn)
         assert out["status"] == "insufficient_data"
-        assert out["decks"] == []
-        assert any("war battle" in g.lower() for g in out["gaps"])
+        assert len(out["decks"]) == 1
+        assert "Only 1 distinct war deck" in out["reason"]
     finally:
         conn.close()
 
@@ -365,8 +342,7 @@ def test_reconstruct_war_decks_no_overlap_with_distinct_decks():
         conn.close()
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture (seeds members/member_battle_facts, old db.list_member_* names); deck subject works - fixture rewrite pending", strict=False)
-def test_reconstruct_war_decks_high_confidence_from_recent_duel():
+def test_reconstruct_war_decks_does_not_infer_unstored_duel_rounds():
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
@@ -380,8 +356,9 @@ def test_reconstruct_war_decks_high_confidence_from_recent_duel():
         ]
         db.snapshot_player_battlelog("#PLAYER", battles, conn=conn)
         out = db.reconstruct_member_war_decks("#PLAYER", conn=conn)
-        assert out["status"] == "reconstructed"
-        assert out["confidence"] == "high"
+        assert out["status"] != "reconstructed"
+        assert out.get("confidence") != "high"
+        assert out["evidence"]["duel_battles_seen"] == 1
     finally:
         conn.close()
 
@@ -575,5 +552,4 @@ def test_respond_in_deck_review_war_review_with_decks_does_not_inject_new_player
     msg = captured["user_msg"]
     assert "PRE-FETCHED WAR DECK RECONSTRUCTION" in msg
     assert "NEW WAR PLAYER" not in msg
-
 

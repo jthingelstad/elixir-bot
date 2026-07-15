@@ -1,4 +1,3 @@
-import pytest
 import json
 from datetime import datetime, timezone
 
@@ -13,7 +12,7 @@ def _battle_ts(time_part: str) -> str:
 def _battle(ts, *, battle_type, game_mode_id, game_mode_name, team_size=1, event_tag=None, tournament_tag=None):
     team = [
         {
-            "tag": "#ABC123",
+            "tag": "#2P0LYQ",
             "name": "Alpha",
             "crowns": 1,
             "cards": [],
@@ -53,13 +52,12 @@ def test_classify_battle_mode_uses_docs_taxonomy_order():
     assert classify_battle_mode(battle_type="friendly", game_mode_id=72000007, game_mode_name="Friendly") == "friendly"
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture (old schema seeds); subjects live - fixture rewrite pending", strict=False)
 def test_battle_rollups_split_new_mode_groups():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members([{"tag": "#ABC123", "name": "Alpha", "role": "member"}], conn=conn)
+        db.snapshot_members([{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn)
         db.snapshot_player_battlelog(
-            "#ABC123",
+            "#2P0LYQ",
             [
                 _battle(_battle_ts("100000"), battle_type="PvP", game_mode_id=72000006, game_mode_name="Ladder"),
                 _battle(_battle_ts("100100"), battle_type="pathOfLegend", game_mode_id=72000464, game_mode_name="Ranked1v1_NewArena2"),
@@ -69,7 +67,7 @@ def test_battle_rollups_split_new_mode_groups():
             ],
             conn=conn,
         )
-        rows = db.list_member_daily_battle_rollups("#ABC123", days=1, conn=conn)
+        rows = db.list_player_daily_battle_rollups("#2P0LYQ", days=1, conn=conn)
         groups = {row["mode_group"] for row in rows}
     finally:
         conn.close()
@@ -77,38 +75,46 @@ def test_battle_rollups_split_new_mode_groups():
     assert {"ladder", "ranked", "two_v_two", "tournament", "friendly"}.issubset(groups)
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture (old schema seeds); subjects live - fixture rewrite pending", strict=False)
 def test_ranked_and_clan_game_mode_query_helpers():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members([{"tag": "#ABC123", "name": "Alpha", "role": "member"}], conn=conn)
+        db.snapshot_members([{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn)
         db.snapshot_player_profile(
             {
-                "tag": "#ABC123",
+                "tag": "#2P0LYQ",
                 "name": "Alpha",
+                "expLevel": 60,
+                "wins": 100,
+                "trophies": 9000,
+                "bestTrophies": 9200,
+                "arena": {"id": 54000130, "name": "Boot Camp"},
                 "currentPathOfLegendSeasonResult": {"leagueNumber": 6, "trophies": 1200, "rank": None},
                 "lastPathOfLegendSeasonResult": {"leagueNumber": 5, "trophies": 1000, "rank": None},
                 "bestPathOfLegendSeasonResult": {"leagueNumber": 7, "trophies": 1800, "rank": None},
                 "progress": {"AutoChess_2026_Season_9": {"trophies": 2100, "bestTrophies": 2200}},
                 "currentDeck": [],
-                "cards": [],
+                "cards": [{"id": 26000000, "name": "Knight", "rarity": "common", "level": 14, "maxLevel": 14}],
+                "badges": [],
             },
             conn=conn,
         )
         db.snapshot_player_battlelog(
-            "#ABC123",
+            "#2P0LYQ",
             [_battle(_battle_ts("100100"), battle_type="pathOfLegend", game_mode_id=72000464, game_mode_name="Ranked1v1_NewArena2")],
             conn=conn,
         )
-        ranked = db.get_member_ranked_status("#ABC123", days=1, conn=conn)
+        ranked = db.get_member_ranked_status("#2P0LYQ", days=1, conn=conn)
         summary = db.get_clan_game_mode_summary(days=1, conn=conn)
     finally:
         conn.close()
 
     assert ranked["current"]["leagueNumber"] == 6
     assert ranked["recent_ranked"]["battles"] == 1
-    assert summary["ranked_activity"][0]["tag"] == "#ABC123"
-    assert summary["side_mode_progress"][0]["progress_key"] == "AutoChess_2026_Season_9"
+    assert summary["ranked_activity"][0]["tag"] == "#2P0LYQ"
+    # v5.1 deliberately does not persist the unbounded profile ``progress``
+    # blob in the current-state projection; event context is tracked through
+    # game_mode_contexts instead.
+    assert summary["side_mode_progress"] == []
     # QA H12: mode_mix (by_group) and ranked_activity now share the authoritative
     # battle_events source, so their ranked counts reconcile (were 1152 vs 451).
     ranked_group = next((g for g in summary["by_group"] if g["mode_group"] == "ranked"), None)
@@ -141,7 +147,7 @@ def test_game_mode_contexts_capture_events_and_leaderboards():
 def test_special_event_activity_uses_event_context_display_names():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members([{"tag": "#ABC123", "name": "Alpha", "role": "member"}], conn=conn)
+        db.snapshot_members([{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn)
         db.upsert_game_mode_contexts_from_events(
             [
                 {
@@ -160,7 +166,7 @@ def test_special_event_activity_uses_event_context_display_names():
             conn=conn,
         )
         db.snapshot_player_battlelog(
-            "#ABC123",
+            "#2P0LYQ",
             [
                 _battle(
                     _battle_ts("101000"),
@@ -181,7 +187,7 @@ def test_special_event_activity_uses_event_context_display_names():
         )
 
         summary = db.get_clan_game_mode_summary(days=1, mode_group="special_event", limit=10, conn=conn)
-        member = db.get_member_special_event_activity("#ABC123", days=1, conn=conn)
+        member = db.get_member_special_event_activity("#2P0LYQ", days=1, conn=conn)
     finally:
         conn.close()
 
@@ -202,4 +208,3 @@ def test_special_event_activity_uses_event_context_display_names():
 
     member_modes = {row["event_tag"]: row for row in member["by_game_mode"]}
     assert member_modes["#REST"]["event_name"] == "Restless Undead"
-

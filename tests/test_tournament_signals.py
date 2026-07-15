@@ -1,4 +1,3 @@
-import pytest
 """Tests for tournament signal generation during polling."""
 
 import db
@@ -110,7 +109,6 @@ def _battle_payload(tournament_tag="#2QG9Y9UR", team_tag="#ABC123", opp_tag="#DE
     }
 
 
-@pytest.mark.xfail(reason="tournament signal path shape drift after member_id column drops - needs v5.1 fixture", strict=False)
 def test_store_tournament_battle_returns_signal_ready_dict_on_insert():
     conn = db.get_connection(":memory:")
     try:
@@ -134,7 +132,6 @@ def test_store_tournament_battle_returns_signal_ready_dict_on_insert():
         conn.close()
 
 
-@pytest.mark.xfail(reason="tournament signal path shape drift after member_id column drops - needs v5.1 fixture", strict=False)
 def test_store_tournament_battle_enriches_deck_and_computes_shared_cards():
     conn = db.get_connection(":memory:")
     try:
@@ -185,7 +182,6 @@ def test_store_tournament_battle_enriches_deck_and_computes_shared_cards():
         conn.close()
 
 
-@pytest.mark.xfail(reason="tournament signal path shape drift after member_id column drops - needs v5.1 fixture", strict=False)
 def test_store_tournament_battle_returns_none_on_duplicate():
     conn = db.get_connection(":memory:")
     try:
@@ -256,7 +252,6 @@ def test_tournament_system_prompt_excludes_clan_events_prose():
     assert "Communal. Proud." not in prompt
 
 
-@pytest.mark.xfail(reason="tournament signal path shape drift after member_id column drops - needs v5.1 fixture", strict=False)
 def test_build_tournament_recap_context_enriches_decks_and_audience():
     """End-of-tournament recap context must include the audience tag, card
     elixir/rarity on head-to-head decks, shared-cards per match, and per-player
@@ -281,15 +276,12 @@ def test_build_tournament_recap_context_enriches_decks_and_audience():
             {"tag": "#ABC123", "name": "King Thing", "role": "leader", "expLevel": 66, "trophies": 11000, "clanRank": 1},
             {"tag": "#DEF456", "name": "King Levy", "role": "member", "expLevel": 60, "trophies": 8000, "clanRank": 2},
         ], conn=conn)
-        # Seed a profile snapshot so the recap enrichment surfaces trophies.
+        # The v5.1 roster projection is the current profile read model.
         for ptag, trophies in [("#ABC123", 11000), ("#DEF456", 8000)]:
-            mid = conn.execute(
-                "SELECT member_id FROM members WHERE player_tag = ?", (ptag,)
-            ).fetchone()["member_id"]
             conn.execute(
-                "INSERT INTO player_profile_snapshots (member_id, fetched_at, exp_level, trophies, best_trophies) "
-                "VALUES (?, '2026-04-18T10:00:00', 66, ?, ?)",
-                (mid, trophies, trophies),
+                "UPDATE player_current_state SET trophies = ?, best_trophies = ? "
+                "WHERE player_tag = ?",
+                (trophies, trophies, ptag),
             )
         conn.commit()
 
