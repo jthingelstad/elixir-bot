@@ -31,8 +31,12 @@ def _size_mb(path: str) -> float:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Purge expired rows and VACUUM the v5.1 DB.")
-    parser.add_argument("--purge-only", action="store_true", help="Skip VACUUM (no file shrink).")
+    parser = argparse.ArgumentParser(
+        description="Purge expired rows and VACUUM the v5.1 DB."
+    )
+    parser.add_argument(
+        "--purge-only", action="store_true", help="Skip VACUUM (no file shrink)."
+    )
     args = parser.parse_args()
 
     path = db.DB_PATH
@@ -54,7 +58,9 @@ def main() -> None:
         print("Purged rows: none expired")
 
     if args.purge_only:
-        print("Skipping VACUUM (--purge-only). Freed pages will be reused, file size unchanged.")
+        print(
+            "Skipping VACUUM (--purge-only). Freed pages will be reused, file size unchanged."
+        )
         return
 
     # VACUUM must run outside any transaction, so use a dedicated autocommit
@@ -67,7 +73,9 @@ def main() -> None:
         vac.execute("VACUUM")
     except sqlite3.OperationalError as exc:
         print(f"VACUUM failed: {exc}")
-        print("Is the bot still running? Stop it and retry — VACUUM needs an exclusive lock.")
+        print(
+            "Is the bot still running? Stop it and retry — VACUUM needs an exclusive lock."
+        )
         sys.exit(1)
     finally:
         vac.close()

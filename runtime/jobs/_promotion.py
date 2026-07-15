@@ -8,9 +8,12 @@ to cross-post). No external website writes happen here anymore.
 """
 
 __all__ = [
-    "_promotion_discord_required_text", "_promotion_reddit_required_token",
-    "_promotion_channel_posts", "_unwrap_outer_bold",
-    "_validate_promote_content_or_raise", "_promotion_content_cycle",
+    "_promotion_discord_required_text",
+    "_promotion_reddit_required_token",
+    "_promotion_channel_posts",
+    "_unwrap_outer_bold",
+    "_validate_promote_content_or_raise",
+    "_promotion_content_cycle",
 ]
 
 import asyncio
@@ -18,10 +21,13 @@ import logging
 
 import db
 import elixir_agent
-from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
+from runtime.helpers import (
+    _channel_msg_kwargs,
+    _channel_scope,
+    _get_singleton_channel_id,
+)
 from runtime.helpers._common import _load_live_clan_context, _post_to_elixir
-
 
 log = logging.getLogger("elixir")
 
@@ -52,10 +58,7 @@ def _promotion_channel_posts(promote):
     reddit_body = (reddit.get("body") or "").strip()
 
     if discord_body:
-        posts.append(
-            "**Discord recruiting copy**\n"
-            f"```text\n{discord_body}\n```"
-        )
+        posts.append(f"**Discord recruiting copy**\n```text\n{discord_body}\n```")
     if reddit_title or reddit_body:
         reddit_lines = ["**Reddit recruiting copy**"]
         if reddit_title:
@@ -80,7 +83,9 @@ def _validate_promote_content_or_raise(promote, required_trophies=2000) -> None:
     discord = (promote or {}).get("discord") or {}
     discord_body = (discord.get("body") or "").strip()
     if discord_body:
-        first_line = next((line.strip() for line in discord_body.splitlines() if line.strip()), "")
+        first_line = next(
+            (line.strip() for line in discord_body.splitlines() if line.strip()), ""
+        )
         first_line = _unwrap_outer_bold(first_line)
         if discord_text not in first_line:
             raise ValueError(
@@ -95,9 +100,7 @@ def _validate_promote_content_or_raise(promote, required_trophies=2000) -> None:
     reddit_title = (reddit.get("title") or "").strip()
     reddit_body = (reddit.get("body") or "").strip()
     if (reddit_title or reddit_body) and reddit_token not in reddit_title:
-        raise ValueError(
-            f"reddit.title must include exact token `{reddit_token}`"
-        )
+        raise ValueError(f"reddit.title must include exact token `{reddit_token}`")
 
 
 async def _promotion_content_cycle():
@@ -105,19 +108,25 @@ async def _promotion_content_cycle():
     try:
         promotion_channel_id = _get_singleton_channel_id("promotion")
     except Exception as exc:
-        runtime_status.mark_job_failure("promotion_content_cycle", f"promotion channel config error: {exc}")
+        runtime_status.mark_job_failure(
+            "promotion_content_cycle", f"promotion channel config error: {exc}"
+        )
         return
 
     channel = _bot().get_channel(promotion_channel_id)
     if not channel:
-        runtime_status.mark_job_failure("promotion_content_cycle", "promotion channel not found")
+        runtime_status.mark_job_failure(
+            "promotion_content_cycle", "promotion channel not found"
+        )
         return
 
     try:
         clan, war = await _load_live_clan_context()
     except Exception as exc:
         log.error("Promotion content refresh failed: %s", exc, exc_info=True)
-        runtime_status.mark_job_failure("promotion_content_cycle", f"refresh failed: {exc}")
+        runtime_status.mark_job_failure(
+            "promotion_content_cycle", f"refresh failed: {exc}"
+        )
         return
 
     if not clan.get("memberList"):
@@ -131,18 +140,26 @@ async def _promotion_content_cycle():
         roster_data=None,
     )
     if not promote:
-        runtime_status.mark_job_success("promotion_content_cycle", "no promotion content")
+        runtime_status.mark_job_success(
+            "promotion_content_cycle", "no promotion content"
+        )
         return
     try:
-        _validate_promote_content_or_raise(promote, required_trophies=clan.get("requiredTrophies", 2000))
+        _validate_promote_content_or_raise(
+            promote, required_trophies=clan.get("requiredTrophies", 2000)
+        )
     except Exception as exc:
         log.error("Promotion content validation failed: %s", exc, exc_info=True)
-        runtime_status.mark_job_failure("promotion_content_cycle", f"invalid promotion content: {exc}")
+        runtime_status.mark_job_failure(
+            "promotion_content_cycle", f"invalid promotion content: {exc}"
+        )
         return
 
     channel_posts = _promotion_channel_posts(promote)
     if not channel_posts:
-        runtime_status.mark_job_success("promotion_content_cycle", "no promotion channel copy")
+        runtime_status.mark_job_success(
+            "promotion_content_cycle", "no promotion channel copy"
+        )
         return
 
     await _post_to_elixir(channel, {"content": channel_posts})
@@ -150,8 +167,15 @@ async def _promotion_content_cycle():
     for index, post in enumerate(channel_posts):
         await asyncio.to_thread(
             db.save_message,
-            _channel_scope(channel), "assistant", post,
-            **ch, workflow="promotion",
-            event_type="promotion_content_cycle" if index == 0 else "promotion_content_cycle_part",
+            _channel_scope(channel),
+            "assistant",
+            post,
+            **ch,
+            workflow="promotion",
+            event_type="promotion_content_cycle"
+            if index == 0
+            else "promotion_content_cycle_part",
         )
-    runtime_status.mark_job_success("promotion_content_cycle", "Discord promotion content published")
+    runtime_status.mark_job_success(
+        "promotion_content_cycle", "Discord promotion content published"
+    )

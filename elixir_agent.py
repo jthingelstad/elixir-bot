@@ -15,8 +15,11 @@ late, function-level ``import elixir_agent`` is the supported pattern.
 
 import cr_api
 import db
-
 from agent import memory_tasks
+from agent.chat import (
+    _build_tool_result_envelope,
+    _chat_with_tools,
+)
 from agent.core import (
     BUILD_HASH,
     RELEASE_LABEL,
@@ -27,16 +30,12 @@ from agent.core import (
     response_tool_uses,
     runtime_status,
 )
+from agent.tool_exec import _execute_tool
 from agent.tool_policy import (
     MAX_ROUNDS_BY_WORKFLOW,
     RESPONSE_SCHEMAS_BY_WORKFLOW,
     TOOLSETS_BY_WORKFLOW,
 )
-from agent.chat import (
-    _build_tool_result_envelope,
-    _chat_with_tools,
-)
-from agent.tool_exec import _execute_tool
 from agent.workflows import (
     analyze_arena_relay_screenshot,
     generate_ask_elixir_daily,
@@ -48,11 +47,11 @@ from agent.workflows import (
     generate_tournament_recap,
     generate_tournament_update,
     generate_weekly_recap,
+    repair_awareness_plan,
     respond_in_channel,
     respond_in_deck_review,
     respond_in_reception,
     respond_to_help_request,
-    repair_awareness_plan,
     run_awareness_tick,
     run_memory_synthesis,
     synthesize_leader_action_feedback,

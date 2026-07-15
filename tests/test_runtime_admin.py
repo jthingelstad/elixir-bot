@@ -20,7 +20,9 @@ def test_preview_job_runtime_patches_current_runtime_bot():
             assert channel is not None
 
             text_message = await channel.send("plain preview")
-            embed_message = await channel.send(embed=SimpleNamespace(title="Action Card"), view=object())
+            embed_message = await channel.send(
+                embed=SimpleNamespace(title="Action Card"), view=object()
+            )
 
             assert text_message.id == 1
             assert embed_message.id == 2

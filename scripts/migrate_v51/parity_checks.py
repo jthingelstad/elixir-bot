@@ -56,6 +56,7 @@ def _one(conn, sql, params=()):
 
 # ---------------------------------------------------------------- old side
 
+
 def old_identity(old):
     member_count = _one(old, "SELECT COUNT(*) FROM members")
     unresolved_open = _one(
@@ -120,7 +121,9 @@ def old_war_history(old):
 
 
 def _sample_tags(old):
-    tags = [r[0] for r in _rows(old, "SELECT player_tag FROM members ORDER BY player_tag")]
+    tags = [
+        r[0] for r in _rows(old, "SELECT player_tag FROM members ORDER BY player_tag")
+    ]
     rng = random.Random(ROLLUP_SAMPLE_SEED)
     return sorted(rng.sample(tags, min(ROLLUP_SAMPLE_SIZE, len(tags))))
 
@@ -144,7 +147,10 @@ def old_rollups(old):
                WHERE m.player_tag = ? GROUP BY month ORDER BY month""",
             (tag,),
         )
-        out[tag] = {"metrics": [tuple(r) for r in metrics], "battles": [tuple(r) for r in battles]}
+        out[tag] = {
+            "metrics": [tuple(r) for r in metrics],
+            "battles": [tuple(r) for r in battles],
+        }
     return out
 
 
@@ -153,7 +159,7 @@ def old_calendar_seed(old):
     rows = _rows(
         old,
         f"""SELECT dedup_key FROM detections
-            WHERE detection_type IN ({','.join('?' * len(CALENDAR_TYPES))})
+            WHERE detection_type IN ({",".join("?" * len(CALENDAR_TYPES))})
               AND occurred_at >= strftime('%Y%m%dT%H%M%S', 'now', '-14 days')
             ORDER BY dedup_key""",
         CALENDAR_TYPES,
@@ -162,6 +168,7 @@ def old_calendar_seed(old):
 
 
 # ---------------------------------------------------------------- new side
+
 
 def new_identity(new):
     return {
@@ -201,7 +208,10 @@ def new_awards(new):
            GROUP BY award_type, season_id ORDER BY award_type, season_id""",
     )
     free_pass = _one(new, "SELECT COUNT(*) FROM awards WHERE award_type = 'free_pass'")
-    return {"per_type_season": [tuple(r) for r in rows], "rank1_war_champ_rows": free_pass}
+    return {
+        "per_type_season": [tuple(r) for r in rows],
+        "rank1_war_champ_rows": free_pass,
+    }
     # rank1_war_champ_rows key holds the free_pass count so the comparator lines
     # up: T6 seeds exactly one free_pass row per archived rank-1 war_champ row.
 
@@ -233,19 +243,29 @@ def new_rollups(new, tags):
                GROUP BY month ORDER BY month""",
             (tag,),
         )
-        out[tag] = {"metrics": [tuple(r) for r in metrics], "battles": [tuple(r) for r in battles]}
+        out[tag] = {
+            "metrics": [tuple(r) for r in metrics],
+            "battles": [tuple(r) for r in battles],
+        }
     return out
 
 
 def new_calendar_seed(new, expected_keys):
     missing = [
-        k for k in expected_keys
-        if _one(new, "SELECT COUNT(*) FROM recognition_ledger WHERE recognition_key = ?", (k,)) == 0
+        k
+        for k in expected_keys
+        if _one(
+            new,
+            "SELECT COUNT(*) FROM recognition_ledger WHERE recognition_key = ?",
+            (k,),
+        )
+        == 0
     ]
     return {"missing": missing}
 
 
 # ---------------------------------------------------------------- driver
+
 
 def run_baseline(old_path: str) -> int:
     old = _connect(old_path)
@@ -264,7 +284,9 @@ def run_baseline(old_path: str) -> int:
             result = fn(old)
             summary = _summarize(result)
             print(f"[baseline] {name:14s} OK   {summary}")
-        except Exception as exc:  # a query that can't run on the old schema is a Phase-0 failure
+        except (
+            Exception
+        ) as exc:  # a query that can't run on the old schema is a Phase-0 failure
             failures += 1
             print(f"[baseline] {name:14s} FAIL {exc}")
     if failures:
@@ -313,14 +335,18 @@ def run_verify(old_path: str, new_path: str) -> int:
         print(f"[verify] calendar_seed  FAIL missing={seed['missing']}")
     else:
         print(f"[verify] calendar_seed  PASS keys={len(expected_calendar)}")
-    print(f"\n{'ALL PARITY CHECKS PASS' if not failures else f'{failures} check(s) FAILED'}")
+    print(
+        f"\n{'ALL PARITY CHECKS PASS' if not failures else f'{failures} check(s) FAILED'}"
+    )
     return 1 if failures else 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
-    base = sub.add_parser("baseline", help="prove the old-side queries on the current DB")
+    base = sub.add_parser(
+        "baseline", help="prove the old-side queries on the current DB"
+    )
     base.add_argument("--old", default="elixir-v5.db")
     ver = sub.add_parser("verify", help="compare archive vs new DB")
     ver.add_argument("--old", required=True)

@@ -23,8 +23,9 @@ import os
 import subprocess
 import sys
 
-os.environ.setdefault("ELIXIR_DB_PATH",
-                      os.path.join(os.path.dirname(__file__), "..", "elixir-v51.db"))
+os.environ.setdefault(
+    "ELIXIR_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "elixir-v51.db")
+)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -38,14 +39,20 @@ _CONFIDENCE_TESTS = [
 
 def _incidents() -> list[dict]:
     from dotenv import load_dotenv
+
     load_dotenv(os.path.join(REPO, ".env"))
     import db
     from storage.incidents import open_incidents
+
     conn = db.get_connection()
     try:
         return [
-            {"at": r["at"], "component": r["component"], "severity": r["severity"],
-             "summary": r["summary"]}
+            {
+                "at": r["at"],
+                "component": r["component"],
+                "severity": r["severity"],
+                "summary": r["summary"],
+            }
             for r in open_incidents(conn, limit=100)
         ]
     finally:
@@ -56,9 +63,11 @@ def _liveness() -> list[str]:
     """Silence signals — no output, or leader-actions recommended-but-never-posted.
     Silence is an alarm, not the absence of one (Jamie, 2026-07-05)."""
     from dotenv import load_dotenv
+
     load_dotenv(os.path.join(REPO, ".env"))
     import db
     from runtime.health import check_output_silence
+
     conn = db.get_connection()
     try:
         return check_output_silence(conn)
@@ -71,7 +80,10 @@ def _liveness() -> list[str]:
 def _run_tests() -> dict:
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", *_CONFIDENCE_TESTS],
-        cwd=REPO, capture_output=True, text=True, timeout=300,
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
     tail = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
     failures = [ln for ln in proc.stdout.splitlines() if ln.startswith("FAILED")]
@@ -90,8 +102,9 @@ def _quality(days: int, quick: bool) -> dict:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--quick", action="store_true", help="skip the LLM depth eval")
     ap.add_argument("--days", type=int, default=3, help="post-quality sample window")
@@ -127,15 +140,21 @@ def main() -> int:
             print()
         print(f"Open incidents: {len(incidents)}")
         for i in incidents[:15]:
-            print(f"  [{i['at'][5:16]}] {i['severity']:5} {i['component']}: {i['summary'][:80]}")
-        print(f"\nConfidence tests: {'PASS' if tests['ok'] else 'FAIL'} — {tests['summary']}")
+            print(
+                f"  [{i['at'][5:16]}] {i['severity']:5} {i['component']}: {i['summary'][:80]}"
+            )
+        print(
+            f"\nConfidence tests: {'PASS' if tests['ok'] else 'FAIL'} — {tests['summary']}"
+        )
         for f in tests["failures"]:
             print(f"  {f}")
         if quality.get("available"):
             ga = quality.get("game_accuracy_rate")
-            print(f"\nPost quality ({quality.get('sampled', 0)} posts, {args.days}d): "
-                  f"game-accuracy {ga if ga is not None else 'n/a'}, "
-                  f"{len(quality.get('flagged', []))} flagged")
+            print(
+                f"\nPost quality ({quality.get('sampled', 0)} posts, {args.days}d): "
+                f"game-accuracy {ga if ga is not None else 'n/a'}, "
+                f"{len(quality.get('flagged', []))} flagged"
+            )
             for fl in quality.get("flagged", [])[:5]:
                 print(f"  flag: {str(fl)[:100]}")
         else:

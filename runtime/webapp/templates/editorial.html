@@ -2,39 +2,8 @@
 {% block title %}Editorial{% endblock %}
 {% block content %}
 <h1>The Editor</h1>
-<p class="muted">Inline gate verdicts, the living rubric, and weekly self-reviews (editor.md).</p>
-
-<div class="cards">
-  {% for c in counts %}
-  <div class="card">
-    <span class="badge {{ 'good' if c.verdict == 'pass' else ('bad' if c.verdict in ('fallback','error') else '') }}">{{ c.verdict }}</span>
-    <div style="font-size:1.6rem; font-weight:700;">{{ c.n }}</div>
-  </div>
-  {% else %}
-  <div class="card"><span class="muted">No gate verdicts yet — the first gated post lands here.</span></div>
-  {% endfor %}
-</div>
-
-<h2>Recent verdicts</h2>
-<table>
-  <tr><th>id</th><th>verdict</th><th>intent</th><th>final copy</th><th>at</th></tr>
-  {% for v in verdicts %}
-  <tr>
-    <td class="num">{{ v.verdict_id }}</td>
-    <td><span class="badge {{ 'good' if v.verdict == 'pass' else ('bad' if v.verdict in ('fallback','error') else '') }}">{{ v.verdict }}</span></td>
-    <td>
-      {% if v.recognition_key %}<a href="/recognition/{{ v.recognition_key }}"><code>{{ v.intent_type }}</code></a>
-      {% else %}<code>{{ v.intent_type or v.intent_id }}</code>{% endif %}
-      <span class="muted">→ {{ v.lane or '?' }}</span>
-    </td>
-    <td>{{ (v.final_copy or '')[:160] }}{% if v.verdict in ('revise','fallback') %}<br>
-        <span class="muted">was: {{ (v.original_copy or '')[:120] }}</span>{% endif %}</td>
-    <td class="muted">{{ v.at | reltime }}</td>
-  </tr>
-  {% else %}
-  <tr><td colspan="5" class="muted">none yet</td></tr>
-  {% endfor %}
-</table>
+<p class="muted">The living rubric learned from leader edits, deletions, repetition checks,
+and retrospective quality reviews.</p>
 
 <h2>The living rubric</h2>
 <table>

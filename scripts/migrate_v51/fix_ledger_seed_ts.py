@@ -15,7 +15,9 @@ import os
 import sqlite3
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from engine.normalize import parse_cr_time  # noqa: E402
 
@@ -41,8 +43,7 @@ def main() -> int:
         )
         fixed += 1
     conn.commit()
-    print(f"normalized {fixed} claimed_at value(s); "
-          f"{'clean' if not rows else 'done'}")
+    print(f"normalized {fixed} claimed_at value(s); {'clean' if not rows else 'done'}")
     conn.close()
     return 0
 

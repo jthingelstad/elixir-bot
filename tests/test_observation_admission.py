@@ -39,49 +39,50 @@ def test_player_contract_rejects_absence_shape_loss_and_identity_mismatch():
 
     missing_wins = copy.deepcopy(player)
     del missing_wins["wins"]
-    assert "wins:not_int" in observations.admit(
-        "player", player["tag"], missing_wins
-    ).errors
+    assert (
+        "wins:not_int"
+        in observations.admit("player", player["tag"], missing_wins).errors
+    )
 
     wrong_player = copy.deepcopy(player)
     wrong_player["tag"] = "#SOMEONEELSE"
-    assert "tag:mismatch" in observations.admit(
-        "player", player["tag"], wrong_player
-    ).errors
+    assert (
+        "tag:mismatch"
+        in observations.admit("player", player["tag"], wrong_player).errors
+    )
 
 
 def test_clan_and_race_contracts_reject_wrong_entity_or_missing_state():
     clan = load_cr_fixture("clan")
     wrong_clan = copy.deepcopy(clan)
     wrong_clan["tag"] = "#SOMEONEELSE"
-    assert "tag:mismatch" in observations.admit(
-        "clan", HOME_CLAN, wrong_clan
-    ).errors
+    assert "tag:mismatch" in observations.admit("clan", HOME_CLAN, wrong_clan).errors
 
     no_roster = copy.deepcopy(clan)
     no_roster["memberList"] = []
-    assert "memberList:not_nonempty_list" in observations.admit(
-        "clan", HOME_CLAN, no_roster
-    ).errors
+    assert (
+        "memberList:not_nonempty_list"
+        in observations.admit("clan", HOME_CLAN, no_roster).errors
+    )
 
     race = load_cr_fixture("riverrace_warday")
     opponent_race = copy.deepcopy(race)
     opponent_race["clan"]["tag"] = "#SOMEONEELSE"
-    assert "clan.tag:mismatch" in observations.admit(
-        "currentriverrace", HOME_CLAN, opponent_race
-    ).errors
+    assert (
+        "clan.tag:mismatch"
+        in observations.admit("currentriverrace", HOME_CLAN, opponent_race).errors
+    )
 
     del race["periodIndex"]
-    assert "periodIndex:not_int" in observations.admit(
-        "currentriverrace", HOME_CLAN, race
-    ).errors
+    assert (
+        "periodIndex:not_int"
+        in observations.admit("currentriverrace", HOME_CLAN, race).errors
+    )
 
 
 def test_battlelog_distinguishes_valid_empty_from_failure_and_requires_subject():
     assert observations.admit("player_battlelog", "#A", []).accepted
-    assert observations.admit(
-        "player_battlelog", "#A", None
-    ).transport_failure
+    assert observations.admit("player_battlelog", "#A", None).transport_failure
 
     battlelog = load_cr_fixture("battlelog")
     result = observations.admit("player_battlelog", "#NOTONTEAM", battlelog)
@@ -221,12 +222,17 @@ def test_rejected_profile_does_not_mutate_baseline_or_poll_freshness(engine_conn
     ).fetchone()
     assert tuple(baseline_after) == tuple(baseline_before)
     assert poll_after["last_profile_poll"] == poll_before
-    assert poll_after["last_battlelog_poll"] == rejected_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert poll_after["last_battlelog_poll"] == rejected_at.strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     assert engine_conn.execute("SELECT COUNT(*) FROM player_events").fetchone()[0] == 0
-    assert engine_conn.execute(
-        "SELECT COUNT(*) FROM runtime_incidents "
-        "WHERE component='engine.observation.player' AND severity='error'"
-    ).fetchone()[0] == 1
+    assert (
+        engine_conn.execute(
+            "SELECT COUNT(*) FROM runtime_incidents "
+            "WHERE component='engine.observation.player' AND severity='error'"
+        ).fetchone()[0]
+        == 1
+    )
 
     # Repeated contract failures stay visible in per-tick counters without
     # flooding the durable incident ledger every ten minutes.
@@ -235,10 +241,13 @@ def test_rejected_profile_does_not_mutate_baseline_or_poll_freshness(engine_conn
     )
     repeated = run_tick(engine_conn, rejected_at + timedelta(minutes=10), api=api)
     assert repeated["profile_observation_contract_rejections"] == 1
-    assert engine_conn.execute(
-        "SELECT COUNT(*) FROM runtime_incidents "
-        "WHERE component='engine.observation.player'"
-    ).fetchone()[0] == 1
+    assert (
+        engine_conn.execute(
+            "SELECT COUNT(*) FROM runtime_incidents "
+            "WHERE component='engine.observation.player'"
+        ).fetchone()[0]
+        == 1
+    )
 
     # A later healthy response sees the original baseline, so no synthetic
     # loss/restoration cascade is emitted.
@@ -278,9 +287,13 @@ def test_offline_replay_rejects_foreign_race_without_state_mutation(
     )
 
     assert engine.counters["observation_rejections"] == 1
-    assert engine.conn.execute(
-        "SELECT COUNT(*) FROM state_baselines WHERE entity_kind='riverrace'"
-    ).fetchone()[0] == 0
+    assert (
+        engine.conn.execute(
+            "SELECT COUNT(*) FROM state_baselines WHERE entity_kind='riverrace'"
+        ).fetchone()[0]
+        == 0
+    )
+    engine.close()
 
 
 def test_storage_facade_rejects_cross_entity_profile_and_bad_battlelog(engine_conn):
@@ -302,8 +315,13 @@ def test_storage_facade_rejects_cross_entity_profile_and_bad_battlelog(engine_co
         conn=engine_conn,
     )
 
-    assert engine_conn.execute("SELECT COUNT(*) FROM state_baselines").fetchone()[0] == 0
+    assert (
+        engine_conn.execute("SELECT COUNT(*) FROM state_baselines").fetchone()[0] == 0
+    )
     assert engine_conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0] == 0
-    assert engine_conn.execute(
-        "SELECT COUNT(*) FROM runtime_incidents WHERE component LIKE 'storage.snapshot_player_%'"
-    ).fetchone()[0] == 2
+    assert (
+        engine_conn.execute(
+            "SELECT COUNT(*) FROM runtime_incidents WHERE component LIKE 'storage.snapshot_player_%'"
+        ).fetchone()[0]
+        == 2
+    )

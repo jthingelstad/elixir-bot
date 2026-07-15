@@ -20,6 +20,7 @@ def _clear_cr_api_cache():
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _mock_response(json_data, status_code=200):
     """Create a mock requests.Response that behaves like a successful response."""
     resp = MagicMock(spec=requests.Response)
@@ -44,6 +45,7 @@ def _mock_response_http_error(status_code=404, headers=None):
 # _request_json tests
 # ---------------------------------------------------------------------------
 
+
 @patch("cr_api.runtime_status.record_api_call")
 @patch("cr_api.requests.get")
 def test_request_json_success(mock_get, mock_record):
@@ -51,7 +53,9 @@ def test_request_json_success(mock_get, mock_record):
     payload = {"name": "POAP KINGS", "tag": "#ABC123"}
     mock_get.return_value = _mock_response(payload)
 
-    result = cr_api._request_json("/clans/%23ABC", endpoint_name="clan", entity_key="ABC")
+    result = cr_api._request_json(
+        "/clans/%23ABC", endpoint_name="clan", entity_key="ABC"
+    )
 
     assert result == payload
     mock_get.assert_called_once()
@@ -151,7 +155,9 @@ def test_request_json_retries_on_5xx(mock_get, mock_record, mock_sleep):
 @patch("cr_api.time.sleep")
 @patch("cr_api.runtime_status.record_api_call")
 @patch("cr_api.requests.get")
-def test_request_json_retry_honors_retry_after_header(mock_get, mock_record, mock_sleep):
+def test_request_json_retry_honors_retry_after_header(
+    mock_get, mock_record, mock_sleep
+):
     """Retry-After header is respected over exponential backoff."""
     mock_get.return_value = _mock_response_http_error(429, headers={"Retry-After": "7"})
 
@@ -184,6 +190,7 @@ def test_request_json_429_then_success(mock_get, mock_record, mock_sleep):
 # ---------------------------------------------------------------------------
 # get_player tests
 # ---------------------------------------------------------------------------
+
 
 @patch("cr_api.runtime_status.record_api_call")
 @patch("cr_api.requests.get")
@@ -228,6 +235,7 @@ def test_get_player_returns_none_on_error(mock_get, mock_record, mock_sleep):
 # get_player_chests tests
 # ---------------------------------------------------------------------------
 
+
 @patch("cr_api.runtime_status.record_api_call")
 @patch("cr_api.requests.get")
 def test_get_player_chests_extracts_items(mock_get, mock_record):
@@ -267,6 +275,7 @@ def test_get_player_chests_returns_none_on_error(mock_get, mock_record, mock_sle
 # get_current_war tests
 # ---------------------------------------------------------------------------
 
+
 @patch("cr_api.time.sleep")
 @patch("cr_api.runtime_status.record_api_call")
 @patch("cr_api.requests.get")
@@ -294,6 +303,7 @@ def test_get_current_war_success(mock_get, mock_record):
 # ---------------------------------------------------------------------------
 # get_cards tests
 # ---------------------------------------------------------------------------
+
 
 @patch("cr_api.runtime_status.record_api_call")
 @patch("cr_api.requests.get")
@@ -327,6 +337,7 @@ def test_get_cards_returns_none_on_error(mock_get, mock_record, mock_sleep):
 # ---------------------------------------------------------------------------
 # get_events tests
 # ---------------------------------------------------------------------------
+
 
 @patch("cr_api.runtime_status.record_api_call")
 @patch("cr_api.requests.get")

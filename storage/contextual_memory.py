@@ -5,7 +5,13 @@ from datetime import datetime, timezone
 import pytz
 
 from db import _canon_tag, get_connection
-from memory_store import archive_memory, attach_tags, create_memory, list_memories, update_memory
+from memory_store import (
+    archive_memory,
+    attach_tags,
+    create_memory,
+    list_memories,
+    update_memory,
+)
 
 # Memory writes route to the durable-memory DB (memory_store ops default there
 # when conn=None). These wrappers therefore do NOT open an operational connection
@@ -207,7 +213,13 @@ def upsert_war_recap_memory(
             body=text,
             scope="public",
             created_by=created_by,
-            tags=["war", "battle-day-recap", f"season-{season_id}", f"week-{week}", f"day-{day_number}"],
+            tags=[
+                "war",
+                "battle-day-recap",
+                f"season-{season_id}",
+                f"week-{week}",
+                f"day-{day_number}",
+            ],
             metadata=metadata,
             war_season_id=str(season_id),
             war_week_id=f"{season_id}:{week}",
@@ -371,7 +383,11 @@ def upsert_race_streak_memory(
         scope="public",
         created_by="elixir:observation",
         tags=["war", "clan-identity", "streak"],
-        metadata={"streak_count": streak_count, "latest_season": latest_season, "latest_week": latest_week},
+        metadata={
+            "streak_count": streak_count,
+            "latest_season": latest_season,
+            "latest_week": latest_week,
+        },
         conn=mem_conn,
     )
 

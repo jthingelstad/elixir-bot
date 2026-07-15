@@ -1,13 +1,11 @@
 """Shared test fixtures (v5.1).
 
-The autouse fixtures protect the live databases and the Anthropic API:
+The autouse fixtures protect the live database and the Anthropic API:
 
 - `_isolate_default_sqlite_db` routes implicit `db.get_connection()` calls to a
   per-test copy of a session-built v5.1 schema template (db refuses schemas
   without the v5.1 spine, so a bare tempfile is not enough). Tests that pass an
   explicit connection or database path keep full control of their storage.
-- `_isolate_memory_db` routes the durable-memory store (elixir-v5-memory.db)
-  to a per-test tempfile.
 - `_block_real_llm_calls` patches `agent.core._get_client` so any test that
   reaches the bottom-level API call raises a loud RuntimeError.
 
@@ -15,6 +13,7 @@ The schema template is built once per session from
 scripts.migrate_v51.schema_v51 (new-table DDL inline; carried-table DDL
 exported from the read-only archive, per the migration convention).
 """
+
 from __future__ import annotations
 
 import json
@@ -27,7 +26,9 @@ import pytest
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _ARCHIVE = os.path.join(_REPO_ROOT, "elixir-v5-archive-2026H2.db")
-_CR_FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "cr")
+_CR_FIXTURES = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "fixtures", "cr"
+)
 
 
 def load_cr_fixture(name: str):
@@ -55,9 +56,8 @@ def cr_fixture():
 # autouse teardown below runs them against the per-test default DB, so a
 # test that corrupts state fails even if its own asserts were too narrow.
 
-def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
-    from engine.recognition.compose import FAIL_CLOSED_LANE, PREFIX_LANE
 
+def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
     problems: list[str] = []
 
     def q1(sql):
@@ -93,8 +93,9 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
 
     # 3) memories FTS mirror in sync (triggers keep them 1:1)
     try:
-        n_mem, n_fts = q1("SELECT COUNT(*) FROM memories"), q1(
-            "SELECT COUNT(*) FROM memories_fts"
+        n_mem, n_fts = (
+            q1("SELECT COUNT(*) FROM memories"),
+            q1("SELECT COUNT(*) FROM memories_fts"),
         )
         if n_mem != n_fts:
             problems.append(f"memories={n_mem} but memories_fts={n_fts}")
@@ -112,8 +113,6 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
         ("battle_events", "observed_at"),
         ("state_baselines", "observed_at"),
         ("recognition_ledger", "claimed_at"),
-        ("communication_intents", "created_at"),
-        ("communication_intents", "expires_at"),
         ("memories", "created_at"),
         ("memories", "updated_at"),
     ):
@@ -121,32 +120,7 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
         if n:
             problems.append(f"{table}.{col}: {n} space-format timestamp(s)")
 
-    # 5) intents only on known lanes / statuses. The awareness brain records its
-    # delivered posts as fulfilled "awareness:post" intents on its two channels
-    # (announcements is already a PREFIX_LANE value; elixir is the new one).
-    # RETIRED_LANES: channels deleted 2026-07-11 (content consolidated into
-    # #elixir). Historical intents on them stay valid — the invariant accepts
-    # them even though they're no longer PREFIX_LANE targets.
-    _RETIRED_LANES = {"member-highlights", "clan-events", "river-race", "battle-feed"}
-    known_lanes = set(PREFIX_LANE.values()) | {FAIL_CLOSED_LANE, "elixir"} | _RETIRED_LANES
-    bad = [
-        r[0]
-        for r in conn.execute(
-            "SELECT DISTINCT lane FROM communication_intents WHERE lane IS NOT NULL"
-        )
-        if r[0] not in known_lanes
-    ]
-    if bad:
-        problems.append(f"unknown intent lanes: {bad}")
-    bad_status = [
-        r[0]
-        for r in conn.execute("SELECT DISTINCT status FROM communication_intents")
-        if r[0] not in {"pending", "fulfilled", "failed", "expired"}
-    ]
-    if bad_status:
-        problems.append(f"unknown intent statuses: {bad_status}")
-
-    # 6) profile-owned facts cannot be erased by a sparse roster refresh.
+    # 5) profile-owned facts cannot be erased by a sparse roster refresh.
     projection_mismatches = q1(
         "WITH profile AS (SELECT entity_tag AS player_tag, "
         "CAST(json_extract(payload_json, '$.best_trophies') AS INTEGER) AS best, "
@@ -168,7 +142,9 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
         "WHERE best_trophies IS NULL AND prior IS NOT NULL"
     )
     if best_drops:
-        problems.append(f"player_daily_metrics has {best_drops} best-trophy null regression(s)")
+        problems.append(
+            f"player_daily_metrics has {best_drops} best-trophy null regression(s)"
+        )
 
     # 7) internal war timestamps use dashed ISO/date text. Battle timestamps are
     # deliberately raw CR compact and are not part of this check.
@@ -241,14 +217,12 @@ def _isolate_default_sqlite_db(tmp_path, monkeypatch, v51_schema_template):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_memory_db(tmp_path, monkeypatch):
-    """Route the durable-memory store away from the live elixir-v5-memory.db.
-
-    memory_store resolves ELIXIR_V5_MEMORY_DB per call and creates its schema
-    on first use, so an empty tempfile is sufficient.
-    """
-    monkeypatch.setenv("ELIXIR_V5_MEMORY_DB", str(tmp_path / "memory-test.db"))
+def _flush_async_status_writes(_isolate_default_sqlite_db):
+    """Finish best-effort worker writes before each temp database disappears."""
     yield
+    from runtime import status as runtime_status
+
+    runtime_status.flush_status_writes()
 
 
 @pytest.fixture(autouse=True)
@@ -299,3 +273,12 @@ def engine_conn(_isolate_default_sqlite_db):
     conn.execute("PRAGMA foreign_keys=ON")
     yield conn
     conn.close()
+
+
+@pytest.fixture()
+def legacy_engine_conn(engine_conn):
+    """Engine connection with the retired offline-only delivery queue."""
+    from engine.legacy_proactive import prepare_queue
+
+    prepare_queue(engine_conn)
+    return engine_conn

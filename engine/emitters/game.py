@@ -11,6 +11,7 @@ observations recorded after go-live surface. On first run the cursor is seeded
 to the tip: everything already in the store is history (the backfill records it
 as `backfilled=1`), so the live stream never floods with the bootstrap batch.
 """
+
 from __future__ import annotations
 
 import json
@@ -35,8 +36,11 @@ def _event_started(conn, obs, now: str) -> int:
         "description": sample.get("description"),
     }
     return ge.insert_game_event(
-        conn, dedup_key=f"event_started:{tag}", event_type="event_started",
-        change_key=f"event:{tag}", observed_at=obs["first_seen_at"] or now,
+        conn,
+        dedup_key=f"event_started:{tag}",
+        event_type="event_started",
+        change_key=f"event:{tag}",
+        observed_at=obs["first_seen_at"] or now,
         payload=payload,
     )
 
@@ -56,8 +60,11 @@ def _event_badge(conn, obs, now: str) -> int:
     # Attribute to the FIRST member seen wearing it — first_entity_key is
     # preserved across touches; entity_key drifts to the latest observer.
     keys = obs.keys()
-    entity_key = (obs["first_entity_key"] if "first_entity_key" in keys
-                  and obs["first_entity_key"] else obs["entity_key"])
+    entity_key = (
+        obs["first_entity_key"]
+        if "first_entity_key" in keys and obs["first_entity_key"]
+        else obs["entity_key"]
+    )
     subject_tag = f"#{entity_key.lstrip('#')}" if entity_key else None
     # Attribution is best-effort: preferred_display_name falls back to the raw
     # tag when the member has left / isn't resolvable — treat that as unattributed.
@@ -72,9 +79,13 @@ def _event_badge(conn, obs, now: str) -> int:
         "image_url": image_url,
     }
     return ge.insert_game_event(
-        conn, dedup_key=f"event_badge_earned:{name}", event_type="event_badge_earned",
-        change_key=f"badge:{name}", observed_at=obs["first_seen_at"] or now,
-        payload=payload, subject_tag=subject_tag,
+        conn,
+        dedup_key=f"event_badge_earned:{name}",
+        event_type="event_badge_earned",
+        change_key=f"badge:{name}",
+        observed_at=obs["first_seen_at"] or now,
+        payload=payload,
+        subject_tag=subject_tag,
     )
 
 
@@ -93,7 +104,8 @@ def emit_game_from_sentinel(conn, now: str) -> int:
         return 0
     rows = conn.execute(
         "SELECT * FROM api_sentinel_observations WHERE observation_id > ? "
-        "ORDER BY observation_id", (pos,)
+        "ORDER BY observation_id",
+        (pos,),
     ).fetchall()
     written = 0
     for obs in rows:

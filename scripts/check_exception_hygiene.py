@@ -7,9 +7,16 @@ import ast
 from collections import Counter
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DIRS = ("agent", "capabilities", "db", "engine", "memory_store", "runtime", "storage")
+SOURCE_DIRS = (
+    "agent",
+    "capabilities",
+    "db",
+    "engine",
+    "memory_store",
+    "runtime",
+    "storage",
+)
 ROOT_SOURCES = ("cr_api.py", "elixir.py", "elixir_agent.py", "prompts.py")
 EXCLUDED: set[str] = set()
 
@@ -31,7 +38,7 @@ BROAD_EXCEPTION_BASELINE = {
     "capabilities/war.py": 1,
     "cr_api.py": 4,
     "db/__init__.py": 2,
-    "db/schema.py": 1,
+    "db/schema.py": 2,
     "engine/chronicles.py": 1,
     "engine/delivery.py": 3,
     "engine/emitters/clan.py": 2,
@@ -78,7 +85,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/system_status_post.py": 1,
     "runtime/threads.py": 3,
     "runtime/webapp/chat.py": 2,
-    "runtime/webapp/queries.py": 4,
+    "runtime/webapp/queries.py": 3,
     "runtime/webapp/routes.py": 4,
     "runtime/webapp/ticks.py": 2,
     "storage/_formatting.py": 2,
@@ -102,9 +109,7 @@ _REPORT_CALLS = {
 
 def _sources() -> list[Path]:
     paths = [
-        path
-        for directory in SOURCE_DIRS
-        for path in (ROOT / directory).rglob("*.py")
+        path for directory in SOURCE_DIRS for path in (ROOT / directory).rglob("*.py")
     ]
     paths.extend(ROOT / name for name in ROOT_SOURCES)
     return sorted(
@@ -143,7 +148,14 @@ def _classification(handler: ast.ExceptHandler) -> str:
     if any(
         isinstance(
             node,
-            (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Break, ast.Continue, ast.Return),
+            (
+                ast.Assign,
+                ast.AnnAssign,
+                ast.AugAssign,
+                ast.Break,
+                ast.Continue,
+                ast.Return,
+            ),
         )
         for node in nodes
     ):

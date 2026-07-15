@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-HIGHLIGHT_THRESHOLD = 80                      # communication.py:71
-ACCRUAL_WINDOW = timedelta(days=14)           # communication.py:70
+HIGHLIGHT_THRESHOLD = 80  # communication.py:71
+ACCRUAL_WINDOW = timedelta(days=14)  # communication.py:70
 REASON_ACCRUING = "player_highlight_accruing"
 REASON_COALESCED = "player_highlight_coalesced:same_tick"
 REASON_COHORT = "cohort_wave"
@@ -43,7 +43,7 @@ BYPASS_TYPES = {
     "card_level_milestone",
     "career_wins_milestone",
     "collection_level_milestone",
-    "arena_up",                               # new — ratified 85/bypass
+    "arena_up",  # new — ratified 85/bypass
 }
 
 # recognition.md §2 — same-tick priority sort (arena_up 90 is the one addition)
@@ -112,13 +112,13 @@ def base_score(event_type: str, payload: dict | None) -> tuple[int, bool]:
 class Candidate:
     """A celebrate-class recognition candidate (from any stream)."""
 
-    key: str                    # recognition_key (event dedup_key or derived key)
+    key: str  # recognition_key (event dedup_key or derived key)
     event_type: str
     subject_tag: str
-    occurred_at: str | None     # event time text (ISO or CR compact)
+    occurred_at: str | None  # event time text (ISO or CR compact)
     payload: dict = field(default_factory=dict)
     event_refs: list = field(default_factory=list)
-    arrival: int = 0            # insertion id, for the final sort tiebreak
+    arrival: int = 0  # insertion id, for the final sort tiebreak
 
 
 def sort_key(candidate: Candidate) -> tuple:
@@ -126,8 +126,12 @@ def sort_key(candidate: Candidate) -> tuple:
     then payload magnitude, then time, then arrival order."""
     p = candidate.payload or {}
     magnitude = (
-        p.get("milestone") or p.get("level") or p.get("peak")
-        or p.get("boundary") or p.get("trophy_delta") or 0
+        p.get("milestone")
+        or p.get("level")
+        or p.get("peak")
+        or p.get("boundary")
+        or p.get("trophy_delta")
+        or 0
     )
     return (
         CELEBRATE_PRIORITY.get(candidate.event_type, 0),
@@ -160,7 +164,9 @@ def _evidence_rows(conn, subject_tag: str, anchor: datetime, cutoff_at: str | No
     return out
 
 
-def _derived_ledger_evidence(conn, subject_tag: str, anchor: datetime, cutoff_at: str | None):
+def _derived_ledger_evidence(
+    conn, subject_tag: str, anchor: datetime, cutoff_at: str | None
+):
     """Suppressed derived battle moments do not have player_events rows, but
     they still claimed the ledger. Count their base moment score for accrual;
     never reuse the ledger's `score` column here because suppressed rows may
@@ -185,7 +191,9 @@ def _derived_ledger_evidence(conn, subject_tag: str, anchor: datetime, cutoff_at
         except (TypeError, ValueError):
             blob = {}
         for item in (blob.get("suppressed") or {}).get("recognition_evidence") or []:
-            if item.get("dedup_key") == r["recognition_key"] and item.get("occurred_at"):
+            if item.get("dedup_key") == r["recognition_key"] and item.get(
+                "occurred_at"
+            ):
                 occurred_at = item["occurred_at"]
                 break
         t = parse_utc(occurred_at)
@@ -199,8 +207,13 @@ def _derived_ledger_evidence(conn, subject_tag: str, anchor: datetime, cutoff_at
     return out
 
 
-def decide(conn, subject_tag: str, selected: Candidate, group: list[Candidate],
-           last_highlight: str | None) -> tuple[bool, int, dict]:
+def decide(
+    conn,
+    subject_tag: str,
+    selected: Candidate,
+    group: list[Candidate],
+    last_highlight: str | None,
+) -> tuple[bool, int, dict]:
     """The accrual decision (recognition.md §3 steps 3–5).
 
     Evidence = stored celebrate player_events in the window (post-cutoff) plus
@@ -237,7 +250,9 @@ def decide(conn, subject_tag: str, selected: Candidate, group: list[Candidate],
     post = sel_bypass or total >= HIGHLIGHT_THRESHOLD
     trace = {
         "recognition_policy": POLICY_ID,
-        "recognition_decision": "bypass" if sel_bypass else ("accrued" if post else "accruing"),
+        "recognition_decision": "bypass"
+        if sel_bypass
+        else ("accrued" if post else "accruing"),
         "recognition_score": total,
         "recognition_threshold": HIGHLIGHT_THRESHOLD,
         "recognition_selected_score": sel_score,

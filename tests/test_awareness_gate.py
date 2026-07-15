@@ -6,19 +6,24 @@ only gate (never post); empty ticks are a deterministic silence with no LLM.
 """
 
 import elixir  # noqa: F401  (full runtime init before importing internals)
-
 from runtime.awareness import gate
-
 
 # ---------------------------------------------------------------------------
 # Deterministic classification
 # ---------------------------------------------------------------------------
 
+
 def _empty_read(**over):
     read = {
         "generated_at": "2026-07-12T22:00:00Z",
-        "signals_by_lane": {"war": [], "battle_mode": [], "milestone": [],
-                            "clan_event": [], "leadership": [], "system": []},
+        "signals_by_lane": {
+            "war": [],
+            "battle_mode": [],
+            "milestone": [],
+            "clan_event": [],
+            "leadership": [],
+            "system": [],
+        },
         "hard_post_signals": [],
         "cake_days_today": [],
         "decision_cases": {"due": [], "open": []},
@@ -38,8 +43,14 @@ def test_classify_deliberate_on_hard_post():
     hp = {"signal_key": "member_joined:#X:t", "event_type": "member_joined"}
     read = _empty_read(
         hard_post_signals=[hp],
-        signals_by_lane={"clan_event": [hp], "war": [], "battle_mode": [],
-                         "milestone": [], "leadership": [], "system": []},
+        signals_by_lane={
+            "clan_event": [hp],
+            "war": [],
+            "battle_mode": [],
+            "milestone": [],
+            "leadership": [],
+            "system": [],
+        },
     )
     cls = gate.classify(read)
     assert cls["tier"] == "deliberate"
@@ -54,38 +65,83 @@ def test_classify_deliberate_on_due_revisit():
 def test_classify_deliberate_on_legendary_badge():
     """A one-off Legendary badge is notable — it must reach the brain, never be
     gated to silence by the cheap triage."""
-    sig = {"signal_key": "badge_earned:#Y:Chaos_S2", "event_type": "badge_earned",
-           "badge_tier": "legendary", "badge_name": "Chaos_S2"}
-    read = _empty_read(signals_by_lane={"milestone": [sig], "war": [], "battle_mode": [],
-                                        "clan_event": [], "leadership": [], "system": []})
+    sig = {
+        "signal_key": "badge_earned:#Y:Chaos_S2",
+        "event_type": "badge_earned",
+        "badge_tier": "legendary",
+        "badge_name": "Chaos_S2",
+    }
+    read = _empty_read(
+        signals_by_lane={
+            "milestone": [sig],
+            "war": [],
+            "battle_mode": [],
+            "clan_event": [],
+            "leadership": [],
+            "system": [],
+        }
+    )
     cls = gate.classify(read)
     assert cls["tier"] == "deliberate"
     assert "notable" in cls["reason"]
 
 
 def test_classify_deliberate_on_arena_climb():
-    sig = {"signal_key": "arena_changed:#Y:1", "event_type": "arena_changed", "arena_name": "Spirit Square"}
-    read = _empty_read(signals_by_lane={"milestone": [sig], "war": [], "battle_mode": [],
-                                        "clan_event": [], "leadership": [], "system": []})
+    sig = {
+        "signal_key": "arena_changed:#Y:1",
+        "event_type": "arena_changed",
+        "arena_name": "Spirit Square",
+    }
+    read = _empty_read(
+        signals_by_lane={
+            "milestone": [sig],
+            "war": [],
+            "battle_mode": [],
+            "clan_event": [],
+            "leadership": [],
+            "system": [],
+        }
+    )
     assert gate.classify(read)["tier"] == "deliberate"
 
 
 def test_classify_routine_badge_still_triage_not_deliberate():
     """A leveled/routine badge is NOT notable — it stays in the cheap triage lane."""
-    sig = {"signal_key": "badge_earned:#Y:MasteryLog", "event_type": "badge_earned",
-           "badge_tier": "routine", "badge_name": "MasteryLog"}
-    read = _empty_read(signals_by_lane={"milestone": [sig], "war": [], "battle_mode": [],
-                                        "clan_event": [], "leadership": [], "system": []})
+    sig = {
+        "signal_key": "badge_earned:#Y:MasteryLog",
+        "event_type": "badge_earned",
+        "badge_tier": "routine",
+        "badge_name": "MasteryLog",
+    }
+    read = _empty_read(
+        signals_by_lane={
+            "milestone": [sig],
+            "war": [],
+            "battle_mode": [],
+            "clan_event": [],
+            "leadership": [],
+            "system": [],
+        }
+    )
     assert gate.classify(read)["tier"] == "triage"
 
 
 def test_classify_heartbeat_quiet_stretch_deliberates():
     """A long quiet stretch WITH a real soft signal → deliberate (compose a
     heartbeat roundup), rather than gating to silence."""
-    sig = {"signal_key": "card_level_milestone:#Y:1", "event_type": "card_level_milestone"}
+    sig = {
+        "signal_key": "card_level_milestone:#Y:1",
+        "event_type": "card_level_milestone",
+    }
     read = _empty_read(
-        signals_by_lane={"milestone": [sig], "war": [], "battle_mode": [],
-                         "clan_event": [], "leadership": [], "system": []},
+        signals_by_lane={
+            "milestone": [sig],
+            "war": [],
+            "battle_mode": [],
+            "clan_event": [],
+            "leadership": [],
+            "system": [],
+        },
         posting_pulse={"is_quiet_stretch": True, "hours_since_last_post": 12.0},
     )
     cls = gate.classify(read)
@@ -95,20 +151,38 @@ def test_classify_heartbeat_quiet_stretch_deliberates():
 
 def test_classify_not_quiet_routine_soft_stays_triage():
     """Same routine signal, but NOT a quiet stretch → stays triage (cheap)."""
-    sig = {"signal_key": "card_level_milestone:#Y:1", "event_type": "card_level_milestone"}
+    sig = {
+        "signal_key": "card_level_milestone:#Y:1",
+        "event_type": "card_level_milestone",
+    }
     read = _empty_read(
-        signals_by_lane={"milestone": [sig], "war": [], "battle_mode": [],
-                         "clan_event": [], "leadership": [], "system": []},
+        signals_by_lane={
+            "milestone": [sig],
+            "war": [],
+            "battle_mode": [],
+            "clan_event": [],
+            "leadership": [],
+            "system": [],
+        },
         posting_pulse={"is_quiet_stretch": False, "hours_since_last_post": 2.0},
     )
     assert gate.classify(read)["tier"] == "triage"
 
 
 def test_classify_triage_on_soft_milestone():
-    sig = {"signal_key": "card_level_milestone:#Y:1", "event_type": "card_level_milestone"}
+    sig = {
+        "signal_key": "card_level_milestone:#Y:1",
+        "event_type": "card_level_milestone",
+    }
     read = _empty_read(
-        signals_by_lane={"milestone": [sig], "war": [], "battle_mode": [],
-                         "clan_event": [], "leadership": [], "system": []},
+        signals_by_lane={
+            "milestone": [sig],
+            "war": [],
+            "battle_mode": [],
+            "clan_event": [],
+            "leadership": [],
+            "system": [],
+        },
     )
     cls = gate.classify(read)
     assert cls["tier"] == "triage"
@@ -130,20 +204,43 @@ def _anniversary_read(*, posted: bool):
     """A read with a join-anniversary sitting in cake_days_today AND the
     clan_event lane. When ``posted`` is true, channel_memory carries a fulfilled
     post that already named the member today (the over-escalation setup)."""
-    cake = {"type": "join_anniversary", "name": "kiruba", "subject_tag": "#KIR",
-            "signal_key": "join_anniversary:#KIR:2026-07-14", "months": 3, "is_annual": False}
-    lane_sig = {"event_type": "join_anniversary", "subject_tag": "#KIR",
-                "signal_key": "join_anniversary:#KIR:2026-07-14"}
+    cake = {
+        "type": "join_anniversary",
+        "name": "kiruba",
+        "subject_tag": "#KIR",
+        "signal_key": "join_anniversary:#KIR:2026-07-14",
+        "months": 3,
+        "is_annual": False,
+    }
+    lane_sig = {
+        "event_type": "join_anniversary",
+        "subject_tag": "#KIR",
+        "signal_key": "join_anniversary:#KIR:2026-07-14",
+    }
     read = _empty_read(
         generated_at="2026-07-14T11:05:00Z",
         cake_days_today=[cake],
-        signals_by_lane={"clan_event": [lane_sig], "war": [], "battle_mode": [],
-                         "milestone": [], "leadership": [], "system": []},
+        signals_by_lane={
+            "clan_event": [lane_sig],
+            "war": [],
+            "battle_mode": [],
+            "milestone": [],
+            "leadership": [],
+            "system": [],
+        },
     )
     if posted:
-        read["channel_memory"] = {"announcements": {"recent_posts": [{
-            "posted": True, "posted_at": "2026-07-14T05:05:45Z",
-            "preview": "**3 months in.** kiruba and ryguy67 both hit the 3-month mark today."}]}}
+        read["channel_memory"] = {
+            "announcements": {
+                "recent_posts": [
+                    {
+                        "posted": True,
+                        "posted_at": "2026-07-14T05:05:45Z",
+                        "preview": "**3 months in.** kiruba and ryguy67 both hit the 3-month mark today.",
+                    }
+                ]
+            }
+        }
     return read
 
 
@@ -152,13 +249,14 @@ def test_already_posted_cake_day_does_not_escalate():
     keeps re-triggering the gate. It must be filtered from BOTH the cake context
     and the clan_event lane so it can't push a triage into a wasted Sonnet run."""
     read = _anniversary_read(posted=True)
-    assert gate._fresh_cake_days(read) == []                      # filtered from cake context
-    assert gate._soft_lane_signals(read) == []                    # filtered from the lane too
+    assert gate._fresh_cake_days(read) == []  # filtered from cake context
+    assert gate._soft_lane_signals(read) == []  # filtered from the lane too
     cls = gate.classify(read)
-    assert cls["tier"] == "skip"                                  # nothing fresh left → free silence
+    assert cls["tier"] == "skip"  # nothing fresh left → free silence
     assert "cake" not in cls["reason"].lower()
     # and the triage (if it ran) would see no cake day to re-post
     import json
+
     triage_payload = json.loads(gate._compact_read_for_triage(read))
     assert triage_payload["cake_days_today"] == []
     assert triage_payload["soft_signals"] == []
@@ -171,6 +269,7 @@ def test_fresh_cake_day_still_reaches_triage():
     assert [c["name"] for c in gate._fresh_cake_days(read)] == ["kiruba"]
     assert gate.classify(read)["tier"] == "triage"
     import json
+
     triage_payload = json.loads(gate._compact_read_for_triage(read))
     assert len(triage_payload["cake_days_today"]) == 1
 
@@ -181,8 +280,14 @@ def test_hard_post_not_double_counted_as_soft():
     hp = {"signal_key": "member_joined:#X:t", "event_type": "member_joined"}
     read = _empty_read(
         hard_post_signals=[hp],
-        signals_by_lane={"clan_event": [hp], "war": [], "battle_mode": [],
-                         "milestone": [], "leadership": [], "system": []},
+        signals_by_lane={
+            "clan_event": [hp],
+            "war": [],
+            "battle_mode": [],
+            "milestone": [],
+            "leadership": [],
+            "system": [],
+        },
     )
     assert gate._soft_lane_signals(read) == []
 
@@ -190,6 +295,7 @@ def test_hard_post_not_double_counted_as_soft():
 # ---------------------------------------------------------------------------
 # Orchestration: decide()
 # ---------------------------------------------------------------------------
+
 
 def test_decide_skip_is_silence_no_triage(monkeypatch):
     monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "1")
@@ -210,8 +316,14 @@ def test_decide_hard_post_deliberates_without_triage(monkeypatch):
     hp = {"signal_key": "member_joined:#X:t", "event_type": "member_joined"}
     read = _empty_read(
         hard_post_signals=[hp],
-        signals_by_lane={"clan_event": [hp], "war": [], "battle_mode": [],
-                         "milestone": [], "leadership": [], "system": []},
+        signals_by_lane={
+            "clan_event": [hp],
+            "war": [],
+            "battle_mode": [],
+            "milestone": [],
+            "leadership": [],
+            "system": [],
+        },
     )
     out = gate.decide(read, triage_fn=lambda r: {"decision": "silent", "reason": "x"})
     assert out["deliberate"] is True
@@ -221,9 +333,19 @@ def test_decide_hard_post_deliberates_without_triage(monkeypatch):
 def test_decide_triage_silent_is_gated_silence(monkeypatch):
     monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "1")
     sig = {"signal_key": "m:1", "event_type": "card_level_milestone"}
-    read = _empty_read(signals_by_lane={"milestone": [sig], "war": [], "battle_mode": [],
-                                        "clan_event": [], "leadership": [], "system": []})
-    out = gate.decide(read, triage_fn=lambda r: {"decision": "silent", "reason": "in cooldown"})
+    read = _empty_read(
+        signals_by_lane={
+            "milestone": [sig],
+            "war": [],
+            "battle_mode": [],
+            "clan_event": [],
+            "leadership": [],
+            "system": [],
+        }
+    )
+    out = gate.decide(
+        read, triage_fn=lambda r: {"decision": "silent", "reason": "in cooldown"}
+    )
     assert out["deliberate"] is False
     assert out["decider"] == "triage"
     assert "cooldown" in out["silence_reason"]
@@ -232,9 +354,19 @@ def test_decide_triage_silent_is_gated_silence(monkeypatch):
 def test_decide_triage_post_escalates_to_brain(monkeypatch):
     monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "1")
     sig = {"signal_key": "m:1", "event_type": "card_level_milestone"}
-    read = _empty_read(signals_by_lane={"milestone": [sig], "war": [], "battle_mode": [],
-                                        "clan_event": [], "leadership": [], "system": []})
-    out = gate.decide(read, triage_fn=lambda r: {"decision": "post", "reason": "fresh unlock"})
+    read = _empty_read(
+        signals_by_lane={
+            "milestone": [sig],
+            "war": [],
+            "battle_mode": [],
+            "clan_event": [],
+            "leadership": [],
+            "system": [],
+        }
+    )
+    out = gate.decide(
+        read, triage_fn=lambda r: {"decision": "post", "reason": "fresh unlock"}
+    )
     assert out["deliberate"] is True
     assert "escalated" in out["reason"]
 
@@ -249,6 +381,7 @@ def test_decide_disabled_always_deliberates(monkeypatch):
 def test_triage_failsafe_to_post_on_error(monkeypatch):
     """A triage call that raises / returns junk must fail SAFE to post (escalate),
     never silently drop the tick."""
+
     def _boom(system, user):
         raise RuntimeError("api down")
 
@@ -263,7 +396,10 @@ def test_triage_failsafe_to_post_on_error(monkeypatch):
 
 
 def test_triage_parses_json_verdict():
-    v = gate.triage(_empty_read(), generate=lambda s, u: '{"decision": "silent", "reason": "routine"}')
+    v = gate.triage(
+        _empty_read(),
+        generate=lambda s, u: '{"decision": "silent", "reason": "routine"}',
+    )
     assert v == {"decision": "silent", "reason": "routine"}
     # tolerant of code fences / surrounding prose
     fenced = '```json\n{"decision": "post", "reason": "new cake day"}\n```'
@@ -275,10 +411,12 @@ def test_triage_parses_json_verdict():
 # Loop integration: the gate actually skips the brain
 # ---------------------------------------------------------------------------
 
+
 def test_loop_gated_silence_skips_the_brain(monkeypatch):
     """On a fully-empty read the loop records a deterministic silence and NEVER
     calls the expensive brain."""
     from unittest.mock import patch
+
     from runtime.awareness import loop as loop_mod
 
     monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "1")

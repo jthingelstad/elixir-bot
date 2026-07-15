@@ -8,22 +8,28 @@ read + write tool surface.
 
 from unittest.mock import patch
 
+import db
+
 # Trigger full runtime/agent init before importing awareness internals — avoids
 # a circular import between agent.tool_exec → elixir_agent → agent.chat.
 import elixir  # noqa: F401
-
-import db
 from agent.workflow_registry import WRITE_TOOLS
-
 
 # ---------------------------------------------------------------------------
 # build_read
 # ---------------------------------------------------------------------------
 
 _EXPECTED_KEYS = {
-    "time", "standing", "war_season", "signals_by_lane", "hard_post_signals",
-    "decision_cases", "channel_memory", "recent_agent_writes",
-    "leader_action_board", "due_revisits",
+    "time",
+    "standing",
+    "war_season",
+    "signals_by_lane",
+    "hard_post_signals",
+    "decision_cases",
+    "channel_memory",
+    "recent_agent_writes",
+    "leader_action_board",
+    "due_revisits",
 }
 
 
@@ -32,28 +38,52 @@ def test_compact_signal_tiers_badges_and_arena():
     arena changes carry the arena name — so the brain can sort notable vs grind."""
     from runtime.awareness.read import _compact_signal
 
-    leg = _compact_signal({"event_type": "badge_earned", "subject_tag": "#A",
-                           "payload": {"badge_name": "Chaos_S2", "level": None}})
+    leg = _compact_signal(
+        {
+            "event_type": "badge_earned",
+            "subject_tag": "#A",
+            "payload": {"badge_name": "Chaos_S2", "level": None},
+        }
+    )
     assert leg["badge_tier"] == "legendary" and leg["badge_name"] == "Chaos_S2"
 
-    routine = _compact_signal({"event_type": "badge_earned", "subject_tag": "#A",
-                               "payload": {"badge_name": "MasteryLog", "level": 1}})
+    routine = _compact_signal(
+        {
+            "event_type": "badge_earned",
+            "subject_tag": "#A",
+            "payload": {"badge_name": "MasteryLog", "level": 1},
+        }
+    )
     assert routine["badge_tier"] == "routine"
 
-    arena = _compact_signal({"event_type": "arena_changed", "subject_tag": "#A",
-                             "payload": {"arena_name": "Spirit Square"}})
+    arena = _compact_signal(
+        {
+            "event_type": "arena_changed",
+            "subject_tag": "#A",
+            "payload": {"arena_name": "Spirit Square"},
+        }
+    )
     assert arena["arena_name"] == "Spirit Square"
 
-    annual = _compact_signal({"event_type": "join_anniversary", "subject_tag": "#A",
-                              "payload": {"years": 2, "is_annual": True}})
+    annual = _compact_signal(
+        {
+            "event_type": "join_anniversary",
+            "subject_tag": "#A",
+            "payload": {"years": 2, "is_annual": True},
+        }
+    )
     assert annual["years"] == 2 and annual["is_annual"] is True
 
 
 def test_posting_pulse_flags_quiet_stretch():
     """posting_pulse marks a long silence so the brain can keep a heartbeat."""
-    from runtime.awareness.read import _posting_pulse, _HEARTBEAT_QUIET_HOURS
+    from runtime.awareness.read import _HEARTBEAT_QUIET_HOURS, _posting_pulse
 
-    pulse = _posting_pulse(db.get_connection())
+    conn = db.get_connection()
+    try:
+        pulse = _posting_pulse(conn)
+    finally:
+        conn.close()
     # Empty DB → no prior post → hours None, not a quiet stretch (nothing to be quiet about).
     assert pulse["hours_since_last_post"] is None
     assert pulse["is_quiet_stretch"] is False
@@ -80,6 +110,7 @@ def test_build_read_returns_expected_keys_on_empty_db():
 # ---------------------------------------------------------------------------
 # run_awareness_loop
 # ---------------------------------------------------------------------------
+
 
 def test_run_awareness_loop_without_deliver_fn_posts_nothing_member_facing(monkeypatch):
     """With no deliver_fn, the loop persists a thought and hands a render to the
@@ -120,20 +151,19 @@ def test_run_awareness_loop_without_deliver_fn_posts_nothing_member_facing(monke
     # No deliver_fn → nothing was delivered.
     assert counters.get("posts_delivered", 0) == 0
 
-    # (b) A row was written to awareness_thoughts (shadow column is legacy → 0).
+    # (b) A row was written to the production awareness ledger.
     conn = db.get_connection()
     try:
         from runtime.awareness.store import ensure_awareness_schema
 
         ensure_awareness_schema(conn)
         rows = conn.execute(
-            "SELECT thought_id, post_count, shadow, chose_silence FROM awareness_thoughts"
+            "SELECT thought_id, post_count, chose_silence FROM awareness_thoughts"
         ).fetchall()
     finally:
         conn.close()
     assert len(rows) == 1
     assert rows[0]["post_count"] == 1
-    assert rows[0]["shadow"] == 0
     assert rows[0]["chose_silence"] == 0
 
 
@@ -144,7 +174,9 @@ def test_run_awareness_loop_live_delivers_the_plan(monkeypatch):
     from runtime.awareness import loop as loop_mod
 
     plan = {
-        "posts": [{"channel": "elixir", "content": "live post", "covers_signal_keys": []}],
+        "posts": [
+            {"channel": "elixir", "content": "live post", "covers_signal_keys": []}
+        ],
         "skipped_reason": None,
     }
     delivered = {}
@@ -186,12 +218,21 @@ def test_classify_plan_distinguishes_failure_from_silence():
     from runtime.awareness.store import classify_plan
 
     assert classify_plan({"posts": [{"channel": "x"}]})[0] == "posted"
-    assert classify_plan({"posts": [], "skipped_reason": "quiet"}) == ("silence", "quiet")
+    assert classify_plan({"posts": [], "skipped_reason": "quiet"}) == (
+        "silence",
+        "quiet",
+    )
     # Failures — the harness must not read any of these as deliberate silence.
     assert classify_plan(None)[0] == "failed"
     assert classify_plan({})[0] == "failed"  # None coerced to {} upstream
     outcome, reason = classify_plan(
-        {"_error": {"kind": "schema_error", "phase": "initial_response", "detail": "bad"}}
+        {
+            "_error": {
+                "kind": "schema_error",
+                "phase": "initial_response",
+                "detail": "bad",
+            }
+        }
     )
     assert outcome == "failed"
     assert "schema_error" in reason and "bad" in reason
@@ -203,7 +244,6 @@ def test_run_awareness_loop_records_tick_failure_not_silence(monkeypatch):
     monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "0")  # reach the brain to fail it
     from runtime.awareness import loop as loop_mod
     from runtime.awareness.store import list_recent_thoughts
-
 
     with patch("agent.workflows.run_awareness_tick", return_value=None):
         counters = loop_mod.run_awareness_loop()
@@ -229,8 +269,11 @@ def test_run_awareness_loop_numbers_loops_and_captures_tool_trace(monkeypatch):
         # Simulate the brain drilling into battle detail via the tool surface —
         # the real tick both records the trace and streams a live tool event.
         entry = {
-            "tool": "get_elixir_state", "args": "section=battle",
-            "round": 0, "allowed": True, "result": "ok · 12 keys · 3200B",
+            "tool": "get_elixir_state",
+            "args": "section=battle",
+            "round": 0,
+            "allowed": True,
+            "result": "ok · 12 keys · 3200B",
         }
         tool_stats.setdefault("tool_trace", []).append(entry)
         if on_event is not None:
@@ -269,6 +312,7 @@ def test_run_awareness_loop_numbers_loops_and_captures_tool_trace(monkeypatch):
 # ---------------------------------------------------------------------------
 # run_awareness_tick — always the full read + write tool surface
 # ---------------------------------------------------------------------------
+
 
 def test_run_awareness_tick_uses_the_write_surface():
     """The brain always runs with the awareness toolset (read + write). Shadow
@@ -323,8 +367,13 @@ def test_run_awareness_tick_serializes_the_full_read_compactly():
 # run_awareness_tick — truncation is transient over-generation, retry once
 # ---------------------------------------------------------------------------
 
-_TRUNCATION = {"_error": {"kind": "truncation", "phase": "initial_response",
-                          "detail": "LLM response truncated by max_tokens=8192"}}
+_TRUNCATION = {
+    "_error": {
+        "kind": "truncation",
+        "phase": "initial_response",
+        "detail": "LLM response truncated by max_tokens=8192",
+    }
+}
 
 
 def test_run_awareness_tick_retries_once_on_truncation():
@@ -381,6 +430,7 @@ def test_run_awareness_tick_persistent_truncation_surfaces_error():
 # 200-char preview (the diagnostic is the observability record of the tick).
 # ---------------------------------------------------------------------------
 
+
 def test_diagnostic_render_full_content_chunked_not_truncated():
     """The full posted content must survive into the thread detail, split across
     Discord-sized chunks — never truncated to a preview."""
@@ -388,10 +438,15 @@ def test_diagnostic_render_full_content_chunked_not_truncated():
 
     # A realistic long post — well over one Discord message.
     body = "\n".join(f"- line {i}: something worth reading in full" for i in range(120))
-    plan = {"posts": [{"channel": "leader-lounge", "content": body,
-                       "covers_signal_keys": ["k1"]}]}
+    plan = {
+        "posts": [
+            {"channel": "leader-lounge", "content": body, "covers_signal_keys": ["k1"]}
+        ]
+    }
 
-    render = diag_mod.build_diagnostic_render({"time": None}, plan, tool_trace=[], loop_number=12)
+    render = diag_mod.build_diagnostic_render(
+        {"time": None}, plan, tool_trace=[], loop_number=12
+    )
     chunks = render["thread_chunks"]
     joined = "\n".join(chunks)
 

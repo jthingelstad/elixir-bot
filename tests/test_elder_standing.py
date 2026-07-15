@@ -1,5 +1,6 @@
 """Elder Standing report — the table-free render and the grounding guard that
 keeps the LLM from naming a member who isn't in the facts."""
+
 from __future__ import annotations
 
 from runtime.elder_standing import (
@@ -13,7 +14,9 @@ STANDING = {
     "composition": {"elders": 3, "members": 5},
     "holding": [{"name": "Atternam", "why": "98% war decks, 8 ranked battles"}],
     "rising": [{"name": "Fullboat", "why": "100% war decks, 98 ranked battles"}],
-    "stepping_down": [{"name": "OllieTurtle", "why": "3% war decks", "reason": "outranked"}],
+    "stepping_down": [
+        {"name": "OllieTurtle", "why": "3% war decks", "reason": "outranked"}
+    ],
 }
 
 
@@ -26,10 +29,12 @@ def test_render_has_no_tables_and_names_everyone():
 
 
 def test_grounding_accepts_real_names_and_ignores_bolded_stats():
-    good = ("**Holding strong.**\n"
-            "- **Atternam** — a huge **98%** war decks and **8** ranked battles.\n"
-            "**On the rise.**\n"
-            "- **Fullboat** — a perfect **100%** war decks.")
+    good = (
+        "**Holding strong.**\n"
+        "- **Atternam** — a huge **98%** war decks and **8** ranked battles.\n"
+        "**On the rise.**\n"
+        "- **Fullboat** — a perfect **100%** war decks."
+    )
     assert output_is_grounded(good, STANDING) is True
 
 
@@ -46,8 +51,12 @@ def test_facts_brief_lists_every_member():
 
 
 def test_empty_groups_render_gracefully():
-    empty = {"composition": {"elders": 0, "members": 0},
-             "holding": [], "rising": [], "stepping_down": []}
+    empty = {
+        "composition": {"elders": 0, "members": 0},
+        "holding": [],
+        "rising": [],
+        "stepping_down": [],
+    }
     text = render_elder_standing(empty)
     assert "|" not in text
     assert "No one's slipping" in text

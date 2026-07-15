@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -13,7 +13,6 @@ import agent.tools
 import db
 import storage.war
 from storage import war_analytics, war_members, war_status
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,8 +27,11 @@ def test_db_facade_public_surface_is_reviewed():
         *(f"{name}:db" for name in db._CORE_EXPORTS),
         *(f"{name}:{module}" for name, module in db._FACADE_EXPORTS.items()),
     ]
-    assert len(entries) == 346
-    assert _digest(entries) == "d133bde35a7e920e611acb7a2a7edfcead950f25f289103ee170ad7a6932065a"
+    assert len(entries) == 323
+    assert (
+        _digest(entries)
+        == "09492b1fdff4a43c40f12771abddd4e60290a71b4a6e4f700aef13c2a808c4c2"
+    )
     assert db._CORE_EXPORTS.isdisjoint(db._FACADE_EXPORTS)
     assert db.__all__ == sorted(db._CORE_EXPORTS | set(db._FACADE_EXPORTS))
 

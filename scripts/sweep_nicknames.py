@@ -8,6 +8,7 @@ callable_name can't resolve (e.g. "...") get a stored nickname. Review with
     ./venv/bin/python scripts/sweep_nicknames.py            # dry run (review)
     ./venv/bin/python scripts/sweep_nicknames.py --apply    # persist residuals
 """
+
 from __future__ import annotations
 
 import os
@@ -51,23 +52,33 @@ def main() -> None:
         print(f"current members: {len(rows)} | need cleaning: {len(flagged)}\n")
         print(f"{'player_tag':13} {'current_name':22} {'->':2} {'display':16} how")
         for r, name, nick, how, _ in flagged:
-            existing = f"  [have: {r['preferred_nickname']!r} {r['nickname_source']}]" if r["preferred_nickname"] else ""
+            existing = (
+                f"  [have: {r['preferred_nickname']!r} {r['nickname_source']}]"
+                if r["preferred_nickname"]
+                else ""
+            )
             print(f"{r['player_tag']:13} {name!r:22} -> {nick!r:16} {how}{existing}")
 
-        to_store = [(r, nick, store) for (r, name, nick, how, store) in flagged if store]
+        to_store = [
+            (r, nick, store) for (r, name, nick, how, store) in flagged if store
+        ]
         if not apply:
-            print(f"\nDRY RUN — would persist {len(to_store)} stored nickname(s) "
-                  f"(residuals only). Re-run with --apply to write.")
+            print(
+                f"\nDRY RUN — would persist {len(to_store)} stored nickname(s) "
+                f"(residuals only). Re-run with --apply to write."
+            )
             return
 
         from db import set_member_nickname
+
         now = engine_db.utcnow()
         n = 0
-        for r, nick, (value, source) in to_store:
+        for r, _nick, (value, source) in to_store:
             if r["nickname_source"] == "leader":
                 continue  # never override a leader-set name
-            set_member_nickname(r["player_tag"], value, source=source,
-                                observed_at=now, conn=conn)
+            set_member_nickname(
+                r["player_tag"], value, source=source, observed_at=now, conn=conn
+            )
             n += 1
         conn.commit()
         print(f"\nAPPLIED — persisted {n} stored nickname(s).")

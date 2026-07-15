@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-PRIMARY_SHARE = 0.35      # spec §2.3: largest mode share must reach 35%…
+PRIMARY_SHARE = 0.35  # spec §2.3: largest mode share must reach 35%…
 PRIMARY_MIN_BATTLES = 12  # …with at least 12 battles in the window
-QUIET_BELOW = 8           # under 8 total battles → 'quiet'
+QUIET_BELOW = 8  # under 8 total battles → 'quiet'
 
 MODE_LABELS = {
     "ladder": "ladder regular",
@@ -26,13 +26,19 @@ MODE_LABELS = {
     "special_event": "event explorer",
 }
 MODE_DISPLAY = {
-    "ladder": "Trophy Road", "war": "war", "ranked": "Ranked",
-    "two_v_two": "2v2", "special_event": "events", "friendly": "friendlies",
+    "ladder": "Trophy Road",
+    "war": "war",
+    "ranked": "Ranked",
+    "two_v_two": "2v2",
+    "special_event": "events",
+    "friendly": "friendlies",
     "tournament": "tournaments",
 }
 
 
-def player_mode_profile(conn, tag: str, days: int = 28, today: str | None = None) -> dict:
+def player_mode_profile(
+    conn, tag: str, days: int = 28, today: str | None = None
+) -> dict:
     """Mode mix + identity over the trailing `days` Chicago days.
 
     Returns {total_battles, window_days, modes: {mode: {battles, wins, share}},
@@ -76,7 +82,8 @@ def _identity(modes: dict, total: int) -> tuple[str, list[str]]:
     if total < QUIET_BELOW:
         return "quiet", []
     labeled = [
-        (m, v) for m, v in modes.items()
+        (m, v)
+        for m, v in modes.items()
         if m in MODE_LABELS  # friendlies/tournaments never drive identity
     ]
     labeled.sort(key=lambda kv: -kv[1]["battles"])
@@ -88,7 +95,8 @@ def _identity(modes: dict, total: int) -> tuple[str, list[str]]:
     if primary is None:
         return "all-rounder", []
     secondary = [
-        MODE_LABELS[m] for m, v in labeled
+        MODE_LABELS[m]
+        for m, v in labeled
         if m != primary and v["share"] >= 0.20 and v["battles"] >= QUIET_BELOW
     ]
     return MODE_LABELS[primary], secondary
@@ -110,8 +118,12 @@ def duo_partners(conn, tag: str, start: str, end: str, limit: int = 3) -> list[d
         (tag, start.replace("-", ""), limit),
     ).fetchall()
     return [
-        {"tag": r["teammate_tag"], "name": r["name"],
-         "games": r["games"], "wins": r["wins"] or 0}
+        {
+            "tag": r["teammate_tag"],
+            "name": r["name"],
+            "games": r["games"],
+            "wins": r["wins"] or 0,
+        }
         for r in rows
     ]
 
@@ -128,8 +140,10 @@ def playstyle_line(profile: dict) -> str | None:
         return None
     v = modes[top_mode]
     disp = MODE_DISPLAY.get(top_mode, top_mode)
-    line = (f"{v['battles']} of their last {total} battles "
-            f"(past {profile.get('window_days', 28)} days) were {disp}")
+    line = (
+        f"{v['battles']} of their last {total} battles "
+        f"(past {profile.get('window_days', 28)} days) were {disp}"
+    )
     if v["battles"]:
         line += f", winning {v['wins']}"
     duos = profile.get("duo_partners") or []

@@ -48,6 +48,7 @@ async def healthz(request: web.Request) -> web.Response:
 
 # ------------------------------------------------------------------ pages
 
+
 async def overview(request: web.Request) -> web.Response:
     data = await asyncio.to_thread(queries.overview)
     live = ticks.recent_ticks(1)
@@ -55,8 +56,14 @@ async def overview(request: web.Request) -> web.Response:
         data["latest_tick"] = live[0]
     scheduler_jobs = _scheduler_next_runs()
     flash = request.query.get("ok", "")
-    return render("overview.html", request, nav="overview", flash=flash,
-                  scheduler_jobs=scheduler_jobs, **data)
+    return render(
+        "overview.html",
+        request,
+        nav="overview",
+        flash=flash,
+        scheduler_jobs=scheduler_jobs,
+        **data,
+    )
 
 
 def _scheduler_next_runs() -> list[dict]:
@@ -77,8 +84,9 @@ async def ticks_page(request: web.Request) -> web.Response:
         for k in t:
             if k not in keys and k != "recorded_at":
                 keys.append(k)
-    return render("ticks.html", request, nav="ticks", history=history,
-                  counter_keys=keys, **data)
+    return render(
+        "ticks.html", request, nav="ticks", history=history, counter_keys=keys, **data
+    )
 
 
 async def members_page(request: web.Request) -> web.Response:
@@ -115,7 +123,7 @@ async def raw_payload_page(request: web.Request) -> web.Response:
     try:
         payload_id = int(request.match_info["payload_id"])
     except (TypeError, ValueError):
-        raise web.HTTPBadRequest(text="bad payload id")
+        raise web.HTTPBadRequest(text="bad payload id") from None
     row = await asyncio.to_thread(queries.raw_payload, payload_id)
     if row is None:
         raise web.HTTPNotFound(text="no such payload")
@@ -132,8 +140,9 @@ async def raw_payload_page(request: web.Request) -> web.Response:
             )
         except (TypeError, ValueError):
             annotated = False
-    return render("raw.html", request, nav="streams", row=row,
-                  body=body, annotated=annotated)
+    return render(
+        "raw.html", request, nav="streams", row=row, body=body, annotated=annotated
+    )
 
 
 async def recognition_page(request: web.Request) -> web.Response:
@@ -168,7 +177,9 @@ async def recognition_detail(request: web.Request) -> web.Response:
     data = await asyncio.to_thread(queries.recognition_detail, key)
     if data is None:
         raise web.HTTPNotFound(text="no such recognition key")
-    return render("recognition_detail.html", request, nav="recognition", key=key, **data)
+    return render(
+        "recognition_detail.html", request, nav="recognition", key=key, **data
+    )
 
 
 async def member_page(request: web.Request) -> web.Response:
@@ -207,7 +218,7 @@ async def llm_call_detail_page(request: web.Request) -> web.Response:
     try:
         call_id = int(request.match_info["call_id"])
     except (TypeError, ValueError):
-        raise web.HTTPBadRequest(text="bad call id")
+        raise web.HTTPBadRequest(text="bad call id") from None
     data = await asyncio.to_thread(queries.llm_call_detail, call_id)
     if data is None:
         raise web.HTTPNotFound(text="no such call")
@@ -219,6 +230,7 @@ async def chat_page(request: web.Request) -> web.Response:
 
 
 # ------------------------------------------------------------------- chat
+
 
 async def chat_get(request: web.Request) -> web.Response:
     msgs = await asyncio.to_thread(chat.list_messages, 50)
@@ -237,6 +249,7 @@ async def chat_post(request: web.Request) -> web.Response:
 
 
 # ---------------------------------------------------------------- safe ops
+
 
 async def ops_tick(request: web.Request) -> web.Response:
     if not _same_origin(request):
@@ -257,8 +270,10 @@ async def ops_review_dryrun(request: web.Request) -> web.Response:
         result = await asyncio.to_thread(ops.weekly_review_dryrun)
         promote = len(result.get("promote_eligible") or [])
         demote = len(result.get("demote_eligible") or [])
-        note = (f"dry-run for {result.get('week_anchor')}: "
-                f"{promote} promote-eligible, {demote} demote-eligible (rolled back)")
+        note = (
+            f"dry-run for {result.get('week_anchor')}: "
+            f"{promote} promote-eligible, {demote} demote-eligible (rolled back)"
+        )
     except Exception as exc:
         log.exception("weekly review dry-run failed")
         note = f"dry-run failed: {exc}"
@@ -283,30 +298,32 @@ async def ops_member_email(request: web.Request) -> web.Response:
 
 
 def add_routes(app: web.Application) -> None:
-    app.add_routes([
-        web.get("/healthz", healthz),
-        web.get("/", overview),
-        web.get("/members", members_page),
-        web.get("/awards", awards_page),
-        web.get("/baseline", baseline_page),
-        web.get("/ticks", ticks_page),
-        web.get("/streams", streams_page),
-        web.get("/raw/{payload_id}", raw_payload_page),
-        web.get("/recognition", recognition_page),
-        web.get("/editorial", editorial_page),
-        web.get("/incidents", incidents_page),
-        web.get("/memories", memories_page),
-        web.get("/recognition/{key:.+}", recognition_detail),
-        web.get("/member/{tag}", member_page),
-        web.get("/polling", polling_page),
-        web.get("/management", management_page),
-        web.get("/war", war_page),
-        web.get("/llm", llm_page),
-        web.get("/llm/{call_id}", llm_call_detail_page),
-        web.get("/chat", chat_page),
-        web.get("/chat/messages", chat_get),
-        web.post("/chat", chat_post),
-        web.post("/ops/tick", ops_tick),
-        web.post("/ops/weekly-review/dryrun", ops_review_dryrun),
-        web.post("/ops/member/{tag}/email", ops_member_email),
-    ])
+    app.add_routes(
+        [
+            web.get("/healthz", healthz),
+            web.get("/", overview),
+            web.get("/members", members_page),
+            web.get("/awards", awards_page),
+            web.get("/baseline", baseline_page),
+            web.get("/ticks", ticks_page),
+            web.get("/streams", streams_page),
+            web.get("/raw/{payload_id}", raw_payload_page),
+            web.get("/recognition", recognition_page),
+            web.get("/editorial", editorial_page),
+            web.get("/incidents", incidents_page),
+            web.get("/memories", memories_page),
+            web.get("/recognition/{key:.+}", recognition_detail),
+            web.get("/member/{tag}", member_page),
+            web.get("/polling", polling_page),
+            web.get("/management", management_page),
+            web.get("/war", war_page),
+            web.get("/llm", llm_page),
+            web.get("/llm/{call_id}", llm_call_detail_page),
+            web.get("/chat", chat_page),
+            web.get("/chat/messages", chat_get),
+            web.post("/chat", chat_post),
+            web.post("/ops/tick", ops_tick),
+            web.post("/ops/weekly-review/dryrun", ops_review_dryrun),
+            web.post("/ops/member/{tag}/email", ops_member_email),
+        ]
+    )

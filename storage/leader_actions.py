@@ -6,8 +6,8 @@ import hashlib
 import json
 import logging
 import sqlite3
-from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 from typing import Optional
 
 import db as _db
@@ -91,7 +91,9 @@ def _stable_action_key(
 
 
 def _cutoff_hours_ago(hours: int | float) -> str:
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=max(1, float(hours or 1)))
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+        hours=max(1, float(hours or 1))
+    )
     return cutoff.strftime("%Y-%m-%dT%H:%M:%S")
 
 
@@ -114,7 +116,9 @@ def _format_utc(value: datetime) -> str:
     return value.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def _utc_plus(*, hours: int | float = 0, days: int | float = 0, start: str | None = None) -> str:
+def _utc_plus(
+    *, hours: int | float = 0, days: int | float = 0, start: str | None = None
+) -> str:
     base = _parse_utc(start) or datetime.now(timezone.utc).replace(tzinfo=None)
     return _format_utc(base + timedelta(hours=float(hours or 0), days=float(days or 0)))
 
@@ -141,16 +145,37 @@ def _note_feedback(note: str, *, noted_at: str) -> dict:
         return {}
     if "revisit" in text or "check again" in text:
         if "month" in text:
-            return {"note_category": "revisit", "suppressed_until": _utc_plus(days=30, start=noted_at)}
+            return {
+                "note_category": "revisit",
+                "suppressed_until": _utc_plus(days=30, start=noted_at),
+            }
         if "2 week" in text or "two week" in text:
-            return {"note_category": "revisit", "suppressed_until": _utc_plus(days=14, start=noted_at)}
+            return {
+                "note_category": "revisit",
+                "suppressed_until": _utc_plus(days=14, start=noted_at),
+            }
         if "week" in text:
-            return {"note_category": "revisit", "suppressed_until": _utc_plus(days=7, start=noted_at)}
+            return {
+                "note_category": "revisit",
+                "suppressed_until": _utc_plus(days=7, start=noted_at),
+            }
         if "tomorrow" in text:
-            return {"note_category": "revisit", "suppressed_until": _utc_plus(days=1, start=noted_at)}
-        return {"note_category": "revisit", "suppressed_until": _utc_plus(days=7, start=noted_at)}
-    if any(phrase in text for phrase in ("already done", "already full", "full already", "not needed")):
-        return {"note_category": "state_already_satisfied", "suppressed_until": _utc_plus(days=1, start=noted_at)}
+            return {
+                "note_category": "revisit",
+                "suppressed_until": _utc_plus(days=1, start=noted_at),
+            }
+        return {
+            "note_category": "revisit",
+            "suppressed_until": _utc_plus(days=7, start=noted_at),
+        }
+    if any(
+        phrase in text
+        for phrase in ("already done", "already full", "full already", "not needed")
+    ):
+        return {
+            "note_category": "state_already_satisfied",
+            "suppressed_until": _utc_plus(days=1, start=noted_at),
+        }
     return {}
 
 
@@ -163,7 +188,9 @@ def _member_baseline(tag: str | None, *, conn) -> dict:
         profile = resolved[0] if resolved else {}
     return {
         "player_tag": profile.get("player_tag") or _db._canon_tag(tag),
-        "name": profile.get("member_name") or profile.get("current_name") or profile.get("name"),
+        "name": profile.get("member_name")
+        or profile.get("current_name")
+        or profile.get("name"),
         "status": profile.get("status"),
         "role": profile.get("role"),
         "donations_week": profile.get("donations_week"),
@@ -250,12 +277,25 @@ def evaluate_leader_action(action: dict, *, conn) -> dict:
             "race_rank": current.get("race_rank"),
         }
         outcome["deltas"] = {
-            "engaged_count": _outcome_delta(base_day.get("engaged_count"), current.get("engaged_count")),
-            "finished_count": _outcome_delta(base_day.get("finished_count"), current.get("finished_count")),
-            "untouched_count": _outcome_delta(base_day.get("untouched_count"), current.get("untouched_count")),
-            "clan_fame": _outcome_delta(base_day.get("clan_fame"), current.get("clan_fame")),
+            "engaged_count": _outcome_delta(
+                base_day.get("engaged_count"), current.get("engaged_count")
+            ),
+            "finished_count": _outcome_delta(
+                base_day.get("finished_count"), current.get("finished_count")
+            ),
+            "untouched_count": _outcome_delta(
+                base_day.get("untouched_count"), current.get("untouched_count")
+            ),
+            "clan_fame": _outcome_delta(
+                base_day.get("clan_fame"), current.get("clan_fame")
+            ),
         }
-    elif action_type in {"promotion_recommendation", "kick_recommendation", "demotion_recommendation", "welcome_relay"}:
+    elif action_type in {
+        "promotion_recommendation",
+        "kick_recommendation",
+        "demotion_recommendation",
+        "welcome_relay",
+    }:
         current = _member_baseline(action.get("target_player_tag"), conn=conn)
         base_member = baseline.get("member") or {}
         outcome["member"] = current
@@ -296,7 +336,9 @@ def create_leader_action_recommendation(
     if not prompt_text:
         # v5.1: engine-created recommendations (kick/promote/demote state
         # machines) carry their case in objective/rationale; derive the prompt.
-        prompt_text = " ".join(f"{objective}. {rationale or ''}".split()).strip(". ") + "."
+        prompt_text = (
+            " ".join(f"{objective}. {rationale or ''}".split()).strip(". ") + "."
+        )
     if not action_type or not objective or not prompt_text:
         raise ValueError("action_type and objective are required")
     action_key = action_key or _stable_action_key(
@@ -381,7 +423,9 @@ def auto_withdraw_leader_actions(
     """
     clean_type = (action_type or "").strip()
     clean_tag = _db._canon_tag(target_player_tag) if target_player_tag else None
-    clean_reason = " ".join((reason or "Auto-withdrawn by the management evaluator.").split())
+    clean_reason = " ".join(
+        (reason or "Auto-withdrawn by the management evaluator.").split()
+    )
     if not clean_type or not clean_tag:
         return 0
     rows = conn.execute(
@@ -415,7 +459,9 @@ def auto_withdraw_leader_actions(
             *action_ids,
         ),
     )
-    case_ids = sorted({int(row["case_id"]) for row in rows if row["case_id"] is not None})
+    case_ids = sorted(
+        {int(row["case_id"]) for row in rows if row["case_id"] is not None}
+    )
     if case_ids:
         case_placeholders = ",".join("?" for _ in case_ids)
         conn.execute(
@@ -492,11 +538,13 @@ def _copy_diff(original: str, edited: str) -> dict:
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue
-        changed.append({
-            "op": tag,
-            "old": old[i1:i2],
-            "new": new[j1:j2],
-        })
+        changed.append(
+            {
+                "op": tag,
+                "old": old[i1:i2],
+                "new": new[j1:j2],
+            }
+        )
     return {
         "changed": old != new,
         "similarity": round(matcher.ratio(), 4),
@@ -519,8 +567,15 @@ def update_leader_action_copy_text(
     if not row:
         return None
     action = _row_to_action(row)
-    clean = "\n".join(line.strip() for line in str(copy_text or "").splitlines()).strip()
-    original = action.get("copy_original_text") or action.get("copy_current_text") or action.get("prompt_text") or ""
+    clean = "\n".join(
+        line.strip() for line in str(copy_text or "").splitlines()
+    ).strip()
+    original = (
+        action.get("copy_original_text")
+        or action.get("copy_current_text")
+        or action.get("prompt_text")
+        or ""
+    )
     now = _db._utcnow()
     conn.execute(
         """
@@ -549,8 +604,9 @@ def update_leader_action_copy_text(
 
         _editor.record_copy_edit_pair(conn, int(action_id), original, clean)
     except Exception:
-        log.debug("editor copy-edit feeder failed for action %s", action_id,
-                  exc_info=True)
+        log.debug(
+            "editor copy-edit feeder failed for action %s", action_id, exc_info=True
+        )
     return get_leader_action_by_id(action_id, conn=conn)
 
 
@@ -568,7 +624,9 @@ def get_leader_action_by_id(
 
 
 @managed_connection
-def get_leader_action_by_key(action_key: str, *, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_leader_action_by_key(
+    action_key: str, *, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     row = conn.execute(
         "SELECT * FROM leader_action_recommendations WHERE action_key = ?",
         ((action_key or "").strip(),),
@@ -664,10 +722,14 @@ def build_leader_action_feedback_synthesis_context(
     counts = {
         "total": len(actions),
         ACTION_DONE: sum(1 for item in actions if item.get("status") == ACTION_DONE),
-        ACTION_REJECTED: sum(1 for item in actions if item.get("status") == ACTION_REJECTED),
+        ACTION_REJECTED: sum(
+            1 for item in actions if item.get("status") == ACTION_REJECTED
+        ),
         "with_notes": sum(1 for item in actions if item.get("decision_note")),
     }
-    types = sorted({item.get("action_type") for item in actions if item.get("action_type")})
+    types = sorted(
+        {item.get("action_type") for item in actions if item.get("action_type")}
+    )
     return {
         "action_type": clean_type or "all",
         "counts": counts,
@@ -693,15 +755,21 @@ def _profile_body(profile: dict) -> str:
     summary = " ".join(str(profile.get("summary") or "").split())
     if summary:
         lines.append(summary)
-    guidance = [str(item).strip() for item in profile.get("guidance") or [] if str(item).strip()]
+    guidance = [
+        str(item).strip() for item in profile.get("guidance") or [] if str(item).strip()
+    ]
     if guidance:
         lines.append("Guidance:")
         lines.extend(f"- {item}" for item in guidance[:8])
-    avoid = [str(item).strip() for item in profile.get("avoid") or [] if str(item).strip()]
+    avoid = [
+        str(item).strip() for item in profile.get("avoid") or [] if str(item).strip()
+    ]
     if avoid:
         lines.append("Avoid:")
         lines.extend(f"- {item}" for item in avoid[:5])
-    try_next = [str(item).strip() for item in profile.get("try_next") or [] if str(item).strip()]
+    try_next = [
+        str(item).strip() for item in profile.get("try_next") or [] if str(item).strip()
+    ]
     if try_next:
         lines.append("Try next:")
         lines.extend(f"- {item}" for item in try_next[:5])
@@ -827,7 +895,12 @@ def get_recent_leader_action_for_target(
     within_hours: int = 168,
     conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
-    where = ["action_type = ?", "target_player_tag = ?", "proposed_at >= ?", "COALESCE(is_test, 0) = 0"]
+    where = [
+        "action_type = ?",
+        "target_player_tag = ?",
+        "proposed_at >= ?",
+        "COALESCE(is_test, 0) = 0",
+    ]
     params: list = [
         (action_type or "").strip(),
         _db._canon_tag(target_player_tag),
@@ -913,11 +986,18 @@ def leader_action_board_snapshot(
         "SELECT * FROM leader_action_recommendations "
         "WHERE status IN (?, ?, ?) AND decided_at IS NOT NULL AND COALESCE(is_test, 0) = 0 "
         "ORDER BY decided_at DESC, action_id DESC LIMIT ?",
-        (ACTION_DONE, ACTION_REJECTED, ACTION_DEFERRED, max(1, min(int(decided_limit or 10), 25))),
+        (
+            ACTION_DONE,
+            ACTION_REJECTED,
+            ACTION_DEFERRED,
+            max(1, min(int(decided_limit or 10), 25)),
+        ),
     ).fetchall()
     return {
         "open": [_compact_action_for_board(_row_to_action(row)) for row in open_rows],
-        "recent_decisions": [_compact_action_for_board(_row_to_action(row)) for row in decided_rows],
+        "recent_decisions": [
+            _compact_action_for_board(_row_to_action(row)) for row in decided_rows
+        ],
     }
 
 
@@ -1121,7 +1201,10 @@ def decide_leader_action(
 # Authoritative leave_source values written when a leader verifies a departure
 # (vs the inferred 'roster_diff'). See storage.cases._departure_was_kick, which
 # prefers these over the 14-day inference.
-LEAVE_SOURCE_VERIFIED = {"leave": "leader_verified_leave", "kick": "leader_verified_kick"}
+LEAVE_SOURCE_VERIFIED = {
+    "leave": "leader_verified_leave",
+    "kick": "leader_verified_kick",
+}
 _CLASSIFY_EMOJI = {"leave": "🚶", "kick": "🚪"}
 
 
@@ -1152,7 +1235,11 @@ def classify_departure(
         return None
     stamp = decided_at or _db._utcnow()
     clean_comment = " ".join((comment or "").split()) or None
-    canon = _db._canon_tag(action.get("target_player_tag")) if action.get("target_player_tag") else None
+    canon = (
+        _db._canon_tag(action.get("target_player_tag"))
+        if action.get("target_player_tag")
+        else None
+    )
 
     if canon:
         conn.execute(
@@ -1181,11 +1268,18 @@ def classify_departure(
                outcome_json = ?, updated_at = ?
            WHERE action_id = ?""",
         (
-            ACTION_DONE, stamp, str(discord_user_id),
+            ACTION_DONE,
+            stamp,
+            str(discord_user_id),
             _CLASSIFY_EMOJI[classification],
-            clean_comment, clean_comment, stamp,
-            clean_comment, str(discord_user_id),
-            _json_dumps(outcome), stamp, action["action_id"],
+            clean_comment,
+            clean_comment,
+            stamp,
+            clean_comment,
+            str(discord_user_id),
+            _json_dumps(outcome),
+            stamp,
+            action["action_id"],
         ),
     )
 

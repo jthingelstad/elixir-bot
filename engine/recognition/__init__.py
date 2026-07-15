@@ -103,15 +103,25 @@ def run_recognizers(conn, clock: dict | None, now: str) -> dict:
     counters: dict[str, int] = {}
 
     battle_result = _guard_cursor_section(
-        conn, counters, "recognize:battle", "battle_events",
+        conn,
+        counters,
+        "recognize:battle",
+        "battle_events",
         lambda: R.battle_candidates(conn, now),
     )
     player_result = _guard_cursor_section(
-        conn, counters, "recognize:player", "player_events",
+        conn,
+        counters,
+        "recognize:player",
+        "player_events",
         lambda: R.player_candidates(conn),
     )
-    battle_cands, battle_pos = battle_result if battle_result is not None else ([], None)
-    player_cands, player_pos = player_result if player_result is not None else ([], None)
+    battle_cands, battle_pos = (
+        battle_result if battle_result is not None else ([], None)
+    )
+    player_cands, player_pos = (
+        player_result if player_result is not None else ([], None)
+    )
     counters.update(R.run_celebrate_pipeline(conn, battle_cands + player_cands, now))
     if battle_pos:
         cursor_set(conn, "recognize:battle", battle_pos)
@@ -119,19 +129,28 @@ def run_recognizers(conn, clock: dict | None, now: str) -> dict:
         cursor_set(conn, "recognize:player", player_pos)
 
     clan_result = _guard_cursor_section(
-        conn, counters, "recognize:clan", "clan_events",
+        conn,
+        counters,
+        "recognize:clan",
+        "clan_events",
         lambda: R.clan_recognizer(conn, now),
     )
     if clan_result:
         counters.update(clan_result)
     war_result = _guard_cursor_section(
-        conn, counters, "recognize:war", "war_events",
+        conn,
+        counters,
+        "recognize:war",
+        "war_events",
         lambda: R.war_recognizer(conn, clock, now),
     )
     if war_result:
         counters.update(war_result)
     game_result = _guard_cursor_section(
-        conn, counters, "recognize:game", "game_events",
+        conn,
+        counters,
+        "recognize:game",
+        "game_events",
         lambda: R.game_recognizer(conn, now),
     )
     if game_result:

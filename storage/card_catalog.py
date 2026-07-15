@@ -8,10 +8,10 @@ from datetime import datetime, timezone
 
 from db import managed_connection
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _card_type_from_id(card_id: int) -> str:
     """Derive card type from the Clash Royale card ID range."""
@@ -40,6 +40,7 @@ def _escape_like(value: str) -> str:
 # Sync
 # ---------------------------------------------------------------------------
 
+
 @managed_connection
 def sync_card_catalog(api_response: dict, conn=None) -> int:
     """Upsert all cards from a /cards API response.
@@ -60,7 +61,9 @@ def sync_card_catalog(api_response: dict, conn=None) -> int:
     all_cards.extend(api_response.get("supportItems") or [])
 
     ge.ensure_schema(conn)  # lazily adds card_catalog.first_seen_at + game_events
-    existing = {r[0] for r in conn.execute("SELECT card_id FROM card_catalog").fetchall()}
+    existing = {
+        r[0] for r in conn.execute("SELECT card_id FROM card_catalog").fetchall()
+    }
     bootstrap = not existing
     new_cards: list[dict] = []
 
@@ -97,18 +100,32 @@ def sync_card_catalog(api_response: dict, conn=None) -> int:
                    evolution_icon_url = excluded.evolution_icon_url,
                    synced_at = excluded.synced_at""",
             (
-                card_id, name, elixir_cost, rarity, max_level,
-                max_evolution_level, card_type, icon_url,
-                hero_icon_url, evolution_icon_url, now, now,
+                card_id,
+                name,
+                elixir_cost,
+                rarity,
+                max_level,
+                max_evolution_level,
+                card_type,
+                icon_url,
+                hero_icon_url,
+                evolution_icon_url,
+                now,
+                now,
             ),
         )
         count += 1
         if card_id not in existing and not bootstrap:
-            new_cards.append({
-                "card_id": card_id, "name": name, "rarity": rarity,
-                "elixir_cost": elixir_cost, "card_type": card_type,
-                "icon_url": icon_url,
-            })
+            new_cards.append(
+                {
+                    "card_id": card_id,
+                    "name": name,
+                    "rarity": rarity,
+                    "elixir_cost": elixir_cost,
+                    "card_type": card_type,
+                    "icon_url": icon_url,
+                }
+            )
 
     for c in new_cards:
         ge.insert_game_event(
@@ -127,6 +144,7 @@ def sync_card_catalog(api_response: dict, conn=None) -> int:
 # ---------------------------------------------------------------------------
 # Queries
 # ---------------------------------------------------------------------------
+
 
 def _row_to_dict(row) -> dict:
     """Convert a sqlite3.Row to a plain dict with a mode_label field.
@@ -204,8 +222,10 @@ def lookup_cards(
 
     if name:
         # exact match, then prefix, then shortest (Knight before Golden Knight).
-        order = ("ORDER BY (LOWER(name) = LOWER(?)) DESC, "
-                 "(LOWER(name) LIKE LOWER(?) || '%') DESC, LENGTH(name) ASC, name")
+        order = (
+            "ORDER BY (LOWER(name) = LOWER(?)) DESC, "
+            "(LOWER(name) LIKE LOWER(?) || '%') DESC, LENGTH(name) ASC, name"
+        )
         order_params = [name, _escape_like(name)]
     else:
         order = "ORDER BY name"
@@ -251,9 +271,7 @@ def get_card_by_name(name: str, conn=None) -> dict | None:
 @managed_connection
 def get_all_cards(conn=None) -> list[dict]:
     """Return the full card catalog."""
-    rows = conn.execute(
-        "SELECT * FROM card_catalog ORDER BY name"
-    ).fetchall()
+    rows = conn.execute("SELECT * FROM card_catalog ORDER BY name").fetchall()
     return [_row_to_dict(r) for r in rows]
 
 

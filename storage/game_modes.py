@@ -114,14 +114,19 @@ def classify_battle_mode(
     hosted = bool(is_hosted_match) if is_hosted_match is not None else False
 
     if (
-        battle_type_l in {"riverracepvp", "riverraceduel", "riverraceduelcolosseum", "boatbattle"}
+        battle_type_l
+        in {"riverracepvp", "riverraceduel", "riverraceduelcolosseum", "boatbattle"}
         or mode_id in WAR_GAME_MODE_IDS
         or "clanwar" in mode_name_l
         or mode_name_l.startswith("cw_")
     ):
         return "war"
 
-    if battle_type_l == "pathoflegend" or mode_id in RANKED_GAME_MODE_IDS or "ranked1v1" in mode_name_l:
+    if (
+        battle_type_l == "pathoflegend"
+        or mode_id in RANKED_GAME_MODE_IDS
+        or "ranked1v1" in mode_name_l
+    ):
         return "ranked"
 
     if battle_type_l == "tournament" or tournament_tag:
@@ -139,7 +144,9 @@ def classify_battle_mode(
     if event_tag or battle_type_l == "trail":
         return "special_event"
 
-    if battle_type_l == "pvp" or (mode_id in LADDER_GAME_MODE_IDS and "ladder" in mode_name_l):
+    if battle_type_l == "pvp" or (
+        mode_id in LADDER_GAME_MODE_IDS and "ladder" in mode_name_l
+    ):
         return "ladder"
 
     if (
@@ -150,7 +157,13 @@ def classify_battle_mode(
     ):
         return "friendly"
 
-    if deck_selection_l in {"eventdeck", "predefined", "pick", "draft", "draftcompetitive"}:
+    if deck_selection_l in {
+        "eventdeck",
+        "predefined",
+        "pick",
+        "draft",
+        "draftcompetitive",
+    }:
         return "special_event"
 
     return "other"

@@ -20,10 +20,13 @@ def _rows(conn, sql, params=()):
 def check_tick_errors(conn) -> list[str]:
     """Any *_error keys in the last 24h of tick history, or a recent failure."""
     problems: list[str] = []
-    rows = _rows(conn, """
+    rows = _rows(
+        conn,
+        """
         SELECT counters_json FROM tick_history
         WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-1 day')
-        ORDER BY tick_id DESC LIMIT 200""")
+        ORDER BY tick_id DESC LIMIT 200""",
+    )
     err_ticks = 0
     for r in rows:
         try:
@@ -53,8 +56,11 @@ def check_ledger_duplicates(conn) -> list[str]:
         "SELECT COUNT(*), COUNT(DISTINCT recognition_key) FROM recognition_ledger"
     ).fetchone()
     return (
-        [f"recognition ledger has {total - distinct} duplicate key(s) — the one-moment-one-post invariant broke"]
-        if total != distinct else []
+        [
+            f"recognition ledger has {total - distinct} duplicate key(s) — the one-moment-one-post invariant broke"
+        ]
+        if total != distinct
+        else []
     )
 
 
@@ -62,13 +68,16 @@ def check_poll_starvation(conn) -> list[str]:
     """Fairness floors (runtime.md §4): battlelog ≤6h, profile ≤24h for every
     open-membership member."""
     problems = []
-    rows = _rows(conn, """
+    rows = _rows(
+        conn,
+        """
         SELECT ps.player_tag,
                COALESCE(ps.last_battlelog_poll, '') < strftime('%Y-%m-%dT%H:%M:%S', 'now', '-6 hours') AS bl_starved,
                COALESCE(ps.last_profile_poll, '')  < strftime('%Y-%m-%dT%H:%M:%S', 'now', '-24 hours') AS pf_starved
         FROM poll_state ps
         WHERE EXISTS (SELECT 1 FROM clan_memberships cm
-                      WHERE cm.player_tag = ps.player_tag AND cm.left_at IS NULL)""")
+                      WHERE cm.player_tag = ps.player_tag AND cm.left_at IS NULL)""",
+    )
     bl = sum(1 for r in rows if r["bl_starved"])
     pf = sum(1 for r in rows if r["pf_starved"])
     if bl:
@@ -106,6 +115,7 @@ def check_new_incidents(conn) -> list[str]:
     to #elixir-log names them."""
     try:
         from storage.incidents import count_open_since
+
         n = count_open_since(conn, hours=24)
     except Exception as exc:  # noqa: BLE001
         return [f"incident check failed: {exc!r}"]
@@ -182,7 +192,8 @@ def check_output_silence(conn) -> list[str]:
         ).fetchone()[0]
         if hrs is not None and hrs > SILENCE_HOURS:
             problems.append(
-                f"no Discord output in {hrs}h (last post {last}) — Elixir may be silently stuck")
+                f"no Discord output in {hrs}h (last post {last}) — Elixir may be silently stuck"
+            )
     # (b) the can_post_leader_action signature: proposed but never posted.
     stuck = conn.execute(
         "SELECT COUNT(*) FROM leader_action_recommendations "
@@ -193,7 +204,8 @@ def check_output_silence(conn) -> list[str]:
     if stuck:
         problems.append(
             f"{stuck} leader-action(s) proposed >{LEADER_ACTION_STALE_HOURS}h ago but never "
-            f"posted — card posting may be broken")
+            f"posted — card posting may be broken"
+        )
     return problems
 
 
@@ -205,9 +217,15 @@ def _cutoff_iso(conn, offset: str) -> str:
 
 def run_all(conn, previous_size: int | None = None) -> tuple[list[str], int]:
     problems: list[str] = []
-    for check in (check_tick_errors, check_ledger_duplicates, check_poll_starvation,
-                  check_memory_writes, check_new_incidents, check_output_silence,
-                  check_data_integrity):
+    for check in (
+        check_tick_errors,
+        check_ledger_duplicates,
+        check_poll_starvation,
+        check_memory_writes,
+        check_new_incidents,
+        check_output_silence,
+        check_data_integrity,
+    ):
         try:
             problems.extend(check(conn))
         except Exception as exc:  # a broken check is itself a finding

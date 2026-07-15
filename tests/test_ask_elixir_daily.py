@@ -6,8 +6,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-
 # ------------------------------------------------------------- brain-powered daily
+
 
 def _run_daily_with(generated):
     """Run _ask_elixir_daily_insight with the brain composer stubbed to return
@@ -27,9 +27,15 @@ def _run_daily_with(generated):
     with (
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
         patch("runtime.jobs._core._get_singleton_channel_id", return_value=channel.id),
-        patch("runtime.jobs._core._bot", return_value=SimpleNamespace(get_channel=lambda _id: channel)),
+        patch(
+            "runtime.jobs._core._bot",
+            return_value=SimpleNamespace(get_channel=lambda _id: channel),
+        ),
         patch("runtime.awareness.read.build_read", return_value={"time": None}),
-        patch("runtime.jobs._core.elixir_agent.generate_ask_elixir_daily", return_value=generated),
+        patch(
+            "runtime.jobs._core.elixir_agent.generate_ask_elixir_daily",
+            return_value=generated,
+        ),
         patch("runtime.jobs._core._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("runtime.jobs._core.db.save_message", side_effect=fake_save_message),
         patch("runtime.jobs._core._channel_msg_kwargs", return_value={}),
@@ -63,30 +69,41 @@ def test_daily_skips_when_no_hook():
 
 # --- rehearsal-driven tool fixes (2026-07-04) -------------------------------
 
+
 def test_list_card_owners_display_level_math():
     import db as _db
     from storage.cards import list_card_owners
 
     conn = _db.get_connection()
     try:
-        conn.execute("INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
-                     "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', '2026-07-04', 1)")
-        conn.execute("INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
-                     "VALUES ('#OWN1', 'Owner', '2026-06-01', '2026-07-04')")
-        conn.execute("INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
-                     "VALUES ('#OWN1', '2026-06-01', 'test')")
-        conn.execute("INSERT INTO card_catalog (card_id, name, max_level, rarity, card_type, synced_at) "
-                     "VALUES (99001, 'Testloon', 14, 'legendary', 'troop', '2026-07-04')")
+        conn.execute(
+            "INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
+            "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', '2026-07-04', 1)"
+        )
+        conn.execute(
+            "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+            "VALUES ('#OWN1', 'Owner', '2026-06-01', '2026-07-04')"
+        )
+        conn.execute(
+            "INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
+            "VALUES ('#OWN1', '2026-06-01', 'test')"
+        )
+        conn.execute(
+            "INSERT INTO card_catalog (card_id, name, max_level, rarity, card_type, synced_at) "
+            "VALUES (99001, 'Testloon', 14, 'legendary', 'troop', '2026-07-04')"
+        )
         # level 14 of maxLevel 14 => display 16 (maxed)
-        conn.execute("INSERT INTO player_card_collection (player_tag, card_id, level, observed_at) "
-                     "VALUES ('#OWN1', 99001, 14, '2026-07-04')")
+        conn.execute(
+            "INSERT INTO player_card_collection (player_tag, card_id, level, observed_at) "
+            "VALUES ('#OWN1', 99001, 14, '2026-07-04')"
+        )
         conn.commit()
-        result = list_card_owners('Testloon', conn=conn)
+        result = list_card_owners("Testloon", conn=conn)
         assert result["count"] == 1
         assert result["owners"][0]["member"] == "Owner"
         assert result["owners"][0]["display_level"] == 16
         # case-insensitive lookup
-        assert list_card_owners('testloon', conn=conn)["count"] == 1
+        assert list_card_owners("testloon", conn=conn)["count"] == 1
     finally:
         conn.close()
 
@@ -97,19 +114,31 @@ def test_donations_aspect_compact_and_labeled():
 
     conn = _db.get_connection()
     try:
-        conn.execute("INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
-                     "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', '2026-07-04', 1)")
-        conn.execute("INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
-                     "VALUES ('#DON1', 'Giver', '2026-06-01', '2026-07-04')")
-        conn.execute("INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
-                     "VALUES ('#DON1', '2026-06-01', 'test')")
-        conn.execute("INSERT INTO player_current_state (player_tag, observed_at, donations_week) "
-                     "VALUES ('#DON1', '2026-07-04', 456)")
+        conn.execute(
+            "INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
+            "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', '2026-07-04', 1)"
+        )
+        conn.execute(
+            "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+            "VALUES ('#DON1', 'Giver', '2026-06-01', '2026-07-04')"
+        )
+        conn.execute(
+            "INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
+            "VALUES ('#DON1', '2026-06-01', 'test')"
+        )
+        conn.execute(
+            "INSERT INTO player_current_state (player_tag, observed_at, donations_week) "
+            "VALUES ('#DON1', '2026-07-04', 456)"
+        )
         conn.commit()
     finally:
         conn.close()
     result = _execute_get_clan_roster({"aspect": "donations"})
-    assert result["top_donors_this_week"][0] == {"name": "Giver", "donated": 456, "received": 0}
+    assert result["top_donors_this_week"][0] == {
+        "name": "Giver",
+        "donated": 456,
+        "received": 0,
+    }
     assert "THIS WEEK" in result["note"]
 
 
@@ -126,9 +155,12 @@ def test_respond_in_channel_author_identity_line():
 
     with patch("elixir_agent._chat_with_tools", side_effect=fake_chat):
         elixir_agent.respond_in_channel(
-            question="When did I join?", author_name="Vijay",
-            channel_name="#ask-elixir", workflow="interactive",
-            clan_data={}, war_data={},
+            question="When did I join?",
+            author_name="Vijay",
+            channel_name="#ask-elixir",
+            workflow="interactive",
+            clan_data={},
+            war_data={},
             author_identity={"member_name": "Vijay", "player_tag": "#C920YGLC2"},
         )
     msg = captured["user_msg"]

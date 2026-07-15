@@ -11,9 +11,9 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-from storage import war as war_storage
 from capabilities.contracts import WarIntelligenceResult, WarSeasonViewResult
 from capabilities.game_truth import get_game_truth
+from storage import war as war_storage
 
 CAPABILITY_ID = "war_intelligence"
 CONTRACT_VERSION = 1
@@ -77,8 +77,10 @@ def _remaining_decks(day: dict) -> dict:
     finished = int(day.get("finished_count") or 0)
     untouched = int(day.get("untouched_count") or 0)
     used_some = day.get("used_some")
-    partial = len(used_some) if isinstance(used_some, list) else max(
-        0, total - finished - untouched
+    partial = (
+        len(used_some)
+        if isinstance(used_some, list)
+        else max(0, total - finished - untouched)
     )
     remaining = max(0, total - finished)
     if partial + untouched != remaining:
@@ -114,9 +116,7 @@ def get_war_intelligence(*, source=None, conn=None) -> WarIntelligenceResult:
     day = _invoke(source, "get_current_war_day_state", conn=conn)
     day = day if isinstance(day, dict) else {}
     boat_scored = _is_scored(status, "boat_scored", "race_standings", "fame")
-    day_scored = _is_scored(
-        status, "day_scored", "day_standings", "period_points"
-    )
+    day_scored = _is_scored(status, "day_scored", "day_standings", "period_points")
     weekly_standings = _ranked(status.get("race_standings"), scored=boat_scored)
     daily_standings = _ranked(status.get("day_standings"), scored=day_scored)
 
@@ -218,9 +218,10 @@ def _standings_freshness(source, season_id=None, *, conn=None) -> dict:
     finalized_races = 0
     current_section_finalized = False
     if target_season is not None:
-        finalized_races = _invoke(
-            source, "count_war_races_for_season", int(target_season), conn=conn
-        ) or 0
+        finalized_races = (
+            _invoke(source, "count_war_races_for_season", int(target_season), conn=conn)
+            or 0
+        )
         if section_index is not None:
             current_section_finalized = bool(
                 _invoke(
@@ -343,7 +344,10 @@ def get_war_season_view(
             )
         elif clean_metric == "attendance":
             data = _invoke(
-                source, "get_members_without_war_participation", season_id=season_id, conn=conn
+                source,
+                "get_members_without_war_participation",
+                season_id=season_id,
+                conn=conn,
             )
         else:
             data = {"error": f"Unknown metric: {metric}"}
@@ -382,7 +386,10 @@ def get_war_season_view(
         )
     elif view == "no_participation":
         data = _invoke(
-            source, "get_members_without_war_participation", season_id=season_id, conn=conn
+            source,
+            "get_members_without_war_participation",
+            season_id=season_id,
+            conn=conn,
         )
     else:
         data = {"error": f"Unknown view: {view}"}

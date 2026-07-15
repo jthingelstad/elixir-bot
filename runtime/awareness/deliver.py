@@ -25,8 +25,8 @@ from __future__ import annotations
 
 import logging
 
-from engine.recognition import compose as engine_compose
 from capabilities.game_truth import awareness_post_facts
+from engine.recognition import compose as engine_compose
 from runtime.awareness.policy import validate_plan, validate_repair
 
 log = logging.getLogger("elixir")
@@ -71,7 +71,9 @@ def deliver_posts(
     the already-sent posts in channel_memory (the brain won't repeat them)."""
     violations = validate_plan(read, plan)
     if violations and repair_fn is not None:
-        log.warning("awareness copy policy rejected plan; attempting one repair: %s", violations)
+        log.warning(
+            "awareness copy policy rejected plan; attempting one repair: %s", violations
+        )
         original_plan = plan
         try:
             repaired = repair_fn(read, plan, violations)
@@ -79,7 +81,9 @@ def deliver_posts(
             log.exception("awareness copy policy repair raised")
             repaired = None
         if isinstance(repaired, dict):
-            violations = validate_repair(original_plan, repaired) + validate_plan(read, repaired)
+            violations = validate_repair(original_plan, repaired) + validate_plan(
+                read, repaired
+            )
             if not violations:
                 # Keep persistence/diagnostics aligned with what actually
                 # reaches Discord instead of retaining the rejected draft.
@@ -89,8 +93,7 @@ def deliver_posts(
     if violations:
         reason = "copy policy violation after repair: " + ", ".join(violations)
         log.error("awareness deliver: %s — failing tick before send", reason)
-        return {"delivered": 0, "failed": True, "reason": reason,
-                "uncovered_hard": []}
+        return {"delivered": 0, "failed": True, "reason": reason, "uncovered_hard": []}
 
     posts = plan.get("posts") or []
     lanes = engine_compose.channels()
@@ -113,34 +116,58 @@ def deliver_posts(
         if cfg is None:
             reason = f"unroutable channel {channel!r}"
             log.error("awareness deliver: %s — failing tick", reason)
-            return {"delivered": delivered, "failed": True, "reason": reason,
-                    "uncovered_hard": []}
+            return {
+                "delivered": delivered,
+                "failed": True,
+                "reason": reason,
+                "uncovered_hard": [],
+            }
 
         copy = _post_content(post)
         if not copy:
             reason = f"empty content for channel {channel!r}"
             log.error("awareness deliver: %s — failing tick", reason)
-            return {"delivered": delivered, "failed": True, "reason": reason,
-                    "uncovered_hard": []}
+            return {
+                "delivered": delivered,
+                "failed": True,
+                "reason": reason,
+                "uncovered_hard": [],
+            }
 
         try:
             message_id = post_fn(cfg["channel_id"], copy)
         except Exception as exc:
-            log.exception("awareness deliver: send to #%s failed; catch up next loop",
-                          cfg.get("channel_name") or channel)
-            return {"delivered": delivered, "failed": True,
-                    "reason": f"send failed: {exc}", "uncovered_hard": []}
+            log.exception(
+                "awareness deliver: send to #%s failed; catch up next loop",
+                cfg.get("channel_name") or channel,
+            )
+            return {
+                "delivered": delivered,
+                "failed": True,
+                "reason": f"send failed: {exc}",
+                "uncovered_hard": [],
+            }
         if message_id is None:
             reason = f"send to #{cfg.get('channel_name') or channel} returned no id"
             log.error("awareness deliver: %s — failing tick", reason)
-            return {"delivered": delivered, "failed": True, "reason": reason,
-                    "uncovered_hard": []}
+            return {
+                "delivered": delivered,
+                "failed": True,
+                "reason": reason,
+                "uncovered_hard": [],
+            }
 
         covers = post.get("covers_signal_keys") or []
         try:
-            record_fn(lane=channel, content=copy, covers=covers,
-                      message_id=message_id, loop_number=loop_number,
-                      post=post, evidence=awareness_post_facts(read, post))
+            record_fn(
+                lane=channel,
+                content=copy,
+                covers=covers,
+                message_id=message_id,
+                loop_number=loop_number,
+                post=post,
+                evidence=awareness_post_facts(read, post),
+            )
         except Exception:
             # Recording is dedup-memory only; a failure here must not fail an
             # already-delivered post (it's landed in Discord).
@@ -155,8 +182,10 @@ def deliver_posts(
         should_relay = bool(post.get("relay_to_clan_chat"))
         if not should_relay and join_signal_keys.intersection(covers):
             should_relay = True
-            log.info("awareness deliver: forcing in-game welcome relay for join %s",
-                     sorted(join_signal_keys.intersection(covers)))
+            log.info(
+                "awareness deliver: forcing in-game welcome relay for join %s",
+                sorted(join_signal_keys.intersection(covers)),
+            )
         if relay_fn is not None and should_relay:
             try:
                 relay_fn(post, cfg.get("channel_name") or channel)
@@ -171,14 +200,22 @@ def deliver_posts(
     }
     uncovered = sorted(mandatory - covered)
     if uncovered:
-        log.error("awareness deliver: hard-post floor uncovered %s — failing tick",
-                  uncovered)
-        return {"delivered": delivered, "failed": True,
-                "reason": f"uncovered hard-post signals: {uncovered}",
-                "uncovered_hard": uncovered}
+        log.error(
+            "awareness deliver: hard-post floor uncovered %s — failing tick", uncovered
+        )
+        return {
+            "delivered": delivered,
+            "failed": True,
+            "reason": f"uncovered hard-post signals: {uncovered}",
+            "uncovered_hard": uncovered,
+        }
 
-    return {"delivered": delivered, "failed": False, "reason": None,
-            "uncovered_hard": []}
+    return {
+        "delivered": delivered,
+        "failed": False,
+        "reason": None,
+        "uncovered_hard": [],
+    }
 
 
 __all__ = ["deliver_posts", "POSTABLE_CHANNELS"]

@@ -41,7 +41,13 @@ def _our_defense_projection(payload: dict, our_tag: str | None) -> dict | None:
             if canon_tag((it.get("clan") or {}).get("tag")) == our_tag:
                 dfame = it.get("progressEarnedFromDefenses")
                 if dfame is not None:
-                    days.append((idx if idx is not None else -1, int(dfame), it.get("numOfDefensesRemaining")))
+                    days.append(
+                        (
+                            idx if idx is not None else -1,
+                            int(dfame),
+                            it.get("numOfDefensesRemaining"),
+                        )
+                    )
     if not days:
         return None
     days.sort(key=lambda d: d[0])
@@ -93,7 +99,16 @@ def project_race_aspect(payload: dict, season_id: int | None) -> dict:
     }
 
 
-def _emit(conn, season_id, section_index, observed_at, window_start, event_type, dedup_key, payload) -> int:
+def _emit(
+    conn,
+    season_id,
+    section_index,
+    observed_at,
+    window_start,
+    event_type,
+    dedup_key,
+    payload,
+) -> int:
     return insert_stream_event(
         conn,
         "war_events",
@@ -143,7 +158,11 @@ def merge_baseline(old: dict, new: dict) -> dict:
         and old.get("section_index") == new.get("section_index")
         and old.get("section_index") is not None
     )
-    if same_period and (old.get("our_fame") or 0) > 0 and (new.get("our_fame") or 0) == 0:
+    if (
+        same_period
+        and (old.get("our_fame") or 0) > 0
+        and (new.get("our_fame") or 0) == 0
+    ):
         return old
     return new
 
@@ -169,7 +188,9 @@ def _ensure_season(conn, season_id: int, observed_at: str) -> None:
     )
 
 
-def _upsert_week(conn, season_id, section_index, period_type, observed_at, defense_fame=None) -> None:
+def _upsert_week(
+    conn, season_id, section_index, period_type, observed_at, defense_fame=None
+) -> None:
     from engine.normalize import canonical_utc_timestamp
 
     created_at = canonical_utc_timestamp(observed_at)
@@ -197,11 +218,14 @@ def _finalize_week(conn, state: dict, observed_at: str) -> None:
     # already-stored} so a degenerate snapshot can never lower a finished
     # week's fame. If the snapshot is degenerate, don't trust its rank/standings
     # either — keep whatever is already recorded.
-    part_fame = conn.execute(
-        "SELECT SUM(COALESCE(fame, 0)) FROM war_participation "
-        "WHERE season_id = ? AND section_index = ?",
-        (season_id, section),
-    ).fetchone()[0] or 0
+    part_fame = (
+        conn.execute(
+            "SELECT SUM(COALESCE(fame, 0)) FROM war_participation "
+            "WHERE season_id = ? AND section_index = ?",
+            (season_id, section),
+        ).fetchone()[0]
+        or 0
+    )
     snap_fame = state.get("our_fame") or 0
     our_fame = max(part_fame, snap_fame)
     degenerate = snap_fame == 0 and our_fame > 0
@@ -215,8 +239,15 @@ def _finalize_week(conn, state: dict, observed_at: str) -> None:
                our_rank = COALESCE(excluded.our_rank, war_weeks.our_rank),
                our_fame = MAX(COALESCE(war_weeks.our_fame, 0), COALESCE(excluded.our_fame, 0)),
                defense_fame = MAX(COALESCE(war_weeks.defense_fame, 0), COALESCE(excluded.defense_fame, 0))""",
-        (season_id, section, state.get("period_type"), observed_at,
-         our_rank, our_fame, _week_defense_fame(state)),
+        (
+            season_id,
+            section,
+            state.get("period_type"),
+            observed_at,
+            our_rank,
+            our_fame,
+            _week_defense_fame(state),
+        ),
     )
     if degenerate:
         # nothing trustworthy to write to the per-clan standings; keep prior
@@ -226,9 +257,12 @@ def _finalize_week(conn, state: dict, observed_at: str) -> None:
             """INSERT INTO clans (clan_tag, name, first_seen_at, last_seen_at)
                VALUES (?, ?, ?, ?)
                ON CONFLICT(clan_tag) DO UPDATE SET last_seen_at = excluded.last_seen_at""",
-            (row["clan_tag"],
-             (state.get("clans") or {}).get(row["clan_tag"], {}).get("name"),
-             observed_at, observed_at),
+            (
+                row["clan_tag"],
+                (state.get("clans") or {}).get(row["clan_tag"], {}).get("name"),
+                observed_at,
+                observed_at,
+            ),
         )
         conn.execute(
             """INSERT INTO war_week_clans (season_id, section_index, clan_tag,
@@ -237,7 +271,14 @@ def _finalize_week(conn, state: dict, observed_at: str) -> None:
                ON CONFLICT(season_id, section_index, clan_tag) DO UPDATE SET
                    fame = excluded.fame, rank = excluded.rank,
                    observed_at = excluded.observed_at""",
-            (season_id, section, row["clan_tag"], row["fame"], row["rank"], observed_at),
+            (
+                season_id,
+                section,
+                row["clan_tag"],
+                row["fame"],
+                row["rank"],
+                observed_at,
+            ),
         )
 
 
@@ -259,9 +300,8 @@ def _upsert_participation(conn, state: dict, observed_at: str) -> None:
                WHERE season_id = ? AND section_index = ? AND player_tag = ?""",
             (season_id, section, tag),
         ).fetchone()
-        if (
-            prev is not None
-            and (p.get("decks_used_today") or 0) > (prev["decks_used_today"] or 0)
+        if prev is not None and (p.get("decks_used_today") or 0) > (
+            prev["decks_used_today"] or 0
         ):
             from engine import polling
 
@@ -281,9 +321,17 @@ def _upsert_participation(conn, state: dict, observed_at: str) -> None:
                    decks_used = MAX(COALESCE(war_participation.decks_used, 0), COALESCE(excluded.decks_used, 0)),
                    decks_used_today = excluded.decks_used_today,
                    observed_at = excluded.observed_at""",
-            (season_id, section, tag, p.get("fame"), p.get("repair_points"),
-             p.get("boat_attacks"), p.get("decks_used"), p.get("decks_used_today"),
-             observed_at),
+            (
+                season_id,
+                section,
+                tag,
+                p.get("fame"),
+                p.get("repair_points"),
+                p.get("boat_attacks"),
+                p.get("decks_used"),
+                p.get("decks_used_today"),
+                observed_at,
+            ),
         )
         if war_day is not None:
             conn.execute(
@@ -298,12 +346,20 @@ def _upsert_participation(conn, state: dict, observed_at: str) -> None:
                        decks_used = MAX(COALESCE(war_attendance_days.decks_used, 0),
                                         COALESCE(excluded.decks_used, 0)),
                        observed_at = excluded.observed_at""",
-                (season_id, section, war_day, tag, p.get("decks_used_today") or 0,
-                 observed_at),
+                (
+                    season_id,
+                    section,
+                    war_day,
+                    tag,
+                    p.get("decks_used_today") or 0,
+                    observed_at,
+                ),
             )
 
 
-def emit_award_races(conn, entity_tag, old: dict, new: dict, observed_at, window_start) -> int:
+def emit_award_races(
+    conn, entity_tag, old: dict, new: dict, observed_at, window_start
+) -> int:
     """Award-race lead changes → clan_events, so the ongoing competitions are
     event-driven, not just ambient in the read (Jamie 2026-07-13). Fires when the
     member topping the War Champ points race changes (the free pass is built on
@@ -312,23 +368,37 @@ def emit_award_races(conn, entity_tag, old: dict, new: dict, observed_at, window
     flipping between two members won't spam — each new leader fires once."""
     n = 0
     season_id = (new or {}).get("season_id")
-    for key, event_type in (("war_champ_leader", "war_champ_lead_change"),
-                            ("rookie_mvp_leader", "rookie_mvp_lead_change")):
+    for key, event_type in (
+        ("war_champ_leader", "war_champ_lead_change"),
+        ("rookie_mvp_leader", "rookie_mvp_lead_change"),
+    ):
         prev = (old or {}).get(key) or {}
         curr = (new or {}).get(key) or {}
         prev_tag, curr_tag = prev.get("tag"), curr.get("tag")
         if curr_tag and curr_tag != prev_tag:
             n += _emit(
-                conn, season_id, None, observed_at, window_start, event_type,
+                conn,
+                season_id,
+                None,
+                observed_at,
+                window_start,
+                event_type,
                 f"{event_type}:{season_id}:{curr_tag}",
-                {"season_id": season_id, "new_leader": curr, "prev_leader": prev or None,
-                 "metric_unit": "points"},
+                {
+                    "season_id": season_id,
+                    "new_leader": curr,
+                    "prev_leader": prev or None,
+                    "metric_unit": "points",
+                },
             )
     return n
 
 
 def _build_season_close_change_set(
-    conn, season_id: int, final_state: dict, observed_at: str,
+    conn,
+    season_id: int,
+    final_state: dict,
+    observed_at: str,
 ) -> SeasonCloseChangeSet:
     """Derive the complete durable season-close transition before writing it."""
     from engine.award_outcomes import compute_season_award_outcome
@@ -389,8 +459,7 @@ def _required_season_awards(changes: SeasonCloseChangeSet) -> set[tuple[str, str
         for entry in outcome["rookie_mvps"][:3]
     )
     required.update(
-        ("war_participant", entry["tag"], 1)
-        for entry in outcome["war_participants"]
+        ("war_participant", entry["tag"], 1) for entry in outcome["war_participants"]
     )
     return required
 
@@ -440,17 +509,32 @@ def _apply_season_close_change_set(conn, changes: SeasonCloseChangeSet) -> int:
         """UPDATE war_seasons SET ended_at = ?, final_rank = ?, weeks = ?,
                war_champ_tag = ?, free_pass_tag = ?
            WHERE season_id = ?""",
-        (changes.observed_at, changes.final_rank, changes.weeks,
-         changes.war_champ_tag, changes.free_pass_tag, changes.season_id),
+        (
+            changes.observed_at,
+            changes.final_rank,
+            changes.weeks,
+            changes.war_champ_tag,
+            changes.free_pass_tag,
+            changes.season_id,
+        ),
     )
     n = _emit(
-        conn, changes.season_id, None, changes.observed_at, None,
-        "season_closed", changes.event_dedup_key, dict(changes.event_payload),
+        conn,
+        changes.season_id,
+        None,
+        changes.observed_at,
+        None,
+        "season_closed",
+        changes.event_dedup_key,
+        dict(changes.event_payload),
     )
     from engine import awards as engine_awards
 
     engine_awards.grant_season_awards(
-        conn, changes.season_id, changes.observed_at, outcome=dict(changes.outcome),
+        conn,
+        changes.season_id,
+        changes.observed_at,
+        outcome=dict(changes.outcome),
     )
     _verify_season_close_change_set(conn, changes)
     # D7: the season's chronicle memory — deterministic prose from the rows
@@ -459,7 +543,10 @@ def _apply_season_close_change_set(conn, changes: SeasonCloseChangeSet) -> int:
     from engine import chronicles
 
     chronicles.write_season_chronicle(
-        conn, "war", changes.season_id, changes.observed_at,
+        conn,
+        "war",
+        changes.season_id,
+        changes.observed_at,
     )
     return n
 
@@ -486,7 +573,10 @@ def close_season(conn, season_id: int, final_state: dict, observed_at: str) -> i
         # must not recompute it from today's active roster/daily metrics.
         return 0
     changes = _build_season_close_change_set(
-        conn, season_id, final_state, observed_at,
+        conn,
+        season_id,
+        final_state,
+        observed_at,
     )
     return _apply_season_close_change_set(conn, changes)
 
@@ -502,24 +592,54 @@ def emit_race(conn, entity_tag, old, new, observed_at, window_start) -> int:
     if new_season is not None:
         _ensure_war_weeks_defense_column(conn)
         _ensure_season(conn, new_season, observed_at)
-        _upsert_week(conn, new_season, new_section, new_type, observed_at,
-                     defense_fame=_week_defense_fame(new))
+        _upsert_week(
+            conn,
+            new_season,
+            new_section,
+            new_type,
+            observed_at,
+            defense_fame=_week_defense_fame(new),
+        )
 
     # season rollover: prior season dies, new one is born (same observation)
     if new_season is not None and old_season is not None and new_season != old_season:
         _finalize_week(conn, old, observed_at)  # colosseum week's final standings
-        n += _emit(conn, old_season, old_section, observed_at, window_start,
-                   "week_finished", f"week_finished:{old_season}:{old_section}",
-                   {"our_rank": _our_rank(old), "our_fame": old.get("our_fame"),
-                    "standings": _standings(old)})
+        n += _emit(
+            conn,
+            old_season,
+            old_section,
+            observed_at,
+            window_start,
+            "week_finished",
+            f"week_finished:{old_season}:{old_section}",
+            {
+                "our_rank": _our_rank(old),
+                "our_fame": old.get("our_fame"),
+                "standings": _standings(old),
+            },
+        )
         n += close_season(conn, old_season, old, observed_at)
-        n += _emit(conn, new_season, new_section, observed_at, window_start,
-                   "season_started", f"season_started:{new_season}",
-                   {"season_id": new_season})
+        n += _emit(
+            conn,
+            new_season,
+            new_section,
+            observed_at,
+            window_start,
+            "season_started",
+            f"season_started:{new_season}",
+            {"season_id": new_season},
+        )
     elif old_season is None and new_season is not None:
-        n += _emit(conn, new_season, new_section, observed_at, window_start,
-                   "season_started", f"season_started:{new_season}",
-                   {"season_id": new_season})
+        n += _emit(
+            conn,
+            new_season,
+            new_section,
+            observed_at,
+            window_start,
+            "season_started",
+            f"season_started:{new_season}",
+            {"season_id": new_season},
+        )
 
     # week rollover within a season
     if (
@@ -530,10 +650,20 @@ def emit_race(conn, entity_tag, old, new, observed_at, window_start) -> int:
         and new_section > old_section
     ):
         _finalize_week(conn, old, observed_at)
-        n += _emit(conn, old_season, old_section, observed_at, window_start,
-                   "week_finished", f"week_finished:{old_season}:{old_section}",
-                   {"our_rank": _our_rank(old), "our_fame": old.get("our_fame"),
-                    "standings": _standings(old)})
+        n += _emit(
+            conn,
+            old_season,
+            old_section,
+            observed_at,
+            window_start,
+            "week_finished",
+            f"week_finished:{old_season}:{old_section}",
+            {
+                "our_rank": _our_rank(old),
+                "our_fame": old.get("our_fame"),
+                "standings": _standings(old),
+            },
+        )
 
     # colosseum detected — the end is discovered, not known (§16.1)
     if new_type == "colosseum" and old_type != "colosseum" and new_season is not None:
@@ -542,9 +672,16 @@ def emit_race(conn, entity_tag, old, new, observed_at, window_start) -> int:
             "WHERE season_id = ? AND colosseum_detected_at IS NULL",
             (observed_at, new_season),
         )
-        n += _emit(conn, new_season, new_section, observed_at, window_start,
-                   "colosseum_detected", f"colosseum_detected:{new_season}",
-                   {"section_index": new_section})
+        n += _emit(
+            conn,
+            new_season,
+            new_section,
+            observed_at,
+            window_start,
+            "colosseum_detected",
+            f"colosseum_detected:{new_season}",
+            {"section_index": new_section},
+        )
 
     # war day opened — day transitions into a battle day
     if (
@@ -555,11 +692,20 @@ def emit_race(conn, entity_tag, old, new, observed_at, window_start) -> int:
         and wd_open.war_day_index is not None
         and new_season is not None
     ):
-        n += _emit(conn, new_season, new_section, observed_at, window_start,
-                   "war_day_opened",
-                   f"war_day_opened:{new_season}:{new_section}:{wd_open.war_day_index}",
-                   {"period_type": new_type, "day_index": wd_open.war_day_index,
-                    "war_day_human": wd_open.human})
+        n += _emit(
+            conn,
+            new_season,
+            new_section,
+            observed_at,
+            window_start,
+            "war_day_opened",
+            f"war_day_opened:{new_season}:{new_section}:{wd_open.war_day_index}",
+            {
+                "period_type": new_type,
+                "day_index": wd_open.war_day_index,
+                "war_day_human": wd_open.human,
+            },
+        )
 
     # race finished — we crossed the finish line mid-week (§16.4 tone shift).
     # NEVER in Colosseum: there is no finish line there (clock.py, verified
@@ -573,15 +719,24 @@ def emit_race(conn, entity_tag, old, new, observed_at, window_start) -> int:
         and old_fame < finish_line <= new_fame
         and new_season is not None
     ):
-        n += _emit(conn, new_season, new_section, observed_at, window_start,
-                   "race_finished", f"race_finished:{new_season}:{new_section}",
-                   {"finished_at": observed_at})
+        n += _emit(
+            conn,
+            new_season,
+            new_section,
+            observed_at,
+            window_start,
+            "race_finished",
+            f"race_finished:{new_season}:{new_section}",
+            {"finished_at": observed_at},
+        )
 
     _upsert_participation(conn, new, observed_at)
     return n
 
 
-def finalize_attendance_day(conn, season_id: int, section_index: int, war_day_index: int) -> int:
+def finalize_attendance_day(
+    conn, season_id: int, section_index: int, war_day_index: int
+) -> int:
     """End-of-battle-day finalization (runtime.md §3 war-attendance-snapshot):
     stamp final decks_used and fame_delta; evaluators read finalized days only."""
     cur = conn.execute(

@@ -1,5 +1,5 @@
 """Seed the Editor's founding rubric entries (editor.md §3) + create the
-editor_verdicts table on the live DB. Idempotent — every entry dedupes on its
+retired inline-verdict mechanism. Idempotent — every entry dedupes on its
 source_event_key; safe to re-run.
 
 Post texts are verbatim from Discord (message ids in provenance), fetched

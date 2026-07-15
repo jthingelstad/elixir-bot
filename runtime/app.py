@@ -3,42 +3,51 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
-import logging
 import sys
 from datetime import datetime, timedelta, timezone
 
 import discord
+import pytz
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from discord.ext import commands
 from dotenv import load_dotenv
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import pytz
 
 import cr_api  # re-exported; accessed by runtime submodules
 import db
 import elixir_agent
 import prompts
-from runtime.activities import format_scheduler_startup_summary, register_scheduled_activities
+from runtime import onboarding, prompt_feedback
+from runtime import process as _process_service
+from runtime import status as runtime_status
+from runtime.activities import (
+    format_scheduler_startup_summary,
+    register_scheduled_activities,
+)
 from runtime.admin import admin_command_requires_leader, dispatch_admin_command
 from runtime.channel_router import route_message
 from runtime.discord_commands import register_elixir_app_commands
-from runtime.leader_action_policy import can_post_leader_action
-from runtime import onboarding
-from runtime import process as _process_service
-from runtime import prompt_feedback
-from runtime import status as runtime_status
 from runtime.emoji import sync_emoji
+from runtime.leader_action_policy import can_post_leader_action
 from runtime.system_signals import queue_startup_system_signals
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 # Quiet noisy third-party loggers so operational signals stay readable.
 # discord.py installs its own handler via utils.setup_logging() in client.run();
 # we pass log_handler=None below to suppress it, and clear any handlers it may
 # have attached at import time so messages don't double-print.
-for _noisy in ("apscheduler", "apscheduler.scheduler", "apscheduler.executors.default", "httpx"):
+for _noisy in (
+    "apscheduler",
+    "apscheduler.scheduler",
+    "apscheduler.executors.default",
+    "httpx",
+):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 for _discord_logger in ("discord", "discord.client", "discord.gateway", "discord.http"):
     _dl = logging.getLogger(_discord_logger)
@@ -53,6 +62,7 @@ def _record_incident(component, error, context=None, severity="error"):
     the path it observes."""
     try:
         from storage.incidents import record_incident
+
         record_incident(component, error, context=context, severity=severity)
     except Exception:
         log.exception("incident recording boundary failed component=%s", component)
@@ -105,7 +115,10 @@ SLASH_COMMANDS_SYNCED = False
 def _has_leader_role(member) -> bool:
     if not LEADER_ROLE_ID:
         return True
-    return any(getattr(role, "id", None) == LEADER_ROLE_ID for role in getattr(member, "roles", []))
+    return any(
+        getattr(role, "id", None) == LEADER_ROLE_ID
+        for role in getattr(member, "roles", [])
+    )
 
 
 def _is_clanops_channel(channel) -> bool:
@@ -140,8 +153,19 @@ def _normalize_prompt_failure_question(question):
     return " ".join(text.split())
 
 
-def _log_prompt_failure(*, question, workflow, failure_type, failure_stage, channel, author,
-                        discord_message_id=None, detail=None, result_preview=None, raw_json=None):
+def _log_prompt_failure(
+    *,
+    question,
+    workflow,
+    failure_type,
+    failure_stage,
+    channel,
+    author,
+    discord_message_id=None,
+    detail=None,
+    result_preview=None,
+    raw_json=None,
+):
     llm = runtime_status.snapshot().get("llm") or {}
     clean_question = _normalize_prompt_failure_question(question)
     try:
@@ -185,11 +209,39 @@ def _log_prompt_failure(*, question, workflow, failure_type, failure_stage, chan
 # address helpers and jobs through it. These imports ARE that surface — they
 # replaced a dynamic __export_public copy loop, so keep them explicit.
 
-from runtime.helpers import (  # noqa: E402,F401
+from runtime.alerts import (  # noqa: E402,F401
+    _ALERT_SIGNATURES,
+    _admin_mention_ref,
+    _alert_admin,
+    _clear_alert,
+    _clear_cr_api_failure_alert_if_recovered,
+    _clear_llm_failure_alert_if_recovered,
+    _cr_api_failure_signature,
+    _cr_api_outage_signature,
+    _is_hard_fail_llm_error,
+    _llm_outage_signature,
+    _maybe_alert_cr_api_failure,
+    _maybe_alert_llm_failure,
+    schedule_llm_failure_alert,
+)
+from runtime.clan_chat_copy import (  # noqa: E402,F401
+    generate_clan_chat_copy,
+    sign_clan_chat_text,
+)
+from runtime.discord_posting import (  # noqa: E402,F401
+    _chunk_discord_text,
+    _entry_posts,
+    _normalize_entry_posts,
+    _post_to_elixir,
+    _resolve_custom_emoji,
+)
+from runtime.helpers import (  # noqa: E402,F401  # noqa: E402,F401
+    _DB_STATUS_MEMORY_TABLES,
+    _WEEKLY_RECAP_HEADER_RE,
     DISCORD_CHUNK_SIZE,
     DISCORD_MAX_MESSAGE_LEN,
-    _DB_STATUS_MEMORY_TABLES,
     _author_msg_kwargs,
+    _bare_tag,
     _bot,
     _bot_role_id,
     _build_clan_status_report,
@@ -205,7 +257,7 @@ from runtime.helpers import (  # noqa: E402,F401
     _build_top_war_contributors_report,
     _build_war_status_report,
     _build_weekly_clan_recap_context,
-    _bare_tag,
+    _channel_config_by_key,
     _channel_conversation_scope,
     _channel_msg_kwargs,
     _channel_reply_target_name,
@@ -221,6 +273,7 @@ from runtime.helpers import (  # noqa: E402,F401
     _fmt_num,
     _fmt_relative,
     _format_relative_join_age,
+    _format_weekly_recap_post,
     _get_channel_behavior,
     _get_singleton_channel,
     _get_singleton_channel_id,
@@ -245,6 +298,7 @@ from runtime.helpers import (  # noqa: E402,F401
     _share_channel_result,
     _status_badge,
     _strip_bot_mentions,
+    _strip_weekly_recap_header,
     _with_leader_ping,
 )
 from runtime.jobs._core import (  # noqa: E402,F401
@@ -259,9 +313,9 @@ from runtime.jobs._core import (  # noqa: E402,F401
     _query_or_default,
     _summarize_member_rows,
     _weekly_clan_recap,
+    _weekly_discord_invite_relay,
     _weekly_elder_standing,
     _weekly_member_report_cycle,
-    _weekly_discord_invite_relay,
 )
 from runtime.jobs._intel import (  # noqa: E402,F401
     _clan_wars_intel_report,
@@ -283,18 +337,6 @@ from runtime.jobs._memory import (  # noqa: E402,F401
     _build_memory_synthesis_context,
     _memory_synthesis_cycle,
 )
-from runtime.system_status_post import (  # noqa: E402,F401
-    _post_system_signal_updates,
-    _preauthored_system_signal_result,
-    _publish_pending_system_signal_updates,
-    _system_signal_updates,
-)
-from runtime.helpers import (  # noqa: E402,F401
-    _WEEKLY_RECAP_HEADER_RE,
-    _channel_config_by_key,
-    _format_weekly_recap_post,
-    _strip_weekly_recap_header,
-)
 from runtime.jobs._promotion import (  # noqa: E402,F401
     _promotion_channel_posts,
     _promotion_content_cycle,
@@ -304,40 +346,13 @@ from runtime.jobs._promotion import (  # noqa: E402,F401
     _validate_promote_content_or_raise,
 )
 from runtime.jobs._tournament import (  # noqa: E402,F401
+    _TOURNAMENT_JOB_ID,
     TOURNAMENT_BATTLE_LOG_SPACING_SECONDS,
     TOURNAMENT_POLL_MINUTES,
-    _TOURNAMENT_JOB_ID,
     _tournament_recap,
     _tournament_watch_tick,
     start_tournament_watch,
     stop_tournament_watch,
-)
-
-from runtime.alerts import (  # noqa: E402,F401
-    _ALERT_SIGNATURES,
-    _admin_mention_ref,
-    _alert_admin,
-    _clear_alert,
-    _clear_cr_api_failure_alert_if_recovered,
-    _clear_llm_failure_alert_if_recovered,
-    _cr_api_failure_signature,
-    _cr_api_outage_signature,
-    _is_hard_fail_llm_error,
-    _llm_outage_signature,
-    _maybe_alert_cr_api_failure,
-    _maybe_alert_llm_failure,
-    schedule_llm_failure_alert,
-)
-from runtime.discord_posting import (  # noqa: E402,F401
-    _chunk_discord_text,
-    _entry_posts,
-    _normalize_entry_posts,
-    _post_to_elixir,
-    _resolve_custom_emoji,
-)
-from runtime.clan_chat_copy import (  # noqa: E402,F401
-    generate_clan_chat_copy,
-    sign_clan_chat_text,
 )
 from runtime.leader_action_ui import (  # noqa: E402,F401
     CLASH_COPY_MAX_LENGTH,
@@ -350,8 +365,16 @@ from runtime.startup import (  # noqa: E402,F401
     _resolve_runtime_channel,
     _startup_channel_audit_summary,
 )
+from runtime.system_status_post import (  # noqa: E402,F401
+    _post_system_signal_updates,
+    _preauthored_system_signal_result,
+    _publish_pending_system_signal_updates,
+    _system_signal_updates,
+)
 
 register_elixir_app_commands(bot)
+
+
 async def _engine_send(channel_id: int, text: str, image_url: str | None = None):
     """Async Discord send for the engine; returns the first message id or None.
     When image_url is set (game-level card/badge announcements), post the copy
@@ -373,7 +396,10 @@ async def _engine_send(channel_id: int, text: str, image_url: str | None = None)
             msg = await channel.send(content=content, embed=embed)
             return getattr(msg, "id", None)
         except Exception:
-            log.exception("engine: embed send failed for channel %s; text-only fallback", channel_id)
+            log.exception(
+                "engine: embed send failed for channel %s; text-only fallback",
+                channel_id,
+            )
             # fall through to a plain text post so the announcement still lands
     sent_messages = await _post_to_elixir(channel, {"content": text})
     if not sent_messages:
@@ -402,7 +428,9 @@ def _engine_startup_cursors() -> int:
                 (consumer_key,),
             ).fetchone()
             if row is None:
-                engine_db.cursor_set(conn, consumer_key, engine_db.stream_head(conn, table))
+                engine_db.cursor_set(
+                    conn, consumer_key, engine_db.stream_head(conn, table)
+                )
                 initialized += 1
         conn.commit()
     finally:
@@ -456,7 +484,9 @@ async def _post_pending_leader_action_cards(limit: int = 4) -> int:
                 )
             posted += 1
         except Exception:
-            log.exception("engine leader-action card post failed for %s", action.get("action_id"))
+            log.exception(
+                "engine leader-action card post failed for %s", action.get("action_id")
+            )
             if not post_attempted:
                 try:  # sentinel write itself failed pre-post — safe to retry
                     await asyncio.to_thread(
@@ -465,8 +495,11 @@ async def _post_pending_leader_action_cards(limit: int = 4) -> int:
                         )
                     )
                 except Exception:
-                    log.debug("sentinel clear failed for %s", action.get("action_id"),
-                              exc_info=True)
+                    log.debug(
+                        "sentinel clear failed for %s",
+                        action.get("action_id"),
+                        exc_info=True,
+                    )
     return posted
 
 
@@ -498,8 +531,10 @@ async def _ensure_role_action_clan_chat_copy(action: dict) -> dict:
         # noun, never the #TAG.
         tag = action.get("target_player_tag")
         if tag:
+            conn = None
             try:
-                row = db.get_connection().execute(
+                conn = db.get_connection()
+                row = conn.execute(
                     "SELECT display_name, current_name FROM players WHERE player_tag = ?",
                     (tag,),
                 ).fetchone()
@@ -507,10 +542,15 @@ async def _ensure_role_action_clan_chat_copy(action: dict) -> dict:
                     name = row["display_name"] or row["current_name"]
             except Exception:
                 log.warning("copy name lookup failed for %s", tag, exc_info=True)
+            finally:
+                if conn is not None:
+                    conn.close()
     name = name or "this member"
     rationale = action.get("rationale") or ""
     fallback = role_action_clan_chat_copy(
-        action_type=atype, target_player_name=name, rationale=rationale,
+        action_type=atype,
+        target_player_name=name,
+        rationale=rationale,
         max_chars=CLASH_COPY_MAX_LENGTH,
     )
     copy_text = fallback
@@ -532,10 +572,14 @@ async def _ensure_role_action_clan_chat_copy(action: dict) -> dict:
         if result and getattr(result, "messages", None):
             copy_text = result.messages[0]
     except Exception:
-        log.warning("role-action clan-chat copy generation failed for %s",
-                    action.get("action_id"), exc_info=True)
+        log.warning(
+            "role-action clan-chat copy generation failed for %s",
+            action.get("action_id"),
+            exc_info=True,
+        )
 
     if copy_text:
+
         def _persist(a_id=action["action_id"], text=copy_text):
             conn = db.get_connection()
             try:
@@ -547,18 +591,25 @@ async def _ensure_role_action_clan_chat_copy(action: dict) -> dict:
                 conn.commit()
             finally:
                 conn.close()
+
         await asyncio.to_thread(_persist)
-        action = {**action, "copy_original_text": copy_text, "copy_current_text": copy_text}
+        action = {
+            **action,
+            "copy_original_text": copy_text,
+            "copy_current_text": copy_text,
+        }
     return action
+
+
 async def _engine_tick():
     """The v5.1 data tick: poll → mirror → emit → project → manage."""
     import cr_api as _cr_api
-
     from engine import db as engine_db
     from engine import tick as engine_tick_mod
     from engine.recognition import compose as engine_compose
 
     runtime_status.mark_job_start("engine_tick")
+
     def _run():
         conn = engine_db.connect()
         try:
@@ -598,7 +649,9 @@ async def _engine_tick():
         webapp_ticks.record_tick(dict(counters))
     except Exception:
         log.debug("webapp tick recording failed", exc_info=True)
-    runtime_status.mark_job_success("engine_tick", json.dumps(counters, default=str)[:900])
+    runtime_status.mark_job_success(
+        "engine_tick", json.dumps(counters, default=str)[:900]
+    )
     return counters
 
 
@@ -641,7 +694,8 @@ async def _weekly_leadership_review():
                             f"Weekly review: {tag} is {kind.replace('_', ' ')} "
                             f"per the management evaluators. Evidence: {json.dumps(row, default=str)[:600]}"
                         ),
-                        rationale=row.get("rationale") or "Weekly management review candidacy.",
+                        rationale=row.get("rationale")
+                        or "Weekly management review candidacy.",
                         target_player_tag=tag,
                         target_player_name=row.get("player_name"),
                         source_signal_key=f"engine:weekly-review:{monday.isoformat()}:{tag}:{action_type}",
@@ -713,7 +767,9 @@ async def _engine_health():
             previous_size = None
             if row:
                 try:
-                    last = json.loads(json.loads(row["status_json"]).get("last_summary") or "{}")
+                    last = json.loads(
+                        json.loads(row["status_json"]).get("last_summary") or "{}"
+                    )
                     previous_size = last.get("db_size_bytes")
                 except (TypeError, ValueError):
                     pass
@@ -730,9 +786,12 @@ async def _engine_health():
     if problems:
         body = "\n".join(f"- {p}" for p in problems)
         await asyncio.to_thread(
-            elixir_log.post_event, f"**Engine health: {len(problems)} issue(s)**\n{body}"
+            elixir_log.post_event,
+            f"**Engine health: {len(problems)} issue(s)**\n{body}",
         )
-        log.warning("engine health: %d issue(s): %s", len(problems), "; ".join(problems))
+        log.warning(
+            "engine health: %d issue(s): %s", len(problems), "; ".join(problems)
+        )
     else:
         log.info("engine health: all checks clean (db %.1fMB)", size / 1e6)
     runtime_status.mark_job_success(
@@ -745,7 +804,9 @@ async def _engine_health():
 # The leader-only #thinking channel — Elixir's train of thought lands here as a
 # bot-native embed per loop, with the full read/tool-trace/decision in a thread.
 # Replaced the old #elixir-log webhook (2026-07-09).
-THINKING_CHANNEL_ID = int(os.getenv("ELIXIR_THINKING_CHANNEL_ID", "1524983821852872896"))
+THINKING_CHANNEL_ID = int(
+    os.getenv("ELIXIR_THINKING_CHANNEL_ID", "1524983821852872896")
+)
 
 
 # Live #thinking session for the in-flight tick. Awareness runs one-at-a-time
@@ -761,33 +822,43 @@ async def _awareness_event(event: dict) -> None:
     the header with the outcome + verbatim decision. Never raises — a diagnostic
     hiccup must not fail the tick; the thought is persisted regardless."""
     import discord
+
     from runtime.awareness import diagnostic as diag_mod
 
     channel = bot.get_channel(THINKING_CHANNEL_ID)
     if channel is None:
-        log.warning("awareness: #thinking channel %s not found; event dropped",
-                    THINKING_CHANNEL_ID)
+        log.warning(
+            "awareness: #thinking channel %s not found; event dropped",
+            THINKING_CHANNEL_ID,
+        )
         return
     none = discord.AllowedMentions.none()
     etype = event.get("type")
     try:
         if etype == "start":
             embed = discord.Embed(title="🧠 Awareness — deliberating…", color=0x95A5A6)
-            embed.add_field(name="Read", value=(event.get("read_summary") or "—")[:1024],
-                            inline=False)
+            embed.add_field(
+                name="Read",
+                value=(event.get("read_summary") or "—")[:1024],
+                inline=False,
+            )
             msg = await channel.send(embed=embed, allowed_mentions=none)
-            thread = await msg.create_thread(name="Awareness — deliberating…",
-                                             auto_archive_duration=1440)
+            thread = await msg.create_thread(
+                name="Awareness — deliberating…", auto_archive_duration=1440
+            )
             _thinking_session.clear()
             _thinking_session.update(message=msg, thread=thread)
-            await thread.send("_Live train of thought — tool calls stream in below._",
-                              allowed_mentions=none)
+            await thread.send(
+                "_Live train of thought — tool calls stream in below._",
+                allowed_mentions=none,
+            )
 
         elif etype in ("tool", "truncation", "retry"):
             thread = _thinking_session.get("thread")
             if thread is not None:
-                await thread.send(diag_mod.format_live_event(event)[:1900],
-                                  allowed_mentions=none)
+                await thread.send(
+                    diag_mod.format_live_event(event)[:1900], allowed_mentions=none
+                )
 
         elif etype == "end":
             render = event.get("render") or {}
@@ -803,21 +874,33 @@ async def _awareness_event(event: dict) -> None:
                 # Convenience link to the Observatory LLM view (this tick's rounds
                 # at the top) — drill into any call for the full prompt + response.
                 if obs_url:
-                    await thread.send(f"🔍 **Full prompts/responses in the Observatory:** {obs_url}",
-                                      allowed_mentions=none, suppress_embeds=True)
+                    await thread.send(
+                        f"🔍 **Full prompts/responses in the Observatory:** {obs_url}",
+                        allowed_mentions=none,
+                        suppress_embeds=True,
+                    )
                 try:
                     await thread.edit(name=render.get("thread_name") or f"Loop #{n}")
                 except Exception:
-                    log.debug("awareness: #thinking thread rename failed", exc_info=True)
+                    log.debug(
+                        "awareness: #thinking thread rename failed", exc_info=True
+                    )
             if msg is not None:
-                embed = discord.Embed(title=render.get("header") or f"🧠 Loop #{n}",
-                                      color=render.get("color"),
-                                      url=obs_url or None)
+                embed = discord.Embed(
+                    title=render.get("header") or f"🧠 Loop #{n}",
+                    color=render.get("color"),
+                    url=obs_url or None,
+                )
                 for name, value in (render.get("fields") or {}).items():
-                    embed.add_field(name=name, value=(value or "—")[:1024], inline=False)
+                    embed.add_field(
+                        name=name, value=(value or "—")[:1024], inline=False
+                    )
                 if obs_url:
-                    embed.add_field(name="Full details",
-                                    value=f"[Observatory · prompts & responses]({obs_url})", inline=False)
+                    embed.add_field(
+                        name="Full details",
+                        value=f"[Observatory · prompts & responses]({obs_url})",
+                        inline=False,
+                    )
                 try:
                     await msg.edit(embed=embed)
                 except Exception:
@@ -845,13 +928,17 @@ async def _awareness_loop():
     def _progress_fn(event):
         # Runs in the worker thread; marshal each live event back to the loop.
         try:
-            asyncio.run_coroutine_threadsafe(_awareness_event(event), loop).result(timeout=90)
+            asyncio.run_coroutine_threadsafe(_awareness_event(event), loop).result(
+                timeout=90
+            )
         except Exception:
             log.exception("awareness: #thinking event bridge failed")
 
     def _post_fn(channel_id, copy):
         # Worker thread → bot loop, mirroring the engine send_fn.
-        fut = asyncio.run_coroutine_threadsafe(_engine_send(int(channel_id), copy), loop)
+        fut = asyncio.run_coroutine_threadsafe(
+            _engine_send(int(channel_id), copy), loop
+        )
         return fut.result(timeout=120)
 
     def _relay_fn(post, channel_name):
@@ -862,7 +949,8 @@ async def _awareness_loop():
 
     def _deliver_fn(read, plan):
         return deliver_mod.deliver_posts(
-            read, plan,
+            read,
+            plan,
             post_fn=_post_fn,
             record_fn=awareness_store.record_awareness_post,
             relay_fn=_relay_fn,
@@ -871,7 +959,9 @@ async def _awareness_loop():
 
     try:
         counters = await asyncio.to_thread(
-            run_awareness_loop, progress_fn=_progress_fn, deliver_fn=_deliver_fn,
+            run_awareness_loop,
+            progress_fn=_progress_fn,
+            deliver_fn=_deliver_fn,
         )
     except Exception as exc:
         runtime_status.mark_job_failure("awareness_loop", str(exc))
@@ -930,7 +1020,9 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
     # wrote the Discord post — drawn from the full read, NOT a redraft of the post
     # — so there's no second LLM hop to lose depth or introduce drift. Accept it
     # only if it clears the deterministic guardrails; otherwise fall through.
-    copies = signed_valid_messages(post.get("clan_chat"), max_chars=CLASH_COPY_MAX_LENGTH)
+    copies = signed_valid_messages(
+        post.get("clan_chat"), max_chars=CLASH_COPY_MAX_LENGTH
+    )
     if copies is not None:
         copy_source = "brain"
     elif post.get("clan_chat"):
@@ -959,10 +1051,16 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
                 fallback_messages=[content],
                 metadata={"source": "awareness_relay", "channel": channel_name},
             )
-            copies = list(generated.messages) if generated and generated.messages else [fallback]
+            copies = (
+                list(generated.messages)
+                if generated and generated.messages
+                else [fallback]
+            )
             copy_source = "llm_fallback"
         except Exception:
-            log.warning("awareness relay clan-chat copy generation failed", exc_info=True)
+            log.warning(
+                "awareness relay clan-chat copy generation failed", exc_info=True
+            )
             copies = [fallback]
             copy_source = "signed_content"
     # Cap the sequence at 2 so a relay never becomes a wall of pastes; persist as
@@ -972,17 +1070,24 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
     log.info("awareness relay copy source=%s (%d msg)", copy_source, len(copies))
 
     baseline = await asyncio.to_thread(
-        db.build_leader_action_baseline, action_type="in_game_relay", target_player_tag=None
+        db.build_leader_action_baseline,
+        action_type="in_game_relay",
+        target_player_tag=None,
     )
     seq_note = f" ({len(copies)} messages, paste in order)" if len(copies) > 1 else ""
-    prompt_text = f"Paste this clan-chat note (from #{channel_name}){seq_note}: {copy_text}"
+    prompt_text = (
+        f"Paste this clan-chat note (from #{channel_name}){seq_note}: {copy_text}"
+    )
     action = await asyncio.to_thread(
         db.create_leader_action_recommendation,
         action_type="in_game_relay",
         objective=objective,
         prompt_text=prompt_text,
-        rationale=(post.get("relay_reason") or post.get("summary")
-                   or "Brain-flagged for clan chat"),
+        rationale=(
+            post.get("relay_reason")
+            or post.get("summary")
+            or "Brain-flagged for clan chat"
+        ),
         target_channel_key="arena-relay",
         target_channel_id=channel_config["id"],
         target_player_tag=None,
@@ -997,7 +1102,9 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
     )
     if not action or action.get("source_message_id"):
         return False
-    card_messages = await post_leader_action_card(relay_channel, action, copy_messages=copies)
+    card_messages = await post_leader_action_card(
+        relay_channel, action, copy_messages=copies
+    )
     return bool(card_messages)
 
 
@@ -1007,9 +1114,9 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
 
 
 async def _db_backup():
-    """Daily compressed snapshots of the operational + memory DBs to
-    ELIXIR_BACKUP_DIR (iCloud Drive — offsite via sync). Uses the online
-    backup API; no downtime. Added 2026-07-04 (Jamie: offsite backup)."""
+    """Daily compressed snapshots of the single operational DB to
+    ELIXIR_BACKUP_DIR (iCloud Drive—offsite via sync). Uses the online backup
+    API with no downtime."""
     from scripts.backup_db import create_backup, prune_backups
 
     runtime_status.mark_job_start("db_backup")
@@ -1080,7 +1187,9 @@ async def _war_attendance_snapshot():
         runtime_status.mark_job_failure("war_attendance_snapshot", str(exc))
         log.exception("war attendance snapshot failed")
         return
-    runtime_status.mark_job_success("war_attendance_snapshot", json.dumps(result, default=str))
+    runtime_status.mark_job_success(
+        "war_attendance_snapshot", json.dumps(result, default=str)
+    )
     return result
 
 
@@ -1093,7 +1202,9 @@ async def _action_outcome_refresh():
         refreshed = await asyncio.to_thread(db.refresh_due_leader_action_outcomes)
         if refreshed:
             log.info("action outcome refresh: %s due outcome(s)", len(refreshed))
-            from runtime.leader_action_feedback import queue_leader_action_feedback_refresh
+            from runtime.leader_action_feedback import (
+                queue_leader_action_feedback_refresh,
+            )
 
             for action_type in sorted(
                 {a.get("action_type") for a in refreshed if a.get("action_type")}
@@ -1130,7 +1241,10 @@ async def on_ready():
                 # intentionally operating with a guild-scoped slash surface.
                 await bot.tree.sync()
                 await bot.tree.sync(guild=APP_GUILD)
-                log.info("Synced /elixir commands to guild %s and cleared stale global commands", GUILD_ID)
+                log.info(
+                    "Synced /elixir commands to guild %s and cleared stale global commands",
+                    GUILD_ID,
+                )
             else:
                 await bot.tree.sync()
                 log.info("Synced global /elixir commands")
@@ -1151,7 +1265,9 @@ async def on_ready():
     except Exception:
         log.exception("observatory webapp startup failed")
     if not scheduler.running:
-        cleared_stale_jobs = await asyncio.to_thread(runtime_status.clear_stale_running_jobs)
+        cleared_stale_jobs = await asyncio.to_thread(
+            runtime_status.clear_stale_running_jobs
+        )
         if cleared_stale_jobs:
             log.warning(
                 "Cleared stale runtime job running state after restart: %s",
@@ -1174,18 +1290,24 @@ async def on_ready():
         try:
             initialized = await asyncio.to_thread(_engine_startup_cursors)
             if initialized:
-                log.info("engine startup: %s cursor(s) initialized at head", initialized)
+                log.info(
+                    "engine startup: %s cursor(s) initialized at head", initialized
+                )
         except Exception:
             log.exception("engine startup cursor init failed")
         startup_posted = await _post_startup_message()
         if not startup_posted:
             log.warning("Startup announcement was not posted to leadership")
-        log.info("Scheduler started — %s", format_scheduler_startup_summary(sys.modules[__name__]))
+        log.info(
+            "Scheduler started — %s",
+            format_scheduler_startup_summary(sys.modules[__name__]),
+        )
         # Resume tournament watch if one was active before restart
         try:
             active_tournament = await asyncio.to_thread(db.get_active_tournament)
             if active_tournament:
                 from runtime.jobs import start_tournament_watch
+
                 start_tournament_watch()
                 log.info(
                     "Resumed tournament watch for %s (%s)",
@@ -1197,17 +1319,20 @@ async def on_ready():
         # Recover any deferred recap that didn't post before this restart.
         try:
             from runtime.jobs._tournament import resume_pending_tournament_recaps
+
             await resume_pending_tournament_recaps()
         except Exception as exc:
             log.warning("Pending tournament recap resume failed: %s", exc)
         # Best-effort startup card catalog sync
         try:
             from runtime.jobs import _card_catalog_sync
+
             bot.loop.create_task(_card_catalog_sync())
         except Exception as exc:
             log.warning("Startup card catalog sync failed: %s", exc)
         try:
             from runtime.leader_action_ui import restore_leader_action_views
+
             await restore_leader_action_views(bot)
         except Exception as exc:
             log.warning("Leader action view restore failed: %s", exc)
@@ -1244,7 +1369,11 @@ async def on_message_delete(message):
     Elixir's OWN posts in one of its posting lanes is the strongest
     anti-pattern signal — capture the copy before it's gone."""
     try:
-        if bot.user is None or message.author is None or message.author.id != bot.user.id:
+        if (
+            bot.user is None
+            or message.author is None
+            or message.author.id != bot.user.id
+        ):
             return
         from engine import editor as engine_editor
         from engine.recognition import compose as engine_compose
@@ -1270,11 +1399,16 @@ async def on_message_delete(message):
 
         mid = await asyncio.to_thread(_record)
         if mid:
-            log.info("editor: deletion of message %s in #%s recorded as anti-pattern memory %s",
-                     message.id, channel_name, mid)
+            log.info(
+                "editor: deletion of message %s in #%s recorded as anti-pattern memory %s",
+                message.id,
+                channel_name,
+                mid,
+            )
     except Exception:
-        log.exception("editor deletion feeder failed for message %s",
-                      getattr(message, "id", "?"))
+        log.exception(
+            "editor deletion feeder failed for message %s", getattr(message, "id", "?")
+        )
 
 
 @bot.event

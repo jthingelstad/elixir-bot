@@ -24,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
@@ -38,7 +39,6 @@ from runtime.helpers._members import (
     _build_member_war_decks_report,
 )
 from storage.war_analytics import war_player_types_by_tag
-
 
 # ── Member selection ──────────────────────────────────────────────────────
 
@@ -104,7 +104,8 @@ def generate_conversation_script(member: dict) -> list[str]:
 
     deck_status = (
         "has a current ladder deck stored"
-        if has_deck else "has no current deck data (new or lapsed player)"
+        if has_deck
+        else "has no current deck data (new or lapsed player)"
     )
 
     # Steer war-capable members toward exercising the war-deck display path
@@ -113,8 +114,8 @@ def generate_conversation_script(member: dict) -> list[str]:
         "- At least ONE of the 3 turns should involve war decks (either "
         "asking to see them, review them, or tweak them). Example phrasings: "
         "'show me my war decks', 'pull up my 4 war decks', 'review my war decks'."
-        if war_type in {"regular", "occasional"} else
-        "- This member doesn't play war much, so do NOT have them ask about war decks."
+        if war_type in {"regular", "occasional"}
+        else "- This member doesn't play war much, so do NOT have them ask about war decks."
     )
 
     prompt = (
@@ -181,6 +182,7 @@ def install_tool_capture() -> None:
     # rebinds the name in the chat module. We have to patch the name where it's
     # actually called from.
     from agent import chat as agent_chat
+
     tool_exec._execute_tool = _capturing_execute_tool
     agent_chat._execute_tool = _capturing_execute_tool
     if hasattr(elixir_agent, "_execute_tool"):
@@ -200,7 +202,10 @@ def run_turn(member: dict, question: str, conversation_history: list[dict]) -> d
     """Run a single conversation turn through the real deck pipeline."""
     reset_tool_capture()
     intent = classify_intent(
-        question, workflow="interactive", mentioned=True, allows_open_channel_reply=False,
+        question,
+        workflow="interactive",
+        mentioned=True,
+        allows_open_channel_reply=False,
         conversation_history=conversation_history,
     )
     route = intent.get("route")
@@ -285,8 +290,10 @@ def run_turn(member: dict, question: str, conversation_history: list[dict]) -> d
 
 def print_member_report(member: dict, turns: list[dict]) -> None:
     name = member.get("current_name") or member["player_tag"]
-    print(f"\n── {name} ({member['player_tag']}) "
-          f"[war={member['war_player_type']}, has_deck={member['has_current_deck']}] ──")
+    print(
+        f"\n── {name} ({member['player_tag']}) "
+        f"[war={member['war_player_type']}, has_deck={member['has_current_deck']}] ──"
+    )
     for i, t in enumerate(turns, 1):
         flag = "!" if t.get("error") else ("·" if t.get("skipped") else " ")
         route_label = f"{t.get('route')}"
@@ -321,7 +328,9 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
     route_modes = Counter(
         f"{t.get('route')}/{t.get('mode') or '-'}" for _, t in all_turns
     )
-    event_types = Counter(t.get("event_type") for _, t in all_turns if t.get("event_type"))
+    event_types = Counter(
+        t.get("event_type") for _, t in all_turns if t.get("event_type")
+    )
     tools = Counter()
     for _, t in all_turns:
         for name, _args in t.get("tool_calls") or []:
@@ -335,7 +344,9 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
         print("\nError details:")
         for m, t in all_turns:
             if t.get("error"):
-                print(f"  {m.get('current_name', m.get('player_tag', '?'))} — {t['error']}")
+                print(
+                    f"  {m.get('current_name', m.get('player_tag', '?'))} — {t['error']}"
+                )
 
     print("\nRoute distribution:")
     for route, n in routes.most_common():
@@ -353,23 +364,30 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
     # Mode inheritance: a follow-up turn (turn index > 1) whose question lacks
     # an explicit war/regular cue but still carries the right mode is a win.
     follow_ups_with_mode = [
-        (m, t) for m, t in all_turns
+        (m, t)
+        for m, t in all_turns
         if t.get("mode") in {"war", "regular"}
         and t.get("route") in {"deck_review", "deck_suggest"}
     ]
     print(f"\nFollow-ups with concrete mode: {len(follow_ups_with_mode)}")
 
     war_suggest_turns = [
-        t for _, t in all_turns
-        if t.get("route") == "deck_suggest" and t.get("mode") == "war"
+        t
+        for _, t in all_turns
+        if t.get("route") == "deck_suggest"
+        and t.get("mode") == "war"
         and t.get("proposed_decks_count") is not None
     ]
     if war_suggest_turns:
         mismatches = [t for t in war_suggest_turns if t["proposed_decks_count"] != 4]
         print("\nWar deck_suggest validation:")
-        print(f"  {len(war_suggest_turns) - len(mismatches)}/{len(war_suggest_turns)} produced exactly 4 decks")
+        print(
+            f"  {len(war_suggest_turns) - len(mismatches)}/{len(war_suggest_turns)} produced exactly 4 decks"
+        )
         for t in mismatches:
-            print(f"  MISMATCH: got {t['proposed_decks_count']} decks for Q: {t['question'][:80]!r}")
+            print(
+                f"  MISMATCH: got {t['proposed_decks_count']} decks for Q: {t['question'][:80]!r}"
+            )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
@@ -377,9 +395,13 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--members", type=int, default=6, help="Number of members to test")
+    parser.add_argument(
+        "--members", type=int, default=6, help="Number of members to test"
+    )
     parser.add_argument("--turns", type=int, default=3, help="Turns per member")
-    parser.add_argument("--seed", type=int, default=None, help="Random seed for member selection")
+    parser.add_argument(
+        "--seed", type=int, default=None, help="Random seed for member selection"
+    )
     parser.add_argument("--out", default="scripts/deck_conversations_eval_results.json")
     args = parser.parse_args()
 
@@ -399,15 +421,19 @@ def main() -> None:
 
     print(f"Selected {len(members)} members:")
     for m in members:
-        print(f"  {m.get('current_name') or m['player_tag']:30s} "
-              f"({m['player_tag']})  war={m['war_player_type']:10s} "
-              f"deck_data={'yes' if m['has_current_deck'] else 'no'}")
+        print(
+            f"  {m.get('current_name') or m['player_tag']:30s} "
+            f"({m['player_tag']})  war={m['war_player_type']:10s} "
+            f"deck_data={'yes' if m['has_current_deck'] else 'no'}"
+        )
 
     all_rows = []
     all_turns: list[tuple[dict, dict]] = []
 
     for member in members:
-        print(f"\n— Generating script for {member.get('current_name') or member['player_tag']} —")
+        print(
+            f"\n— Generating script for {member.get('current_name') or member['player_tag']} —"
+        )
         script = generate_conversation_script(member)
         if not script:
             print("    !! no script generated, skipping member")
@@ -431,19 +457,25 @@ def main() -> None:
             assistant_content = turn.get("content")
             if assistant_content:
                 if isinstance(assistant_content, list):
-                    assistant_content = "\n\n".join(str(s) for s in assistant_content if s)
-                conversation_history.append({"role": "assistant", "content": assistant_content})
+                    assistant_content = "\n\n".join(
+                        str(s) for s in assistant_content if s
+                    )
+                conversation_history.append(
+                    {"role": "assistant", "content": assistant_content}
+                )
 
         print_member_report(member, turns)
-        all_rows.append({
-            "member": {
-                "tag": member["player_tag"],
-                "name": member.get("current_name"),
-                "war_player_type": member["war_player_type"],
-                "has_current_deck": member["has_current_deck"],
-            },
-            "turns": turns,
-        })
+        all_rows.append(
+            {
+                "member": {
+                    "tag": member["player_tag"],
+                    "name": member.get("current_name"),
+                    "war_player_type": member["war_player_type"],
+                    "has_current_deck": member["has_current_deck"],
+                },
+                "turns": turns,
+            }
+        )
 
     print_summary(all_turns)
 

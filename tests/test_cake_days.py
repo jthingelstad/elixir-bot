@@ -1,6 +1,7 @@
 """The awareness read surfaces today's member "cake days" for the WHOLE Chicago
 day (not the one-tick delta window), ACTIVE members only, so the brain reliably
 celebrates them once. Covers runtime/awareness/read.py:_cake_days_today."""
+
 from __future__ import annotations
 
 import db
@@ -9,7 +10,9 @@ from runtime.awareness.read import build_read
 NOW = "2026-07-01T00:00:00Z"
 
 
-def _insert_cake_event(conn, *, event_type, subject_tag, dedup_key, observed_at, payload_json):
+def _insert_cake_event(
+    conn, *, event_type, subject_tag, dedup_key, observed_at, payload_json
+):
     conn.execute(
         "INSERT INTO clan_events (dedup_key, event_type, clan_tag, subject_tag, "
         "observed_at, payload_json, created_at) VALUES (?, ?, '#J2RGCRVG', ?, ?, ?, ?)",
@@ -20,10 +23,14 @@ def _insert_cake_event(conn, *, event_type, subject_tag, dedup_key, observed_at,
 def _member(conn, tag, name, *, left_at=None):
     conn.execute(
         "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
-        "VALUES (?, ?, ?, ?)", (tag, name, NOW, NOW))
+        "VALUES (?, ?, ?, ?)",
+        (tag, name, NOW, NOW),
+    )
     conn.execute(
         "INSERT INTO clan_memberships (player_tag, joined_at, left_at, join_source) "
-        "VALUES (?, '2026-03-01', ?, 'test')", (tag, left_at))
+        "VALUES (?, '2026-03-01', ?, 'test')",
+        (tag, left_at),
+    )
 
 
 def test_cake_days_today_surfaces_active_members_all_day(engine_conn):
@@ -37,26 +44,44 @@ def test_cake_days_today_surfaces_active_members_all_day(engine_conn):
 
     engine_conn.execute(
         "INSERT INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
-        "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', ?, 1)", (NOW,))
-    _member(engine_conn, "#A", "Al")                       # active
+        "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', ?, 1)",
+        (NOW,),
+    )
+    _member(engine_conn, "#A", "Al")  # active
     _member(engine_conn, "#B", "Bo", left_at="2026-06-20")  # departed
 
     _insert_cake_event(
-        engine_conn, event_type="member_birthday", subject_tag="#A",
-        dedup_key=f"member_birthday:#A:{today}", observed_at=stamp,
-        payload_json='{"name": "Al"}')
+        engine_conn,
+        event_type="member_birthday",
+        subject_tag="#A",
+        dedup_key=f"member_birthday:#A:{today}",
+        observed_at=stamp,
+        payload_json='{"name": "Al"}',
+    )
     _insert_cake_event(
-        engine_conn, event_type="cr_account_anniversary", subject_tag="#A",
-        dedup_key="cr_account_anniversary:#A:5", observed_at=stamp,
-        payload_json='{"name": "Al", "years": 5}')
+        engine_conn,
+        event_type="cr_account_anniversary",
+        subject_tag="#A",
+        dedup_key="cr_account_anniversary:#A:5",
+        observed_at=stamp,
+        payload_json='{"name": "Al", "years": 5}',
+    )
     _insert_cake_event(  # departed member — must be excluded
-        engine_conn, event_type="join_anniversary", subject_tag="#B",
-        dedup_key=f"join_anniversary:#B:{today}", observed_at=stamp,
-        payload_json='{"name": "Bo", "months": 12, "is_annual": true}')
+        engine_conn,
+        event_type="join_anniversary",
+        subject_tag="#B",
+        dedup_key=f"join_anniversary:#B:{today}",
+        observed_at=stamp,
+        payload_json='{"name": "Bo", "months": 12, "is_annual": true}',
+    )
     _insert_cake_event(  # clan-wide, null subject — always included
-        engine_conn, event_type="clan_birthday", subject_tag=None,
-        dedup_key=f"clan_birthday:{today}", observed_at=stamp,
-        payload_json='{"years": 1}')
+        engine_conn,
+        event_type="clan_birthday",
+        subject_tag=None,
+        dedup_key=f"clan_birthday:{today}",
+        observed_at=stamp,
+        payload_json='{"years": 1}',
+    )
     engine_conn.commit()
 
     read = build_read(conn=engine_conn)
@@ -87,13 +112,19 @@ def test_cake_days_today_surfaces_active_members_all_day(engine_conn):
 def test_cake_days_today_empty_when_none_today(engine_conn):
     engine_conn.execute(
         "INSERT INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
-        "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', ?, 1)", (NOW,))
+        "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', ?, 1)",
+        (NOW,),
+    )
     _member(engine_conn, "#A", "Al")
     # A cake event stamped on a DIFFERENT day must not surface today.
     _insert_cake_event(
-        engine_conn, event_type="member_birthday", subject_tag="#A",
-        dedup_key="member_birthday:#A:2001-01-01", observed_at="2001-01-01T12:00:00Z",
-        payload_json='{"name": "Al"}')
+        engine_conn,
+        event_type="member_birthday",
+        subject_tag="#A",
+        dedup_key="member_birthday:#A:2001-01-01",
+        observed_at="2001-01-01T12:00:00Z",
+        payload_json='{"name": "Al"}',
+    )
     engine_conn.commit()
 
     read = build_read(conn=engine_conn)

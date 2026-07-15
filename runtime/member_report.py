@@ -22,12 +22,19 @@ from storage._formatting import preferred_display_name
 
 _ISO_CUTOFF = "%Y-%m-%dT%H:%M:%S"
 
-_CARD_EVENT_TYPES = ("card_unlocked", "card_level_milestone", "collection_level_milestone")
+_CARD_EVENT_TYPES = (
+    "card_unlocked",
+    "card_level_milestone",
+    "collection_level_milestone",
+)
 
 
 def _anchor(now: str | None) -> datetime:
-    return (datetime.fromisoformat(str(now).replace("Z", "+00:00")).astimezone(timezone.utc)
-            if now else datetime.now(timezone.utc))
+    return (
+        datetime.fromisoformat(str(now).replace("Z", "+00:00")).astimezone(timezone.utc)
+        if now
+        else datetime.now(timezone.utc)
+    )
 
 
 def _cutoff(days: int, now: str | None = None) -> str:
@@ -42,7 +49,9 @@ def _cutoff_compact(days: int, now: str | None = None) -> str:
     return (_anchor(now) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S")
 
 
-def _window_battles(conn, tag: str, cutoff: str, until: str | None = None) -> list[dict]:
+def _window_battles(
+    conn, tag: str, cutoff: str, until: str | None = None
+) -> list[dict]:
     where = "player_tag = ? AND battle_time >= ?"
     params: list = [tag, cutoff]
     if until:
@@ -69,7 +78,10 @@ def _battle_tally(battles: list[dict]) -> dict:
         slot["battles"] += 1
         slot["wins"] += 1 if b["outcome"] == "W" else 0
     return {
-        "battles": len(battles), "wins": wins, "losses": losses, "draws": draws,
+        "battles": len(battles),
+        "wins": wins,
+        "losses": losses,
+        "draws": draws,
         "win_rate": round(wins / len(battles), 3) if battles else 0.0,
         "net_trophies": net_trophies,
         "by_mode": dict(sorted(by_mode.items(), key=lambda kv: -kv[1]["battles"])),
@@ -80,16 +92,25 @@ def _battle_of_week(battles: list[dict]) -> dict | None:
     """The week's standout fight: biggest crown margin, then trophy swing, wins first."""
     if not battles:
         return None
+
     def score(b):
         margin = int(b["crowns_for"] or 0) - int(b["crowns_against"] or 0)
-        return (1 if b["outcome"] == "W" else 0, margin, int(b["trophy_change"] or 0),
-                int(b["crowns_for"] or 0))
+        return (
+            1 if b["outcome"] == "W" else 0,
+            margin,
+            int(b["trophy_change"] or 0),
+            int(b["crowns_for"] or 0),
+        )
+
     best = max(battles, key=score)
     return {
         "battle_time": best["battle_time"],
-        "mode": humanize_game_mode(best["game_mode_name"]) or best["game_mode_name"] or "a battle",
+        "mode": humanize_game_mode(best["game_mode_name"])
+        or best["game_mode_name"]
+        or "a battle",
         "outcome": best["outcome"],
-        "crowns_for": best["crowns_for"], "crowns_against": best["crowns_against"],
+        "crowns_for": best["crowns_for"],
+        "crowns_against": best["crowns_against"],
         "trophy_change": best["trophy_change"],
     }
 
@@ -112,7 +133,9 @@ def _battles_rank(conn, tag: str, cutoff: str) -> dict | None:
     return None
 
 
-def _clan_trending_cards(conn, cutoff: str, *, min_members: int = 2, limit: int = 6) -> list[dict]:
+def _clan_trending_cards(
+    conn, cutoff: str, *, min_members: int = 2, limit: int = 6
+) -> list[dict]:
     """Cards freshly unlocked across CURRENT clan members this week — the real
     'what's new in the meta' signal (the game-stream catalog bootstrapped every
     card at once, so a fresh clan-wide unlock wave is the truthful new-card cue —
@@ -126,18 +149,21 @@ def _clan_trending_cards(conn, cutoff: str, *, min_members: int = 2, limit: int 
         "GROUP BY card HAVING members >= ? ORDER BY members DESC LIMIT ?",
         (cutoff, min_members, limit),
     ).fetchall()
-    return [{"card_name": r["card"], "members": r["members"]} for r in rows if r["card"]]
+    return [
+        {"card_name": r["card"], "members": r["members"]} for r in rows if r["card"]
+    ]
 
 
-def build_member_report_context(tag: str, name: str, *, days: int = 7,
-                                now: str | None = None) -> dict:
+def build_member_report_context(
+    tag: str, name: str, *, days: int = 7, now: str | None = None
+) -> dict:
     """Gather one member's week as pure facts — the input to both the renderer and
     the (grounded) narrative model."""
     conn = db.get_connection()
     try:
         display = preferred_display_name(conn, tag, name)
-        cutoff = _cutoff(days, now)              # ISO — for *_events.observed_at
-        cutoff_c = _cutoff_compact(days, now)    # compact — for battle_events.battle_time
+        cutoff = _cutoff(days, now)  # ISO — for *_events.observed_at
+        cutoff_c = _cutoff_compact(days, now)  # compact — for battle_events.battle_time
         prev_c = _cutoff_compact(days * 2, now)
 
         member_read = member_capability.get_member_intelligence(
@@ -159,38 +185,60 @@ def build_member_report_context(tag: str, name: str, *, days: int = 7,
         for e in events:
             et, payload = e.get("event_type"), e.get("payload") or {}
             if et == "badge_earned":
-                badges.append({
-                    "label": humanize_badge(payload.get("badge_name") or ""),
-                    "level": payload.get("level"),
-                    "observed_at": e.get("observed_at"),
-                    "image_url": payload.get("image_url"),
-                })
+                badges.append(
+                    {
+                        "label": humanize_badge(payload.get("badge_name") or ""),
+                        "level": payload.get("level"),
+                        "observed_at": e.get("observed_at"),
+                        "image_url": payload.get("image_url"),
+                    }
+                )
             elif et in _CARD_EVENT_TYPES:
-                cards.append({
-                    "type": et, "card_name": payload.get("card_name"),
-                    "rarity": payload.get("rarity"),
-                    "milestone": payload.get("milestone") or payload.get("collection_level"),
-                    "observed_at": e.get("observed_at"),
-                })
+                cards.append(
+                    {
+                        "type": et,
+                        "card_name": payload.get("card_name"),
+                        "rarity": payload.get("rarity"),
+                        "milestone": payload.get("milestone")
+                        or payload.get("collection_level"),
+                        "observed_at": e.get("observed_at"),
+                    }
+                )
             elif et and et.startswith("pol_") or et in ("ultimate_champion_reached",):
-                ranked.append({"event_type": et, "payload": payload,
-                               "observed_at": e.get("observed_at")})
+                ranked.append(
+                    {
+                        "event_type": et,
+                        "payload": payload,
+                        "observed_at": e.get("observed_at"),
+                    }
+                )
             elif et in ("best_trophies_peak",):
-                other.append({"event_type": et, "payload": payload,
-                              "observed_at": e.get("observed_at")})
+                other.append(
+                    {
+                        "event_type": et,
+                        "payload": payload,
+                        "observed_at": e.get("observed_at"),
+                    }
+                )
 
         war = member_read.get("war")
 
         stream = game_events.recent_game_events(conn, days=days, now=now)
         new_cards = [s["payload"] for s in stream if s["event_type"] == "card_added"]
-        new_events = [s["payload"] for s in stream if s["event_type"] == "event_started"]
+        new_events = [
+            s["payload"] for s in stream if s["event_type"] == "event_started"
+        ]
 
         return {
             "tag": tag,
             "name": display,
             "days": days,
-            "window": {"from": cutoff, "generated_at": (now or datetime.now(timezone.utc)
-                                                        .strftime("%Y-%m-%dT%H:%M:%SZ"))},
+            "window": {
+                "from": cutoff,
+                "generated_at": (
+                    now or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                ),
+            },
             "profile": {
                 "trophies": profile.get("trophies"),
                 "best_trophies": profile.get("best_trophies"),
@@ -234,7 +282,9 @@ def build_member_report_context(tag: str, name: str, *, days: int = 7,
 def _sig_names(sig) -> list[str]:
     if isinstance(sig, dict):
         sig = sig.get("cards") or []
-    return [c.get("name") for c in (sig or []) if isinstance(c, dict) and c.get("name")][:6]
+    return [
+        c.get("name") for c in (sig or []) if isinstance(c, dict) and c.get("name")
+    ][:6]
 
 
 def _achievements(ctx: dict) -> list[str]:
@@ -249,7 +299,9 @@ def _achievements(ctx: dict) -> list[str]:
     streak = _win_streak(ctx["battles"]["log"])
     if streak >= 3:
         out.append(f"a {streak}-win streak")
-    if any(m["event_type"] == "best_trophies_peak" for m in ctx.get("milestones") or []):
+    if any(
+        m["event_type"] == "best_trophies_peak" for m in ctx.get("milestones") or []
+    ):
         out.append("a new personal-best trophy count")
     cs = ctx.get("clan_standing")
     if cs and cs["rank"] <= 5:
@@ -273,9 +325,16 @@ def facts_for_model(ctx: dict) -> str:
         + (f", arena {prof.get('arena')}" if prof.get("arena") else ""),
         f"RECORD: {t['battles']} battles, {t['wins']}-{t['losses']} "
         f"({_pct(t['win_rate'])}% win rate)",
-        f"PLAYSTYLE: {p.get('identity')}" + (f" — {p['line']}" if p.get("line") else ""),
-        "MODES: " + (", ".join(f"{_mode_label(m)} {v['battles']}" for m, v in
-                               (t["by_mode"] or {}).items()) or "none"),
+        f"PLAYSTYLE: {p.get('identity')}"
+        + (f" — {p['line']}" if p.get("line") else ""),
+        "MODES: "
+        + (
+            ", ".join(
+                f"{_mode_label(m)} {v['battles']}"
+                for m, v in (t["by_mode"] or {}).items()
+            )
+            or "none"
+        ),
     ]
     if prof.get("donations_week") is not None:
         lines.append(f"DONATIONS THIS WEEK: {prof['donations_week']} cards")
@@ -286,24 +345,40 @@ def facts_for_model(ctx: dict) -> str:
         lines.append("WORTH CELEBRATING: " + "; ".join(ach))
     if ctx["battles"]["battle_of_week"]:
         b = ctx["battles"]["battle_of_week"]
-        lines.append(f"BATTLE OF THE WEEK: {b['outcome']} {b['crowns_for']}-{b['crowns_against']} "
-                     f"in {b['mode']} (trophy {int(b['trophy_change'] or 0):+d})")
+        lines.append(
+            f"BATTLE OF THE WEEK: {b['outcome']} {b['crowns_for']}-{b['crowns_against']} "
+            f"in {b['mode']} (trophy {int(b['trophy_change'] or 0):+d})"
+        )
     if ctx["badges"]:
-        lines.append("BADGES THIS WEEK: " + ", ".join(b["label"] for b in ctx["badges"]))
+        lines.append(
+            "BADGES THIS WEEK: " + ", ".join(b["label"] for b in ctx["badges"])
+        )
     if ctx["cards"]:
-        lines.append("CARD ACTIVITY: " + ", ".join(
-            f"{c['card_name']} ({c['type'].replace('_',' ')})" for c in ctx["cards"] if c.get("card_name")))
+        lines.append(
+            "CARD ACTIVITY: "
+            + ", ".join(
+                f"{c['card_name']} ({c['type'].replace('_', ' ')})"
+                for c in ctx["cards"]
+                if c.get("card_name")
+            )
+        )
     if ctx["war"]:
         s = (ctx["war"] or {}).get("season") or {}
-        lines.append(f"WAR: {s.get('total_decks_used', 0)} decks used, "
-                     f"{s.get('total_points', 0)} points this season")
+        lines.append(
+            f"WAR: {s.get('total_decks_used', 0)} decks used, "
+            f"{s.get('total_points', 0)} points this season"
+        )
     if ctx["clan_standing"]:
         cs = ctx["clan_standing"]
-        lines.append(f"CLAN STANDING: #{cs['rank']} of {cs['of']} clanmates by battles played")
+        lines.append(
+            f"CLAN STANDING: #{cs['rank']} of {cs['of']} clanmates by battles played"
+        )
     tc = ctx["game_stream"].get("trending_cards") or []
     if tc:
-        lines.append("HOT NEW CARD IN THE CLAN THIS WEEK (fresh unlocks): "
-                     + ", ".join(f"{c['card_name']} ({c['members']} members)" for c in tc))
+        lines.append(
+            "HOT NEW CARD IN THE CLAN THIS WEEK (fresh unlocks): "
+            + ", ".join(f"{c['card_name']} ({c['members']} members)" for c in tc)
+        )
     ne = ctx["game_stream"]["new_events"]
     if ne:
         lines.append("NEW EVENTS: " + ", ".join(e.get("title") or "" for e in ne))
@@ -311,6 +386,7 @@ def facts_for_model(ctx: dict) -> str:
 
 
 # ── Rendering (facts → email markdown) ────────────────────────────────────────
+
 
 def _fmt_dt(iso: str | None) -> str:
     try:
@@ -339,23 +415,29 @@ def _pct(x: float) -> int:
 
 def _fallback_overview(ctx: dict) -> str:
     t = ctx["battles"]["tally"]
-    return (f"Here's your week: **{t['wins']}–{t['losses']}** across **{t['battles']}** battles, "
-            f"a net of **{t['net_trophies']:+d}** trophies.")
+    return (
+        f"Here's your week: **{t['wins']}–{t['losses']}** across **{t['battles']}** battles, "
+        f"a net of **{t['net_trophies']:+d}** trophies."
+    )
 
 
 def _fallback_standouts(ctx: dict) -> str:
     bits: list[str] = []
     b = ctx["battles"]["battle_of_week"]
     if b:
-        bits.append(f"Your standout was a **{b['outcome']}** at {b['crowns_for']}–"
-                    f"{b['crowns_against']} in {b['mode']}.")
+        bits.append(
+            f"Your standout was a **{b['outcome']}** at {b['crowns_for']}–"
+            f"{b['crowns_against']} in {b['mode']}."
+        )
     ach = _achievements(ctx)
     if ach:
         bits.append("Worth noting: " + ", ".join(ach) + ".")
     tc = ctx["game_stream"].get("trending_cards") or []
     if tc:
-        bits.append(f"And **{tc[0]['card_name']}** is the clan's card of the week "
-                    f"({tc[0]['members']} unlocks).")
+        bits.append(
+            f"And **{tc[0]['card_name']}** is the clan's card of the week "
+            f"({tc[0]['members']} unlocks)."
+        )
     return " ".join(bits)
 
 
@@ -374,8 +456,10 @@ def render_member_report(ctx: dict, narrative: dict | None = None) -> tuple[str,
     # Scorecard — the one stat block up top. No H1; the subject is the title.
     troph = prof.get("trophies")
     troph_str = f"{troph:,}" if isinstance(troph, int) else "—"
-    parts.append(f"### 🏆 {troph_str}  ·  {t['wins']}–{t['losses']}  ·  "
-                 f"{_pct(t['win_rate'])}% win  ·  {t['battles']} battles")
+    parts.append(
+        f"### 🏆 {troph_str}  ·  {t['wins']}–{t['losses']}  ·  "
+        f"{_pct(t['win_rate'])}% win  ·  {t['battles']} battles"
+    )
     sub = [f"Your week in the arena · **{t['net_trophies']:+d}** trophies"]
     if prof.get("best_trophies"):
         sub.append(f"best {prof['best_trophies']:,}")
@@ -394,18 +478,28 @@ def render_member_report(ctx: dict, narrative: dict | None = None) -> tuple[str,
     # The full tape — the one structured reference.
     log = ctx["battles"]["log"]
     if log:
-        tape = ["## The full tape", "", "| When | Mode | Result | Crowns | 🏆 |",
-                "|---|---|---|---|---|"]
+        tape = [
+            "## The full tape",
+            "",
+            "| When | Mode | Result | Crowns | 🏆 |",
+            "|---|---|---|---|---|",
+        ]
         for b in log:
-            mode = humanize_game_mode(b.get("game_mode_name")) or _mode_label(b.get("mode_group"))
+            mode = humanize_game_mode(b.get("game_mode_name")) or _mode_label(
+                b.get("mode_group")
+            )
             crowns = f"{b.get('crowns_for', 0)}–{b.get('crowns_against', 0)}"
             tc = b.get("trophy_change")
             tro = f"{int(tc):+d}" if tc is not None else ""
-            tape.append(f"| {_fmt_dt(b.get('battle_time'))} | {mode} | "
-                        f"{_outcome_cell(b.get('outcome'))} | {crowns} | {tro} |")
+            tape.append(
+                f"| {_fmt_dt(b.get('battle_time'))} | {mode} | "
+                f"{_outcome_cell(b.get('outcome'))} | {crowns} | {tro} |"
+            )
         parts.append("\n".join(tape))
 
-    parts.append(nar.get("closer") or "Same time next week. Keep the crowns coming. — E")
+    parts.append(
+        nar.get("closer") or "Same time next week. Keep the crowns coming. — E"
+    )
 
     subject = f"{name} — your week in the arena 👑"
     return subject, "\n\n".join(parts)

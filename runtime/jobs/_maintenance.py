@@ -2,8 +2,11 @@
 
 __all__ = [
     "API_SENTINEL_POLL_MINUTES",
-    "_format_size", "_build_maintenance_report",
-    "_card_catalog_sync", "_api_sentinel_tick", "_db_maintenance_cycle",
+    "_format_size",
+    "_build_maintenance_report",
+    "_card_catalog_sync",
+    "_api_sentinel_tick",
+    "_db_maintenance_cycle",
 ]
 
 import asyncio
@@ -12,11 +15,14 @@ import os
 
 import cr_api
 import db
-from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import elixir_log
 from runtime import status as runtime_status
+from runtime.helpers import (
+    _channel_msg_kwargs,
+    _channel_scope,
+    _get_singleton_channel_id,
+)
 from runtime.helpers._common import _post_to_elixir
-
 
 API_SENTINEL_POLL_MINUTES = int(os.getenv("API_SENTINEL_POLL_MINUTES", "240"))
 log = logging.getLogger("elixir")
@@ -42,7 +48,9 @@ def _format_size(size_bytes):
     return f"{size_bytes} B"
 
 
-def _build_maintenance_report(size_before, size_after, purge_stats, backup_result=None, pruned_count=0):
+def _build_maintenance_report(
+    size_before, size_after, purge_stats, backup_result=None, pruned_count=0
+):
     freed = size_before - size_after
     pct = (freed / size_before * 100) if size_before > 0 else 0
     rows_purged = sum(purge_stats.values())
@@ -57,11 +65,15 @@ def _build_maintenance_report(size_before, size_after, purge_stats, backup_resul
         if backup_result["ok"]:
             compressed_mb = backup_result["size_compressed"] / 1_048_576
             original_mb = backup_result["size_original"] / 1_048_576
-            lines.append(f"**Backup:** {original_mb:.1f} MB -> {compressed_mb:.1f} MB compressed")
+            lines.append(
+                f"**Backup:** {original_mb:.1f} MB -> {compressed_mb:.1f} MB compressed"
+            )
             if pruned_count > 0:
                 lines.append(f"  Pruned {pruned_count} old backup(s)")
         else:
-            lines.append(f"**Backup: FAILED** — {backup_result.get('error', 'unknown error')}")
+            lines.append(
+                f"**Backup: FAILED** — {backup_result.get('error', 'unknown error')}"
+            )
         lines.append("")
 
     lines += [
@@ -154,7 +166,9 @@ async def _db_maintenance_cycle():
 
         size_after = os.path.getsize(db_path)
         report = _build_maintenance_report(
-            size_before, size_after, purge_stats,
+            size_before,
+            size_after,
+            purge_stats,
             backup_result=backup_result,
             pruned_count=len(pruned),
         )
@@ -164,22 +178,31 @@ async def _db_maintenance_cycle():
             try:
                 channel_id = _get_singleton_channel_id("leader-lounge")
             except Exception as exc:
-                runtime_status.mark_job_failure("db_maintenance", f"leaders channel config error: {exc}")
+                runtime_status.mark_job_failure(
+                    "db_maintenance", f"leaders channel config error: {exc}"
+                )
                 return
 
             channel = _bot().get_channel(channel_id)
             if not channel:
-                runtime_status.mark_job_failure("db_maintenance", "leaders channel not found")
+                runtime_status.mark_job_failure(
+                    "db_maintenance", "leaders channel not found"
+                )
                 return
 
             await _post_to_elixir(channel, {"content": report})
             await asyncio.to_thread(
                 db.save_message,
-                _channel_scope(channel), "assistant", report,
-                **_channel_msg_kwargs(channel), workflow="clanops",
+                _channel_scope(channel),
+                "assistant",
+                report,
+                **_channel_msg_kwargs(channel),
+                workflow="clanops",
                 event_type="db_maintenance",
             )
-        runtime_status.mark_job_success("db_maintenance", f"freed {_format_size(size_before - size_after)}")
+        runtime_status.mark_job_success(
+            "db_maintenance", f"freed {_format_size(size_before - size_after)}"
+        )
     except Exception as exc:
         log.error("DB maintenance failed: %s", exc, exc_info=True)
         runtime_status.mark_job_failure("db_maintenance", str(exc))

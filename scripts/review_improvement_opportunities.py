@@ -29,7 +29,9 @@ DEFAULT_PROMOTION_CONFIDENCE = 0.72
 
 
 def _cutoff(days: int) -> str:
-    dt = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=max(1, int(days or 1)))
+    dt = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+        days=max(1, int(days or 1))
+    )
     return dt.strftime("%Y-%m-%dT%H:%M:%S")
 
 
@@ -55,10 +57,13 @@ def _loads_dict(value) -> dict:
 
 
 def _has_table(conn, table_name: str) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (table_name,),
-    ).fetchone() is not None
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+        is not None
+    )
 
 
 def _leader_action_feedback_spec(conn, *, days: int) -> dict | None:
@@ -135,25 +140,35 @@ def _leader_action_feedback_spec(conn, *, days: int) -> dict | None:
                 detail_parts.append("copy edited")
         if row["rationale"] and not note:
             detail_parts.append(f"rationale: {row['rationale']}")
-        samples.append({
-            "label": f"{action_type}/{status}",
-            "detail": _truncate(" | ".join(detail_parts) or row["prompt_text"]),
-            "action_id": row["action_id"],
-            "source": "leader_action_recommendations",
-        })
+        samples.append(
+            {
+                "label": f"{action_type}/{status}",
+                "detail": _truncate(" | ".join(detail_parts) or row["prompt_text"]),
+                "action_id": row["action_id"],
+                "source": "leader_action_recommendations",
+            }
+        )
 
     comment_samples = []
     for comment in channel_comments:
-        comment_samples.append({
-            "label": f"#{comment['channel_name'] or 'leader-actions'} comment",
-            "detail": _truncate(comment["content"] or comment["summary"]),
-            "message_id": comment["message_id"],
-            "discord_message_id": comment["discord_message_id"],
-            "source": "messages",
-        })
+        comment_samples.append(
+            {
+                "label": f"#{comment['channel_name'] or 'leader-actions'} comment",
+                "detail": _truncate(comment["content"] or comment["summary"]),
+                "message_id": comment["message_id"],
+                "discord_message_id": comment["discord_message_id"],
+                "source": "messages",
+            }
+        )
 
     total_evidence = len(rows) + len(channel_comments)
-    confidence = min(0.95, 0.58 + (0.05 * min(total_evidence, 6)) + (0.05 if notes else 0) + (0.04 if copy_edits else 0))
+    confidence = min(
+        0.95,
+        0.58
+        + (0.05 * min(total_evidence, 6))
+        + (0.05 if notes else 0)
+        + (0.04 if copy_edits else 0),
+    )
     severity = 4 if total_evidence >= 3 or notes or by_status.get("rejected") else 3
     metrics = {
         "leader_action_feedback_rows": len(rows),
@@ -163,7 +178,9 @@ def _leader_action_feedback_spec(conn, *, days: int) -> dict | None:
         "rejected": by_status.get("rejected", 0),
         "deferred": by_status.get("deferred", 0),
     }
-    metrics.update({f"action_type_{key}": value for key, value in by_type.most_common(5)})
+    metrics.update(
+        {f"action_type_{key}": value for key, value in by_type.most_common(5)}
+    )
     return {
         "category": "routing_quality",
         "title": "Fold leader-action feedback into Elixir recommendation policy",
@@ -220,7 +237,9 @@ def _prompt_failure_spec(conn, *, days: int) -> dict | None:
     samples = [
         {
             "label": f"{row['workflow'] or 'unknown'} {row['failure_type']}/{row['failure_stage']}",
-            "detail": _truncate(row["detail"] or row["llm_last_error"] or f"{row['count']} failures"),
+            "detail": _truncate(
+                row["detail"] or row["llm_last_error"] or f"{row['count']} failures"
+            ),
             "count": int(row["count"] or 0),
             "last_seen": row["last_seen"],
         }
@@ -240,7 +259,11 @@ def _prompt_failure_spec(conn, *, days: int) -> dict | None:
         ),
         "evidence": {
             "basis": "prompt-failures",
-            "metrics": {"recurring_prompt_failures": total, "groups": len(rows), "window_days": days},
+            "metrics": {
+                "recurring_prompt_failures": total,
+                "groups": len(rows),
+                "window_days": days,
+            },
             "samples": samples,
         },
         "severity": 4 if total >= 5 else 3,
@@ -275,13 +298,17 @@ def store_improvement_specs(specs: Iterable[dict], *, conn=None) -> list[dict]:
 
 def _format_suggestion(suggestion: dict) -> str:
     evidence = suggestion.get("evidence") or {}
-    metrics = evidence.get("metrics") if isinstance(evidence.get("metrics"), dict) else {}
+    metrics = (
+        evidence.get("metrics") if isinstance(evidence.get("metrics"), dict) else {}
+    )
     sample = ""
     samples = evidence.get("samples") or []
     if samples:
         first = samples[0]
         sample = f"\n  sample: {first.get('label')}: {first.get('detail')}"
-    metric_text = ", ".join(f"{key}={value}" for key, value in sorted(metrics.items())[:6])
+    metric_text = ", ".join(
+        f"{key}={value}" for key, value in sorted(metrics.items())[:6]
+    )
     metric_line = f"\n  metrics: {metric_text}" if metric_text else ""
     return (
         f"[{suggestion.get('category')}] {suggestion.get('title')}\n"
@@ -315,16 +342,18 @@ def _github_issue_metadata(
     repo: str,
     runner: Callable[[list[str]], subprocess.CompletedProcess] = _gh_runner,
 ) -> tuple[dict | None, str | None]:
-    completed = runner([
-        "gh",
-        "issue",
-        "view",
-        str(issue_number),
-        "--repo",
-        repo,
-        "--json",
-        "state,stateReason,url",
-    ])
+    completed = runner(
+        [
+            "gh",
+            "issue",
+            "view",
+            str(issue_number),
+            "--repo",
+            repo,
+            "--json",
+            "state,stateReason,url",
+        ]
+    )
     output = (completed.stdout or completed.stderr or "").strip()
     if completed.returncode != 0:
         return None, output or "failed to read issue state"
@@ -347,32 +376,41 @@ def promote_suggestions_to_github(
     results = []
     for suggestion in suggestions:
         if suggestion.get("confidence", 0) < min_confidence:
-            results.append({
-                "suggestion_key": suggestion.get("suggestion_key"),
-                "action": "skip",
-                "reason": "below_confidence_threshold",
-            })
+            results.append(
+                {
+                    "suggestion_key": suggestion.get("suggestion_key"),
+                    "action": "skip",
+                    "reason": "below_confidence_threshold",
+                }
+            )
             continue
-        if suggestion.get("status") in {db.SUGGESTION_DISMISSED, db.SUGGESTION_IMPLEMENTED}:
-            results.append({
-                "suggestion_key": suggestion.get("suggestion_key"),
-                "action": "skip",
-                "reason": f"status:{suggestion.get('status')}",
-            })
+        if suggestion.get("status") in {
+            db.SUGGESTION_DISMISSED,
+            db.SUGGESTION_IMPLEMENTED,
+        }:
+            results.append(
+                {
+                    "suggestion_key": suggestion.get("suggestion_key"),
+                    "action": "skip",
+                    "reason": f"status:{suggestion.get('status')}",
+                }
+            )
             continue
         labels = db.github_labels_for_improvement(suggestion)
         body = db.build_improvement_github_issue_body(suggestion)
         existing_issue = suggestion.get("github_issue_number")
         action = "update" if existing_issue else "create"
         if not write:
-            results.append({
-                "suggestion_key": suggestion.get("suggestion_key"),
-                "action": action,
-                "dry_run": True,
-                "title": suggestion.get("title"),
-                "labels": labels,
-                "github_issue_number": existing_issue,
-            })
+            results.append(
+                {
+                    "suggestion_key": suggestion.get("suggestion_key"),
+                    "action": action,
+                    "dry_run": True,
+                    "title": suggestion.get("title"),
+                    "labels": labels,
+                    "github_issue_number": existing_issue,
+                }
+            )
             continue
         github_issue_url = suggestion.get("github_issue_url")
         if existing_issue:
@@ -382,24 +420,28 @@ def promote_suggestions_to_github(
                 runner=runner,
             )
             if metadata_error:
-                results.append({
-                    "suggestion_key": suggestion.get("suggestion_key"),
-                    "action": action,
-                    "ok": False,
-                    "github_issue_number": existing_issue,
-                    "error": metadata_error,
-                })
+                results.append(
+                    {
+                        "suggestion_key": suggestion.get("suggestion_key"),
+                        "action": action,
+                        "ok": False,
+                        "github_issue_number": existing_issue,
+                        "error": metadata_error,
+                    }
+                )
                 continue
             github_issue_url = metadata.get("url") or github_issue_url
             if metadata.get("state") == "CLOSED":
                 state_reason = metadata.get("stateReason") or "closed"
-                results.append({
-                    "suggestion_key": suggestion.get("suggestion_key"),
-                    "action": "skip",
-                    "reason": f"github_issue_closed:{state_reason}",
-                    "github_issue_number": existing_issue,
-                    "github_issue_url": github_issue_url,
-                })
+                results.append(
+                    {
+                        "suggestion_key": suggestion.get("suggestion_key"),
+                        "action": "skip",
+                        "reason": f"github_issue_closed:{state_reason}",
+                        "github_issue_number": existing_issue,
+                        "github_issue_url": github_issue_url,
+                    }
+                )
                 continue
         if existing_issue:
             args = [
@@ -431,42 +473,76 @@ def promote_suggestions_to_github(
         completed = runner(args)
         output = (completed.stdout or completed.stderr or "").strip()
         if completed.returncode != 0:
-            results.append({
-                "suggestion_key": suggestion.get("suggestion_key"),
-                "action": action,
-                "ok": False,
-                "error": output,
-            })
+            results.append(
+                {
+                    "suggestion_key": suggestion.get("suggestion_key"),
+                    "action": action,
+                    "ok": False,
+                    "error": output,
+                }
+            )
             continue
         issue_number = existing_issue or _parse_issue_number(output)
         if issue_number:
             updated = db.mark_improvement_suggestion_promoted(
                 suggestion["suggestion_key"],
                 github_issue_number=issue_number,
-                github_issue_url=output if output.startswith("http") else github_issue_url,
+                github_issue_url=output
+                if output.startswith("http")
+                else github_issue_url,
                 conn=conn,
             )
             suggestion.update(updated or {})
-        results.append({
-            "suggestion_key": suggestion.get("suggestion_key"),
-            "action": action,
-            "ok": True,
-            "github_issue_number": issue_number,
-            "output": output,
-        })
+        results.append(
+            {
+                "suggestion_key": suggestion.get("suggestion_key"),
+                "action": action,
+                "ok": True,
+                "github_issue_number": issue_number,
+                "output": output,
+            }
+        )
     return results
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Review Elixir improvement opportunities.")
-    parser.add_argument("--days", type=int, default=30, help="Lookback window for source evidence.")
-    parser.add_argument("--limit", type=int, default=50, help="Maximum stored suggestions to print/promote.")
-    parser.add_argument("--json", action="store_true", help="Emit JSON instead of a text report.")
-    parser.add_argument("--no-store", action="store_true", help="Do not persist collected suggestions.")
-    parser.add_argument("--promote-github", action="store_true", help="Dry-run promotion of stored suggestions to GitHub issues.")
-    parser.add_argument("--write-github", action="store_true", help="Actually create/update GitHub issues. Implies --promote-github.")
-    parser.add_argument("--repo", default=DEFAULT_REPO, help="GitHub repository owner/name.")
-    parser.add_argument("--min-confidence", type=float, default=DEFAULT_PROMOTION_CONFIDENCE, help="Minimum confidence for promotion.")
+    parser = argparse.ArgumentParser(
+        description="Review Elixir improvement opportunities."
+    )
+    parser.add_argument(
+        "--days", type=int, default=30, help="Lookback window for source evidence."
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum stored suggestions to print/promote.",
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of a text report."
+    )
+    parser.add_argument(
+        "--no-store", action="store_true", help="Do not persist collected suggestions."
+    )
+    parser.add_argument(
+        "--promote-github",
+        action="store_true",
+        help="Dry-run promotion of stored suggestions to GitHub issues.",
+    )
+    parser.add_argument(
+        "--write-github",
+        action="store_true",
+        help="Actually create/update GitHub issues. Implies --promote-github.",
+    )
+    parser.add_argument(
+        "--repo", default=DEFAULT_REPO, help="GitHub repository owner/name."
+    )
+    parser.add_argument(
+        "--min-confidence",
+        type=float,
+        default=DEFAULT_PROMOTION_CONFIDENCE,
+        help="Minimum confidence for promotion.",
+    )
     args = parser.parse_args()
 
     conn = db.get_connection()
@@ -495,7 +571,13 @@ def main() -> None:
                 conn=conn,
             )
         if args.json:
-            print(json.dumps({"suggestions": suggestions, "promotion": promotion}, indent=2, ensure_ascii=False))
+            print(
+                json.dumps(
+                    {"suggestions": suggestions, "promotion": promotion},
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
             return
         if not suggestions:
             print("No improvement opportunities found for the selected window.")
@@ -509,9 +591,15 @@ def main() -> None:
             print("GitHub promotion:")
             for item in promotion:
                 status = _format_promotion_result_status(item)
-                issue = f" #{item['github_issue_number']}" if item.get("github_issue_number") else ""
+                issue = (
+                    f" #{item['github_issue_number']}"
+                    if item.get("github_issue_number")
+                    else ""
+                )
                 reason = f" ({item['reason']})" if item.get("reason") else ""
-                print(f"- {status}: {item.get('action')} {item.get('suggestion_key')}{issue}{reason}")
+                print(
+                    f"- {status}: {item.get('action')} {item.get('suggestion_key')}{issue}{reason}"
+                )
     finally:
         conn.close()
 

@@ -15,10 +15,14 @@ import logging
 
 import cr_api
 import elixir_agent
-from storage.contextual_memory import upsert_intel_report_memory
-from runtime.helpers import _get_singleton_channel_id, _channel_config_by_key, build_lane_memory_context
-from runtime.helpers._common import _post_to_elixir
 from runtime import status as runtime_status
+from runtime.helpers import (
+    _channel_config_by_key,
+    _get_singleton_channel_id,
+    build_lane_memory_context,
+)
+from runtime.helpers._common import _post_to_elixir
+from storage.contextual_memory import upsert_intel_report_memory
 
 log = logging.getLogger("elixir")
 
@@ -33,12 +37,6 @@ def _bot():
     return _runtime_app().bot
 
 
-
-
-
-
-
-
 async def _clan_wars_intel_report():
     """Generate and post the Clan Wars Intel Report to #elixir."""
     runtime_status.mark_job_start("clan_wars_intel")
@@ -46,7 +44,9 @@ async def _clan_wars_intel_report():
     try:
         channel_id = _get_singleton_channel_id("elixir")
     except Exception as exc:
-        runtime_status.mark_job_failure("clan_wars_intel", f"channel config error: {exc}")
+        runtime_status.mark_job_failure(
+            "clan_wars_intel", f"channel config error: {exc}"
+        )
         return
 
     channel = _bot().get_channel(channel_id)
@@ -69,10 +69,13 @@ async def _clan_wars_intel_report():
     competitors = [
         (c.get("tag") or "").lstrip("#").upper()
         for c in (war.get("clans") or [])
-        if (c.get("tag") or "").lstrip("#").upper() and (c.get("tag") or "").lstrip("#").upper() != our_tag
+        if (c.get("tag") or "").lstrip("#").upper()
+        and (c.get("tag") or "").lstrip("#").upper() != our_tag
     ]
     if not competitors:
-        runtime_status.mark_job_success("clan_wars_intel", "no competitors in current war")
+        runtime_status.mark_job_success(
+            "clan_wars_intel", "no competitors in current war"
+        )
         return
 
     season_id = war.get("seasonId")
@@ -81,7 +84,9 @@ async def _clan_wars_intel_report():
     try:
         channel_config = _channel_config_by_key("elixir")
         memory_context = await asyncio.to_thread(
-            build_lane_memory_context, channel_config, signals=[],
+            build_lane_memory_context,
+            channel_config,
+            signals=[],
         )
     except Exception as exc:
         log.warning("Intel report: memory context setup failed: %s", exc)
@@ -95,7 +100,9 @@ async def _clan_wars_intel_report():
     )
 
     if not isinstance(response, dict):
-        runtime_status.mark_job_failure("clan_wars_intel", "intel_report workflow returned no response")
+        runtime_status.mark_job_failure(
+            "clan_wars_intel", "intel_report workflow returned no response"
+        )
         return
 
     content = response.get("content")
@@ -107,7 +114,9 @@ async def _clan_wars_intel_report():
         messages = []
 
     if not messages:
-        runtime_status.mark_job_failure("clan_wars_intel", "intel_report workflow returned empty content")
+        runtime_status.mark_job_failure(
+            "clan_wars_intel", "intel_report workflow returned empty content"
+        )
         return
 
     for message_text in messages:

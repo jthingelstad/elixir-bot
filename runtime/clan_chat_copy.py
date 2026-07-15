@@ -244,7 +244,11 @@ async def generate_clan_chat_copy(
         max_chars=max_chars,
         signature=signature_config,
     )
-    summary = str((generated or {}).get("summary") or "") if isinstance(generated, dict) else ""
+    summary = (
+        str((generated or {}).get("summary") or "")
+        if isinstance(generated, dict)
+        else ""
+    )
     result = _valid_or_none(
         messages,
         max_messages=max_messages,
@@ -259,7 +263,9 @@ async def generate_clan_chat_copy(
         return result
     if fallback_messages:
         return _valid_or_none(
-            _sign_messages(fallback_messages, max_chars=max_chars, signature=signature_config),
+            _sign_messages(
+                fallback_messages, max_chars=max_chars, signature=signature_config
+            ),
             max_messages=max_messages,
             max_chars=max_chars,
             required_terms=required_terms,
@@ -284,7 +290,11 @@ def _clan_chat_action_reason(rationale: str) -> str:
                 selected.append(part)
                 continue
             if not selected:
-                selected.append(clip_clan_chat_text(part, limit=90).removesuffix("...").rstrip(" .,;:"))
+                selected.append(
+                    clip_clan_chat_text(part, limit=90)
+                    .removesuffix("...")
+                    .rstrip(" .,;:")
+                )
             break
         if selected:
             return "; ".join(selected)
@@ -312,9 +322,14 @@ def signed_valid_messages(
     clean = [str(m).strip() for m in (messages or []) if str(m).strip()][:2]
     if not clean:
         return None
-    signed = [sign_clan_chat_text(m, limit=max_chars, signature=signature) for m in clean]
+    signed = [
+        sign_clan_chat_text(m, limit=max_chars, signature=signature) for m in clean
+    ]
     result = validate_clan_chat_messages(
-        signed, max_messages=2, max_chars=max_chars, forbidden_terms=forbidden_terms,
+        signed,
+        max_messages=2,
+        max_chars=max_chars,
+        forbidden_terms=forbidden_terms,
     )
     if result.messages and not result.violations:
         return result.messages

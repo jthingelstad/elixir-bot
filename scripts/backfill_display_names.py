@@ -7,6 +7,7 @@ lazy column-ensure + ingest keep it fresh afterward.
 
     python scripts/backfill_display_names.py
 """
+
 from __future__ import annotations
 
 import os

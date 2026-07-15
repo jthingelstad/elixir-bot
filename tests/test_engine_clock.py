@@ -1,5 +1,6 @@
 """War clock (architecture §16.1–§16.2): colosseum detection, season length
 discovery, battle-time war-key resolution."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -10,8 +11,12 @@ NOW = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
 
 
 def _race(period_type="warDay", period_index=24, section_index=3, fame=4000):
-    return {"periodType": period_type, "periodIndex": period_index,
-            "sectionIndex": section_index, "clan": {"tag": "#J2RGCRVG", "fame": fame}}
+    return {
+        "periodType": period_type,
+        "periodIndex": period_index,
+        "sectionIndex": section_index,
+        "clan": {"tag": "#J2RGCRVG", "fame": fame},
+    }
 
 
 def test_colosseum_detection_and_finish_line():
@@ -91,11 +96,15 @@ def test_period_anchor_beats_fixed_boundary():
 
     anchor = datetime(2026, 7, 4, 9, 37, tzinfo=timezone.utc)
     now = anchor + timedelta(hours=2)
-    clock = war_clock(_race("warDay", 24, 3, fame=500), now, season_id=133,
-                      period_anchor=anchor)
+    clock = war_clock(
+        _race("warDay", 24, 3, fame=500), now, season_id=133, period_anchor=anchor
+    )
     assert 21.5 <= clock.hours_left_in_period <= 22.5
     # Stale anchor (past its day) falls back to the nominal boundary
-    stale = war_clock(_race("warDay", 24, 3, fame=500),
-                      anchor + timedelta(hours=30), season_id=133,
-                      period_anchor=anchor)
+    stale = war_clock(
+        _race("warDay", 24, 3, fame=500),
+        anchor + timedelta(hours=30),
+        season_id=133,
+        period_anchor=anchor,
+    )
     assert stale.hours_left_in_period > 0

@@ -6,6 +6,7 @@ copy/paste card is a routing choice, not a signal to post less. Regression
 guard for the loops #42/#44 catch-22 where good brain relays were blocked by
 the retired auto-relay's inherited decline history.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -39,7 +40,9 @@ def _seed_declined_relays(conn, *, done: int, rejected: int) -> None:
 def test_relay_throttle_fires_by_default(engine_conn):
     # 2 done / 4 rejected -> decline_rate 0.67, decided 6 (>= 5), recent -> gated.
     _seed_declined_relays(engine_conn, done=2, rejected=4)
-    allowed, reason = can_post_leader_action(action_type="in_game_relay", conn=engine_conn)
+    allowed, reason = can_post_leader_action(
+        action_type="in_game_relay", conn=engine_conn
+    )
     assert allowed is False
     assert reason and reason.startswith("earned_frequency:in_game_relay")
 

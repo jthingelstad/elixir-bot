@@ -47,11 +47,23 @@ def _print_review_item(row: dict, *, include_raw: bool) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Review recent Elixir agent failures and ask-elixir feedback.")
-    parser.add_argument("--limit", type=int, default=20, help="Number of review items to show.")
-    parser.add_argument("--workflow", help="Filter to a workflow like clanops or interactive.")
-    parser.add_argument("--json", action="store_true", help="Emit JSON for copy/paste into another model.")
-    parser.add_argument("--raw", action="store_true", help="Include stored raw_json in text output.")
+    parser = argparse.ArgumentParser(
+        description="Review recent Elixir agent failures and ask-elixir feedback."
+    )
+    parser.add_argument(
+        "--limit", type=int, default=20, help="Number of review items to show."
+    )
+    parser.add_argument(
+        "--workflow", help="Filter to a workflow like clanops or interactive."
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON for copy/paste into another model.",
+    )
+    parser.add_argument(
+        "--raw", action="store_true", help="Include stored raw_json in text output."
+    )
     parser.add_argument(
         "--include-positive",
         action="store_true",

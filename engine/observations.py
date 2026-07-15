@@ -301,9 +301,7 @@ def _admit_battlelog(expected_tag: str, payload, errors: list[str]) -> None:
 
         team = battle.get("team")
         if isinstance(team, list) and canon_tag(expected_tag) not in {
-            canon_tag(player.get("tag"))
-            for player in team
-            if isinstance(player, dict)
+            canon_tag(player.get("tag")) for player in team if isinstance(player, dict)
         }:
             errors.append(f"{prefix}.team:subject_missing")
 

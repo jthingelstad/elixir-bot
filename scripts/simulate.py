@@ -28,8 +28,8 @@ What it gates:
     hard-post event stream
   - training-day race polling is hourly, battle-day polling every tick
   - war_participation accrues fame for the fighters and nobody else
-  - the retired legacy recognition/delivery path raises no ledger claims or
-    communication intents; global DB invariants hold
+  - the production path raises no legacy recognition claims, the retired
+    delivery queue is absent, and global DB invariants hold
 
 Usage:
     ./venv/bin/python scripts/simulate.py                 # 7 days, 30-min ticks
@@ -56,10 +56,10 @@ HOME = "#J2RGCRVG"
 # mistaken for a live person if a DB gets inspected side by side)
 MEMBERS = [
     ("#SIM00001", "Anvil"),
-    ("#SIM00002", "Bramble"),   # war fighter
-    ("#SIM00003", "Cinder"),    # war fighter + leveler (44 -> 45 on day 3)
-    ("#SIM00004", "Dune"),      # donor
-    ("#SIM00005", "Ember"),     # leaves on day 5
+    ("#SIM00002", "Bramble"),  # war fighter
+    ("#SIM00003", "Cinder"),  # war fighter + leveler (44 -> 45 on day 3)
+    ("#SIM00004", "Dune"),  # donor
+    ("#SIM00005", "Ember"),  # leaves on day 5
 ]
 JOINER = ("#SIM00006", "Flint")  # joins on day 2
 FIGHTERS = {"#SIM00002", "#SIM00003"}
@@ -127,7 +127,8 @@ class SimWorld:
         if tag not in FIGHTERS or not 3 <= d <= 6:
             return 0
         return sum(
-            1 for k in range(4)
+            1
+            for k in range(4)
             if self.period_start(d) + timedelta(hours=3, minutes=45 * k) <= self.now
         )
 
@@ -143,13 +144,21 @@ class SimWorld:
     # --- CR-shaped payloads (the fake cr_api) ------------------------------
     def get_clan(self):
         return {
-            "tag": HOME, "name": "SIM KINGS", "clanScore": 620, "clanWarTrophies": 2200,
+            "tag": HOME,
+            "name": "SIM KINGS",
+            "clanScore": 620,
+            "clanWarTrophies": 2200,
             "memberList": [
                 {
-                    "tag": t, "name": self._name(t), "role": "member",
-                    "expLevel": self.exp_level(t), "trophies": 5000,
-                    "donations": self.donations(t), "donationsReceived": 40,
-                    "clanRank": i + 1, "previousClanRank": i + 1,
+                    "tag": t,
+                    "name": self._name(t),
+                    "role": "member",
+                    "expLevel": self.exp_level(t),
+                    "trophies": 5000,
+                    "donations": self.donations(t),
+                    "donationsReceived": 40,
+                    "clanRank": i + 1,
+                    "previousClanRank": i + 1,
                     "lastSeen": self.now.strftime("%Y%m%dT%H%M%S.000Z"),
                 }
                 for i, t in enumerate(self.roster_tags())
@@ -162,40 +171,64 @@ class SimWorld:
         period_type = "training" if (d % 7) < 3 else "warDay"
         section = SECTION + d // 7
         return {
-            "state": "full", "sectionIndex": section,
-            "periodIndex": section * 7 + (d % 7), "periodType": period_type,
+            "state": "full",
+            "sectionIndex": section,
+            "periodIndex": section * 7 + (d % 7),
+            "periodType": period_type,
             "clan": {
-                "tag": HOME, "name": "SIM KINGS", "fame": sum(map(self.fame, FIGHTERS)),
+                "tag": HOME,
+                "name": "SIM KINGS",
+                "fame": sum(map(self.fame, FIGHTERS)),
                 "participants": [
-                    {"tag": t, "name": self._name(t), "fame": self.fame(t),
-                     "repairPoints": 0, "boatAttacks": 0,
-                     "decksUsed": self.fame(t) // 225,
-                     "decksUsedToday": self.war_decks_today(t)}
+                    {
+                        "tag": t,
+                        "name": self._name(t),
+                        "fame": self.fame(t),
+                        "repairPoints": 0,
+                        "boatAttacks": 0,
+                        "decksUsed": self.fame(t) // 225,
+                        "decksUsedToday": self.war_decks_today(t),
+                    }
                     for t in self.roster_tags()
                 ],
             },
             "clans": [
-                {"tag": HOME, "name": "SIM KINGS",
-                 "fame": sum(map(self.fame, FIGHTERS)), "periodPoints": 0,
-                 "clanScore": 620},
-                {"tag": "#SIMRIVAL", "name": "SIM RIVAL",
-                 "fame": 500 * max(0, d - 2), "periodPoints": 0,
-                 "clanScore": 610},
+                {
+                    "tag": HOME,
+                    "name": "SIM KINGS",
+                    "fame": sum(map(self.fame, FIGHTERS)),
+                    "periodPoints": 0,
+                    "clanScore": 620,
+                },
+                {
+                    "tag": "#SIMRIVAL",
+                    "name": "SIM RIVAL",
+                    "fame": 500 * max(0, d - 2),
+                    "periodPoints": 0,
+                    "clanScore": 610,
+                },
             ],
         }
 
     def get_player(self, tag):
         p = dict(self.player_fixture)
-        p.update({
-            "tag": tag, "name": self._name(tag), "expLevel": self.exp_level(tag),
-            "trophies": 5000 + 10 * self.day_index(), "bestTrophies": 5400,
-            "wins": 900 + self.day_index(), "donations": self.donations(tag),
-        })
+        p.update(
+            {
+                "tag": tag,
+                "name": self._name(tag),
+                "expLevel": self.exp_level(tag),
+                "trophies": 5000 + 10 * self.day_index(),
+                "bestTrophies": 5400,
+                "wins": 900 + self.day_index(),
+                "donations": self.donations(tag),
+            }
+        )
         # Override the CollectionLevel badge progress so LEVELER's day-3 crossing
         # drives collection_level_milestone (the cards aspect reads this badge).
         p["badges"] = [
             {**b, "progress": self.collection_level(tag)}
-            if b.get("name") == "CollectionLevel" else b
+            if b.get("name") == "CollectionLevel"
+            else b
             for b in (p.get("badges") or [])
         ]
         return p
@@ -222,10 +255,16 @@ class SimWorld:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--days", type=int, default=7)
-    ap.add_argument("--start", default="2026-08-03T09:00:00Z",
-                    help="sim start (UTC); default begins just before a reset boundary")
-    ap.add_argument("--reset", default="09:37",
-                    help="skewed daily reset hour (HH:MM UTC) — the drift learning")
+    ap.add_argument(
+        "--start",
+        default="2026-08-03T09:00:00Z",
+        help="sim start (UTC); default begins just before a reset boundary",
+    )
+    ap.add_argument(
+        "--reset",
+        default="09:37",
+        help="skewed daily reset hour (HH:MM UTC) — the drift learning",
+    )
     ap.add_argument("--tick-minutes", type=int, default=30)
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args()
@@ -243,6 +282,7 @@ def main() -> int:
 
     import engine.tick as tick_mod
     from engine.db import connect
+
     conn = connect(db_path)
     # season inference needs one logged (season, section) waypoint
     conn.execute(
@@ -258,20 +298,27 @@ def main() -> int:
 
     world = SimWorld(start, reset_hh, reset_mm)
     # freeze the Chicago day to sim time (calendar emitter, rollups)
-    tick_mod.chicago_today = lambda: (world.now - timedelta(hours=5)).strftime("%Y-%m-%d")
+    tick_mod.chicago_today = lambda: (world.now - timedelta(hours=5)).strftime(
+        "%Y-%m-%d"
+    )
 
     ticks = args.days * 24 * 60 // args.tick_minutes
-    print(f"simulating {args.days} days = {ticks} ticks of {args.tick_minutes} min "
-          f"from {args.start} (reset {args.reset}Z) into {db_path}")
+    print(
+        f"simulating {args.days} days = {ticks} ticks of {args.tick_minutes} min "
+        f"from {args.start} (reset {args.reset}Z) into {db_path}"
+    )
     errors = []
     for i in range(ticks):
         world.now = start + timedelta(minutes=args.tick_minutes * i)
         counters = tick_mod.run_tick(
-            conn, world.now, api=world,
+            conn,
+            world.now,
+            api=world,
         )
         errors.extend(
             (world.now.strftime("%m-%dT%H:%M"), k, v)
-            for k, v in counters.items() if k.endswith("_error")
+            for k, v in counters.items()
+            if k.endswith("_error")
         )
     end = world.now
 
@@ -286,10 +333,9 @@ def main() -> int:
         "WHERE event_type='war_day_opened' ORDER BY observed_at"
     ).fetchall()
     expect_days = min(args.days, 4)  # battle days observed in a 7-day week sim
-    g[f"war_day_opened x{expect_days}, once per battle day"] = (
-        len(wd) == expect_days
-        and len({r[0] for r in wd}) == len(wd)
-    )
+    g[f"war_day_opened x{expect_days}, once per battle day"] = len(
+        wd
+    ) == expect_days and len({r[0] for r in wd}) == len(wd)
     labels = [json.loads(r[2]).get("war_day_human") for r in wd]
     g["war-day labels are 1-based humans"] = labels == [
         f"battle day {i + 1} of 4" for i in range(len(wd))
@@ -301,26 +347,36 @@ def main() -> int:
         boundary = obs.replace(hour=reset_hh, minute=reset_mm, second=0)
         lag = (obs - boundary).total_seconds() / 60
         boundary_ok &= 0 <= lag <= args.tick_minutes
-    g[f"war_day_opened within {args.tick_minutes}min of the {args.reset}Z reset"] = boundary_ok
+    g[f"war_day_opened within {args.tick_minutes}min of the {args.reset}Z reset"] = (
+        boundary_ok
+    )
 
     joins = conn.execute(
         "SELECT COUNT(*) FROM clan_events WHERE event_type='member_joined' AND subject_tag=?",
-        (JOINER[0],)).fetchone()[0]
+        (JOINER[0],),
+    ).fetchone()[0]
     leaves = conn.execute(
         "SELECT COUNT(*) FROM clan_events WHERE event_type='member_left' AND subject_tag=?",
-        (LEAVER,)).fetchone()[0]
+        (LEAVER,),
+    ).fetchone()[0]
     g["one member_joined (day-2 joiner)"] = joins == 1
     g["one member_left (day-5 leaver)"] = leaves == 1
     lev = conn.execute(
         "SELECT COUNT(*) FROM player_events WHERE event_type='collection_level_milestone' AND player_tag=?",
-        (LEVELER,)).fetchone()[0]
+        (LEVELER,),
+    ).fetchone()[0]
     g["one collection_level_milestone (1700 crossing)"] = lev == 1
 
-    fam = dict(conn.execute(
-        "SELECT player_tag, SUM(fame) FROM war_participation WHERE season_id=? "
-        "GROUP BY player_tag HAVING SUM(fame) > 0", (SEASON,)).fetchall())
+    fam = dict(
+        conn.execute(
+            "SELECT player_tag, SUM(fame) FROM war_participation WHERE season_id=? "
+            "GROUP BY player_tag HAVING SUM(fame) > 0",
+            (SEASON,),
+        ).fetchall()
+    )
     g["war fame accrued by fighters only"] = set(fam) == FIGHTERS and all(
-        v > 0 for v in fam.values())
+        v > 0 for v in fam.values()
+    )
 
     battles = conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0]
     g["war battles mirrored"] = battles > 0
@@ -334,20 +390,26 @@ def main() -> int:
         training = [by_day.get(d, 0) for d in (1, 2)]
         war = [by_day.get(d, 0) for d in range(3, min(last_full, 6) + 1)]
         # training: hourly (~24/day with 30-min ticks); war days: every tick
-        g["race polls hourly in training, every tick in war"] = (
-            max(training, default=0) < min(war, default=9999)
-        )
+        g["race polls hourly in training, every tick in war"] = max(
+            training, default=0
+        ) < min(war, default=9999)
 
     if world.day_index() >= 7:
         wf = conn.execute(
             "SELECT COUNT(*) FROM war_events WHERE event_type='week_finished' "
-            "AND dedup_key=?", (f"week_finished:{SEASON}:{SECTION}",)).fetchone()[0]
+            "AND dedup_key=?",
+            (f"week_finished:{SEASON}:{SECTION}",),
+        ).fetchone()[0]
         g["week_finished emitted at section rollover"] = wf == 1
 
     n_ledger = conn.execute("SELECT COUNT(*) FROM recognition_ledger").fetchone()[0]
-    n_intents = conn.execute("SELECT COUNT(*) FROM communication_intents").fetchone()[0]
     g["zero legacy recognition claims"] = n_ledger == 0
-    g["zero legacy communication intents"] = n_intents == 0
+    g["retired delivery queue absent"] = (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='communication_intents'"
+        ).fetchone()
+        is None
+    )
 
     # The simulator stops at the LLM/network boundary, but it must prove the
     # awareness owner can see the hard stream events the engine produced.
@@ -361,14 +423,17 @@ def main() -> int:
 
     try:
         from tests.conftest import assert_db_invariants
+
         assert_db_invariants(conn, label="simulation")
         g["global DB invariants"] = True
     except AssertionError as exc:
         print(exc)
         g["global DB invariants"] = False
 
-    print(f"\nsim ran {args.start} -> {end.strftime('%Y-%m-%dT%H:%M:%SZ')}; "
-          f"{n_ledger} legacy claims, {n_intents} legacy intents, {battles} battles")
+    print(
+        f"\nsim ran {args.start} -> {end.strftime('%Y-%m-%dT%H:%M:%SZ')}; "
+        f"{n_ledger} legacy claims, {battles} battles"
+    )
     print("\n=== GATES ===")
     ok = True
     for k, v in g.items():

@@ -12,17 +12,21 @@ These tests pin the two races apart.
 
 from unittest.mock import patch
 
-from storage import war_status
 from runtime.awareness.read import _standing_block
+from storage import war_status
 
 
 def _projection(clans, *, period_type="warDay", period_index=4, our_tag="#US"):
     us = clans.get(our_tag, {})
     return {
-        "season_id": 134, "section_index": 0, "period_index": period_index,
-        "period_type": period_type, "our_tag": our_tag,
+        "season_id": 134,
+        "section_index": 0,
+        "period_index": period_index,
+        "period_type": period_type,
+        "our_tag": our_tag,
         "our_fame": us.get("fame", 0),
-        "clans": clans, "participants": {},
+        "clans": clans,
+        "participants": {},
     }
 
 
@@ -35,8 +39,11 @@ LOOP44 = {
 
 
 def _status(clans, **kw):
-    with patch.object(war_status, "_live_race",
-                      return_value=(_projection(clans, **kw), "2026-07-11T07:06:00Z")):
+    with patch.object(
+        war_status,
+        "_live_race",
+        return_value=(_projection(clans, **kw), "2026-07-11T07:06:00Z"),
+    ):
         return war_status.get_current_war_status(conn=None)
 
 
@@ -78,8 +85,16 @@ def test_colosseum_has_no_finish_line_and_score_never_completes_it():
 def test_standings_are_single_field_and_never_mixed():
     war = _status(LOOP44)
     # race_standings ordered by fame; day_standings by period points.
-    assert [s["clan_name"] for s in war["race_standings"]] == ["POAP KINGS", "R.E.I.C.H", "euromix"]
-    assert [s["clan_name"] for s in war["day_standings"]] == ["POAP KINGS", "R.E.I.C.H", "euromix"]
+    assert [s["clan_name"] for s in war["race_standings"]] == [
+        "POAP KINGS",
+        "R.E.I.C.H",
+        "euromix",
+    ]
+    assert [s["clan_name"] for s in war["day_standings"]] == [
+        "POAP KINGS",
+        "R.E.I.C.H",
+        "euromix",
+    ]
     # Every entry carries BOTH raw numbers so no caller has to re-mix.
     for s in war["race_standings"]:
         assert "fame" in s and "period_points" in s
@@ -88,10 +103,20 @@ def test_standings_are_single_field_and_never_mixed():
     # Weekly scoreboard is fame-only; today scoreboard is period-points-only.
     assert sb["weekly"]["fame"] == 3435
     assert all(set(e) == {"name", "fame", "rank"} for e in sb["weekly"]["scoreboard"])
-    assert sb["weekly"]["scoreboard"][1] == {"name": "R.E.I.C.H", "fame": 1800, "rank": 2}
+    assert sb["weekly"]["scoreboard"][1] == {
+        "name": "R.E.I.C.H",
+        "fame": 1800,
+        "rank": 2,
+    }
     assert sb["today"]["period_points"] == 10525
-    assert all(set(e) == {"name", "period_points", "rank"} for e in sb["today"]["scoreboard"])
-    assert sb["today"]["scoreboard"][1] == {"name": "R.E.I.C.H", "period_points": 450, "rank": 2}
+    assert all(
+        set(e) == {"name", "period_points", "rank"} for e in sb["today"]["scoreboard"]
+    )
+    assert sb["today"]["scoreboard"][1] == {
+        "name": "R.E.I.C.H",
+        "period_points": 450,
+        "rank": 2,
+    }
     # Never our period points next to a rival's fame anywhere in the block.
     assert "period_points" not in sb["weekly"]["scoreboard"][0]
     assert "fame" not in sb["today"]["scoreboard"][0]
@@ -127,7 +152,7 @@ def test_day_one_boat_not_scored():
     assert war["day_scored"] is True
     assert war["day_rank"] == 1
     sb = _standing_block(war)
-    assert sb["weekly"]["boat_scored"] is False   # weekly present but flagged unscored
+    assert sb["weekly"]["boat_scored"] is False  # weekly present but flagged unscored
     assert sb["today"]["period_points"] == 3000
 
 
@@ -170,7 +195,7 @@ def test_no_daily_action_suppresses_meaningless_day_rank():
     assert war["day_scored"] is False
     assert war["boat_scored"] is True
     sb = _standing_block(war)
-    assert sb["today"] is None          # daily race suppressed until it scores
+    assert sb["today"] is None  # daily race suppressed until it scores
     assert sb["weekly"]["fame"] == 6870
 
 
@@ -179,40 +204,66 @@ def test_boat_defense_fame_clinches_finish_today():
     placement projection into finishing tonight — the Loop #50 gap. Live BD3:
     6,870 + 3,000 placement = 9,870 (130 short) but + 435 defenses = 10,305."""
     proj = {
-        "season_id": 134, "section_index": 0, "period_index": 5, "period_type": "warDay",
-        "our_tag": "#US", "our_fame": 6870,
-        "our_defense": {"defense_fame_recent": 435, "defenses_remaining": 15, "defense_fame_days": [435, 435]},
+        "season_id": 134,
+        "section_index": 0,
+        "period_index": 5,
+        "period_type": "warDay",
+        "our_tag": "#US",
+        "our_fame": 6870,
+        "our_defense": {
+            "defense_fame_recent": 435,
+            "defenses_remaining": 15,
+            "defense_fame_days": [435, 435],
+        },
         "clans": {
             "#US": {"name": "POAP KINGS", "fame": 6870, "period_points": 3900},
             "#R": {"name": "R.E.I.C.H", "fame": 3600, "period_points": 0},
         },
         "participants": {},
     }
-    with patch.object(war_status, "_live_race", return_value=(proj, "2026-07-11T13:06:00Z")):
+    with patch.object(
+        war_status, "_live_race", return_value=(proj, "2026-07-11T13:06:00Z")
+    ):
         war = war_status.get_current_war_status(conn=None)
-    assert war["projected_day_fame"] == 3000       # placement only
-    assert war["projected_defense_fame"] == 435     # from the API, not back-calc
+    assert war["projected_day_fame"] == 3000  # placement only
+    assert war["projected_defense_fame"] == 435  # from the API, not back-calc
     assert war["projected_fame_at_close"] == 10305  # 6870 + 3000 + 435
-    assert war["clinches_finish_today"] is True      # 9870 alone would read "130 short"
+    assert war["clinches_finish_today"] is True  # 9870 alone would read "130 short"
     assert war["defenses_remaining"] == 15
 
     # Without defenses standing, placement alone is 130 short → does NOT clinch.
-    proj["our_defense"] = {"defense_fame_recent": 0, "defenses_remaining": 0, "defense_fame_days": []}
-    with patch.object(war_status, "_live_race", return_value=(proj, "2026-07-11T13:06:00Z")):
+    proj["our_defense"] = {
+        "defense_fame_recent": 0,
+        "defenses_remaining": 0,
+        "defense_fame_days": [],
+    }
+    with patch.object(
+        war_status, "_live_race", return_value=(proj, "2026-07-11T13:06:00Z")
+    ):
         war2 = war_status.get_current_war_status(conn=None)
-    assert war2["projected_fame_at_close"] == 9870 and war2["clinches_finish_today"] is False
+    assert (
+        war2["projected_fame_at_close"] == 9870
+        and war2["clinches_finish_today"] is False
+    )
 
 
 def test_war_season_snapshot_exposes_live_race(engine_conn):
     """get_war_season_snapshot (feeds get_elixir_state) must map the real
     get_current_war_status keys — regression for QA H13/H14 where it read stale
     'standings'/'our_fame'/'day_number' and returned an empty race block."""
-    with patch.object(war_status, "_live_race",
-                      return_value=(_projection(LOOP44), "2026-07-11T07:06:00Z")):
+    with patch.object(
+        war_status,
+        "_live_race",
+        return_value=(_projection(LOOP44), "2026-07-11T07:06:00Z"),
+    ):
         snap = war_status.get_war_season_snapshot(conn=engine_conn)
     race = snap["state"]["race"]
     assert race["fame"] == 3435 and race["race_rank"] == 1
-    assert [s["clan_name"] for s in race["race_standings"]] == ["POAP KINGS", "R.E.I.C.H", "euromix"]
+    assert [s["clan_name"] for s in race["race_standings"]] == [
+        "POAP KINGS",
+        "R.E.I.C.H",
+        "euromix",
+    ]
     assert race["period_points"] == 10525 and race["day_rank"] == 1
     assert race["primary_metric"] == "fame"
     assert snap["state"]["day_number"] is not None
@@ -232,9 +283,14 @@ def test_war_season_snapshot_nulls_ranks_on_unranked_race(engine_conn):
         "#GRV": {"name": "Graveborn", "fame": 0, "period_points": 0},
         "#US": {"name": "POAP KINGS", "fame": 0, "period_points": 0},
     }
-    with patch.object(war_status, "_live_race",
-                      return_value=(_projection(practice, period_type="training", period_index=1),
-                                    "2026-07-13T10:00:00Z")):
+    with patch.object(
+        war_status,
+        "_live_race",
+        return_value=(
+            _projection(practice, period_type="training", period_index=1),
+            "2026-07-13T10:00:00Z",
+        ),
+    ):
         snap = war_status.get_war_season_snapshot(conn=engine_conn)
     race = snap["state"]["race"]
     assert race["race_ranked"] is False
@@ -251,11 +307,17 @@ def test_week_win_streak_counts_consecutive_firsts(engine_conn):
     weeks' claim — count consecutive our_rank==1 from the newest finalized week
     back, ignoring the in-progress (NULL-rank) period."""
     for s in (100, 101):
-        engine_conn.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (?, '2026-01-01')", (s,))
+        engine_conn.execute(
+            "INSERT INTO war_seasons (season_id, started_at) VALUES (?, '2026-01-01')",
+            (s,),
+        )
     rows = [
-        (100, 0, 1), (100, 1, 1), (100, 2, 1),   # season 100: three #1s
-        (101, 0, 1), (101, 1, 1),                 # season 101: two #1s
-        (101, 2, None),                           # in-progress week — not counted
+        (100, 0, 1),
+        (100, 1, 1),
+        (100, 2, 1),  # season 100: three #1s
+        (101, 0, 1),
+        (101, 1, 1),  # season 101: two #1s
+        (101, 2, None),  # in-progress week — not counted
     ]
     for season, section, rank in rows:
         engine_conn.execute(
@@ -269,14 +331,16 @@ def test_week_win_streak_counts_consecutive_firsts(engine_conn):
 
 
 def test_week_win_streak_breaks_on_a_non_first(engine_conn):
-    engine_conn.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (200, '2026-01-01')")
+    engine_conn.execute(
+        "INSERT INTO war_seasons (season_id, started_at) VALUES (200, '2026-01-01')"
+    )
     for season, section, rank in [(200, 0, 1), (200, 1, 2), (200, 2, 1), (200, 3, 1)]:
         engine_conn.execute(
             "INSERT INTO war_weeks (season_id, section_index, our_rank) VALUES (?,?,?)",
             (season, section, rank),
         )
     streak = war_status.get_week_win_streak(conn=engine_conn)
-    assert streak["streak"] == 2          # only the two most-recent #1s
+    assert streak["streak"] == 2  # only the two most-recent #1s
     assert streak["weeks_tracked"] == 4
     assert streak["all_first"] is False
 
@@ -285,10 +349,21 @@ def test_perfect_attendance_excludes_in_progress_day(engine_conn):
     """QA H10: a member perfect on the finalized battle days must count even if
     they haven't finished the in-progress day's decks yet."""
     import storage.war_analytics as wa
-    engine_conn.execute("INSERT OR IGNORE INTO clans (clan_tag, first_seen_at, last_seen_at, is_home) VALUES ('#J2RGCRVG','2026-07-01','2026-07-11',1)")
-    engine_conn.execute("INSERT INTO players (player_tag, current_name, display_name, first_seen_at, last_seen_at) VALUES ('#PERF','Perf','Perf','2026-07-01','2026-07-11')")
-    engine_conn.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (555, '2026-07-01')")
-    for day, used in ((0, 4), (1, 4), (2, 1)):  # perfect days 0-1; day 2 in progress (1/4)
+
+    engine_conn.execute(
+        "INSERT OR IGNORE INTO clans (clan_tag, first_seen_at, last_seen_at, is_home) VALUES ('#J2RGCRVG','2026-07-01','2026-07-11',1)"
+    )
+    engine_conn.execute(
+        "INSERT INTO players (player_tag, current_name, display_name, first_seen_at, last_seen_at) VALUES ('#PERF','Perf','Perf','2026-07-01','2026-07-11')"
+    )
+    engine_conn.execute(
+        "INSERT INTO war_seasons (season_id, started_at) VALUES (555, '2026-07-01')"
+    )
+    for day, used in (
+        (0, 4),
+        (1, 4),
+        (2, 1),
+    ):  # perfect days 0-1; day 2 in progress (1/4)
         engine_conn.execute(
             "INSERT INTO war_attendance_days (season_id, section_index, war_day_index, player_tag, decks_used, decks_available, observed_at) "
             "VALUES (555, 0, ?, '#PERF', ?, 4, '2026-07-11T00:00:00Z')",
@@ -296,13 +371,24 @@ def test_perfect_attendance_excludes_in_progress_day(engine_conn):
         )
     engine_conn.commit()
     # live war = Battle Day 3 (war_day_index 2) of section 0 → that day is excluded
-    proj = {"season_id": 555, "section_index": 0, "period_index": 5, "period_type": "warDay",
-            "our_tag": "#US", "our_fame": 0,
-            "clans": {"#US": {"name": "POAP KINGS", "fame": 0, "period_points": 0}}, "participants": {}}
-    with patch.object(war_status, "_live_race", return_value=(proj, "2026-07-11T07:06:00Z")):
+    proj = {
+        "season_id": 555,
+        "section_index": 0,
+        "period_index": 5,
+        "period_type": "warDay",
+        "our_tag": "#US",
+        "our_fame": 0,
+        "clans": {"#US": {"name": "POAP KINGS", "fame": 0, "period_points": 0}},
+        "participants": {},
+    }
+    with patch.object(
+        war_status, "_live_race", return_value=(proj, "2026-07-11T07:06:00Z")
+    ):
         perfect = wa.get_perfect_war_participants(season_id=555, conn=engine_conn)
     names = {m["name"] for m in perfect}
-    assert "Perf" in names  # counted on the 2 finalized days despite the unfinished day 3
+    assert (
+        "Perf" in names
+    )  # counted on the 2 finalized days despite the unfinished day 3
     perf = next(m for m in perfect if m["name"] == "Perf")
     assert perf["battle_days"] == 2  # only finalized days counted
 
@@ -311,18 +397,28 @@ def test_war_season_summary_counts_in_progress_fame(engine_conn):
     """QA H7/H8: war_weeks.our_fame is NULL until a week finalizes, so a live
     season summed to 0 clan fame while members had thousands. The in-progress
     week's live boat fame must be folded in."""
-    engine_conn.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (999, '2026-07-01')")
-    engine_conn.execute("INSERT INTO war_weeks (season_id, section_index) VALUES (999, 0)")  # our_fame NULL
+    engine_conn.execute(
+        "INSERT INTO war_seasons (season_id, started_at) VALUES (999, '2026-07-01')"
+    )
+    engine_conn.execute(
+        "INSERT INTO war_weeks (season_id, section_index) VALUES (999, 0)"
+    )  # our_fame NULL
     engine_conn.commit()
     proj = {
-        "season_id": 999, "section_index": 0, "period_index": 4, "period_type": "warDay",
-        "our_tag": "#US", "our_fame": 5000,
+        "season_id": 999,
+        "section_index": 0,
+        "period_index": 4,
+        "period_type": "warDay",
+        "our_tag": "#US",
+        "our_fame": 5000,
         "clans": {"#US": {"name": "POAP KINGS", "fame": 5000, "period_points": 0}},
         "participants": {},
     }
-    with patch.object(war_status, "_live_race", return_value=(proj, "2026-07-11T07:06:00Z")):
+    with patch.object(
+        war_status, "_live_race", return_value=(proj, "2026-07-11T07:06:00Z")
+    ):
         summ = war_status.get_war_season_summary(season_id=999, conn=engine_conn)
-    assert summ["total_clan_fame"] == 5000        # not 0
+    assert summ["total_clan_fame"] == 5000  # not 0
     assert summ["current_week_in_progress"] is True
     assert summ["races"] == 1  # the NULL-fame week isn't double-counted
 
@@ -341,5 +437,5 @@ def test_colosseum_is_period_points_only():
     assert war["race_completed"] is False
     sb = _standing_block(war)
     assert sb["primary_metric"] == "period_points"
-    assert sb["weekly"] is None            # no weekly fame in Colosseum
+    assert sb["weekly"] is None  # no weekly fame in Colosseum
     assert sb["today"]["period_points"] == 5200

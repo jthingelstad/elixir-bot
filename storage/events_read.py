@@ -73,7 +73,9 @@ def list_events_after_cursors(
             continue
         start = max(0, int(cursors.get(stream, 0) or 0))
         heads[stream] = int(
-            conn.execute(f"SELECT COALESCE(MAX(event_id), 0) FROM {table}").fetchone()[0]
+            conn.execute(f"SELECT COALESCE(MAX(event_id), 0) FROM {table}").fetchone()[
+                0
+            ]
         )
         backfilled_expr = "backfilled" if has_backfilled else "0"
         rows = conn.execute(
@@ -95,7 +97,9 @@ def list_events_after_cursors(
         )
     )
     batch = candidates[:cap]
-    checkpoints = {stream: max(0, int(cursors.get(stream, 0) or 0)) for stream in wanted}
+    checkpoints = {
+        stream: max(0, int(cursors.get(stream, 0) or 0)) for stream in wanted
+    }
     for event in batch:
         stream = event["stream"]
         checkpoints[stream] = max(checkpoints.get(stream, 0), event["stream_position"])
@@ -140,14 +144,11 @@ def summarize_event_windows(
     *,
     windows: tuple[int, ...] = DETECTION_WINDOWS,
     scope: str | None = None,
-    subject_type: str | None = None,  # call-site compatibility; unused
     subject_key: str | None = None,
-    event_class: str | None = None,  # call-site compatibility; unused
     now: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
     """Event counts by type per lookback window, across all four streams."""
-    del subject_type, event_class
     out: dict = {"windows": {}}
     for days in windows:
         cutoff = _cutoff(days, now)
@@ -172,7 +173,7 @@ def summarize_event_windows(
                 key = row["event_type"]
                 counts[key] = counts.get(key, 0) + row["cnt"]
                 total += row["cnt"]
-        battle_cutoff = _cutoff_compact(days, now)   # battle_time is CR-compact, not ISO
+        battle_cutoff = _cutoff_compact(days, now)  # battle_time is CR-compact, not ISO
         battles = conn.execute(
             "SELECT COUNT(*) AS cnt FROM battle_events WHERE battle_time >= ?"
             + (" AND player_tag = ?" if subject_key else ""),
@@ -193,16 +194,13 @@ def list_recent_events(
     since: str | None = None,
     scope: str | None = None,
     event_type: str | None = None,
-    subject_type: str | None = None,  # call-site compatibility; unused
     subject_key: str | None = None,
-    event_class: str | None = None,  # call-site compatibility; unused
     streams: tuple[str, ...] | None = None,
     exclude_backfilled: bool = False,
     limit: int = 100,
     now: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
-    del subject_type, event_class
     cutoff = since or _cutoff(days, now)
     wanted = set(streams) if streams else set(_DEFAULT_STREAMS)
     events: list[dict] = []
@@ -253,7 +251,7 @@ def summarize_battle_modes(
     """Per-mode battle activity from battle_events."""
     out: dict = {"windows": {}}
     for days in windows:
-        cutoff = _cutoff_compact(days, now)   # battle_time is CR-compact, not ISO
+        cutoff = _cutoff_compact(days, now)  # battle_time is CR-compact, not ISO
         where = ["b.battle_time >= ?"]
         params: list = [cutoff]
         if subject_key:
@@ -278,15 +276,22 @@ def summarize_battle_modes(
                 "FROM battle_events b LEFT JOIN players p ON p.player_tag = b.player_tag "
                 f"WHERE {' AND '.join(where)} AND b.mode_group IS ? AND b.game_mode_name IS ? "
                 "GROUP BY b.player_tag ORDER BY battles DESC LIMIT ?",
-                (*params, row["mode_group"], row["game_mode_name"], max(1, int(top_members))),
+                (
+                    *params,
+                    row["mode_group"],
+                    row["game_mode_name"],
+                    max(1, int(top_members)),
+                ),
             ).fetchall()
-            modes.append({
-                "mode_group": row["mode_group"],
-                "game_mode_name": row["game_mode_name"],
-                "battles": row["battles"],
-                "wins": row["wins"],
-                "members_active": row["members_active"],
-                "top_members": [dict(t) for t in top],
-            })
+            modes.append(
+                {
+                    "mode_group": row["mode_group"],
+                    "game_mode_name": row["game_mode_name"],
+                    "battles": row["battles"],
+                    "wins": row["wins"],
+                    "members_active": row["members_active"],
+                    "top_members": [dict(t) for t in top],
+                }
+            )
         out["windows"][f"{days}d"] = {"modes": modes}
     return out

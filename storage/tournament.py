@@ -19,10 +19,10 @@ from db import (
 )
 from storage.player import _normalize_cards_for_storage
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _compute_ends_time(started_time: Optional[str], duration_seconds) -> Optional[str]:
     """Return the UTC ISO end time for a tournament given CR-format
@@ -59,7 +59,9 @@ _GAME_MODE_LABELS = {
 }
 
 
-def game_mode_label(game_mode_id: Optional[int], api_name: Optional[str] = None) -> Optional[str]:
+def game_mode_label(
+    game_mode_id: Optional[int], api_name: Optional[str] = None
+) -> Optional[str]:
     """Translate a CR ``gameMode.id`` to the in-game player-facing name.
 
     Falls back to the raw API ``name`` (an internal code like
@@ -112,8 +114,11 @@ def _is_current_clan_member(conn, tag: str) -> bool:
 # Registration
 # ---------------------------------------------------------------------------
 
+
 @managed_connection
-def register_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.Connection] = None) -> int:
+def register_tournament(
+    tournament_tag: str, api_data: dict, conn: Optional[sqlite3.Connection] = None
+) -> int:
     """Create a tournaments row from a /tournaments/{tag} API response.
 
     Returns the tournament_id.
@@ -199,8 +204,11 @@ def register_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqli
 # Polling
 # ---------------------------------------------------------------------------
 
+
 @managed_connection
-def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.Connection] = None) -> dict:
+def poll_tournament(
+    tournament_tag: str, api_data: dict, conn: Optional[sqlite3.Connection] = None
+) -> dict:
     """Update tournament state from a fresh API response.
 
     Returns dict with:
@@ -272,7 +280,13 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
                     player_name = ?, last_seen_at = ?,
                     final_score = ?, final_rank = ?
                 WHERE participant_id = ?""",
-                (m.get("name"), now, m.get("score"), m.get("rank"), existing["participant_id"]),
+                (
+                    m.get("name"),
+                    now,
+                    m.get("score"),
+                    m.get("rank"),
+                    existing["participant_id"],
+                ),
             )
         else:
             conn.execute(
@@ -311,7 +325,9 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
     ends_time = _compute_ends_time(started_time, duration_seconds)
     timing_fields = {
         "duration_seconds": duration_seconds,
-        "duration_minutes": (duration_seconds // 60) if isinstance(duration_seconds, int) else None,
+        "duration_minutes": (duration_seconds // 60)
+        if isinstance(duration_seconds, int)
+        else None,
         "started_time": started_time,
         "ends_time": ends_time,
     }
@@ -324,53 +340,69 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
         p_tag = _canon_tag(m.get("tag") or "")
         if not p_tag or p_tag in prev_participant_tags:
             continue
-        live_signals.append({
-            "type": "tournament_participant_joined",
-            "signal_key": f"tournament_participant_joined|{tag}|{p_tag}",
-            "tournament_tag": tag,
-            "tournament_name": tournament_name,
-            "player_tag": p_tag,
-            "player_name": m.get("name"),
-            "clan_tag": (m.get("clan") or {}).get("tag"),
-            "clan_name": (m.get("clan") or {}).get("name"),
-            "participant_count": participant_count,
-        })
+        live_signals.append(
+            {
+                "type": "tournament_participant_joined",
+                "signal_key": f"tournament_participant_joined|{tag}|{p_tag}",
+                "tournament_tag": tag,
+                "tournament_name": tournament_name,
+                "player_tag": p_tag,
+                "player_name": m.get("name"),
+                "clan_tag": (m.get("clan") or {}).get("tag"),
+                "clan_name": (m.get("clan") or {}).get("name"),
+                "participant_count": participant_count,
+            }
+        )
 
     if old_status != new_status:
         if new_status == "in_progress":
             max_capacity = api_data.get("maxCapacity")
             spots_remaining = (
                 max(0, max_capacity - participant_count)
-                if isinstance(max_capacity, int) else None
+                if isinstance(max_capacity, int)
+                else None
             )
-            live_signals.append({
-                "type": "tournament_started",
-                "signal_key": f"tournament_started|{tag}",
-                "tournament_tag": tag,
-                "tournament_name": tournament_name,
-                "participant_count": participant_count,
-                "max_capacity": max_capacity,
-                "spots_remaining": spots_remaining,
-                "game_mode_id": (api_data.get("gameMode") or {}).get("id"),
-                "game_mode_name": game_mode_label(
-                    (api_data.get("gameMode") or {}).get("id"),
-                    (api_data.get("gameMode") or {}).get("name"),
-                ),
-                "deck_selection": deck_selection_label(api_data.get("deckSelection")),
-                **timing_fields,
-            })
+            live_signals.append(
+                {
+                    "type": "tournament_started",
+                    "signal_key": f"tournament_started|{tag}",
+                    "tournament_tag": tag,
+                    "tournament_name": tournament_name,
+                    "participant_count": participant_count,
+                    "max_capacity": max_capacity,
+                    "spots_remaining": spots_remaining,
+                    "game_mode_id": (api_data.get("gameMode") or {}).get("id"),
+                    "game_mode_name": game_mode_label(
+                        (api_data.get("gameMode") or {}).get("id"),
+                        (api_data.get("gameMode") or {}).get("name"),
+                    ),
+                    "deck_selection": deck_selection_label(
+                        api_data.get("deckSelection")
+                    ),
+                    **timing_fields,
+                }
+            )
         elif new_status == "ended":
             top3 = sorted(members_list, key=lambda m: m.get("rank") or 999)[:3]
-            live_signals.append({
-                "type": "tournament_ended",
-                "signal_key": f"tournament_ended|{tag}",
-                "tournament_tag": tag,
-                "tournament_name": tournament_name,
-                "participant_count": participant_count,
-                "winner_name": top3[0].get("name") if top3 else None,
-                "winner_score": top3[0].get("score") if top3 else None,
-                "top3": [{"name": m.get("name"), "score": m.get("score"), "rank": m.get("rank")} for m in top3],
-            })
+            live_signals.append(
+                {
+                    "type": "tournament_ended",
+                    "signal_key": f"tournament_ended|{tag}",
+                    "tournament_tag": tag,
+                    "tournament_name": tournament_name,
+                    "participant_count": participant_count,
+                    "winner_name": top3[0].get("name") if top3 else None,
+                    "winner_score": top3[0].get("score") if top3 else None,
+                    "top3": [
+                        {
+                            "name": m.get("name"),
+                            "score": m.get("score"),
+                            "rank": m.get("rank"),
+                        }
+                        for m in top3
+                    ],
+                }
+            )
 
     # Lead change detection (only during in_progress)
     if new_status == "in_progress" and members_list:
@@ -382,15 +414,17 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
             and new_leader_tag != prev_leader["player_tag"]
             and new_leader_score > 0
         ):
-            live_signals.append({
-                "type": "tournament_lead_change",
-                "signal_key": f"tournament_lead_change|{tag}|{new_leader_tag}|{new_leader_score}",
-                "tournament_tag": tag,
-                "tournament_name": tournament_name,
-                "new_leader_name": new_leader.get("name"),
-                "new_leader_score": new_leader_score,
-                "previous_leader_name": prev_leader["player_name"],
-            })
+            live_signals.append(
+                {
+                    "type": "tournament_lead_change",
+                    "signal_key": f"tournament_lead_change|{tag}|{new_leader_tag}|{new_leader_score}",
+                    "tournament_tag": tag,
+                    "tournament_name": tournament_name,
+                    "new_leader_name": new_leader.get("name"),
+                    "new_leader_score": new_leader_score,
+                    "previous_leader_name": prev_leader["player_name"],
+                }
+            )
 
     return {"participants": participants, "live_signals": live_signals}
 
@@ -398,6 +432,7 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
 # ---------------------------------------------------------------------------
 # Battle capture
 # ---------------------------------------------------------------------------
+
 
 def _card_names_from_deck(cards: list[dict] | None) -> list[str]:
     names = []
@@ -407,7 +442,9 @@ def _card_names_from_deck(cards: list[dict] | None) -> list[str]:
     return names
 
 
-def _enrich_deck_from_catalog(conn, card_names: list[str]) -> tuple[list[dict], Optional[float]]:
+def _enrich_deck_from_catalog(
+    conn, card_names: list[str]
+) -> tuple[list[dict], Optional[float]]:
     """Join card names against card_catalog to get elixir cost, rarity, and
     type per card. Returns (enriched_list, avg_elixir_or_None).
 
@@ -451,15 +488,15 @@ def _player_enrichment(conn, player_tag: str) -> dict:
     if not tag:
         return out
     member_row = conn.execute(
-        "SELECT player_tag FROM players WHERE player_tag = ?", (tag,),
+        "SELECT player_tag FROM players WHERE player_tag = ?",
+        (tag,),
     ).fetchone()
     if not member_row:
         return out
     member_id = member_row["player_tag"]
 
     profile = conn.execute(
-        "SELECT trophies, best_trophies FROM player_current_state "
-        "WHERE player_tag = ?",
+        "SELECT trophies, best_trophies FROM player_current_state WHERE player_tag = ?",
         (member_id,),
     ).fetchone()
     if profile:
@@ -482,7 +519,9 @@ def _player_enrichment(conn, player_tag: str) -> dict:
         joined_at = meta["joined_at"]
         if joined_at:
             try:
-                joined_dt = datetime.strptime(joined_at[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                joined_dt = datetime.strptime(joined_at[:10], "%Y-%m-%d").replace(
+                    tzinfo=timezone.utc
+                )
                 tenure_days = (datetime.now(timezone.utc) - joined_dt).days
                 if tenure_days >= 0:
                     out["clan_tenure_days"] = tenure_days
@@ -495,7 +534,9 @@ def _player_enrichment(conn, player_tag: str) -> dict:
 
 
 @managed_connection
-def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def store_tournament_battle(
+    tournament_id: int, battle: dict, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     """Store a single tournament battle with dedup.
 
     Canonicalizes player order (player1_tag < player2_tag lexicographically)
@@ -534,11 +575,35 @@ def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sql
 
     # Canonicalize order: player1_tag is always the lexicographically smaller tag.
     if tag_a <= tag_b:
-        p1_tag, p1_name, p1_crowns, p1_deck, p1_card_names = tag_a, team.get("name"), crowns_a, deck_a, card_names_a
-        p2_tag, p2_name, p2_crowns, p2_deck, p2_card_names = tag_b, opp.get("name"), crowns_b, deck_b, card_names_b
+        p1_tag, p1_name, p1_crowns, p1_deck, p1_card_names = (
+            tag_a,
+            team.get("name"),
+            crowns_a,
+            deck_a,
+            card_names_a,
+        )
+        p2_tag, p2_name, p2_crowns, p2_deck, p2_card_names = (
+            tag_b,
+            opp.get("name"),
+            crowns_b,
+            deck_b,
+            card_names_b,
+        )
     else:
-        p1_tag, p1_name, p1_crowns, p1_deck, p1_card_names = tag_b, opp.get("name"), crowns_b, deck_b, card_names_b
-        p2_tag, p2_name, p2_crowns, p2_deck, p2_card_names = tag_a, team.get("name"), crowns_a, deck_a, card_names_a
+        p1_tag, p1_name, p1_crowns, p1_deck, p1_card_names = (
+            tag_b,
+            opp.get("name"),
+            crowns_b,
+            deck_b,
+            card_names_b,
+        )
+        p2_tag, p2_name, p2_crowns, p2_deck, p2_card_names = (
+            tag_a,
+            team.get("name"),
+            crowns_a,
+            deck_a,
+            card_names_a,
+        )
 
     p1_is_clan_member = _is_current_clan_member(conn, p1_tag)
     p2_is_clan_member = _is_current_clan_member(conn, p2_tag)
@@ -556,8 +621,14 @@ def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sql
         (
             tournament_id,
             battle.get("battleTime"),
-            p1_tag, p1_name, p1_crowns, p1_deck,
-            p2_tag, p2_name, p2_crowns, p2_deck,
+            p1_tag,
+            p1_name,
+            p1_crowns,
+            p1_deck,
+            p2_tag,
+            p2_name,
+            p2_crowns,
+            p2_deck,
             winner_tag,
             battle.get("deckSelection"),
             game_mode.get("id"),
@@ -616,8 +687,11 @@ def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sql
 # Finalize
 # ---------------------------------------------------------------------------
 
+
 @managed_connection
-def finalize_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.Connection] = None) -> None:
+def finalize_tournament(
+    tournament_tag: str, api_data: dict, conn: Optional[sqlite3.Connection] = None
+) -> None:
     """Mark a tournament as ended and store final snapshot."""
     tag = _canon_tag(tournament_tag)
     conn.execute(
@@ -648,6 +722,7 @@ def finalize_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqli
 # Queries
 # ---------------------------------------------------------------------------
 
+
 @managed_connection
 def get_active_tournament(conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     """Return the currently watched tournament or None."""
@@ -660,7 +735,9 @@ def get_active_tournament(conn: Optional[sqlite3.Connection] = None) -> Optional
 
 
 @managed_connection
-def list_pending_tournament_recaps(conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def list_pending_tournament_recaps(
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     """Tournaments that finalized but never posted their recap.
 
     Used at boot to recover from a restart that landed in the gap between
@@ -679,7 +756,9 @@ def list_pending_tournament_recaps(conn: Optional[sqlite3.Connection] = None) ->
 
 
 @managed_connection
-def get_tournament_by_tag(tournament_tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_tournament_by_tag(
+    tournament_tag: str, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     """Return a tournament row by tag or None."""
     tag = _canon_tag(tournament_tag)
     row = conn.execute(
@@ -689,7 +768,9 @@ def get_tournament_by_tag(tournament_tag: str, conn: Optional[sqlite3.Connection
 
 
 @managed_connection
-def get_tournament_participants(tournament_id: int, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_tournament_participants(
+    tournament_id: int, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     """Return all participants for a tournament, ordered by rank."""
     rows = conn.execute(
         """SELECT * FROM tournament_participants
@@ -701,7 +782,9 @@ def get_tournament_participants(tournament_id: int, conn: Optional[sqlite3.Conne
 
 
 @managed_connection
-def get_tournament_battles(tournament_id: int, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_tournament_battles(
+    tournament_id: int, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     """Return all battles for a tournament, ordered by time."""
     rows = conn.execute(
         """SELECT * FROM tournament_battles
@@ -713,9 +796,13 @@ def get_tournament_battles(tournament_id: int, conn: Optional[sqlite3.Connection
 
 
 @managed_connection
-def get_recent_tournaments_for_recap(days: int = 7, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_recent_tournaments_for_recap(
+    days: int = 7, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     """Return recent ended tournaments with summary data for weekly recap integration."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
     rows = conn.execute(
         """SELECT t.*,
             (SELECT COUNT(*) FROM tournament_participants WHERE tournament_id = t.tournament_id) AS participant_count
@@ -746,16 +833,18 @@ def get_recent_tournaments_for_recap(days: int = 7, conn: Optional[sqlite3.Conne
             "draft": "Draft",
         }.get(t.get("deck_selection") or "", t.get("deck_selection") or "")
 
-        results.append({
-            "name": t["name"],
-            "tournament_tag": t["tournament_tag"],
-            "deck_selection": deck_label,
-            "participant_count": t["participant_count"],
-            "battles_captured": t.get("battles_captured", 0),
-            "winner_name": winner_row["player_name"] if winner_row else None,
-            "winner_score": winner_row["final_score"] if winner_row else None,
-            "top_cards": top3_cards or None,
-        })
+        results.append(
+            {
+                "name": t["name"],
+                "tournament_tag": t["tournament_tag"],
+                "deck_selection": deck_label,
+                "participant_count": t["participant_count"],
+                "battles_captured": t.get("battles_captured", 0),
+                "winner_name": winner_row["player_name"] if winner_row else None,
+                "winner_score": winner_row["final_score"] if winner_row else None,
+                "top_cards": top3_cards or None,
+            }
+        )
 
     return results
 
@@ -764,8 +853,11 @@ def get_recent_tournaments_for_recap(days: int = 7, conn: Optional[sqlite3.Conne
 # Card analysis
 # ---------------------------------------------------------------------------
 
+
 @managed_connection
-def get_tournament_card_stats(tournament_id: int, conn: Optional[sqlite3.Connection] = None) -> dict:
+def get_tournament_card_stats(
+    tournament_id: int, conn: Optional[sqlite3.Connection] = None
+) -> dict:
     """Aggregate card usage across all tournament battles.
 
     Returns dict with:
@@ -774,8 +866,8 @@ def get_tournament_card_stats(tournament_id: int, conn: Optional[sqlite3.Connect
     """
     battles = get_tournament_battles(tournament_id, conn=conn)
 
-    card_stats = {}   # card_name -> {picks, wins, players}
-    player_cards = {} # player_name -> {card_name -> {picks, wins}}
+    card_stats = {}  # card_name -> {picks, wins, players}
+    player_cards = {}  # player_name -> {card_name -> {picks, wins}}
 
     for battle in battles:
         for side in (1, 2):
@@ -799,7 +891,13 @@ def get_tournament_card_stats(tournament_id: int, conn: Optional[sqlite3.Connect
                 cid = card.get("id")
 
                 if cname not in card_stats:
-                    card_stats[cname] = {"name": cname, "id": cid, "picks": 0, "wins": 0, "players": set()}
+                    card_stats[cname] = {
+                        "name": cname,
+                        "id": cid,
+                        "picks": 0,
+                        "wins": 0,
+                        "players": set(),
+                    }
                 card_stats[cname]["picks"] += 1
                 card_stats[cname]["players"].add(player_name)
                 if is_winner:
@@ -813,16 +911,20 @@ def get_tournament_card_stats(tournament_id: int, conn: Optional[sqlite3.Connect
 
     # Build sorted card list
     card_list = []
-    for cname, stats in sorted(card_stats.items(), key=lambda x: x[1]["picks"], reverse=True):
+    for cname, stats in sorted(
+        card_stats.items(), key=lambda x: x[1]["picks"], reverse=True
+    ):
         win_rate = stats["wins"] / stats["picks"] if stats["picks"] > 0 else 0
-        card_list.append({
-            "name": cname,
-            "id": stats["id"],
-            "pick_count": stats["picks"],
-            "win_count": stats["wins"],
-            "win_rate": round(win_rate, 2),
-            "player_count": len(stats["players"]),
-        })
+        card_list.append(
+            {
+                "name": cname,
+                "id": stats["id"],
+                "pick_count": stats["picks"],
+                "win_count": stats["wins"],
+                "win_rate": round(win_rate, 2),
+                "player_count": len(stats["players"]),
+            }
+        )
 
     # Build player tendencies
     player_tendencies = {}
@@ -839,6 +941,7 @@ def get_tournament_card_stats(tournament_id: int, conn: Optional[sqlite3.Connect
 # ---------------------------------------------------------------------------
 # Recap context
 # ---------------------------------------------------------------------------
+
 
 def _recap_audience(conn, participants: list[dict]) -> str:
     """Tournament-level audience tag for recap tone selection."""
@@ -858,7 +961,9 @@ def _recap_audience(conn, participants: list[dict]) -> str:
 
 
 @managed_connection
-def build_tournament_recap_context(tournament_tag: str, conn: Optional[sqlite3.Connection] = None) -> str:
+def build_tournament_recap_context(
+    tournament_tag: str, conn: Optional[sqlite3.Connection] = None
+) -> str:
     """Build structured text context for LLM recap generation.
 
     Returns a multi-section string with tournament metadata, audience tag,
@@ -957,8 +1062,16 @@ def build_tournament_recap_context(tournament_tag: str, conn: Optional[sqlite3.C
             h2h[key]["p2_wins"] += 1
 
         # Extract card names for battle summary
-        p1_cards = [c.get("name") for c in json.loads(b["player1_deck_json"] or "[]") if c.get("name")]
-        p2_cards = [c.get("name") for c in json.loads(b["player2_deck_json"] or "[]") if c.get("name")]
+        p1_cards = [
+            c.get("name")
+            for c in json.loads(b["player1_deck_json"] or "[]")
+            if c.get("name")
+        ]
+        p2_cards = [
+            c.get("name")
+            for c in json.loads(b["player2_deck_json"] or "[]")
+            if c.get("name")
+        ]
         p1_enriched, p1_avg = _enrich_deck_from_catalog(conn, p1_cards)
         p2_enriched, p2_avg = _enrich_deck_from_catalog(conn, p2_cards)
         shared = sorted(set(p1_cards) & set(p2_cards))
@@ -967,17 +1080,19 @@ def build_tournament_recap_context(tournament_tag: str, conn: Optional[sqlite3.C
             winner_name = p1
         elif b["winner_tag"] == b["player2_tag"]:
             winner_name = p2
-        h2h[key]["battles"].append({
-            "time": b["battle_time"],
-            "p1_crowns": b["player1_crowns"],
-            "p2_crowns": b["player2_crowns"],
-            "winner": winner_name,
-            "p1_deck": p1_enriched,
-            "p2_deck": p2_enriched,
-            "p1_avg": p1_avg,
-            "p2_avg": p2_avg,
-            "shared_cards": shared,
-        })
+        h2h[key]["battles"].append(
+            {
+                "time": b["battle_time"],
+                "p1_crowns": b["player1_crowns"],
+                "p2_crowns": b["player2_crowns"],
+                "winner": winner_name,
+                "p1_deck": p1_enriched,
+                "p2_deck": p2_enriched,
+                "p1_avg": p1_avg,
+                "p2_avg": p2_avg,
+                "shared_cards": shared,
+            }
+        )
 
     def _format_deck(enriched):
         if not enriched:
@@ -1000,7 +1115,11 @@ def build_tournament_recap_context(tournament_tag: str, conn: Optional[sqlite3.C
                 winner = b["winner"] or "Draw"
                 p1_avg = f" avg {b['p1_avg']}e" if b.get("p1_avg") is not None else ""
                 p2_avg = f" avg {b['p2_avg']}e" if b.get("p2_avg") is not None else ""
-                shared_note = f" | shared: {', '.join(b['shared_cards'])}" if b["shared_cards"] else ""
+                shared_note = (
+                    f" | shared: {', '.join(b['shared_cards'])}"
+                    if b["shared_cards"]
+                    else ""
+                )
                 h2h_lines.append(
                     f"  {b['p1_crowns']}-{b['p2_crowns']} ({winner} wins){shared_note}\n"
                     f"    {p1}{p1_avg}: {_format_deck(b['p1_deck'])}\n"

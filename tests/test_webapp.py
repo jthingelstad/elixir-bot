@@ -32,6 +32,7 @@ def _client_run(coro_fn):
 
 # ------------------------------------------------------------ middleware
 
+
 def test_identity_required():
     async def body(client):
         r = await client.get("/")
@@ -60,11 +61,22 @@ def test_any_login_allowed_when_env_empty(monkeypatch):
 
 # ----------------------------------------------------------- page renders
 
+
 def test_pages_render_on_empty_db():
     async def body(client):
-        for path in ("/", "/members", "/awards", "/ticks", "/streams",
-                     "/recognition", "/polling", "/management", "/war",
-                     "/llm", "/chat"):
+        for path in (
+            "/",
+            "/members",
+            "/awards",
+            "/ticks",
+            "/streams",
+            "/recognition",
+            "/polling",
+            "/management",
+            "/war",
+            "/llm",
+            "/chat",
+        ):
             r = await client.get(path, headers=LOGIN)
             assert r.status == 200, path
             text = await r.text()
@@ -131,8 +143,9 @@ def test_members_awards_baseline_render_seeded():
         assert r.status == 200
         text = await r.text()
         assert "Rosterling" in text and "first sight" in text
-        r = await client.get("/baseline?kind=player&tag=%23NOPE&aspect=profile",
-                             headers=LOGIN)
+        r = await client.get(
+            "/baseline?kind=player&tag=%23NOPE&aspect=profile", headers=LOGIN
+        )
         assert r.status == 404
         r = await client.get("/llm", headers=LOGIN)
         assert r.status == 200
@@ -142,27 +155,18 @@ def test_members_awards_baseline_render_seeded():
     _client_run(body)
 
 
-def _seed_claim_and_intent():
+def _seed_claims():
     conn = db.get_connection()
     try:
         conn.execute(
             """INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at)
                VALUES ('#SEED1', 'Seedling', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z')"""
         )
-        # ledger first: communication_intents.recognition_key FKs the ledger
         conn.execute(
             """INSERT INTO recognition_ledger
                (recognition_key, stream, event_refs_json, score, claimed_at, intent_id)
                VALUES ('collection_level_milestone:#SEED1:1700', 'player',
                        '{"refs": [], "suppressed": null}', 85, '2026-07-04T00:00:00Z', 7)"""
-        )
-        conn.execute(
-            """INSERT INTO communication_intents
-               (intent_id, recognition_key, intent_type, lane, scope, payload_json,
-                status, attempts, created_at, expires_at, last_error)
-               VALUES (7, 'collection_level_milestone:#SEED1:1700', 'celebrate:collection_level_milestone', 'member-highlights',
-                       'public', '{"subject_tag": "#SEED1"}', 'failed', 2,
-                       '2026-07-04T00:00:00Z', '2026-07-04T06:00:00Z', 'boom')"""
         )
         conn.execute(
             """INSERT INTO recognition_ledger
@@ -180,14 +184,14 @@ def _seed_claim_and_intent():
         conn.close()
 
 
-def test_recognition_shows_suppression_and_status():
-    _seed_claim_and_intent()
+def test_recognition_shows_suppression_and_archived_legacy_reference():
+    _seed_claims()
 
     async def body(client):
         r = await client.get("/recognition", headers=LOGIN)
         text = await r.text()
         assert "player_highlight_accruing" in text
-        assert "failed" in text
+        assert "legacy post #7 (archived)" in text
         r = await client.get(
             "/recognition/best_trophies_peak:%23SEED1:5100", headers=LOGIN
         )
@@ -201,6 +205,7 @@ def test_recognition_shows_suppression_and_status():
 
 
 # ------------------------------------------------------------- ring buffer
+
 
 def test_tick_history_persists_and_orders():
     # Since 2026-07-04 record_tick dual-writes: in-memory ring (fast path,
@@ -220,6 +225,7 @@ def test_tick_history_persists_and_orders():
 
 
 # ---------------------------------------------------------------- safe ops
+
 
 def test_weekly_review_dryrun_rolls_back():
     conn = db.get_connection()
@@ -242,9 +248,11 @@ def test_weekly_review_dryrun_rolls_back():
                VALUES ('#DRY1', '2026-07-01T00:00:00Z', '2026-06-23', 2, '{"x": 1}')"""
         )
         conn.commit()
-        before = dict(conn.execute(
-            "SELECT * FROM member_management WHERE player_tag = '#DRY1'"
-        ).fetchone())
+        before = dict(
+            conn.execute(
+                "SELECT * FROM member_management WHERE player_tag = '#DRY1'"
+            ).fetchone()
+        )
     finally:
         conn.close()
 
@@ -253,15 +261,18 @@ def test_weekly_review_dryrun_rolls_back():
 
     conn = db.get_connection()
     try:
-        after = dict(conn.execute(
-            "SELECT * FROM member_management WHERE player_tag = '#DRY1'"
-        ).fetchone())
+        after = dict(
+            conn.execute(
+                "SELECT * FROM member_management WHERE player_tag = '#DRY1'"
+            ).fetchone()
+        )
         assert after == before  # rolled back — nothing changed
     finally:
         conn.close()
 
 
 # --------------------------------------------------------------------- chat
+
 
 def test_chat_post_and_poll(monkeypatch):
     monkeypatch.setattr(webapp_chat, "_run_agent", lambda q, login, prior: f"echo: {q}")
@@ -331,9 +342,9 @@ def test_role_action_card_gets_clan_chat_copy(monkeypatch):
     Guards the lazy-import path in _ensure_role_action_clan_chat_copy (a bad
     import there silently killed card posting, live 2026-07-05)."""
     import asyncio
-    import runtime.app as app
-    import db
 
+    import db
+    import runtime.app as app
     from storage.leader_actions import create_leader_action_recommendation
 
     conn = db.get_connection()
@@ -349,16 +360,20 @@ def test_role_action_card_gets_clan_chat_copy(monkeypatch):
             conn=conn,
         )
         aid = created["action_id"]
-        action = dict(conn.execute(
-            "SELECT * FROM leader_action_recommendations WHERE action_id=?", (aid,)).fetchone())
-        conn.commit()   # the test owns this conn, so it commits it (writers no
-                        # longer commit a borrowed connection — that was the bug)
+        action = dict(
+            conn.execute(
+                "SELECT * FROM leader_action_recommendations WHERE action_id=?", (aid,)
+            ).fetchone()
+        )
+        conn.commit()  # the test owns this conn, so it commits it (writers no
+        # longer commit a borrowed connection — that was the bug)
     finally:
         conn.close()
 
     # Force the deterministic fallback (no live LLM in tests).
     async def _boom(*a, **k):
         raise RuntimeError("no LLM in tests")
+
     monkeypatch.setattr("runtime.clan_chat_copy.generate_clan_chat_copy", _boom)
 
     out = asyncio.run(app._ensure_role_action_clan_chat_copy(action))
@@ -368,7 +383,8 @@ def test_role_action_card_gets_clan_chat_copy(monkeypatch):
     conn = db.get_connection()
     try:
         persisted = conn.execute(
-            "SELECT copy_current_text FROM leader_action_recommendations WHERE action_id=?", (aid,)
+            "SELECT copy_current_text FROM leader_action_recommendations WHERE action_id=?",
+            (aid,),
         ).fetchone()[0]
         assert persisted and "Xavier" in persisted  # persisted, not just in-memory
     finally:

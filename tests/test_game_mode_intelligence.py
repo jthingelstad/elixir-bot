@@ -9,7 +9,16 @@ def _battle_ts(time_part: str) -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d") + f"T{time_part}.000Z"
 
 
-def _battle(ts, *, battle_type, game_mode_id, game_mode_name, team_size=1, event_tag=None, tournament_tag=None):
+def _battle(
+    ts,
+    *,
+    battle_type,
+    game_mode_id,
+    game_mode_name,
+    team_size=1,
+    event_tag=None,
+    tournament_tag=None,
+):
     team = [
         {
             "tag": "#2P0LYQ",
@@ -18,7 +27,9 @@ def _battle(ts, *, battle_type, game_mode_id, game_mode_name, team_size=1, event
             "cards": [],
             "supportCards": [],
             "trophyChange": 30 if battle_type in {"PvP", "pathOfLegend"} else None,
-            "startingTrophies": 1000 if battle_type in {"PvP", "pathOfLegend"} else None,
+            "startingTrophies": 1000
+            if battle_type in {"PvP", "pathOfLegend"}
+            else None,
         }
         for _ in range(team_size)
     ]
@@ -45,25 +56,90 @@ def _battle(ts, *, battle_type, game_mode_id, game_mode_name, team_size=1, event
 
 
 def test_classify_battle_mode_uses_docs_taxonomy_order():
-    assert classify_battle_mode(battle_type="pathOfLegend", game_mode_id=72000464, game_mode_name="Ranked1v1_NewArena2") == "ranked"
-    assert classify_battle_mode(battle_type="riverRacePvP", game_mode_id=72000070, game_mode_name="RampUpElixir_Ladder") == "war"
-    assert classify_battle_mode(battle_type="trail", game_mode_id=72000014, game_mode_name="TeamVsTeam", event_tag="#E") == "two_v_two"
-    assert classify_battle_mode(battle_type="tournament", game_mode_id=72000194, game_mode_name="Draft_Competitive", tournament_tag="#T") == "tournament"
-    assert classify_battle_mode(battle_type="friendly", game_mode_id=72000007, game_mode_name="Friendly") == "friendly"
+    assert (
+        classify_battle_mode(
+            battle_type="pathOfLegend",
+            game_mode_id=72000464,
+            game_mode_name="Ranked1v1_NewArena2",
+        )
+        == "ranked"
+    )
+    assert (
+        classify_battle_mode(
+            battle_type="riverRacePvP",
+            game_mode_id=72000070,
+            game_mode_name="RampUpElixir_Ladder",
+        )
+        == "war"
+    )
+    assert (
+        classify_battle_mode(
+            battle_type="trail",
+            game_mode_id=72000014,
+            game_mode_name="TeamVsTeam",
+            event_tag="#E",
+        )
+        == "two_v_two"
+    )
+    assert (
+        classify_battle_mode(
+            battle_type="tournament",
+            game_mode_id=72000194,
+            game_mode_name="Draft_Competitive",
+            tournament_tag="#T",
+        )
+        == "tournament"
+    )
+    assert (
+        classify_battle_mode(
+            battle_type="friendly", game_mode_id=72000007, game_mode_name="Friendly"
+        )
+        == "friendly"
+    )
 
 
 def test_battle_rollups_split_new_mode_groups():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members([{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn)
+        db.snapshot_members(
+            [{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn
+        )
         db.snapshot_player_battlelog(
             "#2P0LYQ",
             [
-                _battle(_battle_ts("100000"), battle_type="PvP", game_mode_id=72000006, game_mode_name="Ladder"),
-                _battle(_battle_ts("100100"), battle_type="pathOfLegend", game_mode_id=72000464, game_mode_name="Ranked1v1_NewArena2"),
-                _battle(_battle_ts("100200"), battle_type="trail", game_mode_id=72000014, game_mode_name="TeamVsTeam", team_size=2, event_tag="#E"),
-                _battle(_battle_ts("100300"), battle_type="tournament", game_mode_id=72000194, game_mode_name="Draft_Competitive", tournament_tag="#T"),
-                _battle(_battle_ts("100400"), battle_type="friendly", game_mode_id=72000007, game_mode_name="Friendly"),
+                _battle(
+                    _battle_ts("100000"),
+                    battle_type="PvP",
+                    game_mode_id=72000006,
+                    game_mode_name="Ladder",
+                ),
+                _battle(
+                    _battle_ts("100100"),
+                    battle_type="pathOfLegend",
+                    game_mode_id=72000464,
+                    game_mode_name="Ranked1v1_NewArena2",
+                ),
+                _battle(
+                    _battle_ts("100200"),
+                    battle_type="trail",
+                    game_mode_id=72000014,
+                    game_mode_name="TeamVsTeam",
+                    team_size=2,
+                    event_tag="#E",
+                ),
+                _battle(
+                    _battle_ts("100300"),
+                    battle_type="tournament",
+                    game_mode_id=72000194,
+                    game_mode_name="Draft_Competitive",
+                    tournament_tag="#T",
+                ),
+                _battle(
+                    _battle_ts("100400"),
+                    battle_type="friendly",
+                    game_mode_id=72000007,
+                    game_mode_name="Friendly",
+                ),
             ],
             conn=conn,
         )
@@ -78,7 +154,9 @@ def test_battle_rollups_split_new_mode_groups():
 def test_ranked_and_clan_game_mode_query_helpers():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members([{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn)
+        db.snapshot_members(
+            [{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn
+        )
         db.snapshot_player_profile(
             {
                 "tag": "#2P0LYQ",
@@ -88,19 +166,48 @@ def test_ranked_and_clan_game_mode_query_helpers():
                 "trophies": 9000,
                 "bestTrophies": 9200,
                 "arena": {"id": 54000130, "name": "Boot Camp"},
-                "currentPathOfLegendSeasonResult": {"leagueNumber": 6, "trophies": 1200, "rank": None},
-                "lastPathOfLegendSeasonResult": {"leagueNumber": 5, "trophies": 1000, "rank": None},
-                "bestPathOfLegendSeasonResult": {"leagueNumber": 7, "trophies": 1800, "rank": None},
-                "progress": {"AutoChess_2026_Season_9": {"trophies": 2100, "bestTrophies": 2200}},
+                "currentPathOfLegendSeasonResult": {
+                    "leagueNumber": 6,
+                    "trophies": 1200,
+                    "rank": None,
+                },
+                "lastPathOfLegendSeasonResult": {
+                    "leagueNumber": 5,
+                    "trophies": 1000,
+                    "rank": None,
+                },
+                "bestPathOfLegendSeasonResult": {
+                    "leagueNumber": 7,
+                    "trophies": 1800,
+                    "rank": None,
+                },
+                "progress": {
+                    "AutoChess_2026_Season_9": {"trophies": 2100, "bestTrophies": 2200}
+                },
                 "currentDeck": [],
-                "cards": [{"id": 26000000, "name": "Knight", "rarity": "common", "level": 14, "maxLevel": 14}],
+                "cards": [
+                    {
+                        "id": 26000000,
+                        "name": "Knight",
+                        "rarity": "common",
+                        "level": 14,
+                        "maxLevel": 14,
+                    }
+                ],
                 "badges": [],
             },
             conn=conn,
         )
         db.snapshot_player_battlelog(
             "#2P0LYQ",
-            [_battle(_battle_ts("100100"), battle_type="pathOfLegend", game_mode_id=72000464, game_mode_name="Ranked1v1_NewArena2")],
+            [
+                _battle(
+                    _battle_ts("100100"),
+                    battle_type="pathOfLegend",
+                    game_mode_id=72000464,
+                    game_mode_name="Ranked1v1_NewArena2",
+                )
+            ],
             conn=conn,
         )
         ranked = db.get_member_ranked_status("#2P0LYQ", days=1, conn=conn)
@@ -117,16 +224,27 @@ def test_ranked_and_clan_game_mode_query_helpers():
     assert summary["side_mode_progress"] == []
     # QA H12: mode_mix (by_group) and ranked_activity now share the authoritative
     # battle_events source, so their ranked counts reconcile (were 1152 vs 451).
-    ranked_group = next((g for g in summary["by_group"] if g["mode_group"] == "ranked"), None)
+    ranked_group = next(
+        (g for g in summary["by_group"] if g["mode_group"] == "ranked"), None
+    )
     assert ranked_group is not None and ranked_group["battles"] == 1
-    assert sum(m["ranked_battles"] for m in summary["ranked_activity"]) == ranked_group["battles"]
+    assert (
+        sum(m["ranked_battles"] for m in summary["ranked_activity"])
+        == ranked_group["battles"]
+    )
 
 
 def test_game_mode_contexts_capture_events_and_leaderboards():
     conn = db.get_connection(":memory:")
     try:
         db.upsert_game_mode_contexts_from_events(
-            [{"eventTag": "#E", "title": "Princess Gambit", "gameMode": {"id": 72000469, "name": "DraftMode_Princess"}}],
+            [
+                {
+                    "eventTag": "#E",
+                    "title": "Princess Gambit",
+                    "gameMode": {"id": 72000469, "name": "DraftMode_Princess"},
+                }
+            ],
             conn=conn,
         )
         db.upsert_game_mode_contexts_from_leaderboards(
@@ -147,7 +265,9 @@ def test_game_mode_contexts_capture_events_and_leaderboards():
 def test_special_event_activity_uses_event_context_display_names():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members([{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn)
+        db.snapshot_members(
+            [{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn
+        )
         db.upsert_game_mode_contexts_from_events(
             [
                 {
@@ -186,25 +306,35 @@ def test_special_event_activity_uses_event_context_display_names():
             conn=conn,
         )
 
-        summary = db.get_clan_game_mode_summary(days=1, mode_group="special_event", limit=10, conn=conn)
+        summary = db.get_clan_game_mode_summary(
+            days=1, mode_group="special_event", limit=10, conn=conn
+        )
         member = db.get_member_special_event_activity("#2P0LYQ", days=1, conn=conn)
     finally:
         conn.close()
 
     activity_by_tag = {row["event_tag"]: row for row in summary["by_game_mode"]}
     assert activity_by_tag["#REST"]["event_name"] == "Restless Undead"
-    assert activity_by_tag["#REST"]["event_description"] == "Tombstones randomly appear around the Arena."
+    assert (
+        activity_by_tag["#REST"]["event_description"]
+        == "Tombstones randomly appear around the Arena."
+    )
     assert activity_by_tag["#REST"]["game_mode_name"] == "Event_RestlessDead"
     assert activity_by_tag["#SEASON"]["event_name"] == "Seasonal Trophy Road"
     assert activity_by_tag["#SEASON"]["game_mode_name"] == "Ladder"
 
-    participation_by_tag = {row["event_tag"]: row for row in summary["event_participation"]}
+    participation_by_tag = {
+        row["event_tag"]: row for row in summary["event_participation"]
+    }
     assert participation_by_tag["#REST"]["event_name"] == "Restless Undead"
     assert participation_by_tag["#REST"]["member_ref"]
 
     active_by_tag = {row["event_tag"]: row for row in summary["active_events"]}
     assert active_by_tag["#REST"]["event_name"] == "Restless Undead"
-    assert active_by_tag["#REST"]["event_description"] == "Tombstones randomly appear around the Arena."
+    assert (
+        active_by_tag["#REST"]["event_description"]
+        == "Tombstones randomly appear around the Arena."
+    )
 
     member_modes = {row["event_tag"]: row for row in member["by_game_mode"]}
     assert member_modes["#REST"]["event_name"] == "Restless Undead"

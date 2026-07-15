@@ -62,7 +62,7 @@ def test_reception_channel_is_open_channel():
 def test_arena_relay_channel_is_configured():
     channel = prompts.discord_singleton_lane("arena-relay")
     assert channel["id"] == 1513758211206025227
-    assert channel["name"] == "#actions"        # renamed from #leader-actions 2026-07-12
+    assert channel["name"] == "#actions"  # renamed from #leader-actions 2026-07-12
     assert channel["reply_policy"] == "disabled"
     assert channel["memory_scope"] == "leadership"
     section = prompts.channel_section("#actions")
@@ -79,6 +79,7 @@ def test_retired_topic_channels_are_gone():
     deleted 2026-07-11; their lanes are removed and public commentary is
     consolidated into #elixir (the awareness brain's channel)."""
     from engine.recognition.compose import PREFIX_LANE
+
     for lane in ("member-highlights", "river-race", "battle-feed", "clan-events"):
         assert lane not in prompts.CHANNEL_LANE_CONFIG
     # recognition prefixes that used to fan out to those channels now go to #elixir
@@ -172,7 +173,9 @@ def test_validate_discord_channel_config_flags_singleton_errors(monkeypatch):
     )
     errors = prompts.validate_discord_channel_config()
 
-    assert any("expected exactly one leader-lounge channel" in error for error in errors)
+    assert any(
+        "expected exactly one leader-lounge channel" in error for error in errors
+    )
 
 
 def test_knowledge_block():
@@ -197,10 +200,11 @@ def test_awareness_prompt_enforces_they_them_at_compose_time():
     The awareness agent prompt itself must state the they/them rule AND model no
     gendered pronoun in its own examples (the model mirrors the prompt)."""
     import re
+
     agent_md = prompts.agent_prompt("awareness")
     assert "they/them" in agent_md.lower()
     # the prompt's OWN prose must not model he/him/his/she/her (member examples)
-    stray = re.findall(r'\b(he|him|his|she|her|hers)\b', agent_md, re.I)
+    stray = re.findall(r"\b(he|him|his|she|her|hers)\b", agent_md, re.I)
     assert not stray, f"awareness.md models gendered pronouns: {stray}"
     # and it reaches the composed awareness system prompt
     assert "they/them" in agent_prompts._awareness_system().lower()
@@ -246,6 +250,7 @@ def test_clan_tag():
 def test_clan_phase_founding_phase():
     """0-91 days inclusive is founding."""
     from datetime import date
+
     p = prompts.clan_phase(today=date(2026, 4, 25))  # day 80
     assert p["phase"] == "founding"
     assert p["days"] == 80
@@ -256,6 +261,7 @@ def test_clan_phase_founding_phase():
 def test_clan_phase_establishing_phase():
     """92-273 days inclusive is establishing."""
     from datetime import date
+
     p = prompts.clan_phase(today=date(2026, 5, 7))  # day 92
     assert p["phase"] == "establishing"
     assert p["days"] == 92
@@ -265,6 +271,7 @@ def test_clan_phase_establishing_phase():
 def test_clan_phase_established_phase():
     """274-730 days inclusive is established."""
     from datetime import date
+
     p = prompts.clan_phase(today=date(2026, 11, 5))  # day 274
     assert p["phase"] == "established"
     assert p["days"] == 274
@@ -274,6 +281,7 @@ def test_clan_phase_established_phase():
 def test_clan_phase_mature_phase():
     """731+ days is mature."""
     from datetime import date
+
     p = prompts.clan_phase(today=date(2028, 2, 5))  # day 731 (2y+1d)
     assert p["phase"] == "mature"
     assert p["days"] == 731
@@ -283,33 +291,45 @@ def test_clan_phase_mature_phase():
 def test_clan_phase_boundary_91_to_92_days():
     """Phase flip from founding → establishing at day 92."""
     from datetime import date
-    assert prompts.clan_phase(today=date(2026, 5, 6))["phase"] == "founding"      # day 91
-    assert prompts.clan_phase(today=date(2026, 5, 7))["phase"] == "establishing"  # day 92
+
+    assert prompts.clan_phase(today=date(2026, 5, 6))["phase"] == "founding"  # day 91
+    assert (
+        prompts.clan_phase(today=date(2026, 5, 7))["phase"] == "establishing"
+    )  # day 92
 
 
 def test_clan_phase_boundary_273_to_274_days():
     """Phase flip from establishing → established at day 274."""
     from datetime import date
-    assert prompts.clan_phase(today=date(2026, 11, 4))["phase"] == "establishing"  # day 273
-    assert prompts.clan_phase(today=date(2026, 11, 5))["phase"] == "established"   # day 274
+
+    assert (
+        prompts.clan_phase(today=date(2026, 11, 4))["phase"] == "establishing"
+    )  # day 273
+    assert (
+        prompts.clan_phase(today=date(2026, 11, 5))["phase"] == "established"
+    )  # day 274
 
 
 def test_clan_phase_boundary_730_to_731_days():
     """Phase flip from established → mature at day 731."""
     from datetime import date
-    assert prompts.clan_phase(today=date(2028, 2, 4))["phase"] == "established"  # day 730
-    assert prompts.clan_phase(today=date(2028, 2, 5))["phase"] == "mature"       # day 731
+
+    assert (
+        prompts.clan_phase(today=date(2028, 2, 4))["phase"] == "established"
+    )  # day 730
+    assert prompts.clan_phase(today=date(2028, 2, 5))["phase"] == "mature"  # day 731
 
 
 def test_clan_phase_natural_phrasing_at_milestone_dates():
     """phase_text reads naturally at month-1, month-3, month-9, year-2, year-5."""
     from datetime import date
+
     cases = [
-        (date(2026, 3, 6), "one month"),       # 30 days
-        (date(2026, 5, 6), "three months"),    # day 91, edge of founding
-        (date(2026, 11, 5), "nine months"),    # day 274, just established
-        (date(2028, 2, 5), "two years"),       # day 731, just mature
-        (date(2031, 2, 4), "five years"),      # ~1826 days
+        (date(2026, 3, 6), "one month"),  # 30 days
+        (date(2026, 5, 6), "three months"),  # day 91, edge of founding
+        (date(2026, 11, 5), "nine months"),  # day 274, just established
+        (date(2028, 2, 5), "two years"),  # day 731, just mature
+        (date(2031, 2, 4), "five years"),  # ~1826 days
     ]
     for today, expected_age in cases:
         p = prompts.clan_phase(today=today)
@@ -321,6 +341,7 @@ def test_clan_phase_natural_phrasing_at_milestone_dates():
 def test_clan_phase_handles_pre_founding_date():
     """A reference date before clan_founded clamps to 0 days, brand-new phrasing."""
     from datetime import date
+
     p = prompts.clan_phase(today=date(2025, 1, 1))
     assert p["days"] == 0
     assert p["phase"] == "founding"
@@ -330,6 +351,7 @@ def test_clan_phase_handles_pre_founding_date():
 def test_clan_substitutes_age_and_phase_tokens():
     """clan() replaces both <<CLAN_AGE_TEXT>> and <<CLAN_PHASE_BEAT>>."""
     from datetime import date
+
     text = prompts.clan(today=date(2026, 4, 25))  # founding, day 80
     assert "<<CLAN_AGE_TEXT>>" not in text
     assert "<<CLAN_PHASE_BEAT>>" not in text
@@ -340,6 +362,7 @@ def test_clan_substitutes_age_and_phase_tokens():
 def test_clan_substitution_varies_by_phase():
     """Same CLAN.md produces different prose at different phases."""
     from datetime import date
+
     founding = prompts.clan(today=date(2026, 4, 25))
     mature = prompts.clan(today=date(2031, 2, 4))
     assert "founding era is still happening" in founding
@@ -359,10 +382,16 @@ def test_observation_prompt_includes_custom_emoji_guidance():
     system_prompt = agent_prompts._channel_lane_system("#elixir")
 
     assert "Use readable Discord-native formatting." in system_prompt
-    assert "Keep most messages compact unless the task genuinely calls for more structure." in system_prompt
+    assert (
+        "Keep most messages compact unless the task genuinely calls for more structure."
+        in system_prompt
+    )
     assert "Use occasional **bold** emphasis" in system_prompt
     assert "Elixir server custom emoji" in system_prompt
     assert "Do not invent custom emoji names" in system_prompt
     assert "channel lane" in system_prompt
     assert "Default to one Discord message" in system_prompt
-    assert "Do not split one update across multiple near-duplicate messages." in system_prompt
+    assert (
+        "Do not split one update across multiple near-duplicate messages."
+        in system_prompt
+    )

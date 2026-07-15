@@ -1,10 +1,9 @@
-"""Decision-case + communication-intent reads/writes — v5.1 (schema.md §7.3).
+"""Decision-case reads and writes — v5.1 (schema.md §7.3).
 
 Ported from the retired storage/decision_cases.py (Gen B) onto the carried
 decision_cases table: source_event_key/source_event_type became
 source_event_key/source_event_type; the Gen A game_event_stream lookup is
-gone. The communication-intent readers moved here from the retired
-storage/communication_intents.py onto the engine's single intents table.
+gone.
 """
 
 from __future__ import annotations
@@ -73,8 +72,6 @@ __all__ = [
     "upsert_decision_cases_from_signals",
     "upsert_member_review_case",
     "decision_case_snapshot",
-    "list_recent_communication_intents",
-    "get_communication_trace_for_message",
 ]
 
 
@@ -84,7 +81,12 @@ def _clean_text(value) -> str | None:
 
 
 def _json_dumps(value) -> str:
-    return json.dumps(value if value is not None else {}, sort_keys=True, default=str, ensure_ascii=False)
+    return json.dumps(
+        value if value is not None else {},
+        sort_keys=True,
+        default=str,
+        ensure_ascii=False,
+    )
 
 
 def _json_loads(value) -> dict:
@@ -113,7 +115,9 @@ def _parse_utc(value: str | None) -> datetime | None:
     return parsed
 
 
-def _case_due(status: str | None, due_at: str | None, *, now: str | None = None) -> bool:
+def _case_due(
+    status: str | None, due_at: str | None, *, now: str | None = None
+) -> bool:
     if status not in {CASE_OPEN, CASE_DEFERRED}:
         return False
     if not due_at:
@@ -132,7 +136,9 @@ def _row_to_case(row: sqlite3.Row | None, *, now: str | None = None) -> dict | N
     return item
 
 
-def _case_key(case_type: str, subject_key: str | None = None, target_player_tag: str | None = None) -> str:
+def _case_key(
+    case_type: str, subject_key: str | None = None, target_player_tag: str | None = None
+) -> str:
     if target_player_tag:
         return f"{case_type}:member:{_db._canon_tag(target_player_tag)}"
     if subject_key:
@@ -175,7 +181,9 @@ def upsert_decision_case(
     if not clean_title:
         raise ValueError("title is required")
     canon_tag = _db._canon_tag(target_player_tag) if target_player_tag else None
-    clean_subject_key = _clean_text(subject_key) or (f"member:{canon_tag}" if canon_tag else None)
+    clean_subject_key = _clean_text(subject_key) or (
+        f"member:{canon_tag}" if canon_tag else None
+    )
     clean_subject_type = _clean_text(subject_type) or ("member" if canon_tag else None)
     clean_case_key = _clean_text(case_key) or _case_key(
         clean_type,
@@ -250,7 +258,9 @@ def upsert_decision_case(
 
 
 @managed_connection
-def get_decision_case(case_key: str, conn: Optional[sqlite3.Connection] = None) -> dict | None:
+def get_decision_case(
+    case_key: str, conn: Optional[sqlite3.Connection] = None
+) -> dict | None:
     row = conn.execute(
         "SELECT * FROM decision_cases WHERE case_key = ?",
         (_clean_text(case_key),),
@@ -259,7 +269,9 @@ def get_decision_case(case_key: str, conn: Optional[sqlite3.Connection] = None) 
 
 
 @managed_connection
-def get_decision_case_by_id(case_id: int, conn: Optional[sqlite3.Connection] = None) -> dict | None:
+def get_decision_case_by_id(
+    case_id: int, conn: Optional[sqlite3.Connection] = None
+) -> dict | None:
     row = conn.execute(
         "SELECT * FROM decision_cases WHERE case_id = ?",
         (int(case_id),),
@@ -377,7 +389,9 @@ def _departure_was_kick(conn, tag: str, left_at: str | None) -> bool:
     window = ""
     anchor = _parse_utc(left_at) if left_at else None
     if anchor:
-        cutoff = (anchor - timedelta(days=_KICK_ATTRIBUTION_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+        cutoff = (anchor - timedelta(days=_KICK_ATTRIBUTION_DAYS)).strftime(
+            "%Y-%m-%dT%H:%M:%S"
+        )
         window = "AND COALESCE(decided_at, proposed_at) >= ?"
         params.append(cutoff)
     row = conn.execute(
@@ -442,13 +456,15 @@ def reconcile_departed_member_cases(
             resolved_at=current,
             conn=conn,
         )
-        reconciled.append({
-            "case_id": int(row["case_id"]),
-            "case_type": row["case_type"],
-            "target_player_tag": row["target_player_tag"],
-            "target_player_name": row["target_player_name"],
-            "outcome": outcome,
-        })
+        reconciled.append(
+            {
+                "case_id": int(row["case_id"]),
+                "case_type": row["case_type"],
+                "target_player_tag": row["target_player_tag"],
+                "target_player_name": row["target_player_name"],
+                "outcome": outcome,
+            }
+        )
     return reconciled
 
 
@@ -476,7 +492,9 @@ def raise_departure_verification_cards(
 
     current = _clean_text(now) or _db._utcnow()
     anchor = _parse_utc(current) or datetime.now(timezone.utc).replace(tzinfo=None)
-    cutoff = (anchor - timedelta(days=_DEPARTURE_CARD_LOOKBACK_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff = (anchor - timedelta(days=_DEPARTURE_CARD_LOOKBACK_DAYS)).strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
     rows = conn.execute(
         """SELECT cm.membership_id, cm.player_tag, cm.left_at,
                   COALESCE(p.display_name, p.current_name, cm.player_tag) AS name,
@@ -529,7 +547,9 @@ def raise_departure_verification_cards(
             source_signal_type="engine_departure",
             conn=conn,
         )
-        raised.append({"player_tag": tag, "player_name": name, "left_at": row["left_at"]})
+        raised.append(
+            {"player_tag": tag, "player_name": name, "left_at": row["left_at"]}
+        )
     conn.commit()
     return raised
 
@@ -552,7 +572,9 @@ def expire_departure_verification_cards(
     timely and honest."""
     current = _clean_text(now) or _db._utcnow()
     anchor = _parse_utc(current) or datetime.now(timezone.utc).replace(tzinfo=None)
-    cutoff = (anchor - timedelta(days=_DEPARTURE_CARD_TIMEOUT_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff = (anchor - timedelta(days=_DEPARTURE_CARD_TIMEOUT_DAYS)).strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
     rows = conn.execute(
         """SELECT action_id, target_player_tag FROM leader_action_recommendations
            WHERE action_type = 'departure_verification' AND status = 'proposed'
@@ -585,7 +607,9 @@ def expire_departure_verification_cards(
                 current,
                 "Auto-settled: no leader verification within the window; treated as "
                 "an organic leave. No public goodbye was posted.",
-                _json_dumps({"classification": "leave_unverified", "auto_settled": True}),
+                _json_dumps(
+                    {"classification": "leave_unverified", "auto_settled": True}
+                ),
                 current,
                 row["action_id"],
             ),
@@ -623,7 +647,9 @@ def reconcile_uncorroborated_member_cases(
         parsed = datetime.fromisoformat(current.rstrip("Z"))
     except (ValueError, AttributeError):
         parsed = datetime.now(timezone.utc).replace(tzinfo=None)
-    cutoff = (parsed - timedelta(days=max(0, int(grace_days)))).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff = (parsed - timedelta(days=max(0, int(grace_days)))).strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
 
     dismissed: list[dict] = []
     for case_type, state_col, action_type in (
@@ -659,18 +685,22 @@ def reconcile_uncorroborated_member_cases(
             resolve_decision_case(
                 int(row["case_id"]),
                 status=CASE_DISMISSED,
-                resolution=("Auto-dismissed: management engine shows no active "
-                            f"candidacy (state=none) after {grace_days}d and no open card."),
+                resolution=(
+                    "Auto-dismissed: management engine shows no active "
+                    f"candidacy (state=none) after {grace_days}d and no open card."
+                ),
                 resolved_at=current,
                 conn=conn,
             )
-            dismissed.append({
-                "case_id": int(row["case_id"]),
-                "case_type": case_type,
-                "target_player_tag": row["target_player_tag"],
-                "target_player_name": row["target_player_name"],
-                "outcome": "uncorroborated",
-            })
+            dismissed.append(
+                {
+                    "case_id": int(row["case_id"]),
+                    "case_type": case_type,
+                    "target_player_tag": row["target_player_tag"],
+                    "target_player_name": row["target_player_name"],
+                    "outcome": "uncorroborated",
+                }
+            )
     return dismissed
 
 
@@ -686,7 +716,9 @@ def _is_action_expired(action: dict, *, now: str | None = None) -> bool:
     return bool(expires_at and expires_at <= current)
 
 
-def _case_lifecycle_from_action(action: dict, *, now: str | None = None) -> tuple[str, str]:
+def _case_lifecycle_from_action(
+    action: dict, *, now: str | None = None
+) -> tuple[str, str]:
     status = (action.get("status") or "").strip()
     if _is_action_expired(action, now=now):
         return CASE_DISMISSED, "expired"
@@ -716,7 +748,9 @@ def _leader_action_resolution(action: dict, outcome: str) -> str | None:
     return None
 
 
-def _leader_action_case_state(action: dict, *, outcome: str, backfilled_at: str) -> dict:
+def _leader_action_case_state(
+    action: dict, *, outcome: str, backfilled_at: str
+) -> dict:
     return {
         "leader_action": {
             "action_id": action.get("action_id"),
@@ -743,7 +777,9 @@ def _leader_action_case_state(action: dict, *, outcome: str, backfilled_at: str)
     }
 
 
-def _source_event_key_for_signal(source_event_key: str | None, *, conn: sqlite3.Connection) -> str | None:
+def _source_event_key_for_signal(
+    source_event_key: str | None, *, conn: sqlite3.Connection
+) -> str | None:
     signal_key = _clean_text(source_event_key)
     if not signal_key:
         return None
@@ -796,7 +832,11 @@ def backfill_decision_cases_from_leader_actions(
         action = dict(row)
         summary["scanned"] += 1
         config = _leader_action_case_config(action.get("action_type"))
-        tag = _db._canon_tag(action.get("target_player_tag")) if action.get("target_player_tag") else None
+        tag = (
+            _db._canon_tag(action.get("target_player_tag"))
+            if action.get("target_player_tag")
+            else None
+        )
         if not config or not tag:
             summary["skipped"] += 1
             continue
@@ -809,7 +849,9 @@ def backfill_decision_cases_from_leader_actions(
         name = _clean_text(action.get("target_player_name")) or tag
         title = f"{config['title']}: {name}"
         recommendation = _clean_text(action.get("prompt_text")) or f"Review {name}."
-        rationale = _clean_text(action.get("rationale")) or _leader_action_resolution(action, outcome)
+        rationale = _clean_text(action.get("rationale")) or _leader_action_resolution(
+            action, outcome
+        )
         case = upsert_decision_case(
             case_type=case_type,
             title=title,
@@ -823,8 +865,12 @@ def backfill_decision_cases_from_leader_actions(
             source_event_key=action.get("source_event_key"),
             source_event_type=action.get("source_event_type"),
             due_at=due_at,
-            status=case_status if case_status in {CASE_OPEN, CASE_DEFERRED} else CASE_OPEN,
-            state=_leader_action_case_state(action, outcome=outcome, backfilled_at=backfilled_at),
+            status=case_status
+            if case_status in {CASE_OPEN, CASE_DEFERRED}
+            else CASE_OPEN,
+            state=_leader_action_case_state(
+                action, outcome=outcome, backfilled_at=backfilled_at
+            ),
             case_key=case_key,
             # A live leader-action card IS the authority; reflect it even over a
             # prior closure (this reconstructs case state from the action board).
@@ -898,31 +944,40 @@ def sync_terminal_leader_action_cases(
     for row in rows:
         action = dict(row)
         config = _leader_action_case_config(action.get("action_type"))
-        tag = _db._canon_tag(action.get("target_player_tag")) if action.get("target_player_tag") else None
+        tag = (
+            _db._canon_tag(action.get("target_player_tag"))
+            if action.get("target_player_tag")
+            else None
+        )
         if not config or not tag:
             continue
-        case = get_decision_case(_case_key(config["case_type"], target_player_tag=tag), conn=conn)
+        case = get_decision_case(
+            _case_key(config["case_type"], target_player_tag=tag), conn=conn
+        )
         if not case or case["status"] not in {CASE_OPEN, CASE_DEFERRED}:
             continue  # no backing case, or already closed — nothing to propagate
         _case_status, outcome = _case_lifecycle_from_action(action, now=now)
         if outcome in {"accepted", "rejected", "expired"}:
             terminal = CASE_RESOLVED if outcome == "accepted" else CASE_DISMISSED
             resolve_decision_case(
-                case["case_id"], status=terminal,
+                case["case_id"],
+                status=terminal,
                 resolution=_leader_action_resolution(action, outcome),
                 resolved_at=action.get("decided_at") or action.get("expires_at") or now,
                 conn=conn,
             )
         else:
             continue
-        synced.append({
-            "case_id": case["case_id"],
-            "case_type": config["case_type"],
-            "target_player_tag": tag,
-            "target_player_name": case.get("target_player_name") or tag,
-            "action_type": action.get("action_type"),
-            "outcome": outcome,
-        })
+        synced.append(
+            {
+                "case_id": case["case_id"],
+                "case_type": config["case_type"],
+                "target_player_tag": tag,
+                "target_player_name": case.get("target_player_name") or tag,
+                "action_type": action.get("action_type"),
+                "outcome": outcome,
+            }
+        )
     return synced
 
 
@@ -950,12 +1005,16 @@ def _member_case_priority(member: dict) -> int:
 
 
 def _inactivity_recommendation(member: dict) -> str:
-    name = member.get("name") or member.get("member_name") or member.get("tag") or "member"
+    name = (
+        member.get("name") or member.get("member_name") or member.get("tag") or "member"
+    )
     return f"Review {name} for removal from the clan."
 
 
 def _inactivity_rationale(member: dict) -> str:
-    name = member.get("name") or member.get("member_name") or member.get("tag") or "member"
+    name = (
+        member.get("name") or member.get("member_name") or member.get("tag") or "member"
+    )
     days = member.get("days_inactive") or member.get("battle_days_ago")
     threshold = member.get("threshold_days")
     login = member.get("login_days_ago")
@@ -994,7 +1053,9 @@ def upsert_member_review_case(
         clean_recommendation = recommendation or _inactivity_recommendation(member)
         clean_rationale = rationale or _inactivity_rationale(member)
     else:
-        clean_title = title or f"{case_type.replace('_', ' ').title()}: {name or canon_tag}"
+        clean_title = (
+            title or f"{case_type.replace('_', ' ').title()}: {name or canon_tag}"
+        )
         clean_recommendation = recommendation
         clean_rationale = rationale
     return upsert_decision_case(
@@ -1075,69 +1136,14 @@ def decision_case_snapshot(
     default ``open`` repeats the whole ``due`` list. Pass ``dedupe=True`` to
     drop that overlap — ``open`` then means "open but not currently due",
     matching "due = needs attention now; open = being monitored"."""
-    due = [_compact_case(case) for case in list_due_decision_cases(limit=due_limit, conn=conn)]
-    open_cases = [_compact_case(case) for case in list_decision_cases(limit=open_limit, conn=conn)]
+    due = [
+        _compact_case(case)
+        for case in list_due_decision_cases(limit=due_limit, conn=conn)
+    ]
+    open_cases = [
+        _compact_case(case) for case in list_decision_cases(limit=open_limit, conn=conn)
+    ]
     if dedupe:
         due_keys = {c.get("case_key") for c in due}
         open_cases = [c for c in open_cases if c.get("case_key") not in due_keys]
     return {"due": due, "open": open_cases}
-
-
-
-# -- communication-intent reads (engine table; schema.md §7.2) ---------------
-
-@managed_connection
-def list_recent_communication_intents(
-    *,
-    status: str | None = None,
-    workflow: str | None = None,
-    project_id: int | None = None,
-    case_id: int | None = None,
-    target_channel_key: str | None = None,
-    limit: int = 25,
-    conn: Optional[sqlite3.Connection] = None,
-) -> list[dict]:
-    """Recent intents from the v5.1 engine table. workflow/project_id/case_id
-    are Gen-B-era filters kept for caller compatibility (ignored — intents
-    are recognition-keyed now); target_channel_key filters on lane."""
-    del workflow, project_id, case_id
-    where = ["1=1"]
-    params: list = []
-    if status:
-        where.append("status = ?")
-        params.append(status)
-    if target_channel_key:
-        where.append("lane = ?")
-        params.append(target_channel_key)
-    rows = conn.execute(
-        "SELECT intent_id, recognition_key, intent_type, lane, scope, payload_json, "
-        "status, attempts, created_at, expires_at, fulfilled_at, discord_message_id, last_error "
-        "FROM communication_intents "
-        f"WHERE {' AND '.join(where)} "
-        "ORDER BY intent_id DESC LIMIT ?",
-        (*params, max(1, int(limit))),
-    ).fetchall()
-    return [dict(r) for r in rows]
-
-
-@managed_connection
-def get_communication_trace_for_message(
-    discord_message_id: str | int,
-    conn: Optional[sqlite3.Connection] = None,
-) -> dict | None:
-    """Trace a delivered Discord message back to its intent + ledger claim."""
-    intent = conn.execute(
-        "SELECT * FROM communication_intents WHERE discord_message_id = ?",
-        (str(discord_message_id),),
-    ).fetchone()
-    if not intent:
-        return None
-    trace: dict = {"intent": dict(intent)}
-    if intent["recognition_key"]:
-        claim = conn.execute(
-            "SELECT * FROM recognition_ledger WHERE recognition_key = ?",
-            (intent["recognition_key"],),
-        ).fetchone()
-        if claim:
-            trace["recognition"] = dict(claim)
-    return trace

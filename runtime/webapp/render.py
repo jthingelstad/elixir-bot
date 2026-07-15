@@ -62,7 +62,9 @@ _env.filters["tojson_pretty"] = _tojson_pretty
 _env.filters["reltime"] = _reltime
 
 
-def render(template: str, request: web.Request, *, status: int = 200, **ctx) -> web.Response:
+def render(
+    template: str, request: web.Request, *, status: int = 200, **ctx
+) -> web.Response:
     # Identity is validated by the middleware; read it back off the header.
     ctx.setdefault("login", request.headers.get("Tailscale-User-Login", ""))
     body = _env.get_template(template).render(**ctx)

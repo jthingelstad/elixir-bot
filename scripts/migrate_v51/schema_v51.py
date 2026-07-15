@@ -23,7 +23,9 @@ import re
 import sqlite3
 import sys
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -338,7 +340,7 @@ CREATE TABLE member_management (
     state_json TEXT NOT NULL DEFAULT '{}'
 );
 
--- §7.1 / §7.2 Recognition & delivery ------------------------------------------
+-- §7.1 Recognition history ---------------------------------------------------
 CREATE TABLE recognition_ledger (
     recognition_key TEXT PRIMARY KEY,
     stream TEXT NOT NULL,
@@ -347,23 +349,6 @@ CREATE TABLE recognition_ledger (
     claimed_at TEXT NOT NULL,
     intent_id INTEGER
 );
-
-CREATE TABLE communication_intents (
-    intent_id INTEGER PRIMARY KEY,
-    recognition_key TEXT REFERENCES recognition_ledger(recognition_key),
-    intent_type TEXT NOT NULL,
-    lane TEXT NOT NULL,
-    scope TEXT NOT NULL CHECK (scope IN ('public','leadership')),
-    payload_json TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending','fulfilled','failed','expired')),
-    attempts INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL, expires_at TEXT NOT NULL,
-    fulfilled_at TEXT, discord_message_id TEXT, last_error TEXT,
-    thread_id INTEGER
-);
-CREATE INDEX idx_intents_pending ON communication_intents(status, expires_at)
-    WHERE status IN ('pending','failed');
 
 -- §7.3 decision_cases / revisits (renames; leader_action_recommendations
 -- exports verbatim from the archive) ------------------------------------------
@@ -562,18 +547,6 @@ CREATE TABLE post_quality_runs (
     detail_json TEXT
 );
 
--- editor_verdicts: the Editor's inline-gate trace (editor.md §5; added
--- 2026-07-04 — lazily created live by engine/editor.py ensure_editor_schema)
-CREATE TABLE editor_verdicts (
-    verdict_id INTEGER PRIMARY KEY,
-    intent_id INTEGER NOT NULL,
-    verdict TEXT NOT NULL CHECK (verdict IN ('pass','revise','fallback','error')),
-    dimensions_json TEXT,
-    original_copy TEXT, final_copy TEXT,
-    at TEXT NOT NULL
-);
-CREATE INDEX idx_editor_verdicts_intent ON editor_verdicts(intent_id);
-
 -- Ranked season lifecycle (ranked-and-profiles.md §2.1; D1–D7 ratified
 -- 2026-07-04). Ids are canonical 'YYYY-MM' (the month the season starts in;
 -- first-Monday to first-Monday). Discovered lifecycle, war-tracker style.
@@ -686,7 +659,8 @@ CARRIED_VERBATIM = [
     "elixir_improvement_suggestions",
     "runtime_job_status",
     "tournaments",
-    # conversation set (T12; clan_memories live in elixir-v5-memory.db).
+    # Conversation tables carried from the archive; durable memories are
+    # defined in NEW_DDL and share the operational database.
     # conversation_threads/messages carry a member_id column whose FK target
     # (members) no longer exists — the export strips the dead FK clause and the
     # column becomes a soft ref for the deferred memory/conversation pass.
@@ -696,7 +670,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 68
+EXPECTED_TABLE_COUNT = 66
 
 
 _DEAD_MEMBERS_FK = re.compile(
@@ -735,9 +709,14 @@ def carried_ddl(archive_path: str | None) -> list[str]:
         frozen = [s.strip() for s in body.split(";\n") if s.strip()]
     if archive_path and os.path.exists(archive_path):
         archive = sqlite3.connect(f"file:{archive_path}?immutable=1", uri=True)
-        live = export_carried_ddl(archive)
+        try:
+            live = export_carried_ddl(archive)
+        finally:
+            archive.close()
         if frozen is not None and [s.strip() for s in live] != frozen:
-            raise SystemExit("carried_ddl.sql has drifted from the archive export — regenerate it")
+            raise SystemExit(
+                "carried_ddl.sql has drifted from the archive export — regenerate it"
+            )
         return live
     if frozen is None:
         raise SystemExit(
@@ -750,20 +729,27 @@ def build(db_path: str, archive_path: str | None) -> None:
     if os.path.exists(db_path):
         raise SystemExit(f"{db_path} already exists — refusing to overwrite")
     new = sqlite3.connect(db_path)
-    new.execute("PRAGMA journal_mode=WAL")
-    for stmt in carried_ddl(archive_path):
-        new.execute(stmt)
-    new.executescript(NEW_DDL)
-    from db.schema import apply_schema_migrations
+    try:
+        new.execute("PRAGMA journal_mode=WAL")
+        for stmt in carried_ddl(archive_path):
+            new.execute(stmt)
+        new.executescript(NEW_DDL)
+        from db.schema import apply_schema_migrations
 
-    apply_schema_migrations(new)
-    count = new.execute(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
-        "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'memories_fts%'"
-    ).fetchone()[0]
-    print(f"created {db_path}: {count} designed tables (expected {EXPECTED_TABLE_COUNT})")
+        apply_schema_migrations(new)
+        count = new.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'memories_fts%'"
+        ).fetchone()[0]
+    finally:
+        new.close()
+    print(
+        f"created {db_path}: {count} designed tables (expected {EXPECTED_TABLE_COUNT})"
+    )
     if count != EXPECTED_TABLE_COUNT:
-        raise SystemExit("table count mismatch — reconcile with schema.md §2 before proceeding")
+        raise SystemExit(
+            "table count mismatch — reconcile with schema.md §2 before proceeding"
+        )
 
 
 def main() -> int:

@@ -86,7 +86,9 @@ def _noncanonical_war_timestamp_count(conn) -> int:
 
 def audit(conn) -> dict[str, int]:
     return {
-        "foreign_key_violations": len(conn.execute("PRAGMA foreign_key_check").fetchall()),
+        "foreign_key_violations": len(
+            conn.execute("PRAGMA foreign_key_check").fetchall()
+        ),
         "membership_overlaps": _membership_overlap_count(conn),
         "profile_best_projection_mismatches": _count(
             conn,
@@ -113,7 +115,8 @@ def audit(conn) -> dict[str, int]:
                 WHERE p.exp > 0 AND cs.exp_level IS NOT p.exp""",
         ),
         "daily_best_nulls": _count(
-            conn, "SELECT COUNT(*) FROM player_daily_metrics WHERE best_trophies IS NULL"
+            conn,
+            "SELECT COUNT(*) FROM player_daily_metrics WHERE best_trophies IS NULL",
         ),
         "daily_best_drops_to_null": _count(
             conn,
@@ -194,9 +197,12 @@ def _raw_profile_history(conn) -> dict[str, list[tuple[str, int | None, int | No
 def repair_player_daily_metrics(conn) -> int:
     history = _raw_profile_history(conn)
     changed = 0
-    tags = [row[0] for row in conn.execute(
-        "SELECT DISTINCT player_tag FROM player_daily_metrics ORDER BY player_tag"
-    )]
+    tags = [
+        row[0]
+        for row in conn.execute(
+            "SELECT DISTINCT player_tag FROM player_daily_metrics ORDER BY player_tag"
+        )
+    ]
     for tag in tags:
         observations = history.get(tag, [])
         obs_index = 0
@@ -208,7 +214,10 @@ def repair_player_daily_metrics(conn) -> int:
             (tag,),
         ).fetchall()
         for metric in metrics:
-            while obs_index < len(observations) and observations[obs_index][0] <= metric["metric_date"]:
+            while (
+                obs_index < len(observations)
+                and observations[obs_index][0] <= metric["metric_date"]
+            ):
                 _, candidate_best, candidate_exp = observations[obs_index]
                 if candidate_best is not None:
                     raw_best = candidate_best

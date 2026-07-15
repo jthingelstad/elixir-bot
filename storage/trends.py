@@ -14,7 +14,11 @@ from storage._enrichment import _member_reference_fields
 
 
 def _cutoff_date(days: int) -> str:
-    return (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0))).date().isoformat()
+    return (
+        (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0)))
+        .date()
+        .isoformat()
+    )
 
 
 def _member_id_for_tag(conn, tag: str):
@@ -25,7 +29,9 @@ def _member_id_for_tag(conn, tag: str):
 
 
 @managed_connection
-def get_member_trophy_history(tag: str, days: int = 30, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_member_trophy_history(
+    tag: str, days: int = 30, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     cutoff = _cutoff_date(days)
     rows = conn.execute(
         "SELECT dm.metric_date, dm.trophies, dm.best_trophies, dm.clan_rank "
@@ -39,7 +45,12 @@ def get_member_trophy_history(tag: str, days: int = 30, conn: Optional[sqlite3.C
 
 
 @managed_connection
-def get_member_daily_battle_summary(tag: str, days: int = 30, mode_group: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_member_daily_battle_summary(
+    tag: str,
+    days: int = 30,
+    mode_group: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     cutoff = _cutoff_date(days)
     where = ["m.player_tag = ?", "r.battle_date >= ?"]
     params = [_canon_tag(tag), cutoff]
@@ -59,7 +70,11 @@ def get_member_daily_battle_summary(tag: str, days: int = 30, mode_group: Option
 
 
 @managed_connection
-def get_clan_member_count_history(days: int = 30, clan_tag: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_clan_member_count_history(
+    days: int = 30,
+    clan_tag: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     cutoff = _cutoff_date(days)
     where = ["metric_date >= ?"]
     params = [cutoff]
@@ -76,7 +91,11 @@ def get_clan_member_count_history(days: int = 30, clan_tag: Optional[str] = None
 
 
 @managed_connection
-def get_clan_score_history(days: int = 30, clan_tag: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_clan_score_history(
+    days: int = 30,
+    clan_tag: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     cutoff = _cutoff_date(days)
     where = ["metric_date >= ?"]
     params = [cutoff]
@@ -93,7 +112,11 @@ def get_clan_score_history(days: int = 30, clan_tag: Optional[str] = None, conn:
 
 
 @managed_connection
-def get_clan_total_member_trophies_history(days: int = 30, clan_tag: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_clan_total_member_trophies_history(
+    days: int = 30,
+    clan_tag: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     cutoff = _cutoff_date(days)
     where = ["metric_date >= ?"]
     params = [cutoff]
@@ -110,7 +133,12 @@ def get_clan_total_member_trophies_history(days: int = 30, clan_tag: Optional[st
 
 
 @managed_connection
-def get_clan_daily_battle_summary(days: int = 30, clan_tag: Optional[str] = None, mode_group: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_clan_daily_battle_summary(
+    days: int = 30,
+    clan_tag: Optional[str] = None,
+    mode_group: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     cutoff = _cutoff_date(days)
     where = ["battle_date >= ?"]
     params = [cutoff]
@@ -146,7 +174,9 @@ def _compare_series_window(rows, value_key):
     }
 
 
-def _events_battle_window(conn, canon_tag: str, start_ymd: str, end_ymd: str, window_days: int) -> dict:
+def _events_battle_window(
+    conn, canon_tag: str, start_ymd: str, end_ymd: str, window_days: int
+) -> dict:
     """Battle W/L/volume for a member over a calendar window, read from the
     authoritative battle_events store (QA H2/M2: the daily rollups it replaced
     are lossy for new/backfilled members — e.g. a real 27-battle week showed up
@@ -180,11 +210,15 @@ def _events_battle_window(conn, canon_tag: str, start_ymd: str, end_ymd: str, wi
 
 
 @managed_connection
-def compare_member_trend_windows(tag: str, window_days: int = 7, conn: Optional[sqlite3.Connection] = None) -> dict:
+def compare_member_trend_windows(
+    tag: str, window_days: int = 7, conn: Optional[sqlite3.Connection] = None
+) -> dict:
     total_days = max(window_days * 2, 2)
     trophy_history = get_member_trophy_history(tag, days=total_days, conn=conn)
     current_trophies = trophy_history[-window_days:] if window_days else trophy_history
-    previous_trophies = trophy_history[-(window_days * 2):-window_days] if window_days else []
+    previous_trophies = (
+        trophy_history[-(window_days * 2) : -window_days] if window_days else []
+    )
 
     canon = _canon_tag(tag)
     today = datetime.fromisoformat(chicago_today()).date()
@@ -194,13 +228,19 @@ def compare_member_trend_windows(tag: str, window_days: int = 7, conn: Optional[
     prev_start = (today - timedelta(days=2 * win - 1)).strftime("%Y%m%d")
     prev_end = (today - timedelta(days=win)).strftime("%Y%m%d")
     current_battle_window = _events_battle_window(conn, canon, cur_start, cur_end, win)
-    previous_battle_window = _events_battle_window(conn, canon, prev_start, prev_end, win)
+    previous_battle_window = _events_battle_window(
+        conn, canon, prev_start, prev_end, win
+    )
 
     member_row = conn.execute(
         "SELECT player_tag AS member_id, player_tag AS tag, display_name AS name FROM players WHERE player_tag = ?",
         (_canon_tag(tag),),
     ).fetchone()
-    member = dict(member_row) if member_row else {"tag": _canon_tag(tag), "name": _canon_tag(tag)}
+    member = (
+        dict(member_row)
+        if member_row
+        else {"tag": _canon_tag(tag), "name": _canon_tag(tag)}
+    )
     if member_row:
         member = _member_reference_fields(conn, member_row["member_id"], member)
 
@@ -218,7 +258,9 @@ def compare_member_trend_windows(tag: str, window_days: int = 7, conn: Optional[
     }
 
 
-def _events_clan_battle_window(conn, start_ymd: str, end_ymd: str, window_days: int) -> dict:
+def _events_clan_battle_window(
+    conn, start_ymd: str, end_ymd: str, window_days: int
+) -> dict:
     """Clan-wide battle activity over a calendar window from authoritative
     battle_events (current members only). QA H1: the clan_daily_battle_rollups
     this replaced were stale (data ended a week behind), so the previous week
@@ -249,14 +291,24 @@ def _events_clan_battle_window(conn, start_ymd: str, end_ymd: str, window_days: 
 
 
 @managed_connection
-def compare_clan_trend_windows(window_days: int = 7, clan_tag: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> dict:
+def compare_clan_trend_windows(
+    window_days: int = 7,
+    clan_tag: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
     total_days = max(window_days * 2, 2)
-    counts = get_clan_member_count_history(days=total_days, clan_tag=clan_tag, conn=conn)
+    counts = get_clan_member_count_history(
+        days=total_days, clan_tag=clan_tag, conn=conn
+    )
     scores = get_clan_score_history(days=total_days, clan_tag=clan_tag, conn=conn)
-    trophy_totals = get_clan_total_member_trophies_history(days=total_days, clan_tag=clan_tag, conn=conn)
+    trophy_totals = get_clan_total_member_trophies_history(
+        days=total_days, clan_tag=clan_tag, conn=conn
+    )
 
     def _split(rows):
-        return rows[-window_days:] if window_days else rows, rows[-(window_days * 2):-window_days] if window_days else []
+        return rows[-window_days:] if window_days else rows, rows[
+            -(window_days * 2) : -window_days
+        ] if window_days else []
 
     current_counts, previous_counts = _split(counts)
     current_scores, previous_scores = _split(scores)
@@ -277,7 +329,14 @@ def compare_clan_trend_windows(window_days: int = 7, clan_tag: Optional[str] = N
         + "ORDER BY metric_date DESC, observed_at DESC, metric_id DESC LIMIT 1",
         ((_canon_tag(clan_tag),) if clan_tag else ()),
     ).fetchone()
-    clan = dict(clan_row) if clan_row else {"clan_tag": _canon_tag(clan_tag or "#J2RGCRVG"), "clan_name": "POAP KINGS"}
+    clan = (
+        dict(clan_row)
+        if clan_row
+        else {
+            "clan_tag": _canon_tag(clan_tag or "#J2RGCRVG"),
+            "clan_name": "POAP KINGS",
+        }
+    )
 
     return {
         "clan": clan,
@@ -285,20 +344,29 @@ def compare_clan_trend_windows(window_days: int = 7, clan_tag: Optional[str] = N
         "current": {
             "member_count": _compare_series_window(current_counts, "member_count"),
             "clan_score": _compare_series_window(current_scores, "clan_score"),
-            "total_member_trophies": _compare_series_window(current_trophies, "total_member_trophies"),
+            "total_member_trophies": _compare_series_window(
+                current_trophies, "total_member_trophies"
+            ),
             "battle_activity": current_battle_window,
         },
         "previous": {
             "member_count": _compare_series_window(previous_counts, "member_count"),
             "clan_score": _compare_series_window(previous_scores, "clan_score"),
-            "total_member_trophies": _compare_series_window(previous_trophies, "total_member_trophies"),
+            "total_member_trophies": _compare_series_window(
+                previous_trophies, "total_member_trophies"
+            ),
             "battle_activity": previous_battle_window,
         },
     }
 
 
 @managed_connection
-def build_member_trend_summary_context(tag: str, days: int = 30, window_days: int = 7, conn: Optional[sqlite3.Connection] = None) -> str:
+def build_member_trend_summary_context(
+    tag: str,
+    days: int = 30,
+    window_days: int = 7,
+    conn: Optional[sqlite3.Connection] = None,
+) -> str:
     history = get_member_trophy_history(tag, days=days, conn=conn)
     battle_summary = get_member_daily_battle_summary(tag, days=days, conn=conn)
     comparison = compare_member_trend_windows(tag, window_days=window_days, conn=conn)
@@ -326,12 +394,21 @@ def build_member_trend_summary_context(tag: str, days: int = 30, window_days: in
 
 
 @managed_connection
-def build_clan_trend_summary_context(days: int = 30, window_days: int = 7, clan_tag: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> str:
+def build_clan_trend_summary_context(
+    days: int = 30,
+    window_days: int = 7,
+    clan_tag: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> str:
     counts = get_clan_member_count_history(days=days, clan_tag=clan_tag, conn=conn)
     scores = get_clan_score_history(days=days, clan_tag=clan_tag, conn=conn)
-    trophies = get_clan_total_member_trophies_history(days=days, clan_tag=clan_tag, conn=conn)
+    trophies = get_clan_total_member_trophies_history(
+        days=days, clan_tag=clan_tag, conn=conn
+    )
     battle_rows = get_clan_daily_battle_summary(days=days, clan_tag=clan_tag, conn=conn)
-    comparison = compare_clan_trend_windows(window_days=window_days, clan_tag=clan_tag, conn=conn)
+    comparison = compare_clan_trend_windows(
+        window_days=window_days, clan_tag=clan_tag, conn=conn
+    )
     latest_counts = counts[-1] if counts else {}
     latest_scores = scores[-1] if scores else {}
     latest_trophies = trophies[-1] if trophies else {}

@@ -1,17 +1,9 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
-from collections import defaultdict
 
 from db import _json_or_none, _rowdicts, _utcnow, managed_connection
-
-
-SCHEMA_SENTINEL_SIGNAL_TYPE = "api_schema_sentinel"
-EVENT_SENTINEL_SIGNAL_TYPE = "api_event_sentinel"
-_ANNOUNCED_SCHEMA_TYPES = {"badge_name", "progress_key", "battle_game_mode", "schema_path"}
-_CONTENT_ITEM_LIMIT = 12
 
 
 def _json_kind(value) -> str:
@@ -30,13 +22,6 @@ def _json_kind(value) -> str:
     if isinstance(value, dict):
         return "object"
     return type(value).__name__
-
-
-def _clip(value: str | None, limit: int = 160) -> str:
-    text = " ".join(str(value or "").split())
-    if len(text) <= limit:
-        return text
-    return text[: limit - 1].rstrip() + "..."
 
 
 def _iter_dicts(value):
@@ -79,7 +64,9 @@ def _observation_key(observation: dict) -> tuple[str, str, str]:
     )
 
 
-def build_api_sentinel_observations(endpoint: str, entity_key: str | None, payload) -> list[dict]:
+def build_api_sentinel_observations(
+    endpoint: str, entity_key: str | None, payload
+) -> list[dict]:
     endpoint = (endpoint or "unknown").strip() or "unknown"
     entity_key = (entity_key or "global").strip() or "global"
     observations: dict[tuple[str, str, str], dict] = {}
@@ -123,7 +110,9 @@ def build_api_sentinel_observations(endpoint: str, entity_key: str | None, paylo
                     "badge_name",
                     "player.badges",
                     badge.get("name"),
-                    _sample_payload(endpoint=endpoint, entity_key=entity_key, badge=badge),
+                    _sample_payload(
+                        endpoint=endpoint, entity_key=entity_key, badge=badge
+                    ),
                 )
 
         progress = item.get("progress")
@@ -133,7 +122,9 @@ def build_api_sentinel_observations(endpoint: str, entity_key: str | None, paylo
                     "progress_key",
                     "player.progress",
                     progress_key,
-                    _sample_payload(endpoint=endpoint, entity_key=entity_key, value=progress_value),
+                    _sample_payload(
+                        endpoint=endpoint, entity_key=entity_key, value=progress_value
+                    ),
                 )
 
         game_mode = item.get("gameMode")
@@ -188,7 +179,9 @@ def _ensure_first_entity_key(conn: sqlite3.Connection) -> None:
     require_columns(conn, "api_sentinel_observations", {"first_entity_key"})
 
 
-def _insert_or_touch_observation(conn: sqlite3.Connection, observation: dict, now: str) -> dict | None:
+def _insert_or_touch_observation(
+    conn: sqlite3.Connection, observation: dict, now: str
+) -> dict | None:
     row = conn.execute(
         """
         SELECT observation_id
@@ -252,181 +245,11 @@ def _insert_or_touch_observation(conn: sqlite3.Connection, observation: dict, no
     return inserted
 
 
-def _signal_key(signal_type: str, observations: list[dict], now: str) -> str:
-    basis = "|".join(
-        f"{obs.get('sentinel_type')}:{obs.get('scope')}:{obs.get('name')}"
-        for obs in sorted(
-            observations,
-            key=lambda item: (
-                item.get("sentinel_type"),
-                item.get("scope"),
-                item.get("name"),
-            ),
-        )
-    )
-    digest = hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
-    compact_time = now.replace("-", "").replace(":", "").replace("T", "")[:12]
-    return f"{signal_type}:{compact_time}:{digest}"
-
-
-def _observation_payload(observation: dict) -> dict:
-    return {
-        "sentinel_type": observation.get("sentinel_type"),
-        "scope": observation.get("scope"),
-        "name": observation.get("name"),
-        "endpoint": observation.get("endpoint"),
-        "entity_key": observation.get("entity_key"),
-        "first_seen_at": observation.get("first_seen_at"),
-        "sample": observation.get("sample") or {},
-    }
-
-
-def _format_event_observation(observation: dict) -> str:
-    sample = observation.get("sample") or {}
-    title = sample.get("title") or observation.get("name")
-    tag = sample.get("eventTag") or observation.get("name")
-    description = sample.get("description")
-    suffix = f" - {_clip(description, 120)}" if description else " - no description"
-    return f"- {title} (`{tag}`){suffix}"
-
-
-def _format_schema_observation(observation: dict) -> str:
-    sentinel_type = observation.get("sentinel_type")
-    sample = observation.get("sample") or {}
-    endpoint = observation.get("endpoint") or "unknown"
-    entity = observation.get("entity_key") or "global"
-    name = observation.get("name") or "unknown"
-    if sentinel_type == "badge_name":
-        return f"- Badge `{name}` on `{endpoint}` (`{entity}`)"
-    if sentinel_type == "progress_key":
-        return f"- Progress key `{name}` on `{endpoint}` (`{entity}`)"
-    if sentinel_type == "battle_game_mode":
-        mode_name = sample.get("name") or name
-        event_tag = sample.get("event_tag")
-        suffix = f", eventTag `{event_tag}`" if event_tag else ""
-        return f"- Battle game mode `{mode_name}` (`{name}`{suffix})"
-    return f"- Path `{name}` on `{endpoint}` (`{entity}`)"
-
-
-def _content_list(lines: list[str]) -> list[str]:
-    if len(lines) <= _CONTENT_ITEM_LIMIT:
-        return lines
-    shown = lines[:_CONTENT_ITEM_LIMIT]
-    shown.append(f"- ...and {len(lines) - _CONTENT_ITEM_LIMIT} more")
-    return shown
-
-
-def _event_signal_payload(signal_key: str, observations: list[dict]) -> dict:
-    lines = [_format_event_observation(obs) for obs in observations]
-    content = [
-        "**CR event sentinel**",
-        "",
-        "New live game mode/event entries appeared in `/events`:",
-        *_content_list(lines),
-        "",
-        "Stored by `eventTag` so battle logs can be interpreted when these modes show up.",
-    ]
-    return {
-        "type": EVENT_SENTINEL_SIGNAL_TYPE,
-        "audience": "leadership",
-        "title": "CR event sentinel",
-        "summary": f"{len(observations)} first-seen CR event(s)",
-        "discord_content": "\n".join(content),
-        "observations": [_observation_payload(obs) for obs in observations],
-        "signal_key": signal_key,
-    }
-
-
-def _schema_signal_payload(signal_key: str, observations: list[dict]) -> dict:
-    grouped = defaultdict(list)
-    for observation in observations:
-        grouped[observation.get("sentinel_type")].append(observation)
-    lines = []
-    for sentinel_type in ("badge_name", "progress_key", "battle_game_mode", "schema_path"):
-        for observation in grouped.get(sentinel_type, []):
-            lines.append(_format_schema_observation(observation))
-    content = [
-        "**CR API schema sentinel**",
-        "",
-        "First-seen Clash Royale API observations:",
-        *_content_list(lines),
-        "",
-        "Stored in `api_sentinel_observations` for future drift checks and Elixir context.",
-    ]
-    return {
-        "type": SCHEMA_SENTINEL_SIGNAL_TYPE,
-        "audience": "leadership",
-        "title": "CR API schema sentinel",
-        "summary": f"{len(observations)} first-seen CR API schema observation(s)",
-        "discord_content": "\n".join(content),
-        "observations": [_observation_payload(obs) for obs in observations],
-        "signal_key": signal_key,
-    }
-
-
-def _queue_signal(conn: sqlite3.Connection, signal_key: str, signal_type: str, payload: dict, now: str) -> None:
-    conn.execute(
-        """
-        INSERT OR IGNORE INTO system_signals (signal_key, signal_type, created_at, payload_json)
-        VALUES (?, ?, ?, ?)
-        """,
-        (signal_key, signal_type, now, _json_or_none(payload) or "{}"),
-    )
-
-
-def _mark_observations_announced(
-    conn: sqlite3.Connection,
-    signal_key: str,
-    observations: list[dict],
-    now: str,
-) -> None:
-    for observation in observations:
-        conn.execute(
-            """
-            UPDATE api_sentinel_observations
-            SET announced_signal_key = ?, updated_at = ?
-            WHERE sentinel_type = ? AND scope = ? AND name = ? AND announced_signal_key IS NULL
-            """,
-            (
-                signal_key,
-                now,
-                observation.get("sentinel_type"),
-                observation.get("scope"),
-                observation.get("name"),
-            ),
-        )
-
-
-def _queue_api_sentinel_signals(conn: sqlite3.Connection, observations: list[dict], now: str) -> list[str]:
-    signal_keys = []
-    event_observations = [obs for obs in observations if obs.get("sentinel_type") == "event"]
-    schema_observations = [
-        obs
-        for obs in observations
-        if obs.get("sentinel_type") in _ANNOUNCED_SCHEMA_TYPES and obs.get("endpoint") != "events"
-    ]
-    if event_observations:
-        signal_key = _signal_key(EVENT_SENTINEL_SIGNAL_TYPE, event_observations, now)
-        payload = _event_signal_payload(signal_key, event_observations)
-        _queue_signal(conn, signal_key, EVENT_SENTINEL_SIGNAL_TYPE, payload, now)
-        _mark_observations_announced(conn, signal_key, event_observations, now)
-        signal_keys.append(signal_key)
-    if schema_observations:
-        signal_key = _signal_key(SCHEMA_SENTINEL_SIGNAL_TYPE, schema_observations, now)
-        payload = _schema_signal_payload(signal_key, schema_observations)
-        _queue_signal(conn, signal_key, SCHEMA_SENTINEL_SIGNAL_TYPE, payload, now)
-        _mark_observations_announced(conn, signal_key, schema_observations, now)
-        signal_keys.append(signal_key)
-    return signal_keys
-
-
 def _record_api_sentinel_observations(
     conn: sqlite3.Connection,
     endpoint: str,
     entity_key: str | None,
     payload,
-    *,
-    announce: bool,
 ) -> list[dict]:
     now = _utcnow()
     _ensure_first_entity_key(conn)
@@ -435,12 +258,6 @@ def _record_api_sentinel_observations(
         inserted = _insert_or_touch_observation(conn, observation, now)
         if inserted:
             new_observations.append(inserted)
-    # Record-only: the sentinel is the product team's data source (they read
-    # api_sentinel_observations directly) and the feed for the clan-facing
-    # game-level stream (engine.emitters.game). It no longer posts drift to
-    # #leader-lounge, so no signals are queued. `announce` is retained for
-    # call-site compatibility; queueing was dropped when the leader path retired.
-    _ = announce
     return new_observations
 
 
@@ -449,8 +266,6 @@ def record_api_payload_sentinel_observations(
     endpoint: str,
     entity_key: str | None,
     payload,
-    *,
-    announce: bool = True,
     conn=None,
 ) -> list[dict]:
     observations = _record_api_sentinel_observations(
@@ -458,7 +273,6 @@ def record_api_payload_sentinel_observations(
         endpoint,
         entity_key,
         payload,
-        announce=announce,
     )
     conn.commit()
     return observations
@@ -466,7 +280,9 @@ def record_api_payload_sentinel_observations(
 
 @managed_connection
 def bootstrap_api_sentinel_baseline(conn=None) -> dict:
-    existing = conn.execute("SELECT COUNT(*) AS count FROM api_sentinel_observations").fetchone()["count"]
+    existing = conn.execute(
+        "SELECT COUNT(*) AS count FROM api_sentinel_observations"
+    ).fetchone()["count"]
     if existing:
         return {"bootstrapped": False, "payloads": 0, "observations": 0}
 
@@ -493,7 +309,11 @@ def bootstrap_api_sentinel_baseline(conn=None) -> dict:
             )
         )
     conn.commit()
-    return {"bootstrapped": True, "payloads": len(rows), "observations": observation_count}
+    return {
+        "bootstrapped": True,
+        "payloads": len(rows),
+        "observations": observation_count,
+    }
 
 
 @managed_connection

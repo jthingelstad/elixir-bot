@@ -63,15 +63,25 @@ def _upsert_context(
 
 
 @managed_connection
-def upsert_game_mode_contexts_from_events(payload, conn: Optional[sqlite3.Connection] = None) -> int:
-    items = payload if isinstance(payload, list) else (payload or {}).get("items") if isinstance(payload, dict) else []
+def upsert_game_mode_contexts_from_events(
+    payload, conn: Optional[sqlite3.Connection] = None
+) -> int:
+    items = (
+        payload
+        if isinstance(payload, list)
+        else (payload or {}).get("items")
+        if isinstance(payload, dict)
+        else []
+    )
     count = 0
     for index, event in enumerate(items or []):
         if not isinstance(event, dict):
             continue
         event_tag = event.get("eventTag")
         title = event.get("title") or event.get("name")
-        game_mode = event.get("gameMode") if isinstance(event.get("gameMode"), dict) else {}
+        game_mode = (
+            event.get("gameMode") if isinstance(event.get("gameMode"), dict) else {}
+        )
         source_key = _context_source_key(event_tag or title, f"event:{index}")
         _upsert_context(
             conn,
@@ -89,7 +99,9 @@ def upsert_game_mode_contexts_from_events(payload, conn: Optional[sqlite3.Connec
 
 
 @managed_connection
-def upsert_game_mode_contexts_from_leaderboards(payload, conn: Optional[sqlite3.Connection] = None) -> int:
+def upsert_game_mode_contexts_from_leaderboards(
+    payload, conn: Optional[sqlite3.Connection] = None
+) -> int:
     items = (payload or {}).get("items") if isinstance(payload, dict) else []
     count = 0
     for index, board in enumerate(items or []):

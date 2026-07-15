@@ -5,15 +5,15 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import db
+
 # Trigger full agent init before importing tool_exec to avoid a circular import.
 import elixir  # noqa: F401
-
-import db
 from agent import tool_exec
 from agent.tool_policy import (
+    _WRITE_TOOL_NAMES,
     AWARENESS_WRITE_TOOL_NAMES,
     TOOLSETS_BY_WORKFLOW,
-    _WRITE_TOOL_NAMES,
 )
 from storage.revisits import (
     list_due_revisits,
@@ -49,6 +49,7 @@ def _iso(*, minutes: int) -> str:
 # Tool policy
 # ---------------------------------------------------------------------------
 
+
 def test_schedule_revisit_is_in_awareness_toolset_and_write_names():
     tool_names = {t["name"] for t in TOOLSETS_BY_WORKFLOW["awareness"]}
     assert "schedule_revisit" in tool_names
@@ -59,6 +60,7 @@ def test_schedule_revisit_is_in_awareness_toolset_and_write_names():
 # ---------------------------------------------------------------------------
 # Storage layer
 # ---------------------------------------------------------------------------
+
 
 def test_schedule_revisit_persists_and_is_idempotent(memdb):
     first = schedule_revisit(
@@ -127,6 +129,7 @@ def test_schedule_revisit_rejects_bad_due_at(memdb):
 # Tool executor
 # ---------------------------------------------------------------------------
 
+
 def test_schedule_revisit_tool_persists_to_db(memdb):
     raw = tool_exec._execute_tool(
         "schedule_revisit",
@@ -165,6 +168,7 @@ def test_schedule_revisit_tool_rejects_missing_args(memdb):
 # Delivery layer: covered revisits get marked
 # ---------------------------------------------------------------------------
 
+
 def test_mark_revisited_clears_covered_and_skipped_revisits(memdb):
     schedule_revisit(signal_key="covered-key", due_at=_iso(minutes=-5), rationale="x")
     schedule_revisit(signal_key="skipped-key", due_at=_iso(minutes=-5), rationale="y")
@@ -182,16 +186,26 @@ def test_awareness_loop_clears_surfaced_revisits(monkeypatch):
     """QA H22: a non-failed live tick marks the revisits it surfaced as done, so
     they don't nag the read every tick forever."""
     from unittest.mock import patch
+
     from runtime.awareness import loop as loop_mod
 
-    read = {"due_revisits": [{"signal_key": "war:demo", "rationale": "look again"}], "_degraded": []}
+    read = {
+        "due_revisits": [{"signal_key": "war:demo", "rationale": "look again"}],
+        "_degraded": [],
+    }
     silence_plan = {"posts": [], "skipped_reason": "nothing new"}
 
     with (
         patch("runtime.awareness.read.build_read", return_value=read),
         patch("agent.workflows.run_awareness_tick", return_value=silence_plan),
-        patch("runtime.awareness.store.persist_thought", return_value={"thought_id": "t", "loop_number": 1}),
-        patch("runtime.awareness.diagnostic.build_diagnostic_render", return_value={"outcome": "silence"}),
+        patch(
+            "runtime.awareness.store.persist_thought",
+            return_value={"thought_id": "t", "loop_number": 1},
+        ),
+        patch(
+            "runtime.awareness.diagnostic.build_diagnostic_render",
+            return_value={"outcome": "silence"},
+        ),
         patch("storage.revisits.mark_revisited", return_value=1) as mark,
     ):
         counters = loop_mod.run_awareness_loop()

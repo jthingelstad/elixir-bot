@@ -8,7 +8,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 
-from anthropic import APIError, APIConnectionError
+from anthropic import APIConnectionError, APIError
 
 from agent.core import _create_chat_completion, response_text
 
@@ -84,7 +84,9 @@ If nothing is worth extracting, return an empty array: []
 Respond with ONLY the JSON array, no other text."""
 
 
-def extract_inference_facts(content: str, context_label: str | None = None) -> list[dict]:
+def extract_inference_facts(
+    content: str, context_label: str | None = None
+) -> list[dict]:
     """Extract durable facts from conversation or signal content."""
     content = (content or "").strip()
     if not content:
@@ -124,14 +126,22 @@ def extract_inference_facts(content: str, context_label: str | None = None) -> l
                 continue
             conf = float(fact.get("confidence", 0.7))
             conf = max(0.5, min(0.95, conf))
-            valid.append({
-                "title": str(fact["title"]).strip(),
-                "body": str(fact["body"]).strip(),
-                "confidence": conf,
-                "scope": fact.get("scope", "leadership") if fact.get("scope") in ("leadership", "public") else "leadership",
-                "tags": [str(t).strip().lower() for t in (fact.get("tags") or []) if t],
-                "member_tag": str(fact["member_tag"]).strip() if fact.get("member_tag") else None,
-            })
+            valid.append(
+                {
+                    "title": str(fact["title"]).strip(),
+                    "body": str(fact["body"]).strip(),
+                    "confidence": conf,
+                    "scope": fact.get("scope", "leadership")
+                    if fact.get("scope") in ("leadership", "public")
+                    else "leadership",
+                    "tags": [
+                        str(t).strip().lower() for t in (fact.get("tags") or []) if t
+                    ],
+                    "member_tag": str(fact["member_tag"]).strip()
+                    if fact.get("member_tag")
+                    else None,
+                }
+            )
         return valid
     except (json.JSONDecodeError, ValueError, TypeError):
         log.warning("extract_inference_facts_parse_failed", exc_info=True)
@@ -144,12 +154,14 @@ def extract_inference_facts(content: str, context_label: str | None = None) -> l
 # ── Inference fact persistence ─────────────────────────────────────────────
 
 
-def save_inference_facts(facts: list[dict], channel_id: str | int | None = None, conn=None) -> int:
+def save_inference_facts(
+    facts: list[dict], channel_id: str | int | None = None, conn=None
+) -> int:
     """De-duplicate and persist extracted inference facts. Returns count saved."""
     from memory_store import attach_tags, create_memory, search_memories
 
     saved = 0
-    for fact in (facts or []):
+    for fact in facts or []:
         try:
             existing = search_memories(
                 fact["title"],
@@ -189,10 +201,19 @@ def save_inference_facts(facts: list[dict], channel_id: str | int | None = None,
                 conn=conn,
             )
             if memory and fact.get("tags"):
-                attach_tags(memory["memory_id"], fact["tags"], actor="elixir:inference", conn=conn)
+                attach_tags(
+                    memory["memory_id"],
+                    fact["tags"],
+                    actor="elixir:inference",
+                    conn=conn,
+                )
             saved += 1
         except (sqlite3.Error, KeyError, TypeError):
-            log.warning("save_inference_facts: failed to save fact %r", fact.get("title"), exc_info=True)
+            log.warning(
+                "save_inference_facts: failed to save fact %r",
+                fact.get("title"),
+                exc_info=True,
+            )
     return saved
 
 
@@ -407,7 +428,9 @@ _SIGNAL_FACT_MAP = {
 }
 
 
-def store_observation_facts(signals: list[dict], channel_id: str | int | None = None, conn=None) -> int:
+def store_observation_facts(
+    signals: list[dict], channel_id: str | int | None = None, conn=None
+) -> int:
     """Store structured observation facts from signals. Returns count stored."""
     from db import get_connection
     from storage.contextual_memory import upsert_summary_memory
@@ -451,7 +474,11 @@ def store_observation_facts(signals: list[dict], channel_id: str | int | None = 
                 if result:
                     saved += 1
             except (sqlite3.Error, KeyError, TypeError):
-                log.warning("store_observation_facts: failed for signal %s", signal_type, exc_info=True)
+                log.warning(
+                    "store_observation_facts: failed for signal %s",
+                    signal_type,
+                    exc_info=True,
+                )
         return saved
     finally:
         if close:

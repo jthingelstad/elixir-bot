@@ -34,6 +34,9 @@ def test_shared_capability_envelopes_require_identity_version_and_sources():
 
 def test_high_traffic_capabilities_publish_concrete_return_contracts():
     assert get_type_hints(get_clan_game_modes)["return"] is ClanGameModesResult
-    assert get_type_hints(get_clan_game_mode_windows)["return"] is ClanGameModeWindowsResult
+    assert (
+        get_type_hints(get_clan_game_mode_windows)["return"]
+        is ClanGameModeWindowsResult
+    )
     assert get_type_hints(get_war_intelligence)["return"] is WarIntelligenceResult
     assert get_type_hints(get_war_season_view)["return"] is WarSeasonViewResult

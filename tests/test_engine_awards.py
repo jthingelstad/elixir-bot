@@ -2,11 +2,12 @@
 rotation metadata, iron-king insufficient-data guard, silent participants,
 idempotency. Plus the projected-roster-key regression on
 projections.refresh_player_state (live incident 2026-07-04)."""
+
 from __future__ import annotations
 
-import db
 import pytest
 
+import db
 from engine import awards as engine_awards
 from engine import projections
 from engine.change_sets import ChangeSetInvariantError
@@ -20,19 +21,29 @@ def _seed_season(conn, *, full_attendance: bool = False):
         "INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
         "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', '2026-07-06', 1)"
     )
-    for tag, name in (("#A", "Alpha"), ("#B", "Bravo"), ("#C", "Carol"),
-                      ("#D", "Dora"), ("#R", "Rook")):
+    for tag, name in (
+        ("#A", "Alpha"),
+        ("#B", "Bravo"),
+        ("#C", "Carol"),
+        ("#D", "Dora"),
+        ("#R", "Rook"),
+    ):
         conn.execute(
             "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
-            "VALUES (?, ?, '2026-02-01', '2026-07-06')", (tag, name))
+            "VALUES (?, ?, '2026-02-01', '2026-07-06')",
+            (tag, name),
+        )
         joined = "2026-06-20" if tag == "#R" else "2026-03-01"  # Rook = mid-season
         conn.execute(
             "INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
-            "VALUES (?, ?, 'test')", (tag, joined))
+            "VALUES (?, ?, 'test')",
+            (tag, joined),
+        )
     conn.execute(
         "INSERT INTO war_seasons (season_id, started_at, ended_at, final_rank, weeks, "
         "war_champ_tag, free_pass_tag) VALUES (?, '2026-06-10', ?, 1, 2, '#A', '#B')",
-        (SEASON, AT))  # rotation applied: champ #A, pass falls to #B
+        (SEASON, AT),
+    )  # rotation applied: champ #A, pass falls to #B
     # Prior-season war history for the veterans (#A/#B/#C) so they are NOT
     # first-war-season rookies. #R has no prior war → the only Rookie MVP.
     conn.execute(
@@ -42,17 +53,21 @@ def _seed_season(conn, *, full_attendance: bool = False):
     for tag in ("#A", "#B", "#C"):
         conn.execute(
             "INSERT INTO war_participation (season_id, section_index, player_tag, "
-            "fame, decks_used, observed_at) VALUES (132, 0, ?, 1000, 16, ?)", (tag, AT))
+            "fame, decks_used, observed_at) VALUES (132, 0, ?, 1000, 16, ?)",
+            (tag, AT),
+        )
     for section in (3, 4):
         conn.execute(
             "INSERT INTO war_weeks (season_id, section_index, created_date, finish_time) "
             "VALUES (?, ?, ?, ?)",
-            (SEASON, section, f"2026-06-{10 + section}", f"2026-06-{17 + section}"))
+            (SEASON, section, f"2026-06-{10 + section}", f"2026-06-{17 + section}"),
+        )
         for tag, fame in (("#A", 3000), ("#B", 2500), ("#C", 2000), ("#R", 900)):
             conn.execute(
                 "INSERT INTO war_participation (season_id, section_index, player_tag, "
                 "fame, decks_used, observed_at) VALUES (?, ?, ?, ?, 16, ?)",
-                (SEASON, section, tag, fame, AT))
+                (SEASON, section, tag, fame, AT),
+            )
     # attendance: full coverage only when asked (else section 4 only — the
     # real s133 situation)
     sections = (3, 4) if full_attendance else (4,)
@@ -63,12 +78,15 @@ def _seed_season(conn, *, full_attendance: bool = False):
                     "INSERT INTO war_attendance_days (season_id, section_index, "
                     "war_day_index, player_tag, decks_used, decks_available, observed_at) "
                     "VALUES (?, ?, ?, ?, ?, 4, ?)",
-                    (SEASON, section, day, tag, used, AT))
+                    (SEASON, section, day, tag, used, AT),
+                )
     # donations: Carol leads
     for d, (tag, don) in enumerate((("#C", 400), ("#A", 250), ("#B", 100))):
         conn.execute(
             "INSERT INTO player_daily_metrics (player_tag, metric_date, donations_week) "
-            "VALUES (?, ?, ?)", (tag, f"2026-06-1{5 + d}", don))
+            "VALUES (?, ?, ?)",
+            (tag, f"2026-06-1{5 + d}", don),
+        )
     conn.commit()
 
 
@@ -79,14 +97,21 @@ def test_grant_season_awards_full_slate():
         grants = engine_awards.grant_season_awards(conn, SEASON, AT)
 
         podium = grants["war_champ"]
-        assert [(e["rank"], e["tag"]) for e in podium] == [(1, "#A"), (2, "#B"), (3, "#C")]
+        assert [(e["rank"], e["tag"]) for e in podium] == [
+            (1, "#A"),
+            (2, "#B"),
+            (3, "#C"),
+        ]
         assert podium[0]["metric_value"] == 6000  # 3000 × 2 sections
 
         fp = grants["free_pass"]
-        assert len(fp) == 1 and fp[0]["tag"] == "#B" and fp[0]["rotation_applied"] is True
+        assert (
+            len(fp) == 1 and fp[0]["tag"] == "#B" and fp[0]["rotation_applied"] is True
+        )
         fp_rows = conn.execute(
             "SELECT COUNT(*) FROM awards WHERE award_type='free_pass' AND season_id=?",
-            (SEASON,)).fetchone()[0]
+            (SEASON,),
+        ).fetchone()[0]
         assert fp_rows == 1
 
         # s133 reality: attendance only covers one of two sections → guarded skip
@@ -94,7 +119,9 @@ def test_grant_season_awards_full_slate():
         assert grants["iron_king_skipped"] == "insufficient attendance data"
 
         assert [e["tag"] for e in grants["donation_champs"]] == ["#C", "#A", "#B"]
-        assert [e["tag"] for e in grants["rookie_mvps"]] == ["#R"]  # first-war-season only
+        assert [e["tag"] for e in grants["rookie_mvps"]] == [
+            "#R"
+        ]  # first-war-season only
         assert grants["war_participants"] == 4  # A, B, C, R (fame > 0)
 
         # ledger keys claimed per recognition.md §5
@@ -111,7 +138,8 @@ def test_grant_season_awards_full_slate():
 
 
 def test_season_close_award_failure_rolls_back_as_one_transition(
-    engine_conn, monkeypatch,
+    engine_conn,
+    monkeypatch,
 ):
     from engine.emitters.war import close_season
 
@@ -141,7 +169,8 @@ def test_season_close_award_failure_rolls_back_as_one_transition(
 
 
 def test_season_close_invariant_catches_silent_award_omission(
-    engine_conn, monkeypatch,
+    engine_conn,
+    monkeypatch,
 ):
     from engine.emitters.war import close_season
 
@@ -150,14 +179,19 @@ def test_season_close_invariant_catches_silent_award_omission(
         "UPDATE war_seasons SET ended_at = NULL WHERE season_id = ?", (SEASON,)
     )
     engine_conn.commit()
-    monkeypatch.setattr(engine_awards, "grant_season_awards", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        engine_awards, "grant_season_awards", lambda *args, **kwargs: {}
+    )
 
     with pytest.raises(ChangeSetInvariantError, match="awards missing"):
         close_season(engine_conn, SEASON, {}, AT)
     engine_conn.rollback()
-    assert engine_conn.execute(
-        "SELECT ended_at FROM war_seasons WHERE season_id = ?", (SEASON,)
-    ).fetchone()[0] is None
+    assert (
+        engine_conn.execute(
+            "SELECT ended_at FROM war_seasons WHERE season_id = ?", (SEASON,)
+        ).fetchone()[0]
+        is None
+    )
 
 
 def test_replayed_season_close_preserves_recorded_outcome(engine_conn):
@@ -183,19 +217,28 @@ def test_replayed_season_close_preserves_recorded_outcome(engine_conn):
         "UPDATE player_daily_metrics SET donations_week = 9999 WHERE player_tag = '#A'"
     )
     assert close_season(engine_conn, SEASON, {}, "2026-07-08T00:00:00Z") == 0
-    assert engine_conn.execute(
-        "SELECT player_tag, rank FROM awards "
-        "WHERE season_id = ? AND award_type = 'donation_champ' ORDER BY rank",
-        (SEASON,),
-    ).fetchall() == recorded
+    assert (
+        engine_conn.execute(
+            "SELECT player_tag, rank FROM awards "
+            "WHERE season_id = ? AND award_type = 'donation_champ' ORDER BY rank",
+            (SEASON,),
+        ).fetchall()
+        == recorded
+    )
 
 
 def test_tie_aware_ranks_share_a_rank_and_flag_ties():
     """Competition ranking (1,2,2,4) with tie flags — so Elixir can say
     'three tied for 2nd' instead of inventing an order between equal points."""
     from storage.awards import _apply_tie_aware_ranks
-    rows = [{"points": 2700}, {"points": 2400}, {"points": 2400},
-            {"points": 2400}, {"points": 2150}]
+
+    rows = [
+        {"points": 2700},
+        {"points": 2400},
+        {"points": 2400},
+        {"points": 2400},
+        {"points": 2150},
+    ]
     _apply_tie_aware_ranks(rows, "points")
     assert [r["rank"] for r in rows] == [1, 2, 2, 2, 5]
     assert [r["tied"] for r in rows] == [False, True, True, True, False]
@@ -229,30 +272,48 @@ def test_war_season_history_is_the_free_pass_lineage(engine_conn):
     rotation flagged, repeat holders surfaced, capped to the rolling window —
     every name resolved from stored war_seasons tags, never invented."""
     from storage.war_analytics import get_war_season_history
+
     c = engine_conn
-    for tag, name in (("#LEVY", "King Levy"), ("#RAQ", "raquaza"),
-                      ("#28", "28"), ("#ATT", "Atternam"), ("#NEW", "Newbie")):
-        c.execute("INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
-                  "VALUES (?, ?, '2026-01-01', '2026-07-06')", (tag, name))
+    for tag, name in (
+        ("#LEVY", "King Levy"),
+        ("#RAQ", "raquaza"),
+        ("#28", "28"),
+        ("#ATT", "Atternam"),
+        ("#NEW", "Newbie"),
+    ):
+        c.execute(
+            "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+            "VALUES (?, ?, '2026-01-01', '2026-07-06')",
+            (tag, name),
+        )
     # champ==free_pass except S133 where it ROTATED off the champ (#28 held S131)
     seasons = [
         (129, 1, "#LEVY", "#LEVY"),
         (130, 1, "#RAQ", "#RAQ"),
         (131, 1, "#28", "#28"),
         (132, 1, "#ATT", "#ATT"),
-        (133, 1, "#28", "#ATT"),   # champ #28 held it last month → rotates to #ATT
+        (133, 1, "#28", "#ATT"),  # champ #28 held it last month → rotates to #ATT
     ]
     for sid, rank, champ, fp in seasons:
-        c.execute("INSERT INTO war_seasons (season_id, started_at, final_rank, war_champ_tag, free_pass_tag) "
-                  "VALUES (?, '2026-01-01', ?, ?, ?)", (sid, rank, champ, fp))
+        c.execute(
+            "INSERT INTO war_seasons (season_id, started_at, final_rank, war_champ_tag, free_pass_tag) "
+            "VALUES (?, '2026-01-01', ?, ?, ?)",
+            (sid, rank, champ, fp),
+        )
     c.commit()
 
     hist = get_war_season_history(conn=c)
-    assert [s["season_id"] for s in hist["seasons"]] == [133, 132, 131, 130, 129]  # newest first
-    assert hist["seasons"][0]["war_champ"]["name"] == "28"       # tag resolved to name
+    assert [s["season_id"] for s in hist["seasons"]] == [
+        133,
+        132,
+        131,
+        130,
+        129,
+    ]  # newest first
+    assert hist["seasons"][0]["war_champ"]["name"] == "28"  # tag resolved to name
     assert hist["seasons"][0]["free_pass"]["name"] == "Atternam"
-    assert hist["seasons"][0]["rotation_applied"] is True        # champ != free pass
-    assert hist["seasons"][1]["rotation_applied"] is False       # S132 champ took it
+    assert hist["seasons"][0]["rotation_applied"] is True  # champ != free pass
+    assert hist["seasons"][1]["rotation_applied"] is False  # S132 champ took it
     # Atternam held the free pass in 132 and 133 → repeat holder.
     assert hist["repeat_free_pass_holders"] == [
         {"tag": "#ATT", "name": "Atternam", "season_ids": [132, 133]}
@@ -260,33 +321,56 @@ def test_war_season_history_is_the_free_pass_lineage(engine_conn):
 
     # rolling window caps the lineage
     assert get_war_season_history(limit=2, conn=c)["seasons_shown"] == 2
-    assert [s["season_id"] for s in get_war_season_history(limit=2, conn=c)["seasons"]] == [133, 132]
+    assert [
+        s["season_id"] for s in get_war_season_history(limit=2, conn=c)["seasons"]
+    ] == [133, 132]
 
 
 def test_war_champ_tie_breaks_on_cards_donated(engine_conn):
     """Equal War Champ points are a genuine tie (both flagged, same rank), but the
     leader/#1 is the higher season donor (Jamie's tiebreak)."""
     c = engine_conn
-    c.execute("INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
-              "VALUES ('#J2RGCRVG','POAP KINGS','2026-02-04','2026-07-06',1)")
+    c.execute(
+        "INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
+        "VALUES ('#J2RGCRVG','POAP KINGS','2026-02-04','2026-07-06',1)"
+    )
     c.execute(
         "INSERT INTO war_seasons (season_id, started_at) VALUES (150, '2026-06-10')"
     )
-    c.execute("INSERT INTO war_weeks (season_id, section_index, created_date, finish_time) "
-              "VALUES (150, 0, '2026-06-11', '2026-06-18')")
+    c.execute(
+        "INSERT INTO war_weeks (season_id, section_index, created_date, finish_time) "
+        "VALUES (150, 0, '2026-06-11', '2026-06-18')"
+    )
     for tag, name, don in (("#HI", "HiDonor", 500), ("#LO", "LoDonor", 100)):
-        c.execute("INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
-                  "VALUES (?, ?, '2026-02-01', '2026-07-06')", (tag, name))
-        c.execute("INSERT INTO clan_memberships (player_tag, joined_at, join_source) VALUES (?, '2026-03-01', 'test')", (tag,))
-        c.execute("INSERT INTO war_participation (season_id, section_index, player_tag, fame, decks_used, observed_at) "
-                  "VALUES (150, 0, ?, 2400, 16, ?)", (tag, AT))  # EQUAL points
-        c.execute("INSERT INTO player_daily_metrics (player_tag, metric_date, donations_week) VALUES (?, '2026-06-15', ?)", (tag, don))
+        c.execute(
+            "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+            "VALUES (?, ?, '2026-02-01', '2026-07-06')",
+            (tag, name),
+        )
+        c.execute(
+            "INSERT INTO clan_memberships (player_tag, joined_at, join_source) VALUES (?, '2026-03-01', 'test')",
+            (tag,),
+        )
+        c.execute(
+            "INSERT INTO war_participation (season_id, section_index, player_tag, fame, decks_used, observed_at) "
+            "VALUES (150, 0, ?, 2400, 16, ?)",
+            (tag, AT),
+        )  # EQUAL points
+        c.execute(
+            "INSERT INTO player_daily_metrics (player_tag, metric_date, donations_week) VALUES (?, '2026-06-15', ?)",
+            (tag, don),
+        )
     c.commit()
     champ = db.get_award_races(season_id=150, conn=c)["war_champ"]
-    assert [e["name"] for e in champ] == ["HiDonor", "LoDonor"]   # higher donor first
+    assert [e["name"] for e in champ] == ["HiDonor", "LoDonor"]  # higher donor first
     assert champ[0]["donations"] == 500 and champ[1]["donations"] == 100
-    assert champ[0]["rank"] == champ[1]["rank"] and champ[0]["tied"] and champ[1]["tied"]  # still a points tie
-    assert db.get_award_races(season_id=150, conn=c)["war_champ_leader"]["name"] == "HiDonor"
+    assert (
+        champ[0]["rank"] == champ[1]["rank"] and champ[0]["tied"] and champ[1]["tied"]
+    )  # still a points tie
+    assert (
+        db.get_award_races(season_id=150, conn=c)["war_champ_leader"]["name"]
+        == "HiDonor"
+    )
 
     # Season close consumes the exact same outcome: no second implementation
     # can silently choose the low donor after the live race showed HiDonor.
@@ -316,22 +400,32 @@ def test_award_outcome_excludes_departed_members_everywhere(engine_conn):
         "(clan_tag, name, first_seen_at, last_seen_at, is_home) "
         "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-01-01', '2026-07-06', 1)"
     )
-    c.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (151, '2026-07-01')")
-    c.execute("INSERT INTO war_weeks (season_id, section_index, created_date) VALUES (151, 0, '2026-07-01')")
+    c.execute(
+        "INSERT INTO war_seasons (season_id, started_at) VALUES (151, '2026-07-01')"
+    )
+    c.execute(
+        "INSERT INTO war_weeks (season_id, section_index, created_date) VALUES (151, 0, '2026-07-01')"
+    )
     for tag, name, points, left_at in (
         ("#ACTIVE", "Active", 2000, None),
         ("#LEFT", "Departed", 9000, "2026-07-05"),
     ):
         c.execute(
             "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
-            "VALUES (?, ?, '2026-01-01', '2026-07-06')", (tag, name))
+            "VALUES (?, ?, '2026-01-01', '2026-07-06')",
+            (tag, name),
+        )
         c.execute(
             "INSERT INTO clan_memberships (player_tag, joined_at, left_at, join_source) "
-            "VALUES (?, '2026-01-01', ?, 'test')", (tag, left_at))
+            "VALUES (?, '2026-01-01', ?, 'test')",
+            (tag, left_at),
+        )
         c.execute(
             "INSERT INTO war_participation "
             "(season_id, section_index, player_tag, fame, decks_used, observed_at) "
-            "VALUES (151, 0, ?, ?, 16, '2026-07-06')", (tag, points))
+            "VALUES (151, 0, ?, ?, 16, '2026-07-06')",
+            (tag, points),
+        )
 
     preview = compute_season_award_outcome(c, 151)
     assert [entry["tag"] for entry in preview["standings"]] == ["#ACTIVE"]
@@ -353,8 +447,12 @@ def test_award_preview_and_grant_share_rookie_and_donation_outcomes(engine_conn)
         "(clan_tag, name, first_seen_at, last_seen_at, is_home) "
         "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-01-01', '2026-07-06', 1)"
     )
-    c.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (160, '2026-06-01')")
-    c.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (161, '2026-07-01')")
+    c.execute(
+        "INSERT INTO war_seasons (season_id, started_at) VALUES (160, '2026-06-01')"
+    )
+    c.execute(
+        "INSERT INTO war_seasons (season_id, started_at) VALUES (161, '2026-07-01')"
+    )
     c.execute(
         "INSERT INTO war_weeks (season_id, section_index, created_date, finish_time) "
         "VALUES (161, 0, '2026-07-01', '2026-07-08')"
@@ -366,16 +464,19 @@ def test_award_preview_and_grant_share_rookie_and_donation_outcomes(engine_conn)
     ):
         c.execute(
             "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
-            "VALUES (?, ?, '2026-01-01', '2026-07-06')", (tag, name),
+            "VALUES (?, ?, '2026-01-01', '2026-07-06')",
+            (tag, name),
         )
         c.execute(
             "INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
-            "VALUES (?, '2026-07-02', 'test')", (tag,),
+            "VALUES (?, '2026-07-02', 'test')",
+            (tag,),
         )
         c.execute(
             "INSERT INTO war_participation "
             "(season_id, section_index, player_tag, fame, decks_used, observed_at) "
-            "VALUES (161, 0, ?, ?, 16, ?)", (tag, points, AT),
+            "VALUES (161, 0, ?, ?, 16, ?)",
+            (tag, points, AT),
         )
         c.execute(
             "INSERT INTO player_daily_metrics "
@@ -385,7 +486,8 @@ def test_award_preview_and_grant_share_rookie_and_donation_outcomes(engine_conn)
     c.execute(
         "INSERT INTO war_participation "
         "(season_id, section_index, player_tag, fame, decks_used, observed_at) "
-        "VALUES (160, 0, '#VET', 100, 4, ?)", (AT,),
+        "VALUES (160, 0, '#VET', 100, 4, ?)",
+        (AT,),
     )
 
     preview = compute_season_award_outcome(c, 161)
@@ -402,6 +504,7 @@ def test_award_leaderboard_accepts_rank_and_limit():
     """QA H19: get_awards(mode='leaderboard') passed rank/limit that the storage
     fn didn't accept, so every call raised TypeError. Now it filters/caps."""
     from agent.tool_exec import _execute_get_awards
+
     conn = db.get_connection()
     try:
         _seed_season(conn)
@@ -415,7 +518,9 @@ def test_award_leaderboard_accepts_rank_and_limit():
         assert len(top) <= 2
         # the tool path no longer raises
         out = _execute_get_awards({"mode": "leaderboard", "award_type": "war_champ"})
-        assert isinstance(out, dict) and out["mode"] == "leaderboard" and out["count"] >= 1
+        assert (
+            isinstance(out, dict) and out["mode"] == "leaderboard" and out["count"] >= 1
+        )
     finally:
         conn.close()
 
@@ -436,26 +541,41 @@ def test_refresh_player_state_enforces_profile_and_roster_field_ownership():
     try:
         conn.execute(
             "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
-            "VALUES ('#X', 'Xeno', '2026-01-01', '2026-07-06')")
+            "VALUES ('#X', 'Xeno', '2026-01-01', '2026-07-06')"
+        )
         # projected (snake_case) roster entry — the shape the tick passes
-        projections.refresh_player_state(conn, "#X", None, {
-            "role": "member", "trophies": 5100, "donations": 42,
-            "donations_received": 8, "exp_level": 44,
-            "clan_rank": 7, "previous_clan_rank": 9,
-        }, AT)
+        projections.refresh_player_state(
+            conn,
+            "#X",
+            None,
+            {
+                "role": "member",
+                "trophies": 5100,
+                "donations": 42,
+                "donations_received": 8,
+                "exp_level": 44,
+                "clan_rank": 7,
+                "previous_clan_rank": 9,
+            },
+            AT,
+        )
         row = conn.execute(
             "SELECT exp_level, clan_rank, previous_clan_rank, donations_received_week "
-            "FROM player_current_state WHERE player_tag='#X'").fetchone()
-        assert (row["exp_level"], row["clan_rank"], row["previous_clan_rank"],
-                row["donations_received_week"]) == (None, 7, 9, 8)
+            "FROM player_current_state WHERE player_tag='#X'"
+        ).fetchone()
+        assert (
+            row["exp_level"],
+            row["clan_rank"],
+            row["previous_clan_rank"],
+            row["donations_received_week"],
+        ) == (None, 7, 9, 8)
         # A deep profile owns exp_level; a later sparse roster refresh preserves it.
-        projections.refresh_player_state(
-            conn, "#X", {"expLevel": 44}, None, AT
-        )
+        projections.refresh_player_state(conn, "#X", {"expLevel": 44}, None, AT)
         projections.refresh_player_state(conn, "#X", None, {"trophies": 5150}, AT)
         row = conn.execute(
             "SELECT exp_level, clan_rank FROM player_current_state "
-            "WHERE player_tag='#X'").fetchone()
+            "WHERE player_tag='#X'"
+        ).fetchone()
         assert (row["exp_level"], row["clan_rank"]) == (44, 7)
     finally:
         conn.close()

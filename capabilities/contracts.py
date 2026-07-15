@@ -58,10 +58,58 @@ class WarSeasonViewResult(SourcedCapabilityEnvelope):
     data: Any
 
 
+class MemberIntelligenceResult(SourcedCapabilityEnvelope, total=False):
+    player_tag: str
+    requested_facets: list[str]
+    freshness: dict[str, Any]
+    profile: Any
+    form: Any
+    playstyle: Any
+    war: Any
+    trend: Any
+    battles: Any
+    events: Any
+
+
+class ManagementDecisionResult(SourcedCapabilityEnvelope):
+    view: str
+    audience: str
+    policy: dict[str, Any]
+    data: Any
+
+
+class AwardsRecognitionResult(SourcedCapabilityEnvelope):
+    view: str
+    state: str
+    period: dict[str, Any]
+    data: Any
+
+
+class DeckIntelligenceResult(CapabilityEnvelope, total=False):
+    available: bool
+    error: str
+    view: str
+    player_tag: str
+    sources: list[str]
+
+
+class GameTruthResult(CapabilityEnvelope, total=False):
+    topic: str
+    available: bool
+    error: str
+    sources: list[str]
+    mechanics: dict[str, Any]
+
+
 __all__ = [
     "CapabilityEnvelope",
+    "AwardsRecognitionResult",
     "ClanGameModesResult",
     "ClanGameModeWindowsResult",
+    "DeckIntelligenceResult",
+    "GameTruthResult",
+    "ManagementDecisionResult",
+    "MemberIntelligenceResult",
     "SourcedCapabilityEnvelope",
     "WarIntelligenceEnvelope",
     "WarIntelligenceResult",

@@ -69,6 +69,7 @@ class TestRarityFilterGuard:
         # QA L17: 'mythic' must normalize to None so the unknown_rarity guard
         # fires instead of a valid-looking 0-match result.
         from storage.cards import _normalize_rarity_filter
+
         assert _normalize_rarity_filter("mythic") is None
         assert _normalize_rarity_filter("legendaries") == "legendary"
         assert _normalize_rarity_filter("Champion") == "champion"

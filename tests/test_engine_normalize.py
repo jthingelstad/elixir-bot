@@ -27,15 +27,15 @@ REPO = Path(__file__).resolve().parent.parent
 def test_parse_cr_time_all_observed_forms():
     expected = datetime(2026, 7, 3, 21, 15, 0, tzinfo=timezone.utc)
     forms = [
-        "20260703T211500.000Z",        # CR compact, millis
-        "20260703T211500Z",            # CR compact, bare Z
-        "20260703T211500",             # CR compact, suffixless
-        "20260703T211500.000+00:00",   # war_analytics-observed hybrid
-        "2026-07-03T21:15:00Z",        # ISO Z
-        "2026-07-03T21:15:00+00:00",   # ISO offset
-        "2026-07-03T21:15:00",         # ISO suffixless → UTC (engine convention)
+        "20260703T211500.000Z",  # CR compact, millis
+        "20260703T211500Z",  # CR compact, bare Z
+        "20260703T211500",  # CR compact, suffixless
+        "20260703T211500.000+00:00",  # war_analytics-observed hybrid
+        "2026-07-03T21:15:00Z",  # ISO Z
+        "2026-07-03T21:15:00+00:00",  # ISO offset
+        "2026-07-03T21:15:00",  # ISO suffixless → UTC (engine convention)
         datetime(2026, 7, 3, 21, 15),  # naive datetime → UTC
-        expected,                       # aware datetime passthrough
+        expected,  # aware datetime passthrough
     ]
     for form in forms:
         dt = parse_cr_time(form)
@@ -51,12 +51,12 @@ def test_parse_cr_time_rejects_garbage():
 def test_card_display_level_per_rarity():
     # docs/cr-api-docs/cards.md: display = level + (16 − maxLevel);
     # every rarity's max card displays as 16.
-    for max_level in (14, 12, 11, 8, 5, 4):   # common..champion-era values
+    for max_level in (14, 12, 11, 8, 5, 4):  # common..champion-era values
         assert card_display_level(max_level, max_level) == 16
-    assert card_display_level(11, 14) == 13     # mid-level common
-    assert card_display_level(1, 8) == 9        # fresh legendary
+    assert card_display_level(11, 14) == 13  # mid-level common
+    assert card_display_level(1, 8) == 9  # fresh legendary
     assert card_display_level(None, 14) is None
-    assert card_display_level(5, None) == 5     # invalid maxLevel → passthrough
+    assert card_display_level(5, None) == 5  # invalid maxLevel → passthrough
     assert card_display_level(5, 99) == 5
 
 
@@ -82,7 +82,7 @@ def test_arena_kind_boundary():
 
 
 def test_pol_rank_lower_is_better():
-    assert pol_rank_improved(None, 500) is True     # newly attained
+    assert pol_rank_improved(None, 500) is True  # newly attained
     assert pol_rank_improved(100, 50) is True
     assert pol_rank_improved(50, 100) is False
     assert pol_rank_improved(50, 50) is False
@@ -100,8 +100,8 @@ def test_annotate_player_adds_display_level_beside_raw():
     payload = {"tag": "#A", "cards": [{"name": "Knight", "level": 11, "maxLevel": 14}]}
     out = annotate(payload, "player")
     card = out["cards"][0]
-    assert card["level"] == 11          # raw untouched
-    assert card["maxLevel"] == 14       # raw untouched
+    assert card["level"] == 11  # raw untouched
+    assert card["maxLevel"] == 14  # raw untouched
     assert card["display_level"] == 13  # derived alongside
 
 
@@ -123,9 +123,20 @@ def test_annotate_unknown_endpoint_untouched():
 
 def _grep(pattern: str, exclude: set[str]) -> list[str]:
     out = subprocess.run(
-        ["grep", "-rlE", pattern, "--include=*.py",
-         "engine", "storage", "db", "runtime", "agent"],
-        capture_output=True, text=True, cwd=REPO,
+        [
+            "grep",
+            "-rlE",
+            pattern,
+            "--include=*.py",
+            "engine",
+            "storage",
+            "db",
+            "runtime",
+            "agent",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=REPO,
     )
     hits = [line for line in out.stdout.splitlines() if line]
     return [h for h in hits if h not in exclude]

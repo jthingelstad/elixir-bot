@@ -2,13 +2,22 @@
 so the brain knows exactly when it's speaking without misreading a bare timestamp
 as local. POAP KINGS is international — no single local time — so it's UTC plus
 labeled reference conversions, not "the" local time."""
+
 from __future__ import annotations
 
 import re
 
 from runtime.awareness import read as read_mod
 
-_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+_WEEKDAYS = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+)
 
 
 def test_clock_block_is_utc_anchored_with_reference_zones():

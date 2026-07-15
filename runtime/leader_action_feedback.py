@@ -10,7 +10,9 @@ import db
 log = logging.getLogger("elixir.leader_action_feedback")
 
 
-def refresh_leader_action_feedback_profile(*, action_type: str | None, limit: int = 50) -> dict | None:
+def refresh_leader_action_feedback_profile(
+    *, action_type: str | None, limit: int = 50
+) -> dict | None:
     clean_type = (action_type or "").strip()
     if not clean_type:
         return None
@@ -28,7 +30,9 @@ def refresh_leader_action_feedback_profile(*, action_type: str | None, limit: in
         log.warning(
             "leader_action_feedback synthesis failed action_type=%s error=%s",
             clean_type,
-            profile.get("_error") if isinstance(profile, dict) else type(profile).__name__,
+            profile.get("_error")
+            if isinstance(profile, dict)
+            else type(profile).__name__,
         )
         return None
     return db.upsert_leader_action_feedback_profile(
@@ -39,9 +43,15 @@ def refresh_leader_action_feedback_profile(*, action_type: str | None, limit: in
 
 async def _refresh_leader_action_feedback_profile_async(action_type: str) -> None:
     try:
-        await asyncio.to_thread(refresh_leader_action_feedback_profile, action_type=action_type)
+        await asyncio.to_thread(
+            refresh_leader_action_feedback_profile, action_type=action_type
+        )
     except Exception:
-        log.warning("leader_action_feedback background refresh failed action_type=%s", action_type, exc_info=True)
+        log.warning(
+            "leader_action_feedback background refresh failed action_type=%s",
+            action_type,
+            exc_info=True,
+        )
 
 
 def queue_leader_action_feedback_refresh(action_type: str | None):

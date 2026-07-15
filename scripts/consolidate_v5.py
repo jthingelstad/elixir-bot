@@ -11,6 +11,7 @@ Usage (cutover does the renames; this only does the in-file merge):
     python scripts/consolidate_v5.py <operational_db> <projections_db>
 Returns a JSON report; exits non-zero if integrity_check != 'ok'.
 """
+
 from __future__ import annotations
 
 import json
@@ -43,7 +44,8 @@ def merge_projections_into(operational_path: str, projections_path: str) -> dict
         copied = {}
         for t in tables:
             ddl = conn.execute(
-                "SELECT sql FROM v5src.sqlite_master WHERE type='table' AND name=?", (t,)
+                "SELECT sql FROM v5src.sqlite_master WHERE type='table' AND name=?",
+                (t,),
             ).fetchone()[0]
             conn.execute(ddl)
             conn.execute(f'INSERT INTO main."{t}" SELECT * FROM v5src."{t}"')
@@ -76,7 +78,10 @@ def merge_projections_into(operational_path: str, projections_path: str) -> dict
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print("usage: consolidate_v5.py <operational_db> <projections_db>", file=sys.stderr)
+        print(
+            "usage: consolidate_v5.py <operational_db> <projections_db>",
+            file=sys.stderr,
+        )
         sys.exit(2)
     result = merge_projections_into(sys.argv[1], sys.argv[2])
     print(json.dumps(result, indent=2, default=str))

@@ -16,7 +16,9 @@ def _parse_utc_iso(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
     try:
-        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S").replace(
+            tzinfo=timezone.utc
+        )
     except (TypeError, ValueError):
         return None
 
@@ -44,7 +46,11 @@ def coerce_utc_datetime(value: datetime | str | None) -> Optional[datetime]:
 def format_utc_iso(value: Optional[datetime]) -> Optional[str]:
     if value is None:
         return None
-    current = value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    current = (
+        value.astimezone(timezone.utc)
+        if value.tzinfo
+        else value.replace(tzinfo=timezone.utc)
+    )
     return current.replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S")
 
 
@@ -60,7 +66,9 @@ def period_offset(period_index: Optional[int]) -> Optional[int]:
     return period_index % PERIODS_PER_WEEK
 
 
-def resolve_phase(period_type: Optional[str], period_index: Optional[int]) -> Optional[str]:
+def resolve_phase(
+    period_type: Optional[str], period_index: Optional[int]
+) -> Optional[str]:
     normalized = normalize_period_type(period_type)
     if normalized in BATTLE_PERIOD_TYPES:
         return "battle"
@@ -74,7 +82,9 @@ def resolve_phase(period_type: Optional[str], period_index: Optional[int]) -> Op
     return "practice"
 
 
-def phase_day_number(phase: Optional[str], period_index: Optional[int]) -> Optional[int]:
+def phase_day_number(
+    phase: Optional[str], period_index: Optional[int]
+) -> Optional[int]:
     """Delegates to engine.normalize.war_day (public signature unchanged)."""
     from engine.normalize import war_day
 
@@ -120,7 +130,9 @@ def war_day_key(
     return f"{season_token}-w{section_index:02d}-p{period_index:03d}"
 
 
-def war_reset_window_utc(value: datetime | str | None) -> tuple[Optional[datetime], Optional[datetime]]:
+def war_reset_window_utc(
+    value: datetime | str | None,
+) -> tuple[Optional[datetime], Optional[datetime]]:
     current = coerce_utc_datetime(value)
     if current is None:
         return None, None

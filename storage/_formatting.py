@@ -7,7 +7,6 @@ shared wrapper instead of duplicated late-import wrappers in each storage module
 import re
 import unicodedata
 
-
 _CALLABLE_DROP_CATEGORIES = frozenset({"Mn", "So", "Sk", "Cf"})
 _CALLABLE_WHITESPACE = re.compile(r"\s+")
 
@@ -60,7 +59,9 @@ def compute_display_name(conn, tag: str | None, raw_name: str | None = None) -> 
     fallback in preferred_display_name when the column is unset."""
     nick = stored_nickname(conn, tag)
     if nick:
-        return nick.strip()[:_MAX_DISPLAY_NAME_LEN].strip() or (f"Player {tag[-4:]}" if tag else "Player")
+        return nick.strip()[:_MAX_DISPLAY_NAME_LEN].strip() or (
+            f"Player {tag[-4:]}" if tag else "Player"
+        )
     if raw_name is None and conn is not None and tag:
         row = conn.execute(
             "SELECT current_name FROM players WHERE player_tag = ?", (tag,)
@@ -194,4 +195,5 @@ def external_safe_name(raw_name: str | None, *, fallback: str = "(name hidden)")
 def format_member_reference(*args, **kwargs):
     """Format a member reference — delegates to storage.identity."""
     from storage.identity import format_member_reference as _impl
+
     return _impl(*args, **kwargs)

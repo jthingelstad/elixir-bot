@@ -9,6 +9,7 @@ The three points:
   3. prompts/lanes/<lane>.md — the lane voice file compose loads (a missing one
      silently drops composition to the fallback).
 """
+
 from __future__ import annotations
 
 import os
@@ -16,7 +17,9 @@ import os
 import prompts
 from engine.recognition.compose import FAIL_CLOSED_LANE, PREFIX_LANE
 
-_LANES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts", "lanes")
+_LANES_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "prompts", "lanes"
+)
 
 
 def _routed_lanes() -> set[str]:
@@ -38,7 +41,8 @@ def test_every_routed_lane_has_a_voice_file():
     """A lane with no prompts/lanes/<lane>.md silently drops composition to the
     deterministic fallback (the third registration point)."""
     missing = {
-        lane for lane in _routed_lanes()
+        lane
+        for lane in _routed_lanes()
         if not os.path.isfile(os.path.join(_LANES_DIR, f"{lane}.md"))
     }
     assert not missing, (
@@ -49,8 +53,11 @@ def test_every_routed_lane_has_a_voice_file():
 def test_every_config_lane_has_a_discord_md_section():
     """Reverse direction: no CHANNEL_LANE_CONFIG lane is orphaned — each must map
     to a #channel section in DISCORD.md (Lane: <lane>)."""
-    discord_md = open(prompts._DISCORD_MD if hasattr(prompts, "_DISCORD_MD")
-                      else os.path.join(os.path.dirname(_LANES_DIR), "DISCORD.md")).read()
+    discord_md = open(
+        prompts._DISCORD_MD
+        if hasattr(prompts, "_DISCORD_MD")
+        else os.path.join(os.path.dirname(_LANES_DIR), "DISCORD.md")
+    ).read()
     lanes_in_md = {
         line.split(":", 1)[1].strip()
         for line in discord_md.splitlines()
@@ -67,7 +74,8 @@ def test_every_config_lane_has_a_voice_file():
     """Every configured lane also needs its voice file (covers config lanes that
     aren't recognition-routed, e.g. ask-elixir/general)."""
     missing = {
-        lane for lane in prompts.CHANNEL_LANE_CONFIG
+        lane
+        for lane in prompts.CHANNEL_LANE_CONFIG
         if not os.path.isfile(os.path.join(_LANES_DIR, f"{lane}.md"))
     }
     assert not missing, (
@@ -80,8 +88,11 @@ def test_every_discord_md_lane_is_in_channel_lane_config():
     with no CHANNEL_LANE_CONFIG entry hard-crashes on_ready. This is the exact
     gap that broke the #elixir deploy (2026-07-10): the channel was in DISCORD.md
     before its lane was registered in the config."""
-    discord_md = open(prompts._DISCORD_MD if hasattr(prompts, "_DISCORD_MD")
-                      else os.path.join(os.path.dirname(_LANES_DIR), "DISCORD.md")).read()
+    discord_md = open(
+        prompts._DISCORD_MD
+        if hasattr(prompts, "_DISCORD_MD")
+        else os.path.join(os.path.dirname(_LANES_DIR), "DISCORD.md")
+    ).read()
     lanes_in_md = {
         line.split(":", 1)[1].strip()
         for line in discord_md.splitlines()

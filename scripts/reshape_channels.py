@@ -49,7 +49,8 @@ DEPRECATED = {
 
 ROLLBACK_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "scratch", "reshape_channels_rollback.json",
+    "scratch",
+    "reshape_channels_rollback.json",
 )
 
 
@@ -64,7 +65,9 @@ def _req(method: str, path: str, *, json_body=None):
     """One REST call with basic 429 handling. Returns parsed JSON (or {})."""
     url = f"{API}{path}"
     for _ in range(5):
-        resp = requests.request(method, url, headers=_headers(), json=json_body, timeout=30)
+        resp = requests.request(
+            method, url, headers=_headers(), json=json_body, timeout=30
+        )
         if resp.status_code == 429:
             retry = float(resp.json().get("retry_after", 1.0))
             time.sleep(retry + 0.25)
@@ -88,13 +91,20 @@ def _find_category(channels: list[dict], name: str) -> dict | None:
 
 def create_elixir(dry_run: bool) -> None:
     channels = _guild_channels()
-    existing = next((c for c in channels if (c.get("name") or "") == "elixir"
-                     and c.get("type") == 0), None)
+    existing = next(
+        (
+            c
+            for c in channels
+            if (c.get("name") or "") == "elixir" and c.get("type") == 0
+        ),
+        None,
+    )
     if existing:
         print(f"#elixir already exists: {existing['id']}")
         return
-    parent_id = next((c.get("parent_id") for c in channels
-                      if c.get("id") == ANNOUNCEMENTS_ID), None)
+    parent_id = next(
+        (c.get("parent_id") for c in channels if c.get("id") == ANNOUNCEMENTS_ID), None
+    )
     body = {
         "name": "elixir",
         "type": 0,
@@ -119,8 +129,11 @@ def archive(dry_run: bool) -> None:
             print("[dry-run] would create category 'Archived'")
             category_id = "<new>"
         else:
-            category = _req("POST", f"/guilds/{GUILD_ID}/channels",
-                            json_body={"name": "Archived", "type": 4})
+            category = _req(
+                "POST",
+                f"/guilds/{GUILD_ID}/channels",
+                json_body={"name": "Archived", "type": 4},
+            )
             category_id = category["id"]
             print(f"created category 'Archived': {category_id}")
     else:
@@ -134,10 +147,19 @@ def archive(dry_run: bool) -> None:
             print(f"  skip {name} ({cid}): not found")
             continue
         rollback[cid] = {"name": name, "parent_id": chan.get("parent_id")}
-        overwrites = [o for o in (chan.get("permission_overwrites") or [])
-                      if o.get("id") != EVERYONE_ROLE_ID]
-        overwrites.append({"id": EVERYONE_ROLE_ID, "type": 0, "allow": "0",
-                           "deny": str(SEND_MESSAGES)})
+        overwrites = [
+            o
+            for o in (chan.get("permission_overwrites") or [])
+            if o.get("id") != EVERYONE_ROLE_ID
+        ]
+        overwrites.append(
+            {
+                "id": EVERYONE_ROLE_ID,
+                "type": 0,
+                "allow": "0",
+                "deny": str(SEND_MESSAGES),
+            }
+        )
         body = {"parent_id": category_id, "permission_overwrites": overwrites}
         if dry_run:
             print(f"  [dry-run] would PATCH {name} ({cid}) → Archived + lock @everyone")

@@ -4,6 +4,7 @@ block. This lives in the agent (compose) layer, NOT storage: the storage layer
 this module turns that data into the Discord-ready prose the brain reads via the
 get_river_race tool and the war-status prompt context. Keeping the rendering
 here means a copy change never touches the data/signal layer."""
+
 from __future__ import annotations
 
 

@@ -7,7 +7,6 @@ import db
 from runtime.leader_action_feedback import queue_leader_action_feedback_refresh
 from runtime.leader_action_ui import refresh_leader_action_card
 
-
 log = logging.getLogger("elixir")
 
 THUMBS_UP = "\N{THUMBS UP SIGN}"
@@ -28,7 +27,11 @@ def feedback_value_for_emoji(emoji) -> str | None:
 
 def leader_action_value_for_emoji(emoji) -> str | None:
     value = str(emoji or "").strip()
-    if value in {WHITE_CHECK_MARK, BALLOT_BOX_WITH_CHECK, f"{BALLOT_BOX_WITH_CHECK}\ufe0f"}:
+    if value in {
+        WHITE_CHECK_MARK,
+        BALLOT_BOX_WITH_CHECK,
+        f"{BALLOT_BOX_WITH_CHECK}\ufe0f",
+    }:
         return db.ACTION_DONE
     if value == CROSS_MARK:
         return db.ACTION_REJECTED
@@ -56,7 +59,9 @@ async def _fetch_channel_and_message(payload):
             channel = await app.bot.fetch_channel(payload.channel_id)
         except Exception:
             app.log.warning(
-                "prompt_feedback channel fetch failed channel_id=%s", payload.channel_id, exc_info=True,
+                "prompt_feedback channel fetch failed channel_id=%s",
+                payload.channel_id,
+                exc_info=True,
             )
             return None, None
     try:
@@ -64,7 +69,9 @@ async def _fetch_channel_and_message(payload):
     except Exception:
         app.log.warning(
             "prompt_feedback message fetch failed channel_id=%s message_id=%s",
-            payload.channel_id, payload.message_id, exc_info=True,
+            payload.channel_id,
+            payload.message_id,
+            exc_info=True,
         )
         return channel, None
     return channel, message
@@ -79,11 +86,15 @@ async def _acknowledge_feedback(payload):
     except Exception:
         import runtime.app as app
 
-        app.log.warning("Failed to add ask-elixir feedback acknowledgement reaction", exc_info=True)
+        app.log.warning(
+            "Failed to add ask-elixir feedback acknowledgement reaction", exc_info=True
+        )
     return message
 
 
-async def _post_retry_invitation(payload, *, prompt_feedback_id: int | None, message=None) -> None:
+async def _post_retry_invitation(
+    payload, *, prompt_feedback_id: int | None, message=None
+) -> None:
     if message is None:
         _channel, message = await _fetch_channel_and_message(payload)
     if message is None:
@@ -105,13 +116,21 @@ async def _post_retry_invitation(payload, *, prompt_feedback_id: int | None, mes
     except Exception:
         import runtime.app as app
 
-        app.log.warning("Failed to send ask-elixir retry invitation after thumbs-down", exc_info=True)
+        app.log.warning(
+            "Failed to send ask-elixir retry invitation after thumbs-down",
+            exc_info=True,
+        )
 
 
 async def handle_raw_reaction_add(payload) -> None:
     import runtime.app as app
 
-    if not payload or not payload.channel_id or not payload.message_id or not payload.user_id:
+    if (
+        not payload
+        or not payload.channel_id
+        or not payload.message_id
+        or not payload.user_id
+    ):
         return
     if app.bot.user and int(payload.user_id) == int(app.bot.user.id):
         return
@@ -146,7 +165,9 @@ async def handle_raw_reaction_add(payload) -> None:
     if not feedback_value:
         return
 
-    channel_config, assistant = await asyncio.to_thread(_assistant_message_lookup, payload)
+    channel_config, assistant = await asyncio.to_thread(
+        _assistant_message_lookup, payload
+    )
     if not channel_config or not assistant:
         return
     if assistant.get("author_type") != "assistant":
@@ -172,10 +193,7 @@ async def handle_raw_reaction_add(payload) -> None:
     # WARNING; thumbs-up is informational. Only the first thumbs-down per
     # message+user gets WARNING (became_active_down=True) — toggle-and-back
     # is downgraded to INFO so we don't spam triage with re-reactions.
-    log_level = (
-        log.warning if became_active_down
-        else log.info
-    )
+    log_level = log.warning if became_active_down else log.info
     log_level(
         "prompt_feedback emoji=%s channel=%s workflow=%s message_id=%s reactor=%s asker=%s",
         f"thumbs_{feedback_value}",
@@ -197,7 +215,12 @@ async def handle_raw_reaction_add(payload) -> None:
 async def handle_raw_reaction_remove(payload) -> None:
     import runtime.app as app
 
-    if not payload or not payload.channel_id or not payload.message_id or not payload.user_id:
+    if (
+        not payload
+        or not payload.channel_id
+        or not payload.message_id
+        or not payload.user_id
+    ):
         return
     if app.bot.user and int(payload.user_id) == int(app.bot.user.id):
         return
@@ -226,7 +249,9 @@ async def handle_raw_reaction_remove(payload) -> None:
     if not feedback_value:
         return
 
-    channel_config, assistant = await asyncio.to_thread(_assistant_message_lookup, payload)
+    channel_config, assistant = await asyncio.to_thread(
+        _assistant_message_lookup, payload
+    )
     if not channel_config or not assistant:
         return
     if assistant.get("author_type") != "assistant":

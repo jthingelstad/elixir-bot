@@ -57,7 +57,13 @@ def schedule_revisit(
         "INSERT OR IGNORE INTO revisits "
         "(revisit_key, created_by_workflow, due_at, rationale, created_at) "
         "VALUES (?, ?, ?, ?, ?)",
-        (key, created_by_workflow or "awareness", normalized_due, (rationale or "").strip() or None, now),
+        (
+            key,
+            created_by_workflow or "awareness",
+            normalized_due,
+            (rationale or "").strip() or None,
+            now,
+        ),
     )
     conn.commit()
     row = conn.execute(

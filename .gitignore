@@ -6,6 +6,11 @@ __pycache__/
 logs/
 elixir.db*
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 elixir.pid
 .DS_Store
 .claude/settings.local.json

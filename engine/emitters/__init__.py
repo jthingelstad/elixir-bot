@@ -38,7 +38,9 @@ def insert_stream_event(
         "observed_at": observed_at,
         "timing": timing,
         "window_start": window_start,
-        "evidence_json": json.dumps(evidence, separators=(",", ":")) if evidence else None,
+        "evidence_json": json.dumps(evidence, separators=(",", ":"))
+        if evidence
+        else None,
         "payload_json": json.dumps(payload, separators=(",", ":"), sort_keys=True),
         "scope": scope,
         "created_at": utcnow(),
@@ -51,7 +53,14 @@ def insert_stream_event(
     return cur.rowcount
 
 
-def emit(conn, entity_kind: str, entity_tag: str, aspect: str, new_payload: dict, observed_at: str) -> int:
+def emit(
+    conn,
+    entity_kind: str,
+    entity_tag: str,
+    aspect: str,
+    new_payload: dict,
+    observed_at: str,
+) -> int:
     """Run one (entity, aspect) observation through its emitter.
 
     First sight (§8): record the baseline, emit nothing. Hash-unchanged: roll

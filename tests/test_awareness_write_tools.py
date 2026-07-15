@@ -16,17 +16,17 @@ from unittest.mock import patch
 
 import pytest
 
+import db
+
 # Trigger full runtime/agent init before importing tool_exec — avoids a
 # circular import between agent.tool_exec → elixir_agent → agent.chat.
 import elixir  # noqa: F401
-
-import db
 from agent import tool_exec
 from agent.tool_policy import (
+    _WRITE_TOOL_NAMES,
     AWARENESS_WRITE_BUDGET_PER_TICK,
     AWARENESS_WRITE_TOOL_NAMES,
     TOOLSETS_BY_WORKFLOW,
-    _WRITE_TOOL_NAMES,
 )
 from memory_store import list_memories
 
@@ -58,6 +58,7 @@ def memdb(tmp_path, monkeypatch):
 # Tool policy
 # ---------------------------------------------------------------------------
 
+
 def test_awareness_toolset_includes_the_three_write_tools():
     tool_names = {t["name"] for t in TOOLSETS_BY_WORKFLOW["awareness"]}
     assert "save_clan_memory" in tool_names
@@ -83,6 +84,7 @@ def test_write_tool_names_include_new_tools():
 # ---------------------------------------------------------------------------
 # flag_member_watch
 # ---------------------------------------------------------------------------
+
 
 def test_flag_member_watch_creates_leadership_inference_memory(memdb):
     db.snapshot_members(
@@ -119,8 +121,11 @@ def test_flag_member_watch_away_until_records_leave_hold(memdb):
 
     raw = tool_exec._execute_tool(
         "flag_member_watch",
-        {"member_tag": "Vijay", "reason": "Told us he's travelling, back after the 20th",
-         "away_until": "2026-07-20"},
+        {
+            "member_tag": "Vijay",
+            "reason": "Told us he's travelling, back after the 20th",
+            "away_until": "2026-07-20",
+        },
         workflow="awareness",
     )
     result = json.loads(raw)
@@ -172,22 +177,36 @@ def test_awareness_write_does_not_reopen_a_leader_closed_case(memdb):
     """QA H20/H21: an awareness write must not silently reopen a decision case
     a leader deliberately resolved/dismissed."""
     db.snapshot_members([{"tag": "#ZZZ9", "name": "Rook", "role": "member"}])
-    first = json.loads(tool_exec._execute_tool(
-        "flag_member_watch",
-        {"member_tag": "Rook", "reason": "Silent; review removal.", "case_type": "kick_review"},
-        workflow="awareness",
-    ))
+    first = json.loads(
+        tool_exec._execute_tool(
+            "flag_member_watch",
+            {
+                "member_tag": "Rook",
+                "reason": "Silent; review removal.",
+                "case_type": "kick_review",
+            },
+            workflow="awareness",
+        )
+    )
     case_id = first["case_id"]
     # Leader dismisses the case.
-    db.resolve_decision_case(case_id, status="dismissed", resolution="Leader kept them.")
+    db.resolve_decision_case(
+        case_id, status="dismissed", resolution="Leader kept them."
+    )
     assert db.get_decision_case_by_id(case_id)["status"] == "dismissed"
 
     # A later awareness write must NOT reopen it.
-    json.loads(tool_exec._execute_tool(
-        "flag_member_watch",
-        {"member_tag": "Rook", "reason": "Still silent.", "case_type": "kick_review"},
-        workflow="awareness",
-    ))
+    json.loads(
+        tool_exec._execute_tool(
+            "flag_member_watch",
+            {
+                "member_tag": "Rook",
+                "reason": "Still silent.",
+                "case_type": "kick_review",
+            },
+            workflow="awareness",
+        )
+    )
     assert db.get_decision_case_by_id(case_id)["status"] == "dismissed"
 
     # The controlled re-nomination path (allow_reopen=True) still may.
@@ -202,6 +221,7 @@ def test_awareness_write_does_not_reopen_a_leader_closed_case(memdb):
 # ---------------------------------------------------------------------------
 # record_leadership_followup
 # ---------------------------------------------------------------------------
+
 
 def test_record_leadership_followup_creates_leadership_inference_memory(memdb):
     raw = tool_exec._execute_tool(
@@ -250,6 +270,7 @@ def test_record_leadership_followup_can_scope_to_member(memdb):
 # save_clan_memory branching for awareness
 # ---------------------------------------------------------------------------
 
+
 def test_save_clan_memory_from_awareness_uses_elixir_inference(memdb):
     raw = tool_exec._execute_tool(
         "save_clan_memory",
@@ -293,6 +314,7 @@ def test_save_clan_memory_from_clanops_still_uses_leader_note(memdb):
 # Write-budget enforcement in chat.py tool-call loop
 # ---------------------------------------------------------------------------
 
+
 def _fake_tool_use(tool_id, name, arguments):
     """Simulate the shape of a native Anthropic tool_use content block."""
     from types import SimpleNamespace
@@ -324,24 +346,40 @@ def test_awareness_write_budget_rejects_fourth_call(memdb):
     # Script the LLM responses: first turn makes 4 flag_member_watch calls;
     # second turn emits the final plan as JSON.
     tool_uses_round1 = [
-        _fake_tool_use(f"t{i}", "flag_member_watch", {
-            "member_tag": f"#M{i}", "reason": f"Observation {i}",
-        })
+        _fake_tool_use(
+            f"t{i}",
+            "flag_member_watch",
+            {
+                "member_tag": f"#M{i}",
+                "reason": f"Observation {i}",
+            },
+        )
         for i in range(4)
     ]
 
-    responses = iter([
-        _fake_response(tool_uses_round1, stop_reason="tool_use"),
-        _fake_response([_fake_text_block(json.dumps({"posts": [], "skipped_reason": "budget test"}))]),
-    ])
+    responses = iter(
+        [
+            _fake_response(tool_uses_round1, stop_reason="tool_use"),
+            _fake_response(
+                [
+                    _fake_text_block(
+                        json.dumps({"posts": [], "skipped_reason": "budget test"})
+                    )
+                ]
+            ),
+        ]
+    )
 
     def _fake_completion(**kwargs):
         return next(responses)
 
     tool_stats: dict = {}
-    with patch.object(agent_chat, "_create_chat_completion", side_effect=_fake_completion):
+    with patch.object(
+        agent_chat, "_create_chat_completion", side_effect=_fake_completion
+    ):
         result = agent_chat._chat_with_tools(
-            "system", "user",
+            "system",
+            "user",
             workflow="awareness",
             allowed_tools=TOOLSETS_BY_WORKFLOW["awareness"],
             response_schema={"required": ["posts"]},
@@ -362,8 +400,16 @@ def test_awareness_write_budget_rejects_fourth_call(memdb):
 def test_save_clan_memory_awareness_is_idempotent(memdb):
     """QA M28: a repeated identical awareness observation dedups instead of
     piling up duplicate memories (the leader path already upserts)."""
-    args = {"title": "Andy hot streak", "body": "Andy on a 5-win run.", "member_tag": None}
-    first = json.loads(tool_exec._execute_tool("save_clan_memory", args, workflow="awareness"))
-    second = json.loads(tool_exec._execute_tool("save_clan_memory", args, workflow="awareness"))
+    args = {
+        "title": "Andy hot streak",
+        "body": "Andy on a 5-win run.",
+        "member_tag": None,
+    }
+    first = json.loads(
+        tool_exec._execute_tool("save_clan_memory", args, workflow="awareness")
+    )
+    second = json.loads(
+        tool_exec._execute_tool("save_clan_memory", args, workflow="awareness")
+    )
     assert first["success"] and second["success"]
     assert first["memory_id"] == second["memory_id"]  # same memory, no duplicate

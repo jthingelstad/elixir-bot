@@ -1,8 +1,7 @@
 """Persistence for the awareness loop: thoughts, posts, and standing watches.
 
 - ``awareness_thoughts`` — one row per loop turn: the read it reviewed, the
-  plan it produced, and whether it chose silence. (The ``shadow`` column is a
-  retained legacy field — shadow mode was removed, the brain is fully live.)
+  plan it produced, and whether it chose silence.
 - ``awareness_posts`` — the durable member-facing delivery history.
 - ``watches`` — standing concerns Elixir is keeping an eye on (a durable home
   for the ``flag_member_watch`` surface).
@@ -129,7 +128,13 @@ def ensure_event_cursors(conn: sqlite3.Connection) -> tuple[dict[str, int], bool
                 consumer_key,
                 position,
                 _utcnow(),
-                json.dumps({"initialized_from": "last_success" if last_success else "stream_start"}),
+                json.dumps(
+                    {
+                        "initialized_from": "last_success"
+                        if last_success
+                        else "stream_start"
+                    }
+                ),
             ),
         )
         positions[stream] = position
@@ -211,15 +216,16 @@ def persist_thought(
     else:
         skipped_reason = reason
     thought_id = uuid.uuid4().hex
-    loop_number = (conn.execute(
-        "SELECT COALESCE(MAX(loop_number), 0) + 1 FROM awareness_thoughts"
-    ).fetchone() or [1])[0]
+    loop_number = (
+        conn.execute(
+            "SELECT COALESCE(MAX(loop_number), 0) + 1 FROM awareness_thoughts"
+        ).fetchone()
+        or [1]
+    )[0]
     conn.execute(
-        # `shadow` is a retained legacy column (shadow mode was removed — the
-        # brain is fully live); always 0. Kept so historical rows still read.
         "INSERT INTO awareness_thoughts (thought_id, loop_number, at, read_json, "
         "plan_json, tool_trace_json, chose_silence, post_count, skipped_reason, "
-        "model, shadow) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+        "model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             thought_id,
             loop_number,
@@ -265,8 +271,14 @@ def record_awareness_post(
             "(lane, content_preview, covers_json, loop_number, posted_at, "
             "discord_message_id) VALUES (?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(discord_message_id) DO NOTHING",
-            (lane, preview, json.dumps(list(covers or [])), loop_number, now,
-             str(message_id) if message_id is not None else None),
+            (
+                lane,
+                preview,
+                json.dumps(list(covers or [])),
+                loop_number,
+                now,
+                str(message_id) if message_id is not None else None,
+            ),
         )
         if post is not None:
             from engine.editor import record_active_awareness_quality
@@ -325,7 +337,7 @@ def list_recent_thoughts(
     ensure_awareness_schema(conn)
     rows = conn.execute(
         "SELECT thought_id, loop_number, at, chose_silence, post_count, "
-        "skipped_reason, model, shadow FROM awareness_thoughts "
+        "skipped_reason, model FROM awareness_thoughts "
         "ORDER BY loop_number DESC LIMIT ?",
         (int(limit),),
     ).fetchall()

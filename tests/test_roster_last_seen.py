@@ -1,6 +1,7 @@
 """lastSeen roster-badge awareness (architecture §13.6): Elixir ingests the CR
 API lastSeen so it knows who wears the in-game idle badge — recorded, never used
 as an engagement/kick signal (battling stays the kick clock)."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -14,8 +15,15 @@ LAST_SEEN = "20260701T151811.000Z"
 
 def test_snapshot_ingests_last_seen_api(engine_conn):
     db.snapshot_members(
-        [{"tag": "#TR1", "name": "TR", "role": "member", "trophies": 6001,
-          "lastSeen": LAST_SEEN}],
+        [
+            {
+                "tag": "#TR1",
+                "name": "TR",
+                "role": "member",
+                "trophies": 6001,
+                "lastSeen": LAST_SEEN,
+            }
+        ],
         conn=engine_conn,
     )
     cur = engine_conn.execute(
@@ -46,8 +54,11 @@ def test_last_seen_schema_check_refuses_unmigrated_connection():
     )
     import pytest
 
-    with pytest.raises(RuntimeError, match="open it through db.get_connection"):
-        _ensure_last_seen_api_column(conn)
+    try:
+        with pytest.raises(RuntimeError, match="open it through db.get_connection"):
+            _ensure_last_seen_api_column(conn)
+    finally:
+        conn.close()
 
 
 def test_in_game_idle_days_from_last_seen():

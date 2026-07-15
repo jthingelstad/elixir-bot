@@ -32,9 +32,9 @@ log = logging.getLogger("memory_store")
 # ---------------------------------------------------------------- constants
 
 # Ranked-selection weights (memory.md §2.3). Tunable, pure code.
-W_MATCH = 0.5      # subject match strength (member 1.0, channel 0.6, fts 0.8)
-W_CONF = 0.3       # stored confidence 0..1
-W_RECENCY = 0.2    # decay(updated_at)
+W_MATCH = 0.5  # subject match strength (member 1.0, channel 0.6, fts 0.8)
+W_CONF = 0.3  # stored confidence 0..1
+W_RECENCY = 0.2  # decay(updated_at)
 RECENCY_HALF_LIFE_DAYS = 45.0
 RETIRED_PURGE_GRACE_DAYS = 30
 
@@ -62,6 +62,7 @@ SOURCE_TYPES = set(_KIND_MAP)  # legacy export
 SCOPES = {"public", "leadership", "system_internal"}
 STATUSES = {"active", "archived", "deleted"}
 
+
 def _utcnow() -> str:
     # Engine Z-convention (cold review #8): the table briefly held three
     # timestamp formats on day one; scripts/migrate_v51/fix_memories_ts.py
@@ -82,6 +83,7 @@ def _json_or_none(data) -> Optional[str]:
 
 
 # ---------------------------------------------------------------- connection
+
 
 def get_memory_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     """v5.1: memories live in the ENGINE DB — this returns a normal
@@ -116,6 +118,7 @@ def managed_memory_connection(fn: Callable) -> Callable:
     NOT call conn.commit() themselves — a mid-tick commit on the engine's
     connection (chronicles writes memories during EMIT/RECOGNIZE) would defeat
     the tick's per-step rollback guard."""
+
     @functools.wraps(fn)
     def wrapper(*args, conn=None, **kwargs):
         owns = conn is None
@@ -139,6 +142,7 @@ def managed_memory_connection(fn: Callable) -> Callable:
 
 
 # ---------------------------------------------------------------- validation
+
 
 class MemoryValidationError(ValueError):
     pass
@@ -164,7 +168,9 @@ def _norm_scope(scope: str) -> str:
     return "leadership" if scope == "system_internal" else scope
 
 
-def _allowed_scopes(viewer_scope: str, include_system_internal: bool = False) -> tuple[str, ...]:
+def _allowed_scopes(
+    viewer_scope: str, include_system_internal: bool = False
+) -> tuple[str, ...]:
     if viewer_scope == "public":
         return ("public",)
     if viewer_scope in ("leadership", "system_internal"):
@@ -172,12 +178,16 @@ def _allowed_scopes(viewer_scope: str, include_system_internal: bool = False) ->
     raise MemoryValidationError(f"invalid viewer scope: {viewer_scope}")
 
 
-def _validate_provenance(source_type: str, is_inference: bool, confidence: float) -> None:
+def _validate_provenance(
+    source_type: str, is_inference: bool, confidence: float
+) -> None:
     kind = _norm_kind(source_type)
     if not (0.0 <= float(confidence) <= 1.0):
         raise MemoryValidationError("confidence must be between 0.0 and 1.0")
     if kind == "leader_note" and is_inference:
-        raise MemoryValidationError("leader_note memories cannot be marked as inference")
+        raise MemoryValidationError(
+            "leader_note memories cannot be marked as inference"
+        )
     if kind == "inference" and float(confidence) >= 1.0:
         raise MemoryValidationError("elixir_inference confidence must be less than 1.0")
 
@@ -203,6 +213,7 @@ def _parse_utc_datetime(value: str) -> datetime:
 
 # ---------------------------------------------------------------- row shape
 
+
 def _event_key(event_type: Optional[str], event_id: Optional[str]) -> Optional[str]:
     if event_type and event_id:
         return f"{event_type}:{event_id}"
@@ -210,7 +221,9 @@ def _event_key(event_type: Optional[str], event_id: Optional[str]) -> Optional[s
 
 
 def _fetch_memory(conn, memory_id: int) -> Optional[dict]:
-    row = conn.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM memories WHERE memory_id = ?", (memory_id,)
+    ).fetchone()
     if not row:
         return None
     item = dict(row)
@@ -235,7 +248,9 @@ def _fetch_memory(conn, memory_id: int) -> Optional[dict]:
     return item
 
 
-def _log(conn, memory_id: int, action: str, actor: str, diff: Optional[dict] = None) -> None:
+def _log(
+    conn, memory_id: int, action: str, actor: str, diff: Optional[dict] = None
+) -> None:
     conn.execute(
         "INSERT INTO memory_log (memory_id, action, actor, at, diff_json) VALUES (?, ?, ?, ?, ?)",
         (memory_id, action, actor, _utcnow(), _json_or_none(diff)),
@@ -244,16 +259,33 @@ def _log(conn, memory_id: int, action: str, actor: str, diff: Optional[dict] = N
 
 # ---------------------------------------------------------------- writers
 
+
 @managed_memory_connection
-def create_memory(*, body: str, source_type: str, is_inference: bool, confidence: float,
-                  created_by: str, scope: str = "leadership", status: str = "active",
-                  title: Optional[str] = None, summary: Optional[str] = None,
-                  member_id: Optional[int] = None, member_tag: Optional[str] = None,
-                  role: Optional[str] = None, channel_id: Optional[str] = None,
-                  war_season_id: Optional[str] = None, war_week_id: Optional[str] = None,
-                  event_type: Optional[str] = None, event_id: Optional[str] = None,
-                  retention_class: str = "standard", expires_at: Optional[str] = None,
-                  metadata: Optional[dict] = None, idempotent: bool = False, conn=None) -> dict:
+def create_memory(
+    *,
+    body: str,
+    source_type: str,
+    is_inference: bool,
+    confidence: float,
+    created_by: str,
+    scope: str = "leadership",
+    status: str = "active",
+    title: Optional[str] = None,
+    summary: Optional[str] = None,
+    member_id: Optional[int] = None,
+    member_tag: Optional[str] = None,
+    role: Optional[str] = None,
+    channel_id: Optional[str] = None,
+    war_season_id: Optional[str] = None,
+    war_week_id: Optional[str] = None,
+    event_type: Optional[str] = None,
+    event_id: Optional[str] = None,
+    retention_class: str = "standard",
+    expires_at: Optional[str] = None,
+    metadata: Optional[dict] = None,
+    idempotent: bool = False,
+    conn=None,
+) -> dict:
     """Signature preserved from the old store; member_id / role /
     retention_class / war_* are accepted-and-absorbed (war ids fold into the
     event key when no event pair is given; the rest are legacy no-ops)."""
@@ -299,7 +331,9 @@ def create_memory(*, body: str, source_type: str, is_inference: bool, confidence
     )
     memory_id = cur.lastrowid
     if metadata:
-        _log(conn, memory_id, "created", created_by, {"metadata": metadata, "kind": kind})
+        _log(
+            conn, memory_id, "created", created_by, {"metadata": metadata, "kind": kind}
+        )
     else:
         _log(conn, memory_id, "created", created_by, {"kind": kind})
     # No conn.commit(): managed_memory_connection commits when it owns the conn;
@@ -308,7 +342,9 @@ def create_memory(*, body: str, source_type: str, is_inference: bool, confidence
 
 
 @managed_memory_connection
-def attach_tags(memory_id: int, tags: Iterable[str], *, actor: str, conn=None) -> list[str]:
+def attach_tags(
+    memory_id: int, tags: Iterable[str], *, actor: str, conn=None
+) -> list[str]:
     clean = sorted({t.strip().lower() for t in (tags or []) if t and t.strip()})
     for tag in clean:
         conn.execute(
@@ -317,26 +353,53 @@ def attach_tags(memory_id: int, tags: Iterable[str], *, actor: str, conn=None) -
         )
     if clean:
         _log(conn, memory_id, "edited", actor, {"tags": clean})
-    return clean   # commit owned by managed_memory_connection (never on borrowed conn)
+    return clean  # commit owned by managed_memory_connection (never on borrowed conn)
 
 
 @managed_memory_connection
-def attach_evidence_ref(memory_id: int, *, evidence_type: str, evidence_ref: str,
-                        actor: str, evidence_label: Optional[str] = None,
-                        evidence_url: Optional[str] = None, metadata: Optional[dict] = None,
-                        conn=None) -> None:
+def attach_evidence_ref(
+    memory_id: int,
+    *,
+    evidence_type: str,
+    evidence_ref: str,
+    actor: str,
+    evidence_label: Optional[str] = None,
+    evidence_url: Optional[str] = None,
+    metadata: Optional[dict] = None,
+    conn=None,
+) -> None:
     """v5.1: the evidence-ref satellite is gone (0 rows ever) — the reference
     lands in memory_log so provenance is still recorded."""
-    _log(conn, memory_id, "edited", actor, {
-        "evidence": {"type": evidence_type, "ref": evidence_ref,
-                     "label": evidence_label, "url": evidence_url,
-                     "metadata": metadata or {}},
-    })
+    _log(
+        conn,
+        memory_id,
+        "edited",
+        actor,
+        {
+            "evidence": {
+                "type": evidence_type,
+                "ref": evidence_ref,
+                "label": evidence_label,
+                "url": evidence_url,
+                "metadata": metadata or {},
+            },
+        },
+    )
     # commit owned by managed_memory_connection (never on borrowed conn)
 
 
-_UPDATABLE = {"title", "body", "summary", "scope", "confidence", "member_tag",
-              "channel_id", "event_type", "event_id", "expires_at"}
+_UPDATABLE = {
+    "title",
+    "body",
+    "summary",
+    "scope",
+    "confidence",
+    "member_tag",
+    "channel_id",
+    "event_type",
+    "event_id",
+    "expires_at",
+}
 
 
 @managed_memory_connection
@@ -382,17 +445,26 @@ def update_memory(memory_id: int, *, actor: str, conn=None, **updates) -> dict:
     cols.append("updated_at = ?")
     args.extend([_utcnow(), memory_id])
     conn.execute(f"UPDATE memories SET {', '.join(cols)} WHERE memory_id = ?", args)
-    _log(conn, memory_id, "retired" if status in ("archived", "deleted") else "edited",
-         actor, diff)
+    _log(
+        conn,
+        memory_id,
+        "retired" if status in ("archived", "deleted") else "edited",
+        actor,
+        diff,
+    )
     # commit owned by managed_memory_connection (never on borrowed conn)
     return _fetch_memory(conn, memory_id)
 
 
-def archive_memory(memory_id: int, *, actor: str, conn: Optional[sqlite3.Connection] = None) -> dict:
+def archive_memory(
+    memory_id: int, *, actor: str, conn: Optional[sqlite3.Connection] = None
+) -> dict:
     return update_memory(memory_id, actor=actor, status="archived", conn=conn)
 
 
-def soft_delete_memory(memory_id: int, *, actor: str, conn: Optional[sqlite3.Connection] = None) -> dict:
+def soft_delete_memory(
+    memory_id: int, *, actor: str, conn: Optional[sqlite3.Connection] = None
+) -> dict:
     return update_memory(memory_id, actor=actor, status="deleted", conn=conn)
 
 
@@ -412,12 +484,8 @@ def purge_expired_memories(*, conn=None) -> int:
     return cur.rowcount
 
 
-def upsert_embedding(memory_id: int, embedding: list, *, model: str = "", conn=None) -> None:
-    """Retired (D2: no embeddings in v1). No-op kept for import compatibility."""
-    log.debug("upsert_embedding is retired in v5.1 (memory %s ignored)", memory_id)
-
-
 # ---------------------------------------------------------------- readers
+
 
 def _filter_where(filters: Optional[dict], args: list) -> str:
     filters = filters or {}
@@ -473,8 +541,15 @@ def _filter_where(filters: Optional[dict], args: list) -> str:
 
 
 @managed_memory_connection
-def get_memory(memory_id: int, *, viewer_scope: str = "leadership", include_system_internal: bool = False,
-               include_archived: bool = False, include_deleted: bool = False, conn=None) -> Optional[dict]:
+def get_memory(
+    memory_id: int,
+    *,
+    viewer_scope: str = "leadership",
+    include_system_internal: bool = False,
+    include_archived: bool = False,
+    include_deleted: bool = False,
+    conn=None,
+) -> Optional[dict]:
     scopes = _allowed_scopes(viewer_scope, include_system_internal)
     row = _fetch_memory(conn, memory_id)
     if not row:
@@ -489,9 +564,16 @@ def get_memory(memory_id: int, *, viewer_scope: str = "leadership", include_syst
 
 
 @managed_memory_connection
-def list_memories(*, viewer_scope: str = "leadership", include_system_internal: bool = False,
-                  include_archived: bool = False, include_deleted: bool = False,
-                  filters: Optional[dict] = None, limit: int = 50, conn=None) -> list[dict]:
+def list_memories(
+    *,
+    viewer_scope: str = "leadership",
+    include_system_internal: bool = False,
+    include_archived: bool = False,
+    include_deleted: bool = False,
+    filters: Optional[dict] = None,
+    limit: int = 50,
+    conn=None,
+) -> list[dict]:
     scopes = _allowed_scopes(viewer_scope, include_system_internal)
     args: list = list(scopes)
     sql = "SELECT m.memory_id FROM memories m WHERE m.scope IN ({})".format(
@@ -510,17 +592,25 @@ def list_memories(*, viewer_scope: str = "leadership", include_system_internal: 
 
 def _recency(updated_at: str, now: datetime) -> float:
     try:
-        age_days = max(0.0, (now - _parse_utc_datetime(updated_at)).total_seconds() / 86400.0)
+        age_days = max(
+            0.0, (now - _parse_utc_datetime(updated_at)).total_seconds() / 86400.0
+        )
     except (TypeError, ValueError):
         return 0.0
     return 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
 
 
 @managed_memory_connection
-def select_memories(*, member_tag: Optional[str] = None, channel_key: Optional[str] = None,
-                    query: Optional[str] = None, tags: Optional[list] = None,
-                    viewer_scope: str = "public",
-                    limit: int = 5, conn=None) -> list[dict]:
+def select_memories(
+    *,
+    member_tag: Optional[str] = None,
+    channel_key: Optional[str] = None,
+    query: Optional[str] = None,
+    tags: Optional[list] = None,
+    viewer_scope: str = "public",
+    limit: int = 5,
+    conn=None,
+) -> list[dict]:
     """Ranked selection for answer-time context (memory.md §2.3):
     score = W_MATCH·match + W_CONF·confidence + W_RECENCY·decay(updated_at).
     Deterministic; no embeddings.
@@ -533,8 +623,10 @@ def select_memories(*, member_tag: Optional[str] = None, channel_key: Optional[s
     tags = [t.strip().lower() for t in (tags or []) if t and t.strip()]
 
     def scope_sql(alias="m"):
-        return f"{alias}.scope IN ({','.join('?' for _ in scopes)}) AND {alias}.retired_at IS NULL " \
-               f"AND ({alias}.expires_at IS NULL OR {alias}.expires_at > ?)"
+        return (
+            f"{alias}.scope IN ({','.join('?' for _ in scopes)}) AND {alias}.retired_at IS NULL "
+            f"AND ({alias}.expires_at IS NULL OR {alias}.expires_at > ?)"
+        )
 
     base_args = [*scopes, _utcnow()]
     if member_tag:
@@ -553,11 +645,14 @@ def select_memories(*, member_tag: Optional[str] = None, channel_key: Optional[s
             match[r["memory_id"]] = max(match.get(r["memory_id"], 0.0), 0.6)
     if query and query.strip():
         try:
-            for rank, r in enumerate(conn.execute(
-                "SELECT rowid AS memory_id FROM memories_fts WHERE memories_fts MATCH ? "
-                "ORDER BY bm25(memories_fts) LIMIT 40",
-                (_fts_sanitize(query),),
-            ).fetchall(), start=1):
+            for rank, r in enumerate(
+                conn.execute(
+                    "SELECT rowid AS memory_id FROM memories_fts WHERE memories_fts MATCH ? "
+                    "ORDER BY bm25(memories_fts) LIMIT 40",
+                    (_fts_sanitize(query),),
+                ).fetchall(),
+                start=1,
+            ):
                 strength = 0.8 * (1.0 / (1 + 0.05 * (rank - 1)))
                 match[r["memory_id"]] = max(match.get(r["memory_id"], 0.0), strength)
         except sqlite3.OperationalError:
@@ -594,9 +689,11 @@ def select_memories(*, member_tag: Optional[str] = None, channel_key: Optional[s
             continue
         if tags and not set(tags) <= set(row.get("tags") or []):
             continue
-        score = (W_MATCH * strength
-                 + W_CONF * float(row.get("confidence") or 0.0)
-                 + W_RECENCY * _recency(row.get("updated_at") or row.get("created_at"), now))
+        score = (
+            W_MATCH * strength
+            + W_CONF * float(row.get("confidence") or 0.0)
+            + W_RECENCY * _recency(row.get("updated_at") or row.get("created_at"), now)
+        )
         scored.append((score, row))
     scored.sort(key=lambda x: (-x[0], x[1]["memory_id"]))
     out = []
@@ -613,10 +710,16 @@ def _fts_sanitize(query: str) -> str:
 
 
 @managed_memory_connection
-def search_memories(query: str, *, viewer_scope: str = "leadership", include_system_internal: bool = False,
-                    filters: Optional[dict] = None, limit: int = 10,
-                    embed_query: Optional[Callable] = None,
-                    conn=None) -> list[MemorySearchResult]:
+def search_memories(
+    query: str,
+    *,
+    viewer_scope: str = "leadership",
+    include_system_internal: bool = False,
+    filters: Optional[dict] = None,
+    limit: int = 10,
+    embed_query: Optional[Callable] = None,
+    conn=None,
+) -> list[MemorySearchResult]:
     """FTS-ranked search (embed_query accepted-and-ignored — D2)."""
     del embed_query
     scopes = _allowed_scopes(viewer_scope, include_system_internal)
@@ -649,7 +752,8 @@ def search_memories(query: str, *, viewer_scope: str = "leadership", include_sys
                     "ORDER BY m.updated_at DESC LIMIT 400",
                     args,
                 ).fetchall()
-                if low in f"{r['title'] or ''}\n{r['summary'] or ''}\n{r['body'] or ''}".lower()
+                if low
+                in f"{r['title'] or ''}\n{r['summary'] or ''}\n{r['body'] or ''}".lower()
             ][: limit * 4]
     else:
         rows = conn.execute(
@@ -662,13 +766,19 @@ def search_memories(query: str, *, viewer_scope: str = "leadership", include_sys
         if not memory:
             continue
         strength = 1.0 / (1 + 0.1 * (rank - 1))
-        score = (W_MATCH * strength
-                 + W_CONF * float(memory.get("confidence") or 0.0)
-                 + W_RECENCY * _recency(memory.get("updated_at") or memory.get("created_at"), now))
-        results.append(MemorySearchResult(
-            memory=memory, rank_score=score,
-            components={"fts_rank": rank, "match": strength},
-        ))
+        score = (
+            W_MATCH * strength
+            + W_CONF * float(memory.get("confidence") or 0.0)
+            + W_RECENCY
+            * _recency(memory.get("updated_at") or memory.get("created_at"), now)
+        )
+        results.append(
+            MemorySearchResult(
+                memory=memory,
+                rank_score=score,
+                components={"fts_rank": rank, "match": strength},
+            )
+        )
     results.sort(key=lambda x: (-x.rank_score, x.memory["memory_id"]))
     return results[: max(1, int(limit))]
 
@@ -687,7 +797,6 @@ __all__ = [
     "select_memories",
     "search_memories",
     "purge_expired_memories",
-    "upsert_embedding",
     "get_memory_connection",
     "managed_memory_connection",
     "ensure_memory_schema",

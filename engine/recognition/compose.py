@@ -28,7 +28,7 @@ PREFIX_LANE = {
     "game": "announcements",
     "leadership": "arena-relay",
 }
-FAIL_CLOSED_LANE = "arena-relay"   # unknown never leaks public
+FAIL_CLOSED_LANE = "arena-relay"  # unknown never leaks public
 
 _DISCORD_MD = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "prompts", "DISCORD.md"
@@ -77,7 +77,7 @@ META_MARKERS = (
     "is stale",
     "signal is from",
     "signal data",
-    "signal lacks",   # live incident 2026-07-03: "card milestone signal lacks card names" posted as copy
+    "signal lacks",  # live incident 2026-07-03: "card milestone signal lacks card names" posted as copy
     "lacks card names",
     "data inconsistent",
     "inconsistent with",
@@ -95,7 +95,9 @@ def looks_like_meta(copy: str) -> bool:
 
 def _payload(intent_row) -> dict:
     try:
-        return json.loads(intent_row["payload_json"]) if intent_row["payload_json"] else {}
+        return (
+            json.loads(intent_row["payload_json"]) if intent_row["payload_json"] else {}
+        )
     except (TypeError, ValueError):
         return {}
 
@@ -112,7 +114,9 @@ def resolve_name(conn, tag: str | None) -> str | None:
     return name if name and str(name).strip() and name != tag else None
 
 
-def _subject_history(conn, tag: str, lane_leadership: bool, limit: int = 12) -> list[dict]:
+def _subject_history(
+    conn, tag: str, lane_leadership: bool, limit: int = 12
+) -> list[dict]:
     """The subject's recent recognized moments (ledger + intents), newest
     first, scope-gated to the target lane — a public post never sees
     leadership-only context (recognition.md §7)."""
@@ -121,7 +125,7 @@ def _subject_history(conn, tag: str, lane_leadership: bool, limit: int = 12) -> 
         f"""SELECT i.intent_type, i.payload_json, i.created_at
             FROM communication_intents i
             WHERE json_extract(i.payload_json, '$.subject_tag') = ?
-              AND i.scope IN ({','.join('?' * len(scopes))})
+              AND i.scope IN ({",".join("?" * len(scopes))})
               AND i.status IN ('pending', 'fulfilled')
             ORDER BY i.intent_id DESC LIMIT ?""",
         (tag, *scopes, limit),
@@ -132,11 +136,13 @@ def _subject_history(conn, tag: str, lane_leadership: bool, limit: int = 12) -> 
             p = json.loads(r["payload_json"]) if r["payload_json"] else {}
         except (TypeError, ValueError):
             p = {}
-        out.append({
-            "intent_type": r["intent_type"],
-            "event_type": p.get("event_type"),
-            "occurred_at": p.get("occurred_at") or r["created_at"],
-        })
+        out.append(
+            {
+                "intent_type": r["intent_type"],
+                "event_type": p.get("event_type"),
+                "occurred_at": p.get("occurred_at") or r["created_at"],
+            }
+        )
     return out
 
 
@@ -198,9 +204,7 @@ def intent_context(conn, intent_row) -> str:
         facts["badge_label"] = humanize_badge(payload.get("badge_name"))
 
     lane_leadership = intent_row["scope"] == "leadership"
-    naming = (
-        "Use the member's current in-game name (player_name) — never the raw tag. "
-    )
+    naming = "Use the member's current in-game name (player_name) — never the raw tag. "
     if prefix == "war":
         ask = (
             "Write ONE short post for the #river-race channel in your own voice from "
@@ -220,8 +224,9 @@ def intent_context(conn, intent_row) -> str:
             "member who's been watching, not a report. 3-6 sentences; on a "
             "quiet window (quiet_window=true) two honest sentences beat "
             "manufactured excitement. Name at most 2-4 players, preferring "
-            "players NOT listed in recently_featured. " + naming +
-            "If battle_spotlight is present, tell it as the window's coolest "
+            "players NOT listed in recently_featured. "
+            + naming
+            + "If battle_spotlight is present, tell it as the window's coolest "
             "battle. off_peak_carrier is the member with the most battles in "
             "the window's quiet hours — say it that way; do not claim they "
             "were alone. player_moments are quiet achievements nobody has "
@@ -241,8 +246,9 @@ def intent_context(conn, intent_row) -> str:
             facts["playstyle"] = playstyle
         ask = (
             "Compose a short, natural #player-highlights post celebrating this "
-            "milestone, in your own voice. " + naming +
-            "Feature a concrete recent moment if recent_win is present; "
+            "milestone, in your own voice. "
+            + naming
+            + "Feature a concrete recent moment if recent_win is present; "
             "recent_history is their recent run for color. Ground every specific "
             "in these facts — do not invent details. If badge_label is present, "
             "refer to the badge by that clean label — never the raw badge_name. "
@@ -253,8 +259,9 @@ def intent_context(conn, intent_row) -> str:
     elif prefix == "cohort":
         ask = (
             "Several members hit the same milestone today. Compose ONE short "
-            "#clan-events post naming them together. " + naming +
-            "Each entry in members has name and, when known, a detail (the "
+            "#clan-events post naming them together. "
+            + naming
+            + "Each entry in members has name and, when known, a detail (the "
             "specific card, badge, or level) — use those specifics. Name what "
             "the milestone actually was (wave_type), never a generic 'hit "
             "milestones'. If members carry no detail, still name the members and "
@@ -265,24 +272,30 @@ def intent_context(conn, intent_row) -> str:
             "A new member just joined the clan. Compose a short, warm welcome for "
             "#clan-events that shows you actually looked at who they are — work in "
             "a concrete first impression from the facts (their trophies, king "
-            "level). " + naming +
-            "A bare 'Welcome, <name>' with no substance is a failure; so is "
+            "level). "
+            + naming
+            + "A bare 'Welcome, <name>' with no substance is a failure; so is "
             "inventing details not in the facts."
         )
     elif payload.get("event_type") == "member_left":
         ask = (
             "A member left the clan. Compose a brief, warm sendoff for "
-            "#clan-events. " + naming +
-            "If tenure_days is present, acknowledge their time with us "
+            "#clan-events. "
+            + naming
+            + "If tenure_days is present, acknowledge their time with us "
             "concretely. Never speculate about why they left."
         )
-    elif payload.get("event_type") == "role_changed" and payload.get("direction") == "promoted":
+    elif (
+        payload.get("event_type") == "role_changed"
+        and payload.get("direction") == "promoted"
+    ):
         ask = (
             "A member was just promoted to Elder. Compose a short, warm "
             "#clan-events celebration that EXPLAINS why they earned it, using "
             "the elder_evidence facts (their Ranked standing, war deck rate, "
-            "donations — whichever are their strength). " + naming +
-            "A bare '<name> was promoted' with no reason is a failure; so is "
+            "donations — whichever are their strength). "
+            + naming
+            + "A bare '<name> was promoted' with no reason is a failure; so is "
             "inventing anything not in elder_evidence."
         )
     elif prefix == "game":
@@ -307,7 +320,8 @@ def intent_context(conn, intent_row) -> str:
             facts["recent_history"] = history
         ask = (
             "Compose a short, natural post in your own voice for this clan event. "
-            + naming + "Use only these facts; do not invent details. Include at "
+            + naming
+            + "Use only these facts; do not invent details. Include at "
             "least one concrete detail from the facts — a post that could have "
             "come from a template is a failure."
         )
@@ -324,7 +338,9 @@ def render_intent(intent_row) -> str:
     """Deterministic fallback copy (recognition.md §7 meta-marker guard);
     shape carried from event_core/live/discord.py render_intent."""
     p = _payload(intent_row)
-    subj = p.get("player_name") or p.get("name") or p.get("subject_tag") or "A clan member"
+    subj = (
+        p.get("player_name") or p.get("name") or p.get("subject_tag") or "A clan member"
+    )
     et = p.get("event_type") or (intent_row["intent_type"] or "").split(":", 1)[-1]
     if et == "arena_up":
         arena = p.get("arena_name") or "a new arena"
@@ -377,7 +393,11 @@ def render_intent(intent_row) -> str:
         return f"🎁 {top} led donations this week. Thank you!"
     if et == "war_day_opened":
         day = p.get("war_day_human") or "a new battle day"
-        where = "Colosseum" if (p.get("war_clock") or {}).get("is_colosseum_week") else "the river race"
+        where = (
+            "Colosseum"
+            if (p.get("war_clock") or {}).get("is_colosseum_week")
+            else "the river race"
+        )
         return f"⚔️ {day.capitalize()} is open in {where} — get your war decks in!"
     if et == "race_finished":
         return "🏁 We crossed the finish line — race won! Decks still count for personal rewards."
@@ -387,21 +407,28 @@ def render_intent(intent_row) -> str:
             line += f"\nThe week's room: <#{p['week_thread_id']}>"
         return line
     if et == "season_closed":
-        champ = p.get("war_champ_name") or p.get("war_champ_tag") or "our top contributor"
+        champ = (
+            p.get("war_champ_name") or p.get("war_champ_tag") or "our top contributor"
+        )
         return f"🏆 War season closed — {champ} is the War Champ!"
     if et == "season_started":
         sid = p.get("season_id")
-        return (f"⚔️ War season {sid} begins — training days first, then we race. "
-                "Fresh start, same goal: first place."
-                if sid else "⚔️ A new war season begins — fresh start, same goal.")
+        return (
+            f"⚔️ War season {sid} begins — training days first, then we race. "
+            "Fresh start, same goal: first place."
+            if sid
+            else "⚔️ A new war season begins — fresh start, same goal."
+        )
     if et == "pol_season_podium":
         pod = p.get("podium") or []
         if pod:
             lead = pod[0]
             who = lead.get("name") or lead.get("tag") or "our top climber"
             league = lead.get("league_name") or "the top of Ranked"
-            line = (f"🏅 Ranked season {p.get('pol_season_id')} is in the books — "
-                    f"{who} led the clan at {league}")
+            line = (
+                f"🏅 Ranked season {p.get('pol_season_id')} is in the books — "
+                f"{who} led the clan at {league}"
+            )
             if lead.get("rating"):
                 line += f" ({lead['rating']} rating)"
             rest = ", ".join(e.get("name") or e.get("tag", "?") for e in pod[1:])
@@ -409,7 +436,11 @@ def render_intent(intent_row) -> str:
         return f"🏅 Ranked season {p.get('pol_season_id')} closed."
     if et == "season_awards":
         podium = p.get("war_champ") or []
-        champ = podium[0]["name"] if podium and podium[0].get("name") else "our top contributor"
+        champ = (
+            podium[0]["name"]
+            if podium and podium[0].get("name")
+            else "our top contributor"
+        )
         fp = (p.get("free_pass") or [{}])[0]
         line = f"🏆 Season {p.get('season_id')} awards — War Champ: {champ}"
         if fp.get("name") and fp.get("rotation_applied"):
@@ -449,8 +480,10 @@ def render_intent(intent_row) -> str:
         label = p.get("badge_label") or "a new badge"
         who = p.get("member_name")
         if who:
-            return (f"🎖️ New badge in the game: **{label}** — and **{who}** is the "
-                    f"first in POAP KINGS to earn it! 👑")
+            return (
+                f"🎖️ New badge in the game: **{label}** — and **{who}** is the "
+                f"first in POAP KINGS to earn it! 👑"
+            )
         return f"🎖️ A new badge just appeared in Clash Royale: **{label}**."
     return f"📣 {subj}: {et.replace('_', ' ')}."
 
@@ -498,8 +531,10 @@ def _cohort_wave_line(p: dict) -> str:
         return f"🎉 {title} in POAP KINGS today — nicely done, all. 👑"
     details = [m.get("detail") for m in members]
     if all(details) and len(details) == len(names):
-        listing = _oxford([f"{n} ({d})" for n, d in zip(names, details)])
+        listing = _oxford([f"{n} ({d})" for n, d in zip(names, details, strict=True)])
         return f"🎉 {title} in POAP KINGS :elixir_trophy: — {listing} today. 👑"
     verb = _WAVE_VERB.get(wave, "hit a milestone")
-    return (f"🎉 {title} in POAP KINGS :elixir_trophy: — "
-            f"{_oxford(names)} each {verb} today. 👑")
+    return (
+        f"🎉 {title} in POAP KINGS :elixir_trophy: — "
+        f"{_oxford(names)} each {verb} today. 👑"
+    )

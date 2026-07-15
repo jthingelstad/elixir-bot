@@ -37,7 +37,6 @@ import argparse
 import json
 import os
 import random
-import sqlite3
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -45,6 +44,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
@@ -55,7 +55,6 @@ from agent import tool_exec
 from agent.core import _create_chat_completion, _lightweight_model_name, response_text
 from agent.intent_router import classify_intent
 from cr_api import CLAN_TAG
-
 
 # ── Member selection ──────────────────────────────────────────────────────
 
@@ -83,7 +82,13 @@ def pick_members(target_count: int) -> list[dict]:
             bucket = "no_snapshot"
         else:
             ready_n = len(profile.get("ready_to_upgrade_top") or [])
-            bucket = "many_ready" if ready_n >= 3 else "few_ready" if ready_n >= 1 else "none_ready"
+            bucket = (
+                "many_ready"
+                if ready_n >= 3
+                else "few_ready"
+                if ready_n >= 1
+                else "none_ready"
+            )
         m["card_bucket"] = bucket
         m["king_tower"] = profile.get("king_tower_level") if profile else None
         by_bucket[bucket].append(m)
@@ -162,7 +167,9 @@ def generate_card_script(member: dict) -> list[tuple[str, str]]:
         f"**Member:** {name} ({tag}). King Tower level "
         f"{member.get('king_tower') or 'unknown'}. Card-bucket: {member.get('card_bucket', '?')}.\n\n"
         f"Generate one message for EACH of these buckets, in this exact order:\n\n"
-        + "\n".join(f"{i+1}. **{b}** — {_BUCKET_HINTS[b]}" for i, b in enumerate(buckets))
+        + "\n".join(
+            f"{i + 1}. **{b}** — {_BUCKET_HINTS[b]}" for i, b in enumerate(buckets)
+        )
         + "\n\n**Instructions:**\n"
         f"- Write the messages as if {name} is speaking. Don't reference themselves "
         f"by name (use 'my', 'I', etc.).\n"
@@ -195,7 +202,7 @@ def generate_card_script(member: dict) -> list[tuple[str, str]]:
         return []
     pairs = [
         (bucket, msg.strip())
-        for bucket, msg in zip(buckets, items)
+        for bucket, msg in zip(buckets, items, strict=False)
         if isinstance(msg, str) and msg.strip()
     ]
     return pairs
@@ -209,12 +216,15 @@ _original_execute_tool = tool_exec._execute_tool
 
 
 def _capturing_execute_tool(name, arguments, *args, **kwargs):
-    _tool_calls_for_turn.append((name, dict(arguments) if isinstance(arguments, dict) else arguments))
+    _tool_calls_for_turn.append(
+        (name, dict(arguments) if isinstance(arguments, dict) else arguments)
+    )
     return _original_execute_tool(name, arguments, *args, **kwargs)
 
 
 def install_tool_capture() -> None:
     from agent import chat as agent_chat
+
     tool_exec._execute_tool = _capturing_execute_tool
     agent_chat._execute_tool = _capturing_execute_tool
     if hasattr(elixir_agent, "_execute_tool"):
@@ -231,19 +241,28 @@ def reset_tool_capture() -> list[tuple[str, dict]]:
 
 
 def _connect_db():
-    return sqlite3.connect(os.fspath(db.DB_PATH))
+    return db.get_connection()
 
 
 def _build_clan_war_context() -> tuple[dict, dict]:
     conn = _connect_db()
-    conn.row_factory = sqlite3.Row
     try:
-        members = [dict(r) for r in conn.execute(
-            "SELECT player_tag AS tag, current_name AS name FROM members WHERE status='active'"
-        )]
+        members = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT p.player_tag AS tag, p.current_name AS name FROM players p "
+                "WHERE EXISTS (SELECT 1 FROM clan_memberships cm "
+                "WHERE cm.player_tag = p.player_tag AND cm.left_at IS NULL)"
+            )
+        ]
     finally:
         conn.close()
-    clan = {"tag": CLAN_TAG, "name": "POAP KINGS", "memberList": members, "members": members}
+    clan = {
+        "tag": CLAN_TAG,
+        "name": "POAP KINGS",
+        "memberList": members,
+        "members": members,
+    }
     war = {}
     return clan, war
 
@@ -261,12 +280,21 @@ def _looks_like_clarifying_question(text: str) -> bool:
         return True
     # Common clarification patterns the prompt encourages.
     lowered = stripped.lower()
-    return any(
-        phrase in lowered for phrase in (
-            "do you mean", "which would you", "which scope", "current deck or",
-            "full collection or", "war decks or", "did you want",
+    return (
+        any(
+            phrase in lowered
+            for phrase in (
+                "do you mean",
+                "which would you",
+                "which scope",
+                "current deck or",
+                "full collection or",
+                "war decks or",
+                "did you want",
+            )
         )
-    ) and "?" in stripped
+        and "?" in stripped
+    )
 
 
 def run_turn(
@@ -287,7 +315,9 @@ def run_turn(
     # for catching cases where a card question gets misrouted to deck_review.
     try:
         intent = classify_intent(
-            question, workflow="interactive", mentioned=True,
+            question,
+            workflow="interactive",
+            mentioned=True,
             allows_open_channel_reply=False,
             conversation_history=conversation_history,
         )
@@ -336,8 +366,12 @@ def run_turn(
         name == "get_member" and "cards" in (args.get("include") or [])
         for name, args in row["tool_calls"] or []
     )
-    row["used_card_profile"] = any(name == "get_member_card_profile" for name, _ in row["tool_calls"] or [])
-    row["used_lookup_member_cards"] = any(name == "lookup_member_cards" for name, _ in row["tool_calls"] or [])
+    row["used_card_profile"] = any(
+        name == "get_member_card_profile" for name, _ in row["tool_calls"] or []
+    )
+    row["used_lookup_member_cards"] = any(
+        name == "lookup_member_cards" for name, _ in row["tool_calls"] or []
+    )
 
     return row
 
@@ -347,11 +381,15 @@ def run_turn(
 
 def print_member_report(member: dict, turns: list[dict]) -> None:
     name = member.get("current_name") or member["player_tag"]
-    print(f"\n── {name} ({member['player_tag']}) "
-          f"[king_tower={member.get('king_tower')}, bucket={member.get('card_bucket')}] ──")
+    print(
+        f"\n── {name} ({member['player_tag']}) "
+        f"[king_tower={member.get('king_tower')}, bucket={member.get('card_bucket')}] ──"
+    )
     for i, t in enumerate(turns, 1):
-        flag = "!" if t.get("error") else (
-            "·" if t.get("event_type") == "agent_error" else " "
+        flag = (
+            "!"
+            if t.get("error")
+            else ("·" if t.get("event_type") == "agent_error" else " ")
         )
         tools = [name for name, _ in t.get("tool_calls") or []]
         tools_str = f" tools={','.join(tools)}" if tools else " tools=-"
@@ -366,7 +404,9 @@ def print_member_report(member: dict, turns: list[dict]) -> None:
             markers.append("DEPRECATED!")
         marker_str = f" [{','.join(markers)}]" if markers else ""
         clen = t.get("content_len") or 0
-        print(f"  [{i}]{flag} {t.get('bucket'):11s}{tools_str:60s} len={clen:>4}{marker_str}")
+        print(
+            f"  [{i}]{flag} {t.get('bucket'):11s}{tools_str:60s} len={clen:>4}{marker_str}"
+        )
         print(f"       Q: {t['question'][:120]}")
         if t.get("error"):
             print(f"       ERROR: {t['error']}")
@@ -382,10 +422,14 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
     total = len(all_turns)
     errors = sum(1 for _, t in all_turns if t.get("error"))
     null_responses = sum(
-        1 for _, t in all_turns
-        if t.get("event_type") == "agent_error" or (not t.get("error") and not t.get("content"))
+        1
+        for _, t in all_turns
+        if t.get("event_type") == "agent_error"
+        or (not t.get("error") and not t.get("content"))
     )
-    deprecated = [(m, t) for m, t in all_turns if t.get("used_deprecated_cards_include")]
+    deprecated = [
+        (m, t) for m, t in all_turns if t.get("used_deprecated_cards_include")
+    ]
     clarifying = [(m, t) for m, t in all_turns if t.get("clarifying")]
     used_profile = sum(1 for _, t in all_turns if t.get("used_card_profile"))
     used_lookup = sum(1 for _, t in all_turns if t.get("used_lookup_member_cards"))
@@ -393,7 +437,9 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
     print(f"Total turns: {total}")
     print(f"Errors: {errors}")
     print(f"Null/empty responses: {null_responses}  ← target: 0")
-    print(f"Deprecated include=['cards']: {len(deprecated)}  ← target: 0 (regression check)")
+    print(
+        f"Deprecated include=['cards']: {len(deprecated)}  ← target: 0 (regression check)"
+    )
     print(f"Card profile fired: {used_profile}/{total} turns")
     print(f"lookup_member_cards fired: {used_lookup}/{total} turns")
     print(f"Clarifying questions: {len(clarifying)}/{total}")
@@ -419,7 +465,9 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
         look = sum(1 for r in rows if r.get("used_lookup_member_cards"))
         clar = sum(1 for r in rows if r.get("clarifying"))
         empty = sum(1 for r in rows if not r.get("error") and not r.get("content"))
-        print(f"  {bucket:12s} n={n:>2}  profile={prof:>2}  lookup={look:>2}  clarify={clar:>2}  empty={empty:>2}")
+        print(
+            f"  {bucket:12s} n={n:>2}  profile={prof:>2}  lookup={look:>2}  clarify={clar:>2}  empty={empty:>2}"
+        )
 
     # Tool tally including deprecated-path detection.
     tools = Counter()
@@ -428,12 +476,17 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
             tools[name] += 1
     print("\nTool call tally:")
     for name, n in tools.most_common():
-        marker = " ← REGRESSION" if name == "get_member" and any(
-            "cards" in (args.get("include") or [])
-            for _m, t in all_turns
-            for tname, args in (t.get("tool_calls") or [])
-            if tname == name
-        ) else ""
+        marker = (
+            " ← REGRESSION"
+            if name == "get_member"
+            and any(
+                "cards" in (args.get("include") or [])
+                for _m, t in all_turns
+                for tname, args in (t.get("tool_calls") or [])
+                if tname == name
+            )
+            else ""
+        )
         print(f"  {name:30s} {n:>4}{marker}")
 
     if deprecated:
@@ -448,9 +501,15 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--members", type=int, default=4, help="Number of members to test")
-    parser.add_argument("--turns", type=int, default=6, help="Turns per member (max 6, one per bucket)")
-    parser.add_argument("--seed", type=int, default=None, help="Random seed for member selection")
+    parser.add_argument(
+        "--members", type=int, default=4, help="Number of members to test"
+    )
+    parser.add_argument(
+        "--turns", type=int, default=6, help="Turns per member (max 6, one per bucket)"
+    )
+    parser.add_argument(
+        "--seed", type=int, default=None, help="Random seed for member selection"
+    )
     parser.add_argument("--out", default="scripts/card_conversations_eval_results.json")
     args = parser.parse_args()
 
@@ -471,9 +530,11 @@ def main() -> None:
 
     print(f"Selected {len(members)} members:")
     for m in members:
-        print(f"  {m.get('current_name') or m['player_tag']:30s} "
-              f"({m['player_tag']})  king_tower={m.get('king_tower')}  "
-              f"bucket={m.get('card_bucket')}")
+        print(
+            f"  {m.get('current_name') or m['player_tag']:30s} "
+            f"({m['player_tag']})  king_tower={m.get('king_tower')}  "
+            f"bucket={m.get('card_bucket')}"
+        )
 
     all_rows = []
     all_turns: list[tuple[dict, dict]] = []
@@ -501,19 +562,25 @@ def main() -> None:
             assistant_content = turn.get("content")
             if assistant_content:
                 if isinstance(assistant_content, list):
-                    assistant_content = "\n\n".join(str(s) for s in assistant_content if s)
-                conversation_history.append({"role": "assistant", "content": assistant_content})
+                    assistant_content = "\n\n".join(
+                        str(s) for s in assistant_content if s
+                    )
+                conversation_history.append(
+                    {"role": "assistant", "content": assistant_content}
+                )
 
         print_member_report(member, turns)
-        all_rows.append({
-            "member": {
-                "tag": member["player_tag"],
-                "name": member.get("current_name"),
-                "king_tower": member.get("king_tower"),
-                "card_bucket": member.get("card_bucket"),
-            },
-            "turns": turns,
-        })
+        all_rows.append(
+            {
+                "member": {
+                    "tag": member["player_tag"],
+                    "name": member.get("current_name"),
+                    "king_tower": member.get("king_tower"),
+                    "card_bucket": member.get("card_bucket"),
+                },
+                "turns": turns,
+            }
+        )
 
     print_summary(all_turns)
 

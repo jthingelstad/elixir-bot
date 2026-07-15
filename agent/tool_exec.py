@@ -2,7 +2,6 @@ import json
 import re
 
 import cr_api
-
 from agent.core import log
 from agent.cr_api_tool import _execute_cr_api
 from capabilities import awards as awards_capability
@@ -66,12 +65,18 @@ def _enrich_member_profile(result):
 
     enriched = dict(result)
     role = enriched.get("role")
-    member_name = enriched.get("member_name") or enriched.get("current_name") or "This member"
+    member_name = (
+        enriched.get("member_name") or enriched.get("current_name") or "This member"
+    )
     if role:
         if role == "leader":
-            enriched["current_role_summary"] = f"{member_name} is currently the clan leader."
+            enriched["current_role_summary"] = (
+                f"{member_name} is currently the clan leader."
+            )
         elif role == "coLeader":
-            enriched["current_role_summary"] = f"{member_name} is currently a co-leader."
+            enriched["current_role_summary"] = (
+                f"{member_name} is currently a co-leader."
+            )
         elif role == "elder":
             enriched["current_role_summary"] = f"{member_name} is currently an Elder."
         else:
@@ -154,7 +159,9 @@ def _enrich_member_profile(result):
 
     progress = _parse_json_object("progress_json")
     if progress:
-        enriched["side_mode_progress_keys"] = sorted(str(key) for key in progress.keys())
+        enriched["side_mode_progress_keys"] = sorted(
+            str(key) for key in progress.keys()
+        )
 
     enriched.update(_resource_constraints_note())
     return enriched
@@ -208,14 +215,15 @@ def _slim_card_list(cards):
 
 def _enrich_war_player_type(result, tag):
     """Add war_player_type classification to a result dict by player tag."""
-    from storage.war_analytics import _war_player_type
     from db import get_connection
+    from storage.war_analytics import _war_player_type
 
     canon = tag if tag.startswith("#") else f"#{tag}"
     conn = get_connection()
     try:
         row = conn.execute(
-            "SELECT 1 FROM players WHERE player_tag = ?", (canon,),
+            "SELECT 1 FROM players WHERE player_tag = ?",
+            (canon,),
         ).fetchone()
         if row:
             result["war_player_type"] = _war_player_type(conn, canon)
@@ -240,13 +248,10 @@ def _annotate_roster_status(result, member_tag):
 
 def _enrich_war_player_types(members):
     """Add war_player_type to each member dict in a list."""
-    from storage.war_analytics import war_player_types_by_tag
     from db import get_connection
+    from storage.war_analytics import war_player_types_by_tag
 
-    tags = [
-        member.get("tag") or member.get("player_tag") or ""
-        for member in members
-    ]
+    tags = [member.get("tag") or member.get("player_tag") or "" for member in members]
     tags = [t for t in tags if t]
     if not tags:
         return
@@ -272,13 +277,19 @@ def _refresh_member_cache(member_tag, include_battles=False):
     if player is not None:
         db.snapshot_player_profile(player, expected_tag=member_tag)
     else:
-        log.warning("player_profile_refresh_skipped tag=%s reason=cr_api_returned_none", member_tag)
+        log.warning(
+            "player_profile_refresh_skipped tag=%s reason=cr_api_returned_none",
+            member_tag,
+        )
     if include_battles:
         battles = cr_api.get_player_battle_log(member_tag)
         if battles is not None:
             db.snapshot_player_battlelog(member_tag, battles)
         else:
-            log.warning("player_battlelog_refresh_skipped tag=%s reason=cr_api_returned_none", member_tag)
+            log.warning(
+                "player_battlelog_refresh_skipped tag=%s reason=cr_api_returned_none",
+                member_tag,
+            )
 
 
 def _resolve_member_tag(value):
@@ -301,15 +312,22 @@ def _resolve_member_tag(value):
     if best is not None:
         return best["player_tag"]
     top, second = matches[0], matches[1]
-    choices = ", ".join(m.get("member_ref_with_handle") or m.get("current_name") or m["player_tag"] for m in matches[:3])
+    choices = ", ".join(
+        m.get("member_ref_with_handle") or m.get("current_name") or m["player_tag"]
+        for m in matches[:3]
+    )
     log.warning(
         "member_resolution_ambiguous query=%r top_score=%d second_score=%d choices=%s",
-        query, top.get("match_score", 0), second.get("match_score", 0), choices,
+        query,
+        top.get("match_score", 0),
+        second.get("match_score", 0),
+        choices,
     )
     raise ValueError(f"Ambiguous member reference '{query}'. Top matches: {choices}")
 
 
 # ── Member domain execution ───────────────────────────────────────────────
+
 
 def _memory_viewer_scope_for_workflow(workflow: str | None) -> str:
     if workflow in {
@@ -336,9 +354,18 @@ def _execute_get_member(arguments, workflow=None):
     facets = {
         item
         for item in include
-        if item in {
-            "profile", "form", "war", "trend", "losses", "battles",
-            "history", "ranked", "mode_activity", "awards",
+        if item
+        in {
+            "profile",
+            "form",
+            "war",
+            "trend",
+            "losses",
+            "battles",
+            "history",
+            "ranked",
+            "mode_activity",
+            "awards",
         }
     }
     if "profile" in include or "form" in include:
@@ -379,7 +406,9 @@ def _execute_get_member(arguments, workflow=None):
         if isinstance(current_deck, dict):
             current_deck = dict(current_deck)
             current_deck["cards"] = _slim_card_list(current_deck.get("cards"))
-            current_deck["support_cards"] = _slim_card_list(current_deck.get("support_cards"))
+            current_deck["support_cards"] = _slim_card_list(
+                current_deck.get("support_cards")
+            )
         result["current_deck"] = current_deck
         result["signature_cards"] = loadout.get("signature_cards")
 
@@ -417,7 +446,11 @@ def _execute_get_member(arguments, workflow=None):
             limit=15,
         )
         if not memories:
-            result["memories"] = {"member_tag": member_tag, "memories": [], "message": "No stored memories for this member."}
+            result["memories"] = {
+                "member_tag": member_tag,
+                "memories": [],
+                "message": "No stored memories for this member.",
+            }
         else:
             result["memories"] = {
                 "member_tag": member_tag,
@@ -448,7 +481,8 @@ def _execute_get_deck_intelligence(arguments, workflow=None):
     view = arguments.get("view", "member")
     member_tag = arguments.get("member_tag")
     if view == "card_impact" and workflow not in {
-        "clanops", "channel_update_leadership"
+        "clanops",
+        "channel_update_leadership",
     }:
         return {
             "error": "The 'card_impact' analysis is only available in leadership channels."
@@ -600,24 +634,32 @@ def _execute_get_river_race(arguments):
                 "points_today": member.get("points_today"),
             }
 
-        data.update({
-            "war_day_key": engagement.get("war_day_key"),
-            "observed_at": engagement.get("observed_at"),
-            "clan_fame": engagement.get("clan_fame"),
-            "clan_period_points": engagement.get("clan_period_points"),
-            "day_rank": engagement.get("day_rank"),
-            "total_participants": engagement.get("total_participants"),
-            "engaged_count": engagement.get("engaged_count"),
-            "finished_count": engagement.get("finished_count"),
-            "untouched_count": engagement.get("untouched_count"),
-            "partial_deck_participant_count": remaining.get("partial"),
-            "participants_with_decks_left_count": remaining.get("total"),
-            "remaining_deck_participants": remaining,
-            "top_points_total": engagement.get("top_points_total"),
-            "used_all_4": [_legacy_member(m) for m in engagement.get("used_all_4") or []],
-            "used_some": [_legacy_member(m) for m in engagement.get("used_some") or []],
-            "used_none": [_legacy_member(m) for m in engagement.get("used_none") or []],
-        })
+        data.update(
+            {
+                "war_day_key": engagement.get("war_day_key"),
+                "observed_at": engagement.get("observed_at"),
+                "clan_fame": engagement.get("clan_fame"),
+                "clan_period_points": engagement.get("clan_period_points"),
+                "day_rank": engagement.get("day_rank"),
+                "total_participants": engagement.get("total_participants"),
+                "engaged_count": engagement.get("engaged_count"),
+                "finished_count": engagement.get("finished_count"),
+                "untouched_count": engagement.get("untouched_count"),
+                "partial_deck_participant_count": remaining.get("partial"),
+                "participants_with_decks_left_count": remaining.get("total"),
+                "remaining_deck_participants": remaining,
+                "top_points_total": engagement.get("top_points_total"),
+                "used_all_4": [
+                    _legacy_member(m) for m in engagement.get("used_all_4") or []
+                ],
+                "used_some": [
+                    _legacy_member(m) for m in engagement.get("used_some") or []
+                ],
+                "used_none": [
+                    _legacy_member(m) for m in engagement.get("used_none") or []
+                ],
+            }
+        )
         return data
 
     return {"error": f"Unknown aspect: {aspect}"}
@@ -637,12 +679,18 @@ def _execute_get_war_season(arguments):
         source=db,
     )["data"]
     if aspect == "standings" and isinstance(result, dict):
-        members = result.get("members") or result.get("standings") or result.get("results") or []
+        members = (
+            result.get("members")
+            or result.get("standings")
+            or result.get("results")
+            or []
+        )
         _enrich_war_player_types(members)
     return result
 
 
 # ── Clan domain execution ─────────────────────────────────────────────────
+
 
 def _donations_this_week(limit: int = 10) -> dict:
     """Top donors this week (CR resets the counter Monday). Fail-open."""
@@ -673,9 +721,19 @@ def _donations_this_week(limit: int = 10) -> dict:
 
 
 _ROSTER_LIST_KEYS = (
-    "member_ref", "player_tag", "role", "roster_status", "trophies", "clan_rank",
-    "donations_week", "donations_received_week", "war_points_rank_season",
-    "joined_date", "elder_eligible", "in_discord", "cr_games_per_day",
+    "member_ref",
+    "player_tag",
+    "role",
+    "roster_status",
+    "trophies",
+    "clan_rank",
+    "donations_week",
+    "donations_received_week",
+    "war_points_rank_season",
+    "joined_date",
+    "elder_eligible",
+    "in_discord",
+    "cr_games_per_day",
 )
 
 
@@ -697,9 +755,11 @@ def _execute_get_clan_roster(arguments):
         # Rehearsal 2026-07-04: the model read donations_week as "lifetime"
         # and refused the question — spell the semantics out in-band.
         return {
-            "note": ("donations_week / donations_received_week are THIS WEEK's "
-                     "counts (CR resets them Monday); they are fully answerable "
-                     "for any asker — not leadership-restricted."),
+            "note": (
+                "donations_week / donations_received_week are THIS WEEK's "
+                "counts (CR resets them Monday); they are fully answerable "
+                "for any asker — not leadership-restricted."
+            ),
             "members": [_compact_roster_member(m) for m in db.list_members()],
         }
     elif aspect == "card_owners":
@@ -728,7 +788,8 @@ def _execute_get_clan_roster(arguments):
         window_days = arguments.get("window_days", 7)
         comparison = db.compare_clan_trend_windows(window_days=window_days)
         summary = db.build_clan_trend_summary_context(
-            days=days, window_days=window_days,
+            days=days,
+            window_days=window_days,
         )
         if isinstance(comparison, dict):
             comparison["trend_summary"] = summary
@@ -746,7 +807,9 @@ def _execute_get_clan_health(arguments, workflow=None):
     sensitive_aspects = {"at_risk", "promotion_candidates"}
     allowed_workflows = {"clanops", "channel_update_leadership"}
     if aspect in sensitive_aspects and workflow not in allowed_workflows:
-        return {"error": f"The '{aspect}' analysis is only available in leadership channels."}
+        return {
+            "error": f"The '{aspect}' analysis is only available in leadership channels."
+        }
 
     if aspect == "at_risk":
         return management_capability.get_management_decisions(
@@ -807,8 +870,8 @@ def _execute_get_clan_game_modes(arguments):
             # teammate who has LEFT the clan but is still known WILL appear;
             # only never-seen external teammates are absent.
             "note": "pairs are directional (player's own logged battles); a teammate "
-                    "who has since left the clan can still appear, but a teammate never "
-                    "seen in our data (a random / non-roster player) does not",
+            "who has since left the clan can still appear, but a teammate never "
+            "seen in our data (a random / non-roster player) does not",
             "duos": snapshot["duos"],
         }
     if aspect == "side_modes":
@@ -908,7 +971,10 @@ def _state_scope(arguments, workflow: str | None) -> tuple[str | None, dict | No
         return None, None
     if requested in {"public", "leadership", "system_internal"}:
         return requested, None
-    return None, {"error": "invalid_scope", "detail": f"Unknown state scope: {requested}"}
+    return None, {
+        "error": "invalid_scope",
+        "detail": f"Unknown state scope: {requested}",
+    }
 
 
 def _require_leadership_state(workflow: str | None) -> dict | None:
@@ -920,38 +986,8 @@ def _require_leadership_state(workflow: str | None) -> dict | None:
     }
 
 
-def _status_filter(arguments, *, default: tuple[str, ...] | None = None) -> tuple[str, ...] | None:
-    status = (arguments.get("status") or "").strip()
-    if not status:
-        return default
-    if status == "all":
-        return None
-    if status == "due":
-        return ("due",)
-    return (status,)
-
-
-def _state_event_class(arguments):
-    """Resolve the event_class filter: 'signal' (default), 'battle', or 'all' (None)."""
-    event_class = (arguments.get("event_class") or "signal").strip().lower()
-    return None if event_class == "all" else event_class
-
-
-def _compact_intent(row: dict) -> dict:
-    """Project a communication_intents row to what a reader needs, dropping the
-    heavy payload_json / recognition_key / lifecycle-timestamp plumbing."""
-    return {
-        "intent_type": row.get("intent_type"),
-        "lane": row.get("lane"),
-        "status": row.get("status"),
-        "created_at": row.get("created_at"),
-        "posted": bool(row.get("discord_message_id")),
-        "last_error": row.get("last_error") or None,
-    }
-
-
 def _execute_get_elixir_state(arguments, workflow=None):
-    """Read Elixir's internal event/project/case/intent state with scope gates."""
+    """Read current event, awareness, and decision state with scope gates."""
     aspect = arguments.get("aspect", "operational_summary")
     limit = _state_limit(arguments)
 
@@ -962,9 +998,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
         result = event_facades.summarize_event_windows(
             windows=_state_windows(arguments),
             scope=scope,
-            subject_type=arguments.get("subject_type"),
             subject_key=arguments.get("subject_key"),
-            event_class=_state_event_class(arguments),
         )
         if isinstance(result, dict):
             # QA M15: signal-event counts reflect the ~7-day event stream, while
@@ -981,7 +1015,6 @@ def _execute_get_elixir_state(arguments, workflow=None):
         scope, error = _state_scope(arguments, workflow)
         if error:
             return error
-        event_class = _state_event_class(arguments)
         out = {
             "scope": scope or "all",
             "days": _state_days(arguments),
@@ -989,17 +1022,10 @@ def _execute_get_elixir_state(arguments, workflow=None):
                 days=_state_days(arguments),
                 scope=scope,
                 event_type=arguments.get("event_type"),
-                subject_type=arguments.get("subject_type"),
                 subject_key=arguments.get("subject_key"),
-                event_class=event_class,
                 limit=limit,
             ),
         }
-        if event_class == "battle":
-            # QA M16: event_class='battle' is a no-op here (this is the signal
-            # stream, not battle_events) — don't let it read as "no battles".
-            out["note"] = ("event_class='battle' is not supported by this signal-event "
-                           "view; use get_clan_game_modes for battle activity.")
         return out
 
     if aspect == "game_modes":
@@ -1022,6 +1048,9 @@ def _execute_get_elixir_state(arguments, workflow=None):
             )["data"]
         }
 
+    if aspect == "awareness_activity":
+        return db.get_awareness_activity(limit=limit)
+
     if aspect == "decision_cases":
         status = (arguments.get("status") or "").strip()
         case_type = arguments.get("case_type")
@@ -1039,36 +1068,15 @@ def _execute_get_elixir_state(arguments, workflow=None):
             }
         return db.decision_case_snapshot(open_limit=limit, due_limit=limit)
 
-    if aspect == "communication_intents":
-        status = (arguments.get("status") or "").strip()
-        return {
-            "intents": db.list_recent_communication_intents(
-                status=status if status and status != "all" else None,
-                workflow=arguments.get("workflow"),
-                target_channel_key=arguments.get("target_channel_key"),
-                limit=limit,
-            )
-        }
-
-    if aspect == "communication_trace":
-        message_id = (arguments.get("message_id") or "").strip()
-        if not message_id:
-            return {"error": "message_id_required"}
-        return db.get_communication_trace_for_message(message_id) or {
-            "error": "message_not_found",
-            "message_id": message_id,
-        }
-
     if aspect == "operational_summary":
         # A dashboard, not a data dump. Every block is structurally bounded so
         # the result stays under the tool envelope's char cap as data grows —
         # otherwise the envelope blindly drops whole arrays mid-deliberation.
-        # Cases are capped tighter than intents because the awareness read
-        # already carries the full deduped case set; this is a drill-down.
         case_limit = min(limit, 10)
-        intent_limit = min(limit, 15)
         return {
-            "event_windows": event_facades.summarize_event_windows(windows=_ELIXIR_STATE_WINDOWS, scope=None),
+            "event_windows": event_facades.summarize_event_windows(
+                windows=_ELIXIR_STATE_WINDOWS, scope=None
+            ),
             "recent_events": event_facades.list_recent_events(days=7, limit=10),
             "game_modes": game_mode_capability.get_clan_game_mode_windows(windows=(7,)),
             "war_season": war_capability.get_war_season_view(
@@ -1077,21 +1085,14 @@ def _execute_get_elixir_state(arguments, workflow=None):
             "decision_cases": db.decision_case_snapshot(
                 open_limit=case_limit, due_limit=case_limit, dedupe=True
             ),
-            "recent_intents": [
-                _compact_intent(i) for i in db.list_recent_communication_intents(limit=intent_limit)
-            ],
-            "failed_intents": [
-                _compact_intent(i)
-                for i in db.list_recent_communication_intents(status="failed", limit=intent_limit)
-            ],
+            "awareness": db.get_awareness_activity(limit=min(limit, 15)),
         }
 
     return {"error": f"Unknown aspect: {aspect}"}
 
 
-
-
 # ── Write tools execution ─────────────────────────────────────────────────
+
 
 def _execute_update_member(arguments):
     """Execute the consolidated update_member tool."""
@@ -1104,7 +1105,7 @@ def _execute_update_member(arguments):
             month = value.get("month")
             day = value.get("day")
         else:
-            raise ValueError("birthday value must be {\"month\": M, \"day\": D}")
+            raise ValueError('birthday value must be {"month": M, "day": D}')
         db.set_member_birthday(member_tag, name=None, month=month, day=day)
     elif field == "join_date":
         db.set_member_join_date(member_tag, name=None, joined_date=str(value))
@@ -1141,17 +1142,26 @@ def _execute_get_clan_intel_report(arguments):
 
     war = cr_api.get_current_war()
     if not war:
-        return {"error": "no_active_war", "hint": "Our clan is not currently in a river race."}
+        return {
+            "error": "no_active_war",
+            "hint": "Our clan is not currently in a river race.",
+        }
 
     war_clans = list(war.get("clans") or [])
     our_war_entry = war.get("clan")
     our_tag_hash = f"#{cr_api.CLAN_TAG}"
     if our_war_entry:
-        war_clans = [our_war_entry] + [c for c in war_clans if (c.get("tag") or "").upper() != our_tag_hash.upper()]
+        war_clans = [our_war_entry] + [
+            c for c in war_clans if (c.get("tag") or "").upper() != our_tag_hash.upper()
+        ]
 
     target_tag_hash = f"#{clan_tag}"
     target_entry = next(
-        (c for c in war_clans if (c.get("tag") or "").upper() == target_tag_hash.upper()),
+        (
+            c
+            for c in war_clans
+            if (c.get("tag") or "").upper() == target_tag_hash.upper()
+        ),
         None,
     )
     if target_entry is None:
@@ -1183,6 +1193,7 @@ def _execute_get_clan_intel_report(arguments):
             "not full clan membership."
         )
     return entry
+
 
 def _execute_flag_member_watch(arguments):
     """Awareness-loop observation: flag a member for leadership attention.
@@ -1413,7 +1424,7 @@ def _execute_lookup_reference(arguments, workflow=None):
             "error": "unparseable_reference",
             "reference": raw,
             "hint": "Expected a code like 'R137' (leader action), 'L60' (loop), "
-                    "'C12' (case), or 'M340' (memory).",
+            "'C12' (case), or 'M340' (memory).",
         }
     letter, number = match.group(1), int(match.group(2))
     kind = (
@@ -1426,14 +1437,17 @@ def _execute_lookup_reference(arguments, workflow=None):
             "error": "ambiguous_reference",
             "reference": raw,
             "hint": "Bare number with no R/L/C/M prefix — pass kind="
-                    "'leader_action' | 'loop' | 'case' | 'memory'.",
+            "'leader_action' | 'loop' | 'case' | 'memory'.",
         }
 
     if kind == "case":
         case = db.get_decision_case_by_id(number)
         if not case:
-            return {"error": "not_found", "reference": f"C{number}",
-                    "hint": f"No decision case C{number} exists."}
+            return {
+                "error": "not_found",
+                "reference": f"C{number}",
+                "hint": f"No decision case C{number} exists.",
+            }
         return {
             "reference": f"C{number}",
             "kind": "decision_case",
@@ -1461,8 +1475,11 @@ def _execute_lookup_reference(arguments, workflow=None):
             include_archived=True,
         )
         if not mem:
-            return {"error": "not_found", "reference": f"M{number}",
-                    "hint": f"No memory M{number} exists (or it's out of scope here)."}
+            return {
+                "error": "not_found",
+                "reference": f"M{number}",
+                "hint": f"No memory M{number} exists (or it's out of scope here).",
+            }
         return {
             "reference": f"M{number}",
             "kind": "memory",
@@ -1483,8 +1500,11 @@ def _execute_lookup_reference(arguments, workflow=None):
     if kind == "leader_action":
         action = db.get_leader_action_by_id(number)
         if not action:
-            return {"error": "not_found", "reference": f"R{number}",
-                    "hint": f"No leader-action recommendation R{number} exists."}
+            return {
+                "error": "not_found",
+                "reference": f"R{number}",
+                "hint": f"No leader-action recommendation R{number} exists.",
+            }
         return {
             "reference": f"R{number}",
             "kind": "leader_action",
@@ -1495,7 +1515,8 @@ def _execute_lookup_reference(arguments, workflow=None):
             "target_tag": action.get("target_player_tag"),
             "objective": action.get("objective"),
             "rationale": action.get("rationale"),
-            "clan_chat_copy": action.get("copy_current_text") or action.get("copy_original_text"),
+            "clan_chat_copy": action.get("copy_current_text")
+            or action.get("copy_original_text"),
             "proposed_at": action.get("proposed_at"),
             "decided_at": action.get("decided_at"),
             "decided_by_discord_user_id": action.get("decided_by_discord_user_id"),
@@ -1506,8 +1527,11 @@ def _execute_lookup_reference(arguments, workflow=None):
     if kind == "loop":
         loop = db.get_awareness_loop_by_number(number)
         if not loop:
-            return {"error": "not_found", "reference": f"L{number}",
-                    "hint": f"No awareness loop L{number} exists yet."}
+            return {
+                "error": "not_found",
+                "reference": f"L{number}",
+                "hint": f"No awareness loop L{number} exists yet.",
+            }
         return {"reference": f"L{number}", "kind": "loop", **loop}
 
     return {"error": "unknown_kind", "reference": raw, "kind": kind}
@@ -1515,8 +1539,38 @@ def _execute_lookup_reference(arguments, workflow=None):
 
 # ── Main dispatch ─────────────────────────────────────────────────────────
 
+TOOL_EXECUTOR_NAMES = frozenset(
+    {
+        "resolve_member",
+        "get_member",
+        "get_member_war_detail",
+        "get_river_race",
+        "get_war_season",
+        "get_clan_roster",
+        "get_clan_health",
+        "get_clan_game_modes",
+        "get_elixir_state",
+        "get_deck_intelligence",
+        "lookup_cards",
+        "get_member_card_profile",
+        "lookup_member_cards",
+        "get_clan_intel_report",
+        "cr_api",
+        "update_member",
+        "save_clan_memory",
+        "flag_member_watch",
+        "record_leadership_followup",
+        "schedule_revisit",
+        "get_awards",
+        "lookup_reference",
+    }
+)
+
+
 def _execute_tool(name, arguments, workflow=None):
     """Execute a tool call and return the result as a string."""
+    if name not in TOOL_EXECUTOR_NAMES:
+        return json.dumps({"error": f"Unknown tool: {name}"})
     try:
         if name == "resolve_member":
             # QA M1: don't hard-filter to active — a recently-departed or observed
@@ -1582,8 +1636,10 @@ def _execute_tool(name, arguments, workflow=None):
                     )
         elif name == "lookup_member_cards":
             member_tag = _resolve_member_tag(arguments["member_tag"])
-            include_battles = bool(((arguments.get("filter") or {}).get("mode")) == "war"
-                                   or (arguments.get("filter") or {}).get("deck"))
+            include_battles = bool(
+                ((arguments.get("filter") or {}).get("mode")) == "war"
+                or (arguments.get("filter") or {}).get("deck")
+            )
             _refresh_member_cache(member_tag, include_battles=include_battles)
             result = db.lookup_member_cards(
                 member_tag,
@@ -1619,6 +1675,7 @@ def _execute_tool(name, arguments, workflow=None):
             # (the leader path upserts) — dedup a repeated identical observation
             # via a content-hash event key so ticks don't pile up duplicates.
             import hashlib as _hashlib
+
             _dedup_id = _hashlib.sha1(
                 f"{title}|{member_tag_input or ''}|{body}".encode("utf-8")
             ).hexdigest()[:16]
@@ -1691,7 +1748,6 @@ def _execute_tool(name, arguments, workflow=None):
         return json.dumps({"error": str(e)})
 
 
-
 execute_tool = _execute_tool
 
-__all__ = ["execute_tool"]
+__all__ = ["TOOL_EXECUTOR_NAMES", "execute_tool"]

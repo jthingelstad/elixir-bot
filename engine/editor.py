@@ -1,4 +1,4 @@
-"""Elixir's active editorial-learning loop + historical verdict schema.
+"""Elixir's active editorial-learning loop.
 
 Reduced 2026-07-10: the inline gate/critic/judge, the living-rubric builder, the
 daily feedback sweep, and the weekly self-review were retired when the awareness
@@ -6,8 +6,6 @@ brain became the sole proactive poster. The old second-LLM per-post critic stays
 retired; current quality control is deterministic and evidence-bound.
 
 What remains is live:
-- ``ensure_editor_schema`` — the ``editor_verdicts`` table, still read by the
-  Observatory editorial view for historical verdicts;
 - the auto-feeders that turn human actions into editorial rubric memories:
   ``record_deleted_post`` (an admin deletes an Elixir post) and
   ``record_copy_edit_pair`` (a leader rewrites action-card copy);
@@ -28,25 +26,31 @@ from difflib import SequenceMatcher
 
 log = logging.getLogger("elixir.engine.editor")
 
-def ensure_editor_schema(conn) -> None:
-    """Compatibility assertion; db.schema owns editor-history creation."""
-    from db.schema import require_columns
-
-    require_columns(conn, "editor_verdicts", {"verdict_id", "intent_id"})
-
 
 # ------------------------------------------------- editorial rubric memories
 
+
 def _editorial_memory_exists(conn, event_key: str) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM memories WHERE source_event_key = ?", (event_key,)
-    ).fetchone() is not None
+    return (
+        conn.execute(
+            "SELECT 1 FROM memories WHERE source_event_key = ?", (event_key,)
+        ).fetchone()
+        is not None
+    )
 
 
-def _add_editorial_memory(conn, *, title: str, body: str, kind_tag: str,
-                          event_key: str, confidence: float, created_by: str,
-                          extra_tags: tuple[str, ...] = (),
-                          source_type: str = "inference") -> int | None:
+def _add_editorial_memory(
+    conn,
+    *,
+    title: str,
+    body: str,
+    kind_tag: str,
+    event_key: str,
+    confidence: float,
+    created_by: str,
+    extra_tags: tuple[str, ...] = (),
+    source_type: str = "inference",
+) -> int | None:
     """One rubric entry, deduped on its event key. Returns memory_id or None."""
     import memory_store
 
@@ -54,36 +58,50 @@ def _add_editorial_memory(conn, *, title: str, body: str, kind_tag: str,
         return None
     et, _, eid = event_key.partition(":")
     mem = memory_store.create_memory(
-        body=body, source_type=source_type,
-        is_inference=(source_type == "inference"), confidence=confidence,
-        created_by=created_by, scope="leadership", title=title,
-        event_type=et, event_id=eid or None, conn=conn,
+        body=body,
+        source_type=source_type,
+        is_inference=(source_type == "inference"),
+        confidence=confidence,
+        created_by=created_by,
+        scope="leadership",
+        title=title,
+        event_type=et,
+        event_id=eid or None,
+        conn=conn,
     )
     memory_store.attach_tags(
-        mem["memory_id"], ["editorial", kind_tag, *extra_tags],
-        actor=created_by, conn=conn,
+        mem["memory_id"],
+        ["editorial", kind_tag, *extra_tags],
+        actor=created_by,
+        conn=conn,
     )
     return mem["memory_id"]
 
 
-def record_deleted_post(conn, discord_message_id: str, channel_name: str,
-                        content: str) -> int | None:
+def record_deleted_post(
+    conn, discord_message_id: str, channel_name: str, content: str
+) -> int | None:
     """Deletion feeder: an admin deleting an Elixir post in one of its lanes is
     the strongest anti-pattern signal we get."""
-    intent = conn.execute(
-        "SELECT intent_type, payload_json FROM communication_intents "
+    post = conn.execute(
+        "SELECT lane, covers_json, loop_number, posted_at FROM awareness_posts "
         "WHERE discord_message_id = ?",
         (str(discord_message_id),),
     ).fetchone()
     facts_note = ""
-    if intent:
-        facts_note = (f"\n\nIntent type: {intent['intent_type']}\n"
-                      f"Facts it was composed from: {intent['payload_json'][:500]}")
+    if post:
+        facts_note = (
+            f"\n\nAwareness loop: L{post['loop_number']}\n"
+            f"Lane: {post['lane']}\n"
+            f"Evidence covered: {(post['covers_json'] or '[]')[:500]}"
+        )
     mid = _add_editorial_memory(
         conn,
         title="Anti-pattern: post deleted by an admin",
-        body=(f"An admin deleted this Elixir post in #{channel_name}:\n\n"
-              f"{(content or '(content unavailable)')[:600]}{facts_note}"),
+        body=(
+            f"An admin deleted this Elixir post in #{channel_name}:\n\n"
+            f"{(content or '(content unavailable)')[:600]}{facts_note}"
+        ),
         kind_tag="anti-pattern",
         event_key=f"editorial_deletion:{discord_message_id}",
         confidence=0.75,
@@ -102,9 +120,11 @@ def record_copy_edit_pair(conn, action_id: int, before: str, after: str) -> int 
     mid = _add_editorial_memory(
         conn,
         title="Exemplar pair: leader copy-edit on an action card",
-        body=(f"A leader rewrote Elixir's action-card copy — the AFTER is the "
-              f"standard to emulate.\n\nBEFORE (Elixir): {before[:400]}\n\n"
-              f"AFTER (leader): {after[:400]}"),
+        body=(
+            f"A leader rewrote Elixir's action-card copy — the AFTER is the "
+            f"standard to emulate.\n\nBEFORE (Elixir): {before[:400]}\n\n"
+            f"AFTER (leader): {after[:400]}"
+        ),
         kind_tag="exemplar",
         event_key=f"editorial_copy_edit:{action_id}",
         confidence=0.8,
@@ -163,10 +183,10 @@ def _recent_solo_spotlight(conn, post: dict) -> dict | None:
             if not isinstance(prior, dict):
                 continue
             prior_tags = [str(tag) for tag in (prior.get("member_tags") or []) if tag]
-            if (
-                prior.get("leads_with") in {"milestone", "clan_event"}
-                and prior_tags == [target]
-            ):
+            if prior.get("leads_with") in {
+                "milestone",
+                "clan_event",
+            } and prior_tags == [target]:
                 return {
                     "at": row["at"],
                     "summary": prior.get("summary"),
@@ -256,9 +276,10 @@ def record_post_quality_feedback(
         )
     if not concerns:
         return None
-    stable_id = message_id or hashlib.sha1(
-        f"{lane}|{source}|{copy}".encode("utf-8")
-    ).hexdigest()[:16]
+    stable_id = (
+        message_id
+        or hashlib.sha1(f"{lane}|{source}|{copy}".encode("utf-8")).hexdigest()[:16]
+    )
     return _add_editorial_memory(
         conn,
         title="Anti-pattern: live output quality finding",

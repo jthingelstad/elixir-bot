@@ -5,6 +5,7 @@ The rollups undercounted new/backfilled members (a real 31-battle week showed
 as 2 tracked days / 10 battles) and went stale clan-wide (previous week read as
 0 battles). battle_events is complete, so the windows are now exact.
 """
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -34,8 +35,14 @@ def _seed_battles(conn, tag, day: date, wins, losses):
         conn.execute(
             "INSERT INTO battle_events (dedup_key, player_tag, battle_time, observed_at, outcome, trophy_change) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (f"{tag}-{stamp}-{i}", tag, f"{stamp}T12{i:02d}00.000Z", "2026-07-11T00:00:00Z",
-             "W" if i < wins else "L", 30 if i < wins else -30),
+            (
+                f"{tag}-{stamp}-{i}",
+                tag,
+                f"{stamp}T12{i:02d}00.000Z",
+                "2026-07-11T00:00:00Z",
+                "W" if i < wins else "L",
+                30 if i < wins else -30,
+            ),
         )
 
 
@@ -46,7 +53,9 @@ def test_member_trend_window_reads_full_battle_events():
         _seed_player(conn, "#TREND1", "Andy")
         # previous 7d window: a busy week the lossy rollup would have undercounted
         _seed_battles(conn, "#TREND1", today - timedelta(days=9), wins=9, losses=6)
-        _seed_battles(conn, "#TREND1", today - timedelta(days=8), wins=6, losses=4)  # 25 total prev
+        _seed_battles(
+            conn, "#TREND1", today - timedelta(days=8), wins=6, losses=4
+        )  # 25 total prev
         # current 7d window
         _seed_battles(conn, "#TREND1", today - timedelta(days=2), wins=5, losses=5)
         conn.commit()

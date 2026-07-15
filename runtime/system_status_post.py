@@ -2,10 +2,10 @@
 
 The v5-native home for publishing pre-authored system signals. It posts directly
 to the target lane via runtime.discord_posting/_post_to_elixir — the same direct
-post path the other scheduled jobs were rewired to (award-detection,
-tournament-watch, weekly-relay) — instead of the retired v4 awareness-delivery
-pipeline. System signals are expected to carry pre-authored Discord copy (e.g.
-api-sentinel discord_content); anything without copy is logged and skipped.
+post path used by tournament-watch and weekly-relay—rather than entering the
+awareness planner. System signals are expected to carry pre-authored Discord
+copy (for example api-sentinel discord_content); anything without copy is
+logged and skipped.
 """
 
 from __future__ import annotations
@@ -51,8 +51,15 @@ def _preauthored_system_signal_result(signal):
 def _preauthored_system_signal_target(signal):
     signal_type = (signal or {}).get("signal_type") or (signal or {}).get("type")
     payload = (signal or {}).get("payload") or {}
-    audience = (payload.get("audience") or (signal or {}).get("audience") or "").strip().lower()
-    if audience == "leadership" or signal_type in {"api_event_sentinel", "api_schema_sentinel"}:
+    audience = (
+        (payload.get("audience") or (signal or {}).get("audience") or "")
+        .strip()
+        .lower()
+    )
+    if audience == "leadership" or signal_type in {
+        "api_event_sentinel",
+        "api_schema_sentinel",
+    }:
         return "leader-lounge", "leadership"
     return "announcements", "system"
 
@@ -83,7 +90,11 @@ async def _post_system_signal_updates(signals, clan, war):
             continue
         channel = _bot().get_channel(channel_config["id"])
         if channel is None:
-            log.warning("system signal: channel %r (%s) not found", channel_key, channel_config["id"])
+            log.warning(
+                "system signal: channel %r (%s) not found",
+                channel_key,
+                channel_config["id"],
+            )
             continue
 
         content = result["content"]
@@ -104,10 +115,14 @@ async def _post_system_signal_updates(signals, clan, war):
             event_type=result.get("event_type") or "channel_update",
         )
         if signal.get("signal_key"):
-            await asyncio.to_thread(db.mark_system_signal_announced, signal["signal_key"])
+            await asyncio.to_thread(
+                db.mark_system_signal_announced, signal["signal_key"]
+            )
 
 
-async def _publish_pending_system_signal_updates(*, seed_startup_signals: bool = False) -> int:
+async def _publish_pending_system_signal_updates(
+    *, seed_startup_signals: bool = False
+) -> int:
     if seed_startup_signals:
         await asyncio.to_thread(queue_startup_system_signals)
     pending = await asyncio.to_thread(db.list_pending_system_signals)

@@ -33,7 +33,9 @@ def _fold_award_names(rows: list[dict]) -> list[dict]:
     for row in rows:
         name = row.get("player_name")
         if name:
-            row["player_name"] = injection_safe(callable_name(name)) or callable_name(name)
+            row["player_name"] = injection_safe(callable_name(name)) or callable_name(
+                name
+            )
     return rows
 
 
@@ -60,6 +62,7 @@ _ACTIVE = (
 
 
 # -- grant writer -----------------------------------------------------------
+
 
 @managed_connection
 def insert_award(
@@ -103,7 +106,9 @@ def _row_to_award(row) -> dict:
 
 
 @managed_connection
-def get_member_trophy_case(tag_or_id, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_member_trophy_case(
+    tag_or_id, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     tag = _canon_tag(str(tag_or_id))
     rows = conn.execute(
         "SELECT award_id, award_type, season_id, section_index, player_tag, rank, "
@@ -116,9 +121,14 @@ def get_member_trophy_case(tag_or_id, conn: Optional[sqlite3.Connection] = None)
 
 
 @managed_connection
-def list_awards(award_type: Optional[str] = None, season_id: Optional[int] = None,
-                rank: Optional[int] = None, member_tag: Optional[str] = None,
-                limit: int = 50, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def list_awards(
+    award_type: Optional[str] = None,
+    season_id: Optional[int] = None,
+    rank: Optional[int] = None,
+    member_tag: Optional[str] = None,
+    limit: int = 50,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     where = ["1=1"]
     params: list = []
     if rank is not None:
@@ -180,7 +190,9 @@ def award_leaderboard(
 
 
 @managed_connection
-def get_awards_by_season(season_id: int, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_awards_by_season(
+    season_id: int, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     rows = conn.execute(
         "SELECT a.award_id, a.award_type, a.season_id, a.section_index, "
         "a.player_tag AS member_id, a.player_tag, a.rank, a.metric_value, a.metric_unit, "
@@ -194,6 +206,7 @@ def get_awards_by_season(season_id: int, conn: Optional[sqlite3.Connection] = No
 
 
 # -- season helpers ----------------------------------------------------------
+
 
 def _cr_time_to_iso(value: Optional[str]) -> Optional[str]:
     dt = _parse_cr_time(value)
@@ -218,7 +231,9 @@ def _season_bounds(conn, season_id: int) -> tuple[Optional[str], Optional[str]]:
 
 
 @managed_connection
-def season_final_section_index(season_id: int, conn: Optional[sqlite3.Connection] = None) -> Optional[int]:
+def season_final_section_index(
+    season_id: int, conn: Optional[sqlite3.Connection] = None
+) -> Optional[int]:
     row = conn.execute(
         "SELECT MAX(section_index) AS final FROM war_weeks WHERE season_id = ?",
         (int(season_id),),
@@ -227,7 +242,9 @@ def season_final_section_index(season_id: int, conn: Optional[sqlite3.Connection
 
 
 @managed_connection
-def season_is_complete(season_id: int, conn: Optional[sqlite3.Connection] = None) -> bool:
+def season_is_complete(
+    season_id: int, conn: Optional[sqlite3.Connection] = None
+) -> bool:
     """A season is complete when its war_seasons row has ended (the engine
     writes ended_at at the season_closed event, §16.1)."""
     row = conn.execute(
@@ -238,6 +255,7 @@ def season_is_complete(season_id: int, conn: Optional[sqlite3.Connection] = None
 
 
 # -- candidates / standings ---------------------------------------------------
+
 
 @managed_connection
 def get_iron_king_candidates(
@@ -269,15 +287,23 @@ def get_iron_king_candidates(
             (int(season_id), total_days, total_days),
         ).fetchall()
         return [
-            {"tag": r["tag"], "name": r["name"], "member_id": r["tag"],
-             "total_battle_days": total_days, "perfect_days": r["perfect_days"]}
+            {
+                "tag": r["tag"],
+                "name": r["name"],
+                "member_id": r["tag"],
+                "total_battle_days": total_days,
+                "perfect_days": r["perfect_days"],
+            }
             for r in rows
         ]
     # Fallback: per-section ceiling rule over war_participation.
-    sections = [r["section_index"] for r in conn.execute(
-        "SELECT DISTINCT section_index FROM war_weeks WHERE season_id = ? ORDER BY section_index",
-        (int(season_id),),
-    ).fetchall()]
+    sections = [
+        r["section_index"]
+        for r in conn.execute(
+            "SELECT DISTINCT section_index FROM war_weeks WHERE season_id = ? ORDER BY section_index",
+            (int(season_id),),
+        ).fetchall()
+    ]
     if not sections:
         return []
     qualifying: Optional[set[str]] = None
@@ -308,8 +334,12 @@ def get_iron_king_candidates(
         if not qualifying:
             return []
     return [
-        {"tag": t, "name": details[t], "member_id": t,
-         "total_battle_days": total_battle_days or None}
+        {
+            "tag": t,
+            "name": details[t],
+            "member_id": t,
+            "total_battle_days": total_battle_days or None,
+        }
         for t in sorted(qualifying)
     ]
 
@@ -422,8 +452,12 @@ def get_war_participant_candidates(
         (int(season_id),),
     ).fetchall()
     return [
-        {"tag": _canon_tag(r["tag"]), "name": r["name"],
-         "member_id": _canon_tag(r["tag"]), "total_points": r["total_points"] or 0}
+        {
+            "tag": _canon_tag(r["tag"]),
+            "name": r["name"],
+            "member_id": _canon_tag(r["tag"]),
+            "total_points": r["total_points"] or 0,
+        }
         for r in rows
     ]
 
@@ -450,56 +484,64 @@ def get_season_awards_standings(
     war_champ = []
     outcome = compute_season_award_outcome(conn, season_id)
     for entry in outcome["standings"][:3]:
-        war_champ.append({
-            "rank": entry["official_rank"],
-            "tag": entry["tag"],
-            "name": entry.get("name"),
-            "metric_value": entry.get("points"),
-            "metric_unit": "points",
-            "metadata": {
-                "races_participated": entry.get("races_participated"),
-                "donations_tiebreak": entry.get("donations"),
-                "points_rank": entry.get("rank"),
-            },
-        })
+        war_champ.append(
+            {
+                "rank": entry["official_rank"],
+                "tag": entry["tag"],
+                "name": entry.get("name"),
+                "metric_value": entry.get("points"),
+                "metric_unit": "points",
+                "metadata": {
+                    "races_participated": entry.get("races_participated"),
+                    "donations_tiebreak": entry.get("donations"),
+                    "points_rank": entry.get("rank"),
+                },
+            }
+        )
 
     iron_kings = []
     for c in get_iron_king_candidates(season_id=season_id, conn=conn):
-        iron_kings.append({
-            "rank": 1,
-            "tag": c["tag"],
-            "name": c.get("name"),
-            "metric_value": c.get("total_battle_days"),
-            "metric_unit": "battle_days",
-            "metadata": {
-                "perfect_days": c.get("perfect_days"),
-                "total_battle_days": c.get("total_battle_days"),
-            },
-        })
+        iron_kings.append(
+            {
+                "rank": 1,
+                "tag": c["tag"],
+                "name": c.get("name"),
+                "metric_value": c.get("total_battle_days"),
+                "metric_unit": "battle_days",
+                "metadata": {
+                    "perfect_days": c.get("perfect_days"),
+                    "total_battle_days": c.get("total_battle_days"),
+                },
+            }
+        )
 
     donation_champs = []
     for entry in outcome["donation_champs"][:3]:
-        donation_champs.append({
-            "rank": entry["official_rank"],
-            "tag": entry["tag"],
-            "name": entry.get("name"),
-            "metric_value": entry.get("total_donations"),
-            "metric_unit": "donations",
-            "metadata": {},
-        })
+        donation_champs.append(
+            {
+                "rank": entry["official_rank"],
+                "tag": entry["tag"],
+                "name": entry.get("name"),
+                "metric_value": entry.get("total_donations"),
+                "metric_unit": "donations",
+                "metadata": {},
+            }
+        )
 
     rookie_mvps = []
     for entry in outcome["rookie_mvps"][:3]:
-        rookie_mvps.append({
-            "rank": entry["official_rank"],
-            "tag": entry["tag"],
-            "name": entry.get("name"),
-            "metric_value": entry.get("total_points"),
-            "metric_unit": "points",
-            "metadata": {
-                "races_participated": entry.get("races_participated"),
-            },
-        })
+        rookie_mvps.append(
+            {
+                "rank": entry["official_rank"],
+                "tag": entry["tag"],
+                "name": entry.get("name"),
+                "metric_value": entry.get("total_points"),
+                "metric_unit": "points",
+                "metadata": {
+                    "races_participated": entry.get("races_participated"),
+                },
+            }
+        )
 
     return {
         "season_id": season_id,
@@ -533,7 +575,13 @@ def get_award_races(
 
     season_id = season_id if season_id is not None else get_current_season_id(conn=conn)
     if season_id is None:
-        return {"season_id": None, "war_champ": [], "iron_king": [], "rookie_mvp": [], "note": None}
+        return {
+            "season_id": None,
+            "war_champ": [],
+            "iron_king": [],
+            "rookie_mvp": [],
+            "note": None,
+        }
 
     outcome = compute_season_award_outcome(conn, season_id)
     champ = outcome["standings"][: max(1, war_champ_limit)]
@@ -550,9 +598,15 @@ def get_award_races(
     ]
 
     rookie = [
-        {"tag": r["tag"], "name": r.get("name"), "points": r.get("total_points") or 0,
-         "races_participated": r.get("races_participated"), "rank": r.get("rank"),
-         "tied": r.get("tied"), "tie_count": r.get("tie_count")}
+        {
+            "tag": r["tag"],
+            "name": r.get("name"),
+            "points": r.get("total_points") or 0,
+            "races_participated": r.get("races_participated"),
+            "rank": r.get("rank"),
+            "tied": r.get("tied"),
+            "tie_count": r.get("tie_count"),
+        }
         for r in outcome["rookie_mvps"][: max(1, rookie_limit)]
     ]
 
@@ -565,7 +619,7 @@ def get_award_races(
         "war_champ": champ,
         "war_champ_leader": leader,
         "free_pass_last_season": free_pass_last,
-        "free_pass_in_line": in_line,   # projected holder if the season closed now
+        "free_pass_in_line": in_line,  # projected holder if the season closed now
         "iron_king": iron_king,
         "rookie_mvp": rookie,
         "note": (

@@ -100,10 +100,10 @@ def card_display_max_level(max_level) -> int | None:
 @dataclass(frozen=True)
 class WarDay:
     period_index: int
-    day_in_week: int              # 0-6 within the section
-    war_day_index: int | None     # 0-3 on battle days, None during training
-    phase: str                    # 'training' | 'battle'
-    human: str                    # "training day 2 of 3" / "battle day 3 of 4"
+    day_in_week: int  # 0-6 within the section
+    war_day_index: int | None  # 0-3 on battle days, None during training
+    phase: str  # 'training' | 'battle'
+    human: str  # "training day 2 of 3" / "battle day 3 of 4"
 
 
 def war_day(period_index) -> WarDay | None:
@@ -115,11 +115,17 @@ def war_day(period_index) -> WarDay | None:
         return None
     day = period_index % PERIODS_PER_SECTION
     if day < TRAINING_DAYS:
-        return WarDay(period_index, day, None, "training",
-                      f"training day {day + 1} of {TRAINING_DAYS}")
+        return WarDay(
+            period_index,
+            day,
+            None,
+            "training",
+            f"training day {day + 1} of {TRAINING_DAYS}",
+        )
     wdi = day - TRAINING_DAYS
-    return WarDay(period_index, day, wdi, "battle",
-                  f"battle day {wdi + 1} of {WAR_DAYS}")
+    return WarDay(
+        period_index, day, wdi, "battle", f"battle day {wdi + 1} of {WAR_DAYS}"
+    )
 
 
 def arena_kind(arena_id) -> str | None:
@@ -136,16 +142,28 @@ def arena_kind(arena_id) -> str | None:
 # best=10 beside a current max of 7). Display maps by era; API field names
 # still say PathOfLegend*, display copy says "Ranked" (Jamie, 2026-07-04).
 RANKED_LEAGUES = {
-    1: "Master 1", 2: "Master 2", 3: "Master 3", 4: "Champion",
-    5: "Grand Champion", 6: "Royal Champion", 7: "Ultimate Champion",
+    1: "Master 1",
+    2: "Master 2",
+    3: "Master 3",
+    4: "Champion",
+    5: "Grand Champion",
+    6: "Royal Champion",
+    7: "Ultimate Champion",
 }
 LEGACY_POL_LEAGUES = {  # pre-rework Path of Legends scale (docs/cr-api-docs)
-    1: "Challenger I", 2: "Challenger II", 3: "Challenger III",
-    4: "Master I", 5: "Master II", 6: "Master III", 7: "Champion",
-    8: "Grand Champion", 9: "Royal Champion", 10: "Ultimate Champion",
+    1: "Challenger I",
+    2: "Challenger II",
+    3: "Challenger III",
+    4: "Master I",
+    5: "Master II",
+    6: "Master III",
+    7: "Champion",
+    8: "Grand Champion",
+    9: "Royal Champion",
+    10: "Ultimate Champion",
 }
-RANKED_UC_LEAGUE = 7            # current scheme
-LEGACY_POL_UC_LEAGUE = 10       # old scheme (emitters' constant predates this)
+RANKED_UC_LEAGUE = 7  # current scheme
+LEGACY_POL_UC_LEAGUE = 10  # old scheme (emitters' constant predates this)
 
 
 def ranked_league_name(league, *, legacy: bool = False) -> str | None:
@@ -184,7 +202,11 @@ def mastery_card(badge_name) -> str | None:
     camelCase split — `MasteryRonin` → `Ronin`, `MasterySuspiciousBush` →
     `Suspicious Bush`. Catalog canonicalization is the caller's job (this module
     stays DB-free); the split alone is human-readable for every current value."""
-    if isinstance(badge_name, str) and badge_name.startswith("Mastery") and len(badge_name) > 7:
+    if (
+        isinstance(badge_name, str)
+        and badge_name.startswith("Mastery")
+        and len(badge_name) > 7
+    ):
         return _split_camel(badge_name[7:]) or None
     return None
 
@@ -217,7 +239,9 @@ def humanize_badge(badge_name) -> str:
         return f"Card Mastery: {card}"
     if badge_name in _BADGE_LABELS:
         return _BADGE_LABELS[badge_name]
-    label = " ".join(_humanize_badge_token(t) for t in badge_name.split("_") if t).strip()
+    label = " ".join(
+        _humanize_badge_token(t) for t in badge_name.split("_") if t
+    ).strip()
     return label or badge_name
 
 
@@ -242,8 +266,18 @@ _GAME_MODE_LABELS = {
 # Structural tokens that describe the ruleset plumbing, not the mode a member
 # would name — dropped from the generic fallback so `Showdown_Friendly` reads
 # "Showdown" and `Event_RestlessDead` reads "Restless Dead".
-_MODE_NOISE = {"Ladder", "Friendly", "NoSet", "EventDeck", "AllCards", "Mode",
-               "NewArena", "NewArena2", "Event", "Competitive"}
+_MODE_NOISE = {
+    "Ladder",
+    "Friendly",
+    "NoSet",
+    "EventDeck",
+    "AllCards",
+    "Mode",
+    "NewArena",
+    "NewArena2",
+    "Event",
+    "Competitive",
+}
 
 
 def humanize_game_mode(mode_name) -> str | None:
@@ -255,7 +289,7 @@ def humanize_game_mode(mode_name) -> str | None:
     if mode_name in _GAME_MODE_LABELS:
         return _GAME_MODE_LABELS[mode_name]
     parts = [p for p in mode_name.split("_") if p and p not in _MODE_NOISE]
-    if not parts:                       # all-noise key — keep something legible
+    if not parts:  # all-noise key — keep something legible
         parts = mode_name.split("_")
     label = " ".join(_split_camel(p) for p in parts).strip()
     return label or None
@@ -289,6 +323,7 @@ def bare_tag(tag) -> str:
 
 
 # ---------------------------------------------------------------- annotation
+
 
 def _annotate_card(card) -> None:
     if isinstance(card, dict) and "level" in card and "display_level" not in card:

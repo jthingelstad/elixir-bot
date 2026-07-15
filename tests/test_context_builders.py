@@ -69,9 +69,24 @@ def test_war_day_state_excludes_departed_from_deck_buckets():
         _seed_race_state(
             conn,
             {
-                "#AAA": {"name": "Stayer", "fame": 900, "decks_used": 8, "decks_used_today": 0},
-                "#BBB": {"name": "AlsoHere", "fame": 1200, "decks_used": 12, "decks_used_today": 4},
-                "#GONE": {"name": "LeftMidweek", "fame": 400, "decks_used": 4, "decks_used_today": 0},
+                "#AAA": {
+                    "name": "Stayer",
+                    "fame": 900,
+                    "decks_used": 8,
+                    "decks_used_today": 0,
+                },
+                "#BBB": {
+                    "name": "AlsoHere",
+                    "fame": 1200,
+                    "decks_used": 12,
+                    "decks_used_today": 4,
+                },
+                "#GONE": {
+                    "name": "LeftMidweek",
+                    "fame": 400,
+                    "decks_used": 4,
+                    "decks_used_today": 0,
+                },
             },
         )
         conn.commit()
@@ -97,7 +112,7 @@ def test_clan_trend_context_labels_roster_delta_and_battle_delta():
     try:
         # A joiner mid-window inflates the roster total by their whole count;
         # the context must label that delta as roster movement, not pushing.
-        for i, (date, members, total) in enumerate(
+        for _i, (date, members, total) in enumerate(
             [
                 ("2026-06-28", 43, 450000),
                 ("2026-06-30", 44, 462000),
@@ -142,9 +157,15 @@ def test_memory_war_filters_actually_filter():
     )
     mem_id = mem_id["memory_id"]  # create_memory returns the full row dict
     assert mem_id
-    hit = list_memories(viewer_scope="public", filters={"war_week_id": "133:4"}, limit=10)
-    miss = list_memories(viewer_scope="public", filters={"war_week_id": "999:9"}, limit=10)
-    season_hit = list_memories(viewer_scope="public", filters={"war_season_id": "133"}, limit=10)
+    hit = list_memories(
+        viewer_scope="public", filters={"war_week_id": "133:4"}, limit=10
+    )
+    miss = list_memories(
+        viewer_scope="public", filters={"war_week_id": "999:9"}, limit=10
+    )
+    season_hit = list_memories(
+        viewer_scope="public", filters={"war_season_id": "133"}, limit=10
+    )
     assert any(m["memory_id"] == mem_id for m in hit)
     assert not miss
     assert any(m["memory_id"] == mem_id for m in season_hit)

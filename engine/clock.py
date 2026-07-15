@@ -21,16 +21,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from engine.game_rules import (
+    NORMAL_RIVER_RACE_FINISH_LINE,
+    river_race_completed_from_score,
+    river_race_finish_line,
+)
 from engine.normalize import (  # single source for war-week structure
     PERIODS_PER_SECTION,
     TRAINING_DAYS,
     WAR_DAYS,
     parse_cr_time,
-)
-from engine.game_rules import (
-    NORMAL_RIVER_RACE_FINISH_LINE,
-    river_race_completed_from_score,
-    river_race_finish_line,
 )
 
 FAME_FINISH_LINE = NORMAL_RIVER_RACE_FINISH_LINE
@@ -103,7 +103,9 @@ def war_clock(
     phase = _PHASE.get(period_type, "training")
     period_index = payload.get("periodIndex")
     section_index = payload.get("sectionIndex")
-    day_index = period_index % PERIODS_PER_SECTION if isinstance(period_index, int) else None
+    day_index = (
+        period_index % PERIODS_PER_SECTION if isinstance(period_index, int) else None
+    )
     war_day_index = (
         day_index - TRAINING_DAYS
         if isinstance(day_index, int) and day_index >= TRAINING_DAYS
@@ -227,7 +229,9 @@ def resolve_war_keys(
     return (clock.season_id, section, war_day)
 
 
-def period_anchor_from_events(conn, season_id, section_index, day_index) -> datetime | None:
+def period_anchor_from_events(
+    conn, season_id, section_index, day_index
+) -> datetime | None:
     """When the current period was first observed — the war_day_opened event's
     observed_at (carried learning: CR's reset hour skews per season; the
     observed period-start is the accurate 24h anchor). None when the event

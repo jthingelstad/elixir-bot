@@ -64,7 +64,9 @@ def update_heat(conn, player_tag, *, new_battles=False, roster_delta=False, now=
                                             poll_state.last_roster_delta),
                updated_at = excluded.updated_at""",
         (
-            tag, _temp(heat), heat,
+            tag,
+            _temp(heat),
+            heat,
             now if new_battles else None,
             now if roster_delta else None,
             now,
@@ -141,8 +143,13 @@ def plan(conn, now=None, budget: int = POLL_BUDGET_PER_TICK) -> list[tuple[str, 
             starved = overdue_min >= cad["floor"]
             if due or starved:
                 candidates.append(
-                    (1 if starved else 0, int(r["heat"]), overdue_min,
-                     endpoint, r["player_tag"])
+                    (
+                        1 if starved else 0,
+                        int(r["heat"]),
+                        overdue_min,
+                        endpoint,
+                        r["player_tag"],
+                    )
                 )
     candidates.sort(key=lambda c: (-c[0], -c[1], -c[2], c[3], c[4]))
     return [(c[3], c[4]) for c in candidates[: max(0, budget)]]

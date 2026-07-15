@@ -37,6 +37,7 @@ def test_latest_release_tag_is_recent():
     tag = rn.latest_release_tag()
     if tag is None:
         import pytest
+
         pytest.skip("no tags in this checkout")
     assert isinstance(tag, str) and tag.strip()
 
@@ -65,7 +66,11 @@ def test_release_history_parses_both_header_shapes(tmp_path, monkeypatch):
     assert {"version": "v5.1", "name": "Consolidated Collector", "date": None} in hist
     # `## The story` / `## Features` / `## Release Notes` section headers are NOT releases.
     names = [h["name"] for h in hist]
-    assert "The story" not in names and "Features" not in names and "Release Notes" not in names
+    assert (
+        "The story" not in names
+        and "Features" not in names
+        and "Release Notes" not in names
+    )
 
 
 def test_slugify_release():
@@ -83,12 +88,12 @@ def test_prompt_embeds_material_and_contract():
     # Three-tier output contract: subject + detailed + announcement + clanchat.
     for tag in ("<subject>", "<detailed>", "<announcement>", "<clanchat>"):
         assert tag in p
-    assert "a shiny thing" in p            # material embedded, not described
-    assert "Trophy Hall" in p              # RELEASES.md context included
+    assert "a shiny thing" in p  # material embedded, not described
+    assert "Trophy Hall" in p  # RELEASES.md context included
     assert "OPEN:" in p and "framing sentence" in p
     assert "CLOSE:" in p and "sign-off" in p
     assert "terse changelog" in p
-    assert "POAP KINGS" in p               # re-voiced for the clan
+    assert "POAP KINGS" in p  # re-voiced for the clan
 
 
 def test_prompt_carries_release_name():
@@ -105,16 +110,20 @@ def test_prompt_notes_truncation():
 def test_extract_subject_and_notes():
     out = "<subject>Five new tricks</subject><notes>## The story\nI grew.</notes>"
     assert rn._extract_subject(out) == "Five new tricks"
-    assert rn._extract_notes(out) == "## The story\nI grew."   # legacy <notes> tag
+    assert rn._extract_notes(out) == "## The story\nI grew."  # legacy <notes> tag
     # Tolerates a missing close tag: subject takes only the first line.
     assert rn._extract_subject("<subject>Solo line\n<notes>body") == "Solo line"
 
 
 def test_extract_three_tiers():
-    out = ("<subject>S</subject><detailed>## The story\nlong body</detailed>"
-           "<announcement>medium post</announcement><clanchat>short blurb</clanchat>")
+    out = (
+        "<subject>S</subject><detailed>## The story\nlong body</detailed>"
+        "<announcement>medium post</announcement><clanchat>short blurb</clanchat>"
+    )
     assert rn._extract_subject(out) == "S"
-    assert rn._extract_notes(out) == "## The story\nlong body"   # <detailed> is the notes tier
+    assert (
+        rn._extract_notes(out) == "## The story\nlong body"
+    )  # <detailed> is the notes tier
     assert rn._extract_tag(out, "announcement") == "medium post"
     assert rn._extract_tag(out, "clanchat") == "short blurb"
     assert rn._extract_tag(out, "missing") == ""
@@ -124,15 +133,25 @@ def test_release_notes_draft_stubbed(monkeypatch):
     monkeypatch.setattr(rn, "recent_changes", lambda **kw: dict(MATERIAL))
     monkeypatch.setattr(rn, "coin_release_name", lambda m: "Golden Goblin")
     import agent.core as core
-    monkeypatch.setattr(core, "_create_chat_completion",
-                        lambda **kw: _resp(
-                            "<subject>Shiny</subject><detailed>I can now shine.</detailed>"
-                            "<announcement>Shine, briefly.</announcement>"
-                            "<clanchat>New: I shine now.</clanchat>"))
+
+    monkeypatch.setattr(
+        core,
+        "_create_chat_completion",
+        lambda **kw: _resp(
+            "<subject>Shiny</subject><detailed>I can now shine.</detailed>"
+            "<announcement>Shine, briefly.</announcement>"
+            "<clanchat>New: I shine now.</clanchat>"
+        ),
+    )
     draft = rn.release_notes_draft(since_ref="v4.8")
-    assert draft == {"subject": "Shiny", "body": "I can now shine.",
-                     "announcement": "Shine, briefly.", "clanchat": "New: I shine now.",
-                     "window": MATERIAL["window"], "release_name": "Golden Goblin"}
+    assert draft == {
+        "subject": "Shiny",
+        "body": "I can now shine.",
+        "announcement": "Shine, briefly.",
+        "clanchat": "New: I shine now.",
+        "window": MATERIAL["window"],
+        "release_name": "Golden Goblin",
+    }
 
 
 def test_draft_none_when_no_changes(monkeypatch):
@@ -142,24 +161,34 @@ def test_draft_none_when_no_changes(monkeypatch):
 
 def test_coin_name_rejects_malformed(monkeypatch):
     import agent.core as core
+
     monkeypatch.setattr(rn, "_card_names", lambda: ["Balloon", "Golem"])
-    monkeypatch.setattr(core, "_create_chat_completion",
-                        lambda **kw: _resp("Blazing Balloon\nextra line"))
-    assert rn.coin_release_name(dict(MATERIAL)) == ""   # multi-line → nameless
-    monkeypatch.setattr(core, "_create_chat_completion",
-                        lambda **kw: _resp('"Gilded Golem"'))
+    monkeypatch.setattr(
+        core,
+        "_create_chat_completion",
+        lambda **kw: _resp("Blazing Balloon\nextra line"),
+    )
+    assert rn.coin_release_name(dict(MATERIAL)) == ""  # multi-line → nameless
+    monkeypatch.setattr(
+        core, "_create_chat_completion", lambda **kw: _resp('"Gilded Golem"')
+    )
     assert rn.coin_release_name(dict(MATERIAL)) == "Gilded Golem"  # quotes stripped
 
 
 def test_coin_name_failure_tolerant(monkeypatch):
-    monkeypatch.setattr(rn, "_card_names", lambda: (_ for _ in ()).throw(RuntimeError("db down")))
+    monkeypatch.setattr(
+        rn, "_card_names", lambda: (_ for _ in ()).throw(RuntimeError("db down"))
+    )
     assert rn.coin_release_name(dict(MATERIAL)) == ""
 
 
 def test_announcement_messages_chunk_and_link():
-    msgs = rn.announcement_messages(announcement="line\n\n" + ("x " * 3000),
-                                    release_url="https://github.com/r/r/releases/tag/golden-goblin",
-                                    name="Golden Goblin", date="2026-07-08")
+    msgs = rn.announcement_messages(
+        announcement="line\n\n" + ("x " * 3000),
+        release_url="https://github.com/r/r/releases/tag/golden-goblin",
+        name="Golden Goblin",
+        date="2026-07-08",
+    )
     assert len(msgs) >= 2
     assert msgs[0].startswith("**Golden Goblin (2026-07-08)**")
     assert "github.com" in msgs[-1]
@@ -167,8 +196,9 @@ def test_announcement_messages_chunk_and_link():
 
 
 def test_announcement_messages_nameless():
-    msgs = rn.announcement_messages(announcement="b", release_url=None,
-                                    name="", date="2026-07-08")
+    msgs = rn.announcement_messages(
+        announcement="b", release_url=None, name="", date="2026-07-08"
+    )
     assert msgs[0].startswith("**Release (2026-07-08)**")
     assert "GitHub" not in msgs[0]
 

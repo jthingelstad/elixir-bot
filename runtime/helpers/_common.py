@@ -9,16 +9,38 @@ DISCORD_MAX_MESSAGE_LEN = 2000
 DISCORD_CHUNK_SIZE = 1990  # leave room for overhead
 
 __all__ = [
-    "BOT_ROLE_ID", "CHICAGO", "LEADER_ROLE_ID", "bot", "log", "scheduler",
-    "DISCORD_MAX_MESSAGE_LEN", "DISCORD_CHUNK_SIZE",
-    "_runtime_app", "_bot", "_scheduler", "_log", "_chicago",
-    "_leader_role_id", "_bot_role_id", "_post_to_elixir",
-    "_chunk_for_discord", "_safe_create_task",
-    "_fmt_iso_short", "_fmt_relative", "_fmt_bytes", "_fmt_num", "_status_badge",
-    "_member_label", "_join_member_bits", "_bare_tag",
-    "_format_relative_join_age", "_recent_join_display_rows",
-    "_leader_role_mention", "_with_leader_ping",
-    "_job_next_runs", "_schedule_specs",
+    "BOT_ROLE_ID",
+    "CHICAGO",
+    "LEADER_ROLE_ID",
+    "bot",
+    "log",
+    "scheduler",
+    "DISCORD_MAX_MESSAGE_LEN",
+    "DISCORD_CHUNK_SIZE",
+    "_runtime_app",
+    "_bot",
+    "_scheduler",
+    "_log",
+    "_chicago",
+    "_leader_role_id",
+    "_bot_role_id",
+    "_post_to_elixir",
+    "_chunk_for_discord",
+    "_safe_create_task",
+    "_fmt_iso_short",
+    "_fmt_relative",
+    "_fmt_bytes",
+    "_fmt_num",
+    "_status_badge",
+    "_member_label",
+    "_join_member_bits",
+    "_bare_tag",
+    "_format_relative_join_age",
+    "_recent_join_display_rows",
+    "_leader_role_mention",
+    "_with_leader_ping",
+    "_job_next_runs",
+    "_schedule_specs",
 ]
 
 BOT_ROLE_ID = None
@@ -31,6 +53,7 @@ scheduler = None
 
 def _runtime_app():
     from runtime import app as app_module
+
     return app_module
 
 
@@ -51,7 +74,9 @@ def _chicago():
 
 
 def _leader_role_id():
-    return LEADER_ROLE_ID if LEADER_ROLE_ID is not None else _runtime_app().LEADER_ROLE_ID
+    return (
+        LEADER_ROLE_ID if LEADER_ROLE_ID is not None else _runtime_app().LEADER_ROLE_ID
+    )
 
 
 def _bot_role_id():
@@ -113,7 +138,9 @@ def _safe_create_task(coro, *, name=None):
         try:
             await coro
         except Exception:
-            _bg_log.warning("background task %s failed", name or "unnamed", exc_info=True)
+            _bg_log.warning(
+                "background task %s failed", name or "unnamed", exc_info=True
+            )
 
     return asyncio.get_event_loop().create_task(_wrapper(), name=name)
 
@@ -196,7 +223,7 @@ def _join_member_bits(members, formatter, limit=3):
 
 
 def _bare_tag(tag):
-    return (str(tag or "").strip().upper().lstrip("#"))
+    return str(tag or "").strip().upper().lstrip("#")
 
 
 def _format_relative_join_age(joined_date):
@@ -239,7 +266,11 @@ def _with_leader_ping(content):
 def _job_next_runs():
     items = []
     for job in _scheduler().get_jobs():
-        next_run = job.next_run_time.astimezone(_chicago()).strftime("%Y-%m-%d %I:%M %p CT") if job.next_run_time else "n/a"
+        next_run = (
+            job.next_run_time.astimezone(_chicago()).strftime("%Y-%m-%d %I:%M %p CT")
+            if job.next_run_time
+            else "n/a"
+        )
         items.append({"id": job.id, "next_run": next_run})
     return sorted(items, key=lambda item: item["id"])
 

@@ -40,7 +40,9 @@ def _card_mode_fields(card: dict) -> dict:
     how a card was deployed in a battle/deck — for that see `_played_as` in
     db/__init__.py.
     """
-    max_evolution_level = _card_mode_value(card, "maxEvolutionLevel", "max_evolution_level")
+    max_evolution_level = _card_mode_value(
+        card, "maxEvolutionLevel", "max_evolution_level"
+    )
     evolution_level = _card_mode_value(card, "evolutionLevel", "evolution_level")
 
     supports_evo = max_evolution_level in {1, 3}
@@ -65,8 +67,11 @@ def _card_mode_fields(card: dict) -> dict:
         "mode_status_label": f"{mode_label} unlocked" if mode_label else None,
     }
 
+
 @managed_connection
-def get_member_current_deck(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_member_current_deck(
+    tag: str, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     row = conn.execute(
         "SELECT cs.current_deck_json, NULL AS current_deck_support_cards_json, "
         "cs.observed_at AS fetched_at "
@@ -118,16 +123,18 @@ def _enrich_deck_cards(raw_cards, catalog: dict[int, dict]) -> list[dict]:
             continue
         card_id = raw.get("id")
         known = catalog.get(int(card_id)) if isinstance(card_id, int) else None
-        cards.append({
-            "id": card_id,
-            "name": raw.get("name") or (known or {}).get("name"),
-            "level": raw.get("level"),
-            "elixir_cost": raw.get("elixirCost")
-            if raw.get("elixirCost") is not None
-            else (known or {}).get("elixir_cost"),
-            "rarity": raw.get("rarity") or (known or {}).get("rarity"),
-            "card_type": (known or {}).get("card_type"),
-        })
+        cards.append(
+            {
+                "id": card_id,
+                "name": raw.get("name") or (known or {}).get("name"),
+                "level": raw.get("level"),
+                "elixir_cost": raw.get("elixirCost")
+                if raw.get("elixirCost") is not None
+                else (known or {}).get("elixir_cost"),
+                "rarity": raw.get("rarity") or (known or {}).get("rarity"),
+                "card_type": (known or {}).get("card_type"),
+            }
+        )
     return cards
 
 
@@ -164,12 +171,14 @@ def list_current_member_decks(
             continue
         if len(cards) != 8:
             continue
-        result.append({
-            "player_tag": row["player_tag"],
-            "player_name": row["player_name"],
-            "observed_at": row["observed_at"],
-            "cards": cards,
-        })
+        result.append(
+            {
+                "player_tag": row["player_tag"],
+                "player_name": row["player_name"],
+                "observed_at": row["observed_at"],
+                "cards": cards,
+            }
+        )
     return result
 
 
@@ -234,7 +243,7 @@ def list_deck_battle_history(
         for segment_index in range(segment_count):
             item = dict(row)
             item.pop("deck_json", None)
-            item["cards"] = cards[segment_index * 8:(segment_index + 1) * 8]
+            item["cards"] = cards[segment_index * 8 : (segment_index + 1) * 8]
             item["deck_segment"] = segment_index + 1
             item["series_deck_count"] = segment_count
             item["outcome_granularity"] = (
@@ -242,8 +251,6 @@ def list_deck_battle_history(
             )
             result.append(item)
     return result
-
-
 
 
 def _load_collection_cards(conn, tag: str):
@@ -262,18 +269,20 @@ def _load_collection_cards(conn, tag: str):
     cards = []
     for r in rows:
         fetched_at = max(fetched_at or "", r["observed_at"] or "")
-        cards.append({
-            "id": r["card_id"],
-            "name": r["name"] or f"card:{r['card_id']}",
-            "level": r["level"],
-            "maxLevel": r["max_level"],
-            "count": r["count"],
-            "rarity": r["rarity"],
-            "starLevel": r["star_level"],
-            "evolutionLevel": r["evolution_level"],
-            "maxEvolutionLevel": r["max_evolution_level"],
-            "elixirCost": r["elixir_cost"],
-        })
+        cards.append(
+            {
+                "id": r["card_id"],
+                "name": r["name"] or f"card:{r['card_id']}",
+                "level": r["level"],
+                "maxLevel": r["max_level"],
+                "count": r["count"],
+                "rarity": r["rarity"],
+                "starLevel": r["star_level"],
+                "evolutionLevel": r["evolution_level"],
+                "maxEvolutionLevel": r["max_evolution_level"],
+                "elixirCost": r["elixir_cost"],
+            }
+        )
     return fetched_at, cards
 
 
@@ -286,7 +295,11 @@ def _normalize_collection_card(raw_card: dict) -> dict:
             card["level"] = display_level
     max_level = card.get("maxLevel")
     api_max_level = card.get("api_max_level")
-    if "api_max_level" not in card and isinstance(max_level, int) and 0 < max_level <= 16:
+    if (
+        "api_max_level" not in card
+        and isinstance(max_level, int)
+        and 0 < max_level <= 16
+    ):
         card["api_max_level"] = max_level
         card["maxLevel"] = 16
     elif isinstance(api_max_level, int) and isinstance(max_level, int):
@@ -347,7 +360,9 @@ def _card_reference_for_collection(card: dict, *, card_type: str | None = None) 
     evolution_level = _card_mode_value(card, "evolutionLevel", "evolution_level")
     if evolution_level is not None:
         item["evolution_level"] = evolution_level
-    max_evolution_level = _card_mode_value(card, "maxEvolutionLevel", "max_evolution_level")
+    max_evolution_level = _card_mode_value(
+        card, "maxEvolutionLevel", "max_evolution_level"
+    )
     if max_evolution_level is not None:
         item["max_evolution_level"] = max_evolution_level
     if card.get("mode_label"):
@@ -360,14 +375,8 @@ def _card_reference_for_collection(card: dict, *, card_type: str | None = None) 
 
 
 def _collection_cards_by_rarity(cards: list[dict], support_cards: list[dict]) -> dict:
-    combined = [
-        (card, "card")
-        for card in (cards or [])
-        if card.get("name")
-    ] + [
-        (card, "support")
-        for card in (support_cards or [])
-        if card.get("name")
+    combined = [(card, "card") for card in (cards or []) if card.get("name")] + [
+        (card, "support") for card in (support_cards or []) if card.get("name")
     ]
     combined.sort(key=lambda item: _card_sort_key(item[0]))
 
@@ -384,8 +393,12 @@ def _collection_cards_by_rarity(cards: list[dict], support_cards: list[dict]) ->
     return grouped
 
 
-def _collection_summary_from_cards(cards: list[dict], support_cards: list[dict]) -> dict:
-    combined = [card for card in [*(cards or []), *(support_cards or [])] if card.get("name")]
+def _collection_summary_from_cards(
+    cards: list[dict], support_cards: list[dict]
+) -> dict:
+    combined = [
+        card for card in [*(cards or []), *(support_cards or [])] if card.get("name")
+    ]
     level_counts: dict[str, int] = {}
     rarity_counts: dict[str, int] = {}
     highest_level = None
@@ -419,7 +432,14 @@ def _collection_summary_from_cards(cards: list[dict], support_cards: list[dict])
 
 
 @managed_connection
-def get_member_card_collection(tag: str, limit: Optional[int] = None, min_level: Optional[int] = None, include_support: bool = True, rarity: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_member_card_collection(
+    tag: str,
+    limit: Optional[int] = None,
+    min_level: Optional[int] = None,
+    include_support: bool = True,
+    rarity: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
     fetched_at, raw_cards = _load_collection_cards(conn, tag)
     if not raw_cards:
         return None
@@ -434,7 +454,9 @@ def get_member_card_collection(tag: str, limit: Optional[int] = None, min_level:
 
     if isinstance(min_level, int):
         cards = [card for card in cards if (card.get("level") or 0) >= min_level]
-        support_cards = [card for card in support_cards if (card.get("level") or 0) >= min_level]
+        support_cards = [
+            card for card in support_cards if (card.get("level") or 0) >= min_level
+        ]
 
     cards.sort(key=_card_sort_key)
     support_cards.sort(key=_card_sort_key)
@@ -445,11 +467,13 @@ def get_member_card_collection(tag: str, limit: Optional[int] = None, min_level:
     rarity_key = _normalize_rarity_filter(rarity)
     if rarity_key:
         cards = [
-            card for card in cards
+            card
+            for card in cards
             if (_normalize_rarity_filter(card.get("rarity")) or "unknown") == rarity_key
         ]
         support_cards = [
-            card for card in support_cards
+            card
+            for card in support_cards
             if (_normalize_rarity_filter(card.get("rarity")) or "unknown") == rarity_key
         ]
     summary = _collection_summary_from_cards(cards, support_cards)
@@ -497,6 +521,7 @@ def _ready_required(card: dict) -> Optional[int]:
     spurious None), mispricing ~75% of cards and hiding ready-to-upgrade cards
     clan-wide. Use api_level, falling back to level only if it's absent."""
     from cr_knowledge import cards_required_to_upgrade
+
     if _is_max(card):
         return None
     level = card.get("api_level")
@@ -593,7 +618,9 @@ def _king_tower_level(conn: sqlite3.Connection, member_tag: str) -> Optional[int
 
 
 @managed_connection
-def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_member_card_profile(
+    tag: str, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     """Compact card-collection digest. Always small (~3KB), always answers
     broad questions ("how am I doing on cards", "what should I upgrade")
     without sending raw card lists.
@@ -607,14 +634,20 @@ def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None)
     if snapshot is None:
         return None
     king_tower = _king_tower_level(conn, tag)
-    all_cards = [c for c in snapshot["cards"] + snapshot["support_cards"] if c.get("name")]
+    all_cards = [
+        c for c in snapshot["cards"] + snapshot["support_cards"] if c.get("name")
+    ]
 
     # Aggregate counts.
     totals = {
         "owned": len(all_cards),
         "max_level": sum(1 for c in all_cards if _is_max(c)),
-        "level_13_plus": sum(1 for c in all_cards if isinstance(c.get("level"), int) and c["level"] >= 13),
-        "level_14_plus": sum(1 for c in all_cards if isinstance(c.get("level"), int) and c["level"] >= 14),
+        "level_13_plus": sum(
+            1 for c in all_cards if isinstance(c.get("level"), int) and c["level"] >= 13
+        ),
+        "level_14_plus": sum(
+            1 for c in all_cards if isinstance(c.get("level"), int) and c["level"] >= 14
+        ),
     }
 
     by_rarity: dict[str, dict] = {}
@@ -624,7 +657,9 @@ def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None)
         bucket["owned"] += 1
         if _is_max(card):
             bucket["maxed"] += 1
-        elif _ready_required(card) is not None and _card_count(card) >= _ready_required(card):
+        elif _ready_required(card) is not None and _card_count(card) >= _ready_required(
+            card
+        ):
             bucket["ready"] += 1
 
     modes = {
@@ -636,7 +671,11 @@ def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None)
 
     # Top lists. Keep entries minimal to stay under 3KB total.
     def _slim_for_digest(card: dict, *, fields: list[str]) -> dict:
-        out = {"name": card.get("name"), "level": card.get("level"), "rarity": card.get("rarity")}
+        out = {
+            "name": card.get("name"),
+            "level": card.get("level"),
+            "rarity": card.get("rarity"),
+        }
         for field in fields:
             value = card.get(field)
             if value is not None:
@@ -649,12 +688,20 @@ def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None)
         key=lambda c: (-_card_count(c), c.get("name") or ""),
     )[:5]
     closest_top = sorted(
-        (c for c in enriched if not _is_max(c) and isinstance(c.get("levels_to_max"), int)),
+        (
+            c
+            for c in enriched
+            if not _is_max(c) and isinstance(c.get("levels_to_max"), int)
+        ),
         key=lambda c: (c["levels_to_max"], -(c.get("level") or 0), c.get("name") or ""),
     )[:5]
     if king_tower is not None:
         gap_top = sorted(
-            (c for c in enriched if isinstance(c.get("king_tower_gap"), int) and c["king_tower_gap"] > 0),
+            (
+                c
+                for c in enriched
+                if isinstance(c.get("king_tower_gap"), int) and c["king_tower_gap"] > 0
+            ),
             key=lambda c: (-c["king_tower_gap"], c.get("name") or ""),
         )[:5]
     else:
@@ -669,15 +716,28 @@ def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None)
         "by_rarity": by_rarity,
         "modes": modes,
         "ready_to_upgrade_top": [
-            _slim_for_digest(c, fields=["count", "cards_required_for_next_level", "king_tower_gap"])
+            _slim_for_digest(
+                c, fields=["count", "cards_required_for_next_level", "king_tower_gap"]
+            )
             for c in ready_top
         ],
         "closest_to_max_top": [
-            _slim_for_digest(c, fields=["levels_to_max", "count", "cards_required_for_next_level", "ready_to_upgrade", "king_tower_gap"])
+            _slim_for_digest(
+                c,
+                fields=[
+                    "levels_to_max",
+                    "count",
+                    "cards_required_for_next_level",
+                    "ready_to_upgrade",
+                    "king_tower_gap",
+                ],
+            )
             for c in closest_top
         ],
         "biggest_king_tower_gaps_top": [
-            _slim_for_digest(c, fields=["king_tower_gap", "levels_to_max", "ready_to_upgrade"])
+            _slim_for_digest(
+                c, fields=["king_tower_gap", "levels_to_max", "ready_to_upgrade"]
+            )
             for c in gap_top
         ],
     }
@@ -710,7 +770,9 @@ def _filter_required_response() -> dict:
 
 def _matches_filter(card: dict, filt: dict, *, war_card_names: set[str]) -> bool:
     if filt.get("rarity"):
-        if (_normalize_rarity_filter(card.get("rarity")) or "unknown") != filt["rarity"]:
+        if (_normalize_rarity_filter(card.get("rarity")) or "unknown") != filt[
+            "rarity"
+        ]:
             return False
     if filt.get("name"):
         target = filt["name"].lower()
@@ -757,6 +819,7 @@ def _war_card_names(conn: sqlite3.Connection, member_tag: str) -> tuple[set[str]
     alongside so lookup_member_cards can size the reconstruction honestly.
     """
     from storage.war_analytics import reconstruct_member_war_decks
+
     result = reconstruct_member_war_decks(member_tag, conn=conn)
     names: set[str] = set()
     decks = result.get("decks", []) or []
@@ -805,8 +868,12 @@ def list_card_owners(
     owners = [dict(r) for r in rows]
     if maxed_only:
         owners = [o for o in owners if (o["display_level"] or 0) >= 16]
-    return {"card": name, "maxed_only": maxed_only, "count": len(owners),
-            "owners": owners}
+    return {
+        "card": name,
+        "maxed_only": maxed_only,
+        "count": len(owners),
+        "owners": owners,
+    }
 
 
 @managed_connection
@@ -844,7 +911,9 @@ def lookup_member_cards(
         deck = get_member_current_deck(tag, conn=conn)
         if not deck:
             return {"error": "no_current_deck", "member_tag": _canon_tag(tag)}
-        deck_cards = [_enrich_card_for_lookup(c, king_tower) for c in deck.get("cards", [])]
+        deck_cards = [
+            _enrich_card_for_lookup(c, king_tower) for c in deck.get("cards", [])
+        ]
         return {
             "fetched_at": deck.get("fetched_at"),
             "filter_applied": {"deck": True},
@@ -858,8 +927,12 @@ def lookup_member_cards(
     if filt.get("mode") == "war":
         war_names, war_coverage = _war_card_names(conn, tag)
 
-    all_cards = [c for c in snapshot["cards"] + snapshot["support_cards"] if c.get("name")]
-    matching = [c for c in all_cards if _matches_filter(c, filt, war_card_names=war_names)]
+    all_cards = [
+        c for c in snapshot["cards"] + snapshot["support_cards"] if c.get("name")
+    ]
+    matching = [
+        c for c in all_cards if _matches_filter(c, filt, war_card_names=war_names)
+    ]
 
     # Sort: ready-to-upgrade first prioritizes by count surplus; otherwise by level desc.
     if filt.get("ready_to_upgrade"):
@@ -867,7 +940,9 @@ def lookup_member_cards(
     elif filt.get("near_ready"):
         matching.sort(key=lambda c: -(_card_count(c) / max(_ready_required(c) or 1, 1)))
     elif filt.get("near_max"):
-        matching.sort(key=lambda c: (c.get("levels_to_max") or 99, -(c.get("level") or 0)))
+        matching.sort(
+            key=lambda c: (c.get("levels_to_max") or 99, -(c.get("level") or 0))
+        )
     else:
         matching.sort(key=_card_sort_key)
 
@@ -896,7 +971,9 @@ def lookup_member_cards(
 
 
 @managed_connection
-def get_member_signature_cards(tag: str, mode_scope: str = "overall", conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_member_signature_cards(
+    tag: str, mode_scope: str = "overall", conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     # v5.1: usage comes from battle_events deck_json (last 40 battles).
     rows = conn.execute(
         "SELECT deck_json, battle_time FROM battle_events "
@@ -927,8 +1004,11 @@ def get_member_signature_cards(tag: str, mode_scope: str = "overall", conn: Opti
         "cards": cards,
     }
 
+
 @managed_connection
-def get_members_with_most_level_16_cards(limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_members_with_most_level_16_cards(
+    limit: int = 10, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     member_rows = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.clan_rank, cs.role "
         "FROM players m "
@@ -976,7 +1056,9 @@ def get_members_with_most_level_16_cards(limit: int = 10, conn: Optional[sqlite3
 
 
 @managed_connection
-def get_clan_favourite_card_counts(limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_clan_favourite_card_counts(
+    limit: int = 10, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     # v5.1: favourite card lives in the profile baseline payload.
     import json as _json
 
@@ -990,7 +1072,12 @@ def get_clan_favourite_card_counts(limit: int = 10, conn: Optional[sqlite3.Conne
             payload = _json.loads(r["payload_json"])
         except (TypeError, ValueError):
             continue
-        name = payload.get("favourite_card") or payload.get("currentFavouriteCard", {}).get("name") if isinstance(payload.get("currentFavouriteCard"), dict) else payload.get("favourite_card")
+        name = (
+            payload.get("favourite_card")
+            or payload.get("currentFavouriteCard", {}).get("name")
+            if isinstance(payload.get("currentFavouriteCard"), dict)
+            else payload.get("favourite_card")
+        )
         if name:
             counts[name] = counts.get(name, 0) + 1
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].lower()))
@@ -998,33 +1085,47 @@ def get_clan_favourite_card_counts(limit: int = 10, conn: Optional[sqlite3.Conne
 
 
 @managed_connection
-def get_clan_most_common_maxed_cards(limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    member_tags = [r["player_tag"] for r in conn.execute(
-        "SELECT m.player_tag FROM players m WHERE EXISTS ("
-        "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
-    ).fetchall()]
+def get_clan_most_common_maxed_cards(
+    limit: int = 10, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
+    member_tags = [
+        r["player_tag"]
+        for r in conn.execute(
+            "SELECT m.player_tag FROM players m WHERE EXISTS ("
+            "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
+        ).fetchall()
+    ]
     rows = []
     for _tag in member_tags:
         _fetched, _cards = _load_collection_cards(conn, _tag)
-        rows.append({"cards_json": json.dumps(_cards), "support_cards_json": "[]", "_tag": _tag})
+        rows.append(
+            {"cards_json": json.dumps(_cards), "support_cards_json": "[]", "_tag": _tag}
+        )
     card_counts: dict[str, int] = {}
     for row in rows:
-        for raw in [*json.loads(row["cards_json"] or "[]"), *json.loads(row["support_cards_json"] or "[]")]:
+        for raw in [
+            *json.loads(row["cards_json"] or "[]"),
+            *json.loads(row["support_cards_json"] or "[]"),
+        ]:
             if not isinstance(raw, dict) or not raw.get("name"):
                 continue
             if _card_level(raw) == 16:
                 name = raw["name"]
                 card_counts[name] = card_counts.get(name, 0) + 1
     ranked = sorted(card_counts.items(), key=lambda item: (-item[1], item[0].lower()))
-    return [{"card_name": name, "member_count": count} for name, count in ranked[:limit]]
+    return [
+        {"card_name": name, "member_count": count} for name, count in ranked[:limit]
+    ]
 
 
 @managed_connection
-def get_clan_recently_played_cards(days: int = 14, limit: int = 20, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_clan_recently_played_cards(
+    days: int = 14, limit: int = 20, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     """Cards that appeared most often in clan members' recent battle decks."""
-    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
-        "%Y%m%dT%H%M%S.000Z"
-    )
+    cutoff = (
+        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    ).strftime("%Y%m%dT%H%M%S.000Z")
     rows = conn.execute(
         "SELECT bf.deck_json "
         "FROM battle_events bf "
@@ -1042,18 +1143,28 @@ def get_clan_recently_played_cards(days: int = 14, limit: int = 20, conn: Option
 
 
 @managed_connection
-def get_clan_rare_maxed_cards(max_owners: int = 2, limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    member_tags = [r["player_tag"] for r in conn.execute(
-        "SELECT m.player_tag FROM players m WHERE EXISTS ("
-        "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
-    ).fetchall()]
+def get_clan_rare_maxed_cards(
+    max_owners: int = 2, limit: int = 10, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
+    member_tags = [
+        r["player_tag"]
+        for r in conn.execute(
+            "SELECT m.player_tag FROM players m WHERE EXISTS ("
+            "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
+        ).fetchall()
+    ]
     rows = []
     for _tag in member_tags:
         _fetched, _cards = _load_collection_cards(conn, _tag)
-        rows.append({"cards_json": json.dumps(_cards), "support_cards_json": "[]", "_tag": _tag})
+        rows.append(
+            {"cards_json": json.dumps(_cards), "support_cards_json": "[]", "_tag": _tag}
+        )
     card_counts: dict[str, int] = {}
     for row in rows:
-        for raw in [*json.loads(row["cards_json"] or "[]"), *json.loads(row["support_cards_json"] or "[]")]:
+        for raw in [
+            *json.loads(row["cards_json"] or "[]"),
+            *json.loads(row["support_cards_json"] or "[]"),
+        ]:
             if not isinstance(raw, dict) or not raw.get("name"):
                 continue
             if _card_level(raw) == 16:
@@ -1065,13 +1176,22 @@ def get_clan_rare_maxed_cards(max_owners: int = 2, limit: int = 10, conn: Option
 
 
 @managed_connection
-def get_clan_overlooked_cards(min_owners: int = 3, min_level: int = 14, battle_days: int = 14, limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_clan_overlooked_cards(
+    min_owners: int = 3,
+    min_level: int = 14,
+    battle_days: int = 14,
+    limit: int = 10,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     """Cards that many members have leveled up but almost nobody actually plays."""
     # Step 1: cards owned at min_level+ across the clan, with owner counts
-    member_tags = [r["player_tag"] for r in conn.execute(
-        "SELECT m.player_tag FROM players m WHERE EXISTS ("
-        "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
-    ).fetchall()]
+    member_tags = [
+        r["player_tag"]
+        for r in conn.execute(
+            "SELECT m.player_tag FROM players m WHERE EXISTS ("
+            "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
+        ).fetchall()
+    ]
     owned: dict[str, int] = {}
     for _tag in member_tags:
         _fetched, _cards = _load_collection_cards(conn, _tag)
@@ -1083,9 +1203,9 @@ def get_clan_overlooked_cards(min_owners: int = 3, min_level: int = 14, battle_d
                 owned[raw["name"]] = owned.get(raw["name"], 0) + 1
 
     # Step 2: cards actually played in recent battles
-    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=battle_days)).strftime(
-        "%Y%m%dT%H%M%S.000Z"
-    )
+    cutoff = (
+        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=battle_days)
+    ).strftime("%Y%m%dT%H%M%S.000Z")
     battle_rows = conn.execute(
         "SELECT bf.deck_json "
         "FROM battle_events bf "
@@ -1106,4 +1226,7 @@ def get_clan_overlooked_cards(min_owners: int = 3, min_level: int = 14, battle_d
         if count >= min_owners and name not in played
     ]
     overlooked.sort(key=lambda item: (-item[1], item[0].lower()))
-    return [{"card_name": name, "owners_at_level": count} for name, count in overlooked[:limit]]
+    return [
+        {"card_name": name, "owners_at_level": count}
+        for name, count in overlooked[:limit]
+    ]

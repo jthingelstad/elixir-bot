@@ -215,7 +215,9 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
             if _count_admission(counters, result, contract_rejections):
                 race_payload = raw_race_payload
         if clan_payload:
-            ensure_clan(conn, HOME_CLAN, clan_payload.get("name"), now_iso, is_home=True)
+            ensure_clan(
+                conn, HOME_CLAN, clan_payload.get("name"), now_iso, is_home=True
+            )
         roster_tags = []
         for m in (clan_payload or {}).get("memberList", []):
             tag = canon_tag(m.get("tag"))
@@ -231,10 +233,13 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
             # finding). A current roster member IS an open membership by
             # definition; the roster-diff emitter still owns the
             # member_joined event and skips its insert when a row exists.
-            if conn.execute(
-                "SELECT 1 FROM clan_memberships WHERE player_tag = ? AND left_at IS NULL",
-                (tag,),
-            ).fetchone() is None:
+            if (
+                conn.execute(
+                    "SELECT 1 FROM clan_memberships WHERE player_tag = ? AND left_at IS NULL",
+                    (tag,),
+                ).fetchone()
+                is None
+            ):
                 conn.execute(
                     "INSERT INTO clan_memberships (player_tag, clan_tag, joined_at, join_source) "
                     "VALUES (?, ?, ?, 'backfill')",
@@ -286,7 +291,9 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
         emitted = 0
         if clan_payload:
             for aspect, aspect_payload in project_clan_aspects(clan_payload).items():
-                emitted += emit(conn, "clan", HOME_CLAN, aspect, aspect_payload, now_iso)
+                emitted += emit(
+                    conn, "clan", HOME_CLAN, aspect, aspect_payload, now_iso
+                )
         if race_payload and clock and clock.season_id is not None:
             race_aspect = project_race_aspect(race_payload, clock.season_id)
             emitted += emit(conn, "riverrace", HOME_CLAN, "race", race_aspect, now_iso)
@@ -302,6 +309,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
         # emits member_left_verified — the held goodbye the brain may now narrate.
         # A confirmed KICK emits nothing. Raw member_left is no longer a hard-post.
         from engine.emitters.clan import emit_verified_leave_events
+
         emitted += emit_verified_leave_events(conn, HOME_CLAN, now_iso)
         # Award-race lead changes (War Champ / Rookie MVP) → clan_events, so the
         # season-long competitions are event-driven. Fail-soft: an awards read
@@ -309,15 +317,26 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
         if clock and clock.season_id is not None:
             try:
                 import db as _db
+
                 races = _db.get_award_races(conn=conn)
                 champ = races.get("war_champ_leader")
                 rookie = (races.get("rookie_mvp") or [None])[0]
                 payload = {
                     "season_id": clock.season_id,
-                    "war_champ_leader": {k: champ.get(k) for k in ("tag", "name", "points")} if champ else None,
-                    "rookie_mvp_leader": {k: rookie.get(k) for k in ("tag", "name", "points")} if rookie else None,
+                    "war_champ_leader": {
+                        k: champ.get(k) for k in ("tag", "name", "points")
+                    }
+                    if champ
+                    else None,
+                    "rookie_mvp_leader": {
+                        k: rookie.get(k) for k in ("tag", "name", "points")
+                    }
+                    if rookie
+                    else None,
                 }
-                emitted += emit(conn, "clan", HOME_CLAN, "award_races", payload, now_iso)
+                emitted += emit(
+                    conn, "clan", HOME_CLAN, "award_races", payload, now_iso
+                )
             except Exception:
                 log.warning("emit award_races failed (non-fatal)", exc_info=True)
         # Game-level stream: new /events + event badges from the sentinel store
@@ -326,6 +345,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
         # cursor + dedup keys make a retry next tick safe.
         try:
             from engine.emitters.game import emit_game_from_sentinel
+
             emitted += emit_game_from_sentinel(conn, now_iso)
         except Exception:
             log.exception("game emit from sentinel failed; retrying next tick")
@@ -346,7 +366,9 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
                 conn, tag, profile, roster_by_tag.get(tag), now_iso
             )
             if profile and profile.get("cards"):
-                projections.refresh_card_collection(conn, tag, profile.get("cards") or [], now_iso)
+                projections.refresh_card_collection(
+                    conn, tag, profile.get("cards") or [], now_iso
+                )
             if tag in battlelogs:
                 projections.refresh_form(conn, tag, now=now_iso)
                 projections.refresh_rollups(conn, tag, today)
@@ -361,26 +383,32 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
         transitions = management.run_tick_evaluators(conn, now=now_iso)
         counters["kick_transitions"] = len(transitions)
         withdrawals = management.withdraw_stale_actions(conn, now=now_iso)
-        counters["management_withdrawals"] = sum(int(w.get("count", 1)) for w in withdrawals)
+        counters["management_withdrawals"] = sum(
+            int(w.get("count", 1)) for w in withdrawals
+        )
         # Propagate terminal leader-action state onto its backing decision case:
         # a done kick/promotion/demotion resolves its review the moment the leader
         # decides — before the member even leaves the roster. Nothing wired this
         # before, so completed actions left their cases OPEN and they resurfaced
         # as stale recommendations to the awareness brain.
         from storage.cases import (
-            reconcile_departed_member_cases,
             expire_departure_verification_cards,
             raise_departure_verification_cards,
+            reconcile_departed_member_cases,
             reconcile_uncorroborated_member_cases,
             sync_terminal_leader_action_cases,
         )
+
         synced_cases = sync_terminal_leader_action_cases(now=now_iso, conn=conn)
         counters["action_cases_synced"] = len(synced_cases)
         if synced_cases:
             log.info(
                 "synced %d decision case(s) from terminal leader-actions: %s",
                 len(synced_cases),
-                ", ".join(f"{c['target_player_name']}({c['case_type']}:{c['outcome']})" for c in synced_cases),
+                ", ".join(
+                    f"{c['target_player_name']}({c['case_type']}:{c['outcome']})"
+                    for c in synced_cases
+                ),
             )
         # Backstop: close any member-review case whose subject has left but whose
         # departure wasn't already resolved above (organic leave, manual clear).
@@ -391,7 +419,10 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
             log.info(
                 "reconciled %d member-review case(s) for departed members: %s",
                 len(departed_cases),
-                ", ".join(f"{c['target_player_name']}({c['case_type']}:{c['outcome']})" for c in departed_cases),
+                ", ".join(
+                    f"{c['target_player_name']}({c['case_type']}:{c['outcome']})"
+                    for c in departed_cases
+                ),
             )
         # Backstop 2: dismiss in-clan member-review cases the engine no longer
         # corroborates (state=none past the grace window, no open card) — the
@@ -404,7 +435,10 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
             log.info(
                 "dismissed %d uncorroborated member-review case(s): %s",
                 len(uncorroborated),
-                ", ".join(f"{c['target_player_name']}({c['case_type']})" for c in uncorroborated),
+                ", ".join(
+                    f"{c['target_player_name']}({c['case_type']})"
+                    for c in uncorroborated
+                ),
             )
         # Departure verification: a leave and a kick are different signals the
         # roster diff can't tell apart. Raise a #leader-actions card for recent
@@ -450,7 +484,8 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
                     target_player_tag=r["player_tag"],
                     target_player_name=r.get("player_name"),
                     objective=f"Review kick candidacy for {r.get('player_name') or r['player_tag']}",
-                    rationale=r.get("rationale") or "Re-nominated after decline cooldown.",
+                    rationale=r.get("rationale")
+                    or "Re-nominated after decline cooldown.",
                     source_signal_key=f"engine:kick-renominate:{r['player_tag']}:{now_iso}",
                     source_signal_type="engine_kick_state",
                     conn=conn,

@@ -57,7 +57,9 @@ def test_welcome_relay_has_copy_controls_but_no_defer():
 
 
 def test_war_nudge_action_type_is_not_registered():
-    assert "war_nudge_recommendation" not in leader_action_ui.leader_action_type_choices()
+    assert (
+        "war_nudge_recommendation" not in leader_action_ui.leader_action_type_choices()
+    )
 
 
 def test_role_action_uses_multi_row_decision_copy_and_note_controls_no_defer():
@@ -80,7 +82,12 @@ def test_terminal_action_has_no_controls():
     view = LeaderActionView(_action("promotion_recommendation", status=db.ACTION_DONE))
 
     assert view.children == []
-    assert leader_action_view_for(_action("promotion_recommendation", status=db.ACTION_DONE)) is None
+    assert (
+        leader_action_view_for(
+            _action("promotion_recommendation", status=db.ACTION_DONE)
+        )
+        is None
+    )
 
 
 def test_embed_marks_test_cards_explicitly():
@@ -128,7 +135,9 @@ def test_restore_refreshes_open_card_components():
     channel = SimpleNamespace(fetch_message=AsyncMock(return_value=message))
     bot = SimpleNamespace(get_channel=Mock(return_value=channel), add_view=Mock())
 
-    with patch.object(leader_action_ui.db, "list_leader_actions", return_value=[action]):
+    with patch.object(
+        leader_action_ui.db, "list_leader_actions", return_value=[action]
+    ):
         restored = asyncio.run(leader_action_ui.restore_leader_action_views(bot))
 
     assert restored == 1
@@ -153,7 +162,9 @@ def test_restore_refreshes_terminal_cards_without_components():
     def fake_list_leader_actions(*, status=None, limit=50):
         return [] if status == db.ACTION_PROPOSED else [action]
 
-    with patch.object(leader_action_ui.db, "list_leader_actions", side_effect=fake_list_leader_actions):
+    with patch.object(
+        leader_action_ui.db, "list_leader_actions", side_effect=fake_list_leader_actions
+    ):
         restored = asyncio.run(leader_action_ui.restore_leader_action_views(bot))
 
     assert restored == 0

@@ -15,8 +15,7 @@
         <dt>battles</dt><dd>{{ latest_tick.get('battles_ingested', '–') }}</dd>
         <dt>events emitted</dt><dd>{{ latest_tick.get('events_emitted', '–') }}</dd>
         <dt>projected</dt><dd>{{ latest_tick.get('players_projected', '–') }}</dd>
-        <dt>posted / suppressed</dt><dd>{{ latest_tick.get('recognize_celebrate_posted', 0) }} / {{ latest_tick.get('recognize_celebrate_suppressed', 0) }}</dd>
-        <dt>delivered</dt><dd>{{ latest_tick.get('deliver_delivered', 0) }} ({{ latest_tick.get('deliver_failed', 0) }} failed)</dd>
+        <dt>managed</dt><dd>{{ latest_tick.get('management_actions', 0) }} actions</dd>
       </dl>
       {% for k, v in latest_tick.items() if k.endswith('_error') %}
         <div class="badge bad" title="{{ v }}">{{ k }}</div>
@@ -59,20 +58,19 @@
   </div>
 
   <div class="card">
-    <h2 style="margin-top:0;">Legacy intents (offline)</h2>
+    <h2 style="margin-top:0;">Awareness (24h)</h2>
     <dl class="kv">
-      <dt>pending</dt><dd>{{ intents.pending }}</dd>
-      <dt>failed</dt><dd class="{{ 'err' if intents.failed else '' }}">{{ intents.failed }}</dd>
-      <dt>fulfilled</dt><dd>{{ intents.fulfilled }}</dd>
-      <dt>expired</dt><dd>{{ intents.expired }}</dd>
+      <dt>decisions</dt><dd>{{ awareness.thoughts_24h }}</dd>
+      <dt>confirmed posts</dt><dd>{{ awareness.posts_24h }}</dd>
+      <dt>failed turns</dt><dd class="{{ 'err' if awareness.failures_24h else '' }}">{{ awareness.failures_24h }}</dd>
+      <dt>latest decision</dt><dd>{% if awareness.latest_thought %}L{{ awareness.latest_thought.loop_number }} · {{ awareness.latest_thought.at | reltime }}{% else %}–{% endif %}</dd>
     </dl>
-    <p style="margin:.5rem 0 0;"><a href="/recognition">decision trail →</a></p>
+    <p style="margin:.5rem 0 0;"><a href="/awareness">awareness trail →</a></p>
   </div>
 
   <div class="card">
     <h2 style="margin-top:0;">Errors (24h)</h2>
     <dl class="kv">
-      <dt>legacy failed/expired</dt><dd>{{ errors.failed_intents_24h }}</dd>
       <dt>prompt failures</dt><dd class="{{ 'err' if errors.prompt_failures_24h else '' }}">{{ errors.prompt_failures_24h }}</dd>
     </dl>
     {% for job, err in errors.job_errors.items() %}

@@ -10,7 +10,7 @@ not an idempotence failure merely because the implementation improved.
 
 Pass 2 is the GATE: after clearing baselines again, the exact same code and
 payloads must produce ZERO additional events, battles, legacy ledger claims,
-or communication intents. Because every dedup key is derived from payload
+or awareness post receipts. Because every dedup key is derived from payload
 content + observation time, any second-pass delta is a current-code defect:
 
     first payload per (entity, aspect)  -> re-seeds the baseline (first sight
@@ -45,6 +45,8 @@ _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _REPO)
 
 EVENT_TABLES = ("player_events", "clan_events", "war_events")
+
+
 def snapshot(live_path: str, scratch_path: str) -> None:
     """Consistent copy while the bot is live (WAL) — sqlite backup API."""
     src = sqlite3.connect(f"file:{live_path}?mode=ro", uri=True)
@@ -67,10 +69,16 @@ def engine_go_live(conn) -> str | None:
 
 
 def counts(conn) -> dict:
-    c = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in EVENT_TABLES}
-    c["battle_events"] = conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0]
+    c = {
+        t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in EVENT_TABLES
+    }
+    c["battle_events"] = conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[
+        0
+    ]
     c["ledger"] = conn.execute("SELECT COUNT(*) FROM recognition_ledger").fetchone()[0]
-    c["intents"] = conn.execute("SELECT COUNT(*) FROM communication_intents").fetchone()[0]
+    c["awareness_posts"] = conn.execute(
+        "SELECT COUNT(*) FROM awareness_posts"
+    ).fetchone()[0]
     return c
 
 
@@ -101,11 +109,20 @@ def print_event_deltas(conn, rowid_mark: dict) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--live-db", default=os.path.join(_REPO, "elixir-v51.db"))
-    ap.add_argument("--days", type=int, default=None,
-                    help="limit the replay window (default: everything since go-live)")
-    ap.add_argument("--scratch-dir", default=None,
-                    help="where the scratch copy lives (default: a tempdir)")
-    ap.add_argument("--keep", action="store_true", help="keep the scratch DB for inspection")
+    ap.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="limit the replay window (default: everything since go-live)",
+    )
+    ap.add_argument(
+        "--scratch-dir",
+        default=None,
+        help="where the scratch copy lives (default: a tempdir)",
+    )
+    ap.add_argument(
+        "--keep", action="store_true", help="keep the scratch DB for inspection"
+    )
     ap.add_argument("--skip-season-close", action="store_true")
     args = ap.parse_args()
 
@@ -181,7 +198,9 @@ def main() -> int:
 
     print("\n=== IDEMPOTENCE DELTAS (must all be zero) ===")
     for key in before:
-        print(f"  {key:16s} {before[key]:7d} -> {after[key]:7d}  (+{after[key] - before[key]})")
+        print(
+            f"  {key:16s} {before[key]:7d} -> {after[key]:7d}  (+{after[key] - before[key]})"
+        )
 
     new_events = sum(after[t] - before[t] for t in EVENT_TABLES)
     if new_events:
@@ -192,7 +211,9 @@ def main() -> int:
     gates["second-pass new events == 0"] = new_events == 0
     gates["new battle rows == 0"] = after["battle_events"] == before["battle_events"]
     gates["new legacy ledger claims == 0"] = after["ledger"] == before["ledger"]
-    gates["new legacy intents == 0"] = after["intents"] == before["intents"]
+    gates["new awareness posts == 0"] = (
+        after["awareness_posts"] == before["awareness_posts"]
+    )
     dupes = conn.execute(
         "SELECT COUNT(*) - COUNT(DISTINCT recognition_key) FROM recognition_ledger"
     ).fetchone()[0]
@@ -220,9 +241,14 @@ def main() -> int:
             conn.commit()
             print(f"\nseason-close rehearsal (open season {open_season[0]})...")
             proc = subprocess.run(
-                [sys.executable, os.path.join(_REPO, "scripts/migrate_v51/rehearse_season_close.py"),
-                 scratch],
-                capture_output=True, text=True, cwd=_REPO,
+                [
+                    sys.executable,
+                    os.path.join(_REPO, "scripts/migrate_v51/rehearse_season_close.py"),
+                    scratch,
+                ],
+                capture_output=True,
+                text=True,
+                cwd=_REPO,
             )
             fails = [ln for ln in proc.stdout.splitlines() if "[FAIL]" in ln]
             passes = [ln for ln in proc.stdout.splitlines() if "[PASS]" in ln]
@@ -241,10 +267,19 @@ def main() -> int:
     # caught here as well as in the suite (confidence plan Phases 1 & 3).
     print("\nconfidence tests (entrypoints, lanes, pipeline, cold-start)...")
     ct = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q",
-         "tests/test_entrypoints_smoke.py", "tests/test_lane_registration.py",
-         "tests/test_pipeline_integration.py", "tests/test_cold_start_tick.py"],
-        capture_output=True, text=True, cwd=_REPO,
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "tests/test_entrypoints_smoke.py",
+            "tests/test_lane_registration.py",
+            "tests/test_pipeline_integration.py",
+            "tests/test_cold_start_tick.py",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=_REPO,
     )
     gates["confidence tests"] = ct.returncode == 0
     if ct.returncode != 0:

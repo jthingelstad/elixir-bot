@@ -1,6 +1,5 @@
 from agent.factual_admission import admit_structured_response
 
-
 FACTS = {
     "is_colosseum_week": True,
     "finish_line": None,
@@ -29,7 +28,10 @@ def test_bad_response_gets_one_constrained_repair():
 
     def repair(response, findings, facts):
         assert findings and facts["finish_line"] is None
-        return {**response, "content": "Colosseum has no finish line; every battle counts."}
+        return {
+            **response,
+            "content": "Colosseum has no finish line; every battle counts.",
+        }
 
     result, trace = admit_structured_response(original, FACTS, repair_fn=repair)
     assert trace["decision"] == "repaired"

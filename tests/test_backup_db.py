@@ -1,5 +1,6 @@
 """Backup safety: the destination (often iCloud) must only ever receive a
 complete .gz — never temp turds, even if interrupted (live bug 2026-07-05)."""
+
 import gzip
 import sqlite3
 

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from typing import Iterable
 
-
 ROUTES: list[dict] = [
     {
         "key": "help",
@@ -279,8 +278,11 @@ def help_routes_for_workflow(workflow: str) -> list[dict]:
     """Routes worth showing in a user-facing help report for this workflow."""
     excluded = {"not_for_bot", "llm_chat"}
     return [
-        r for r in ROUTES
-        if workflow in r["workflows"] and r["key"] not in excluded and r.get("help_summary")
+        r
+        for r in ROUTES
+        if workflow in r["workflows"]
+        and r["key"] not in excluded
+        and r.get("help_summary")
     ]
 
 
@@ -293,7 +295,9 @@ def router_route_summaries(workflows: Iterable[str] | None = None) -> str:
             continue
         modes = r.get("mode_choices")
         mode_note = f" (modes: {', '.join(modes)})" if modes else ""
-        mention_note = " — requires bot to be mentioned" if r.get("requires_mention") else ""
+        mention_note = (
+            " — requires bot to be mentioned" if r.get("requires_mention") else ""
+        )
         examples = "; ".join(f'"{e}"' for e in r["examples"][:4])
         lines.append(
             f"- **{r['key']}** — {r['label']}{mode_note}{mention_note}\n"

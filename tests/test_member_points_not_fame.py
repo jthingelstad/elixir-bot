@@ -11,6 +11,7 @@ leak "fame" onto individual members:
 If either regresses to a member `fame`/`total_fame` key, the bot will once again
 tell a player "you have N fame," which is wrong.
 """
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -126,13 +127,26 @@ def _live_projection(participants):
 
 def test_engagement_day_state_keys_members_as_points():
     participants = {
-        "#A": {"name": "Alpha", "fame": 300, "repair_points": 10,
-               "boat_attacks": 2, "decks_used": 8, "decks_used_today": 4},
-        "#B": {"name": "Bravo", "fame": 150, "repair_points": 5,
-               "boat_attacks": 1, "decks_used": 4, "decks_used_today": 0},
+        "#A": {
+            "name": "Alpha",
+            "fame": 300,
+            "repair_points": 10,
+            "boat_attacks": 2,
+            "decks_used": 8,
+            "decks_used_today": 4,
+        },
+        "#B": {
+            "name": "Bravo",
+            "fame": 150,
+            "repair_points": 5,
+            "boat_attacks": 1,
+            "decks_used": 4,
+            "decks_used_today": 0,
+        },
     }
     with patch.object(
-        war_status, "_live_race",
+        war_status,
+        "_live_race",
         return_value=(_live_projection(participants), "2026-07-11T07:06:00Z"),
     ):
         state = war_status.get_war_day_state(conn=None)

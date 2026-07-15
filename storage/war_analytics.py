@@ -79,11 +79,15 @@ def _war_player_type(conn, player_tag) -> str:
 
 
 def war_player_types_by_tag(conn, player_tags: list[str]) -> dict[str, str]:
-    return {t: _war_player_type(conn, t) for t in {_canon_tag(t) for t in player_tags if t}}
+    return {
+        t: _war_player_type(conn, t) for t in {_canon_tag(t) for t in player_tags if t}
+    }
 
 
 @managed_connection
-def get_members_without_war_participation(season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> dict:
+def get_members_without_war_participation(
+    season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None
+) -> dict:
     from storage.war_status import get_current_season_id
 
     if season_id is None:
@@ -105,7 +109,9 @@ def get_members_without_war_participation(season_id: Optional[str] = None, conn:
 
 
 @managed_connection
-def compare_member_war_to_clan_average(tag: str, season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def compare_member_war_to_clan_average(
+    tag: str, season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     from storage.war_status import get_current_season_id
 
     member_tag = _canon_tag(tag)
@@ -128,8 +134,13 @@ def compare_member_war_to_clan_average(tag: str, season_id: Optional[str] = None
         (season_id,),
     ).fetchone()
     participants = clan["participants"] or 0
-    avg_points_per_member = round((clan["total_points"] or 0) / participants, 1) if participants else 0
-    name_row = conn.execute("SELECT COALESCE(display_name, current_name) AS name FROM players WHERE player_tag = ?", (member_tag,)).fetchone()
+    avg_points_per_member = (
+        round((clan["total_points"] or 0) / participants, 1) if participants else 0
+    )
+    name_row = conn.execute(
+        "SELECT COALESCE(display_name, current_name) AS name FROM players WHERE player_tag = ?",
+        (member_tag,),
+    ).fetchone()
     return {
         "season_id": season_id,
         "tag": member_tag,
@@ -220,9 +231,15 @@ def _mgmt_rows(conn):
 
 
 @managed_connection
-def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, require_war_participation: bool = False,
-                        min_war_races: int = 1, include_leadership: bool = False,
-                        season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> dict:
+def get_members_at_risk(
+    inactivity_days: int = 7,
+    min_donations_week: int = 20,
+    require_war_participation: bool = False,
+    min_war_races: int = 1,
+    include_leadership: bool = False,
+    season_id: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
     """v5.1: reads the member_management projection (kick_state + evidence
     columns) — the same deterministic state the leader-action pipeline uses
     (management.md §3.3). Parameters are kept for caller compatibility; the
@@ -240,48 +257,75 @@ def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, 
         reasons = []
         if kick_state in {"watch", "at_risk", "recommended"}:
             idle_days = _in_game_idle_days(row["last_seen_api"])
-            detail = f"kick_state={kick_state} (battle-based idleness; management.md §3.3)"
+            detail = (
+                f"kick_state={kick_state} (battle-based idleness; management.md §3.3)"
+            )
             if idle_days is not None and idle_days >= 1:
                 detail += f" · in-game idle {int(idle_days)}d (roster badge showing)"
-            reasons.append({
-                "type": "inactive",
-                "detail": detail,
-                "value": kick_state,
-                "kick_state_since": row["kick_state_since"],
-                "battle_days_last_28": row["battle_days_last_28"],
-                "in_game_idle_days": round(idle_days, 1) if idle_days is not None else None,
-            })
+            reasons.append(
+                {
+                    "type": "inactive",
+                    "detail": detail,
+                    "value": kick_state,
+                    "kick_state_since": row["kick_state_since"],
+                    "battle_days_last_28": row["battle_days_last_28"],
+                    "in_game_idle_days": round(idle_days, 1)
+                    if idle_days is not None
+                    else None,
+                }
+            )
         donations_week = row["donations_week"] or 0
         if donations_week < min_donations_week:
-            reasons.append({
-                "type": "low_donations",
-                "detail": f"{donations_week} donations this week",
-                "value": donations_week,
-            })
+            reasons.append(
+                {
+                    "type": "low_donations",
+                    "detail": f"{donations_week} donations this week",
+                    "value": donations_week,
+                }
+            )
         if require_war_participation and (row["war_attendance_rate"] or 0) <= 0:
-            reasons.append({
-                "type": "low_war_participation",
-                "detail": "no war participation this window",
-                "value": 0,
-            })
+            reasons.append(
+                {
+                    "type": "low_war_participation",
+                    "detail": "no war participation this window",
+                    "value": 0,
+                }
+            )
         if reasons:
             item = {
-                "tag": row["tag"], "name": row["name"], "role": row["role"],
+                "tag": row["tag"],
+                "name": row["name"],
+                "role": row["role"],
                 "trophies": row["trophies"],
-                "clan_rank": row["clan_rank"], "donations_week": donations_week,
-                "joined_date": None, "tenure_days": row["tenure_days"],
+                "clan_rank": row["clan_rank"],
+                "donations_week": donations_week,
+                "joined_date": None,
+                "tenure_days": row["tenure_days"],
                 "kick_state": kick_state,
                 "activity_context": {
                     "battle_days_last_28": row["battle_days_last_28"],
                     "kick_state": kick_state,
                     "kick_state_since": row["kick_state_since"],
                 },
-                "risk_score": len(reasons) + (2 if kick_state == "recommended" else 1 if kick_state == "at_risk" else 0),
+                "risk_score": len(reasons)
+                + (
+                    2
+                    if kick_state == "recommended"
+                    else 1
+                    if kick_state == "at_risk"
+                    else 0
+                ),
                 "reasons": reasons,
                 "war_player_type": _war_player_type(conn, row["tag"]),
             }
             flagged.append(_member_reference_fields(conn, row["tag"], item))
-    flagged.sort(key=lambda item: (-item["risk_score"], item.get("clan_rank") or 999, (item.get("name") or "").lower()))
+    flagged.sort(
+        key=lambda item: (
+            -item["risk_score"],
+            item.get("clan_rank") or 999,
+            (item.get("name") or "").lower(),
+        )
+    )
     return {
         "season_id": season_id,
         "criteria": {
@@ -298,19 +342,27 @@ def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, 
 
 
 @managed_connection
-def get_trending_war_contributors(season_id: Optional[str] = None, recent_races: int = 2, limit: int = 5, conn: Optional[sqlite3.Connection] = None) -> dict:
+def get_trending_war_contributors(
+    season_id: Optional[str] = None,
+    recent_races: int = 2,
+    limit: int = 5,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
     from storage.war_status import get_current_season_id
 
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     if season_id is None:
         return {"members": []}
-    sections = [r["section_index"] for r in conn.execute(
-        "SELECT DISTINCT section_index FROM war_participation WHERE season_id = ? ORDER BY section_index DESC",
-        (season_id,),
-    ).fetchall()]
-    recent = sections[:max(1, recent_races)]
-    earlier = sections[max(1, recent_races):]
+    sections = [
+        r["section_index"]
+        for r in conn.execute(
+            "SELECT DISTINCT section_index FROM war_participation WHERE season_id = ? ORDER BY section_index DESC",
+            (season_id,),
+        ).fetchall()
+    ]
+    recent = sections[: max(1, recent_races)]
+    earlier = sections[max(1, recent_races) :]
     if not recent:
         return {"members": []}
     members = {}
@@ -329,16 +381,29 @@ def get_trending_war_contributors(season_id: Optional[str] = None, recent_races:
         recent_avg = vals.get("recent") or 0
         earlier_avg = vals.get("earlier")
         delta = recent_avg - earlier_avg if earlier_avg is not None else None
-        name_row = conn.execute("SELECT COALESCE(display_name, current_name) AS name FROM players WHERE player_tag = ?", (tag,)).fetchone()
+        name_row = conn.execute(
+            "SELECT COALESCE(display_name, current_name) AS name FROM players WHERE player_tag = ?",
+            (tag,),
+        ).fetchone()
         item = {
             "tag": tag,
             "name": name_row["name"] if name_row else None,
             "recent_avg_points": round(recent_avg, 0),
-            "earlier_avg_points": round(earlier_avg, 0) if earlier_avg is not None else None,
+            "earlier_avg_points": round(earlier_avg, 0)
+            if earlier_avg is not None
+            else None,
             "points_trend": round(delta, 0) if delta is not None else None,
         }
         out.append(_member_reference_fields(conn, tag, item))
-    out.sort(key=lambda i: -(i.get("points_trend") if i.get("points_trend") is not None else i.get("recent_avg_points") or 0))
+    out.sort(
+        key=lambda i: (
+            -(
+                i.get("points_trend")
+                if i.get("points_trend") is not None
+                else i.get("recent_avg_points") or 0
+            )
+        )
+    )
     # QA M9: with only one section recorded there's no earlier window — points_trend
     # is all null and this is a current-average list, NOT a trend. Say so.
     trend_available = bool(earlier)
@@ -347,7 +412,9 @@ def get_trending_war_contributors(season_id: Optional[str] = None, recent_races:
         "recent_races": recent_races,
         "sections_available": len(sections),
         "trend_available": trend_available,
-        "note": None if trend_available else (
+        "note": None
+        if trend_available
+        else (
             "only one war week recorded this season — no earlier window to trend "
             "against; recent_avg_points is a current average, not a trend. (Per-member "
             "'points' here is that member's period-point contribution.)"
@@ -357,7 +424,9 @@ def get_trending_war_contributors(season_id: Optional[str] = None, recent_races:
 
 
 @managed_connection
-def get_war_champ_standings(season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_war_champ_standings(
+    season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     """THE standings query (schema.md §7.4): cumulative season fame per player
     over war_participation — which the engine upserts live, so the in-progress
     week is already included."""
@@ -391,7 +460,9 @@ def get_war_champ_standings(season_id: Optional[str] = None, conn: Optional[sqli
 
 
 @managed_connection
-def get_war_season_history(limit: int = 6, conn: Optional[sqlite3.Connection] = None) -> dict | None:
+def get_war_season_history(
+    limit: int = 6, conn: Optional[sqlite3.Connection] = None
+) -> dict | None:
     """The season-by-season War Champ + free-pass lineage, newest first — the
     deep history that lets Elixir place a war-week/season recap or a free-pass
     designation in context ("28 held it last month; before that Atternam, 28,
@@ -422,32 +493,40 @@ def get_war_season_history(limit: int = 6, conn: Optional[sqlite3.Connection] = 
     holds: dict[str, list[int]] = {}
     for r in rows:
         champ = (
-            {"tag": _canon_tag(r["war_champ_tag"]), "name": r["champ_dn"] or r["champ_cn"]}
-            if r["war_champ_tag"] else None
+            {
+                "tag": _canon_tag(r["war_champ_tag"]),
+                "name": r["champ_dn"] or r["champ_cn"],
+            }
+            if r["war_champ_tag"]
+            else None
         )
         pass_tag = r["free_pass_tag"]
         free_pass = (
             {"tag": _canon_tag(pass_tag), "name": r["pass_dn"] or r["pass_cn"]}
-            if pass_tag else None
+            if pass_tag
+            else None
         )
         if pass_tag:
             holds.setdefault(_canon_tag(pass_tag), []).append(int(r["season_id"]))
-        seasons.append({
-            "season_id": int(r["season_id"]),
-            "final_rank": r["final_rank"],
-            "war_champ": champ,
-            "free_pass": free_pass,
-            # the free pass rotated off the champ when the two tags differ
-            "rotation_applied": bool(
-                pass_tag and r["war_champ_tag"] and pass_tag != r["war_champ_tag"]
-            ),
-        })
+        seasons.append(
+            {
+                "season_id": int(r["season_id"]),
+                "final_rank": r["final_rank"],
+                "war_champ": champ,
+                "free_pass": free_pass,
+                # the free pass rotated off the champ when the two tags differ
+                "rotation_applied": bool(
+                    pass_tag and r["war_champ_tag"] and pass_tag != r["war_champ_tag"]
+                ),
+            }
+        )
 
     # members who've held the free pass more than once (in this window) — the
     # "repeat holder" story worth calling out on a designation.
     repeat_holders = [
         {"tag": tag, "name": _name_for(conn, tag), "season_ids": sorted(ss)}
-        for tag, ss in sorted(holds.items()) if len(ss) > 1
+        for tag, ss in sorted(holds.items())
+        if len(ss) > 1
     ]
     return {
         "seasons": seasons,
@@ -468,11 +547,13 @@ def _name_for(conn, tag: str) -> str:
         "SELECT COALESCE(display_name, current_name) AS n FROM players WHERE player_tag = ?",
         (tag,),
     ).fetchone()
-    return (row["n"] if row and row["n"] else tag)
+    return row["n"] if row and row["n"] else tag
 
 
 @managed_connection
-def get_perfect_war_participants(season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_perfect_war_participants(
+    season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     """Members with perfect attendance: every deck used on every finalized
     battle day (war_attendance_days; Iron King definition)."""
     from storage.war_status import get_current_season_id, get_current_war_status
@@ -487,8 +568,11 @@ def get_perfect_war_participants(season_id: Optional[str] = None, conn: Optional
     live = get_current_war_status(conn=conn) or {}
     where = ["wad.season_id = ?"]
     params: list = [season_id]
-    if (live.get("season_id") == season_id and live.get("phase") == "battle"
-            and live.get("battle_day_number")):
+    if (
+        live.get("season_id") == season_id
+        and live.get("phase") == "battle"
+        and live.get("battle_day_number")
+    ):
         where.append("NOT (wad.section_index = ? AND wad.war_day_index = ?)")
         params.extend([live.get("section_index"), int(live["battle_day_number"]) - 1])
     rows = conn.execute(
@@ -508,12 +592,16 @@ def get_perfect_war_participants(season_id: Optional[str] = None, conn: Optional
 
 
 @managed_connection
-def get_recent_role_changes(days: int = 30, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_recent_role_changes(
+    days: int = 30, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     """First-class role_changed events (schema.md §9: no more snapshot diffing)."""
     import json as _json
     from datetime import timedelta
 
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
     rows = conn.execute(
         "SELECT ce.subject_tag AS tag, COALESCE(p.display_name, p.current_name) AS name, ce.payload_json, ce.observed_at "
         "FROM clan_events ce LEFT JOIN players p ON p.player_tag = ce.subject_tag "
@@ -540,7 +628,12 @@ def get_recent_role_changes(days: int = 30, conn: Optional[sqlite3.Connection] =
 
 
 @managed_connection
-def get_war_battle_win_rates(season_id: Optional[str] = None, limit: int = 10, min_battles: int = 1, conn: Optional[sqlite3.Connection] = None) -> dict:
+def get_war_battle_win_rates(
+    season_id: Optional[str] = None,
+    limit: int = 10,
+    min_battles: int = 1,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
     from storage.war_status import get_current_season_id
 
     if season_id is None:
@@ -565,7 +658,9 @@ def get_war_battle_win_rates(season_id: Optional[str] = None, limit: int = 10, m
     members = []
     for row in rows:
         item = dict(row)
-        item["win_rate"] = round((row["wins"] or 0) / row["battles"], 3) if row["battles"] else 0
+        item["win_rate"] = (
+            round((row["wins"] or 0) / row["battles"], 3) if row["battles"] else 0
+        )
         # QA M8: a small sample (e.g. 1-0 = 100%) isn't a real "top" win rate —
         # flag it so the brain doesn't crown it over a 16-4.
         item["low_sample"] = int(row["battles"] or 0) < 8
@@ -579,7 +674,9 @@ def get_war_battle_win_rates(season_id: Optional[str] = None, limit: int = 10, m
 
 
 @managed_connection
-def get_clan_boat_battle_record(weeks: int = 3, conn: Optional[sqlite3.Connection] = None) -> dict:
+def get_clan_boat_battle_record(
+    weeks: int = 3, conn: Optional[sqlite3.Connection] = None
+) -> dict:
     # QA H9 + cadence: a River Race "war" happens per WEEK (a section within a
     # season), so the unit here is a war WEEK, not an ambiguous "war" (which a
     # player reads as a whole season). This used to ignore the window and count
@@ -593,13 +690,22 @@ def get_clan_boat_battle_record(weeks: int = 3, conn: Optional[sqlite3.Connectio
         (weeks,),
     ).fetchall()
     covered = [
-        {"season_id": r["season_id"], "week": (r["section_index"] or 0) + 1,
-         "section_index": r["section_index"]}
+        {
+            "season_id": r["season_id"],
+            "week": (r["section_index"] or 0) + 1,
+            "section_index": r["section_index"],
+        }
         for r in recent
     ]
     if not covered:
-        return {"window_weeks": weeks, "weeks_covered": [], "boat_battles": 0,
-                "wins": 0, "losses": 0, "win_rate": None}
+        return {
+            "window_weeks": weeks,
+            "weeks_covered": [],
+            "boat_battles": 0,
+            "wins": 0,
+            "losses": 0,
+            "win_rate": None,
+        }
     placeholders = ",".join(["(?, ?)"] * len(covered))
     params: list = []
     for c in covered:
@@ -624,7 +730,9 @@ def get_clan_boat_battle_record(weeks: int = 3, conn: Optional[sqlite3.Connectio
 
 
 @managed_connection
-def get_war_score_trend(days: int = 30, conn: Optional[sqlite3.Connection] = None) -> dict:
+def get_war_score_trend(
+    days: int = 30, conn: Optional[sqlite3.Connection] = None
+) -> dict:
     from datetime import timedelta
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -637,12 +745,16 @@ def get_war_score_trend(days: int = 30, conn: Optional[sqlite3.Connection] = Non
     points = _rowdicts(rows)
     change = None
     if len(points) >= 2:
-        change = (points[-1]["clan_war_trophies"] or 0) - (points[0]["clan_war_trophies"] or 0)
+        change = (points[-1]["clan_war_trophies"] or 0) - (
+            points[0]["clan_war_trophies"] or 0
+        )
     return {"window_days": days, "points": points, "change": change}
 
 
 @managed_connection
-def compare_fame_per_member_to_previous_season(season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def compare_fame_per_member_to_previous_season(
+    season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     from storage.war_status import get_current_season_id, get_current_war_status
 
     if season_id is None:
@@ -683,7 +795,9 @@ def compare_fame_per_member_to_previous_season(season_id: Optional[str] = None, 
             "total_fame": total_fame,
             "weeks": weeks,
             "participants": participants,
-            "fame_per_member": round(total_fame / participants, 1) if participants else 0,
+            "fame_per_member": round(total_fame / participants, 1)
+            if participants
+            else 0,
         }
 
     current = _season_stats(int(season_id))
@@ -702,12 +816,14 @@ def compare_fame_per_member_to_previous_season(season_id: Optional[str] = None, 
         "current_in_progress": current_in_progress,
         "fame_per_member_change": (
             round(current["fame_per_member"] - previous["fame_per_member"], 1)
-            if previous else None
+            if previous
+            else None
         ),
         "comparison_caveat": (
             "current season is in progress (partial fame) — not directly comparable "
             "to a completed season"
-            if current_in_progress and previous else None
+            if current_in_progress and previous
+            else None
         ),
         # QA L8: fame_per_member = the clan's cumulative BOAT fame for the season
         # (placement + defense — a clan-level number, NOT a sum of member fame)
@@ -724,6 +840,7 @@ def compare_fame_per_member_to_previous_season(season_id: Optional[str] = None, 
 
 
 # -- Elder board (member_management-backed) ----------------------------------
+
 
 @managed_connection
 def _elder_role_review(
@@ -761,7 +878,10 @@ def _elder_role_review(
         reviewed.append(item)
         if item["role"] == "member" and item["in_elder_target"]:
             promotion_candidates.append(item)
-        if item["role"] == "elder" and row["demote_state"] in ("eligible", "recommended"):
+        if item["role"] == "elder" and row["demote_state"] in (
+            "eligible",
+            "recommended",
+        ):
             demotion_candidates.append(item)
     return {
         "criteria": {
@@ -799,7 +919,9 @@ def get_promotion_candidates(
 
 
 @managed_connection
-def get_demotion_candidates(min_donations_week: int = 50, conn: Optional[sqlite3.Connection] = None) -> dict:
+def get_demotion_candidates(
+    min_donations_week: int = 50, conn: Optional[sqlite3.Connection] = None
+) -> dict:
     """Current elders whose demote_state has crossed eligibility."""
     del min_donations_week
     review = _elder_role_review(conn=conn)
@@ -821,15 +943,19 @@ def _deck_card_summary(cards: list[dict]) -> list[dict]:
     for card in cards:
         if not isinstance(card, dict) or not card.get("name"):
             continue
-        summary.append({
-            "name": card["name"],
-            "level": card.get("level"),
-            "max_level": card.get("maxLevel"),
-            "elixir_cost": card.get("elixirCost"),
-            "rarity": card.get("rarity"),
-            "evolution_level": card.get("evolutionLevel"),
-            "icon_url": (card.get("iconUrls") or {}).get("medium") if isinstance(card.get("iconUrls"), dict) else None,
-        })
+        summary.append(
+            {
+                "name": card["name"],
+                "level": card.get("level"),
+                "max_level": card.get("maxLevel"),
+                "elixir_cost": card.get("elixirCost"),
+                "rarity": card.get("rarity"),
+                "evolution_level": card.get("evolutionLevel"),
+                "icon_url": (card.get("iconUrls") or {}).get("medium")
+                if isinstance(card.get("iconUrls"), dict)
+                else None,
+            }
+        )
     return summary
 
 
@@ -851,15 +977,21 @@ def _extract_deck_candidates(rows: list[sqlite3.Row]) -> list[dict]:
                 cards = rnd.get("cards") if isinstance(rnd, dict) else None
                 if not isinstance(cards, list) or len(cards) != 8:
                     continue
-                names = [c.get("name") for c in cards if isinstance(c, dict) and c.get("name")]
+                names = [
+                    c.get("name")
+                    for c in cards
+                    if isinstance(c, dict) and c.get("name")
+                ]
                 if len(names) != 8 or len(set(names)) != 8:
                     continue
-                candidates.append({
-                    "cards": cards,
-                    "key": frozenset(names),
-                    "battle_time": battle_time,
-                    "source": f"{battle_type}#round{idx + 1}",
-                })
+                candidates.append(
+                    {
+                        "cards": cards,
+                        "key": frozenset(names),
+                        "battle_time": battle_time,
+                        "source": f"{battle_type}#round{idx + 1}",
+                    }
+                )
         elif battle_type == "riverRacePvP":
             try:
                 cards = json.loads(row["deck_json"] or "[]")
@@ -867,15 +999,19 @@ def _extract_deck_candidates(rows: list[sqlite3.Row]) -> list[dict]:
                 cards = []
             if len(cards) != 8:
                 continue
-            names = [c.get("name") for c in cards if isinstance(c, dict) and c.get("name")]
+            names = [
+                c.get("name") for c in cards if isinstance(c, dict) and c.get("name")
+            ]
             if len(names) != 8 or len(set(names)) != 8:
                 continue
-            candidates.append({
-                "cards": cards,
-                "key": frozenset(names),
-                "battle_time": battle_time,
-                "source": "riverRacePvP",
-            })
+            candidates.append(
+                {
+                    "cards": cards,
+                    "key": frozenset(names),
+                    "battle_time": battle_time,
+                    "source": "riverRacePvP",
+                }
+            )
     return candidates
 
 
@@ -895,10 +1031,16 @@ def _group_candidates(candidates: list[dict]) -> list[dict]:
             }
         else:
             bucket["occurrences"] += 1
-            if cand["battle_time"] and (not bucket["latest_battle_time"] or cand["battle_time"] > bucket["latest_battle_time"]):
+            if cand["battle_time"] and (
+                not bucket["latest_battle_time"]
+                or cand["battle_time"] > bucket["latest_battle_time"]
+            ):
                 bucket["latest_battle_time"] = cand["battle_time"]
                 bucket["cards"] = cand["cards"]  # keep most-recent card-level data
-            if cand["battle_time"] and (not bucket["earliest_battle_time"] or cand["battle_time"] < bucket["earliest_battle_time"]):
+            if cand["battle_time"] and (
+                not bucket["earliest_battle_time"]
+                or cand["battle_time"] < bucket["earliest_battle_time"]
+            ):
                 bucket["earliest_battle_time"] = cand["battle_time"]
             if cand["source"] not in bucket["sources"]:
                 bucket["sources"].append(cand["source"])
@@ -936,7 +1078,11 @@ def _war_decks_confidence(
         # Confidence rules only matter if we're returning decks at all.
         return "low" if skipped else "medium"
     # Look for a recent (top-3) duel that contributed >= 3 selected decks.
-    recent_duels = [r for r in rows[:3] if r["battle_type"] in ("riverRaceDuel", "riverRaceDuelColosseum")]
+    recent_duels = [
+        r
+        for r in rows[:3]
+        if r["battle_type"] in ("riverRaceDuel", "riverRaceDuelColosseum")
+    ]
     selected_keys = {d["key"] for d in selected}
     for duel in recent_duels:
         try:
@@ -948,7 +1094,9 @@ def _war_decks_confidence(
             cards = rnd.get("cards") if isinstance(rnd, dict) else None
             if not isinstance(cards, list) or len(cards) != 8:
                 continue
-            names = [c.get("name") for c in cards if isinstance(c, dict) and c.get("name")]
+            names = [
+                c.get("name") for c in cards if isinstance(c, dict) and c.get("name")
+            ]
             if len(names) == 8 and len(set(names)) == 8:
                 round_keys.append(frozenset(names))
         matched = sum(1 for k in round_keys if k in selected_keys)
@@ -1000,7 +1148,11 @@ def reconstruct_member_war_decks(
             "war_battles_seen": war_battles_seen,
             "distinct_decks_observed": len(distinct_decks),
             "candidate_decks_extracted": len(candidates),
-            "duel_battles_seen": sum(1 for r in rows if r["battle_type"] in ("riverRaceDuel", "riverRaceDuelColosseum")),
+            "duel_battles_seen": sum(
+                1
+                for r in rows
+                if r["battle_type"] in ("riverRaceDuel", "riverRaceDuelColosseum")
+            ),
         },
     }
     if len(distinct_decks) < 2:

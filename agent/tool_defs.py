@@ -11,7 +11,6 @@
 
 TOOLS = [
     # ── MEMBER DOMAIN ──────────────────────────────────────────────────────
-
     {
         "name": "resolve_member",
         "description": (
@@ -88,9 +87,19 @@ TOOLS = [
                     "items": {
                         "type": "string",
                         "enum": [
-                            "profile", "form", "battles", "war", "trend",
-                            "deck", "losses", "history", "ranked", "mode_activity", "memories",
-                            "chests", "awards",
+                            "profile",
+                            "form",
+                            "battles",
+                            "war",
+                            "trend",
+                            "deck",
+                            "losses",
+                            "history",
+                            "ranked",
+                            "mode_activity",
+                            "memories",
+                            "chests",
+                            "awards",
                         ],
                     },
                     "description": (
@@ -161,15 +170,20 @@ TOOLS = [
                     "type": "string",
                     "description": "Which war detail to retrieve. Default: summary.",
                     "default": "summary",
-                    "enum": ["summary", "attendance", "battles", "missed_days", "vs_clan_avg", "war_decks"],
+                    "enum": [
+                        "summary",
+                        "attendance",
+                        "battles",
+                        "missed_days",
+                        "vs_clan_avg",
+                        "war_decks",
+                    ],
                 },
             },
             "required": ["member_tag"],
         },
     },
-
     # ── RIVER RACE DOMAIN ──────────────────────────────────────────────────
-
     {
         "name": "get_river_race",
         "description": (
@@ -228,9 +242,15 @@ TOOLS = [
                     "description": "Which season analytic to retrieve. Default: summary.",
                     "default": "summary",
                     "enum": [
-                        "summary", "standings", "win_rates", "boat_battles",
-                        "score_trend", "season_comparison", "trending",
-                        "perfect_attendance", "no_participation",
+                        "summary",
+                        "standings",
+                        "win_rates",
+                        "boat_battles",
+                        "score_trend",
+                        "season_comparison",
+                        "trending",
+                        "perfect_attendance",
+                        "no_participation",
                     ],
                 },
                 "metric": {
@@ -255,9 +275,7 @@ TOOLS = [
             "required": [],
         },
     },
-
     # ── CLAN DOMAIN ────────────────────────────────────────────────────────
-
     {
         "name": "get_clan_roster",
         "description": (
@@ -288,8 +306,14 @@ TOOLS = [
                     "description": "Which roster view to retrieve. Default: list.",
                     "default": "list",
                     "enum": [
-                        "list", "summary", "recent_joins", "longest_tenure",
-                        "role_changes", "max_cards", "card_owners", "donations",
+                        "list",
+                        "summary",
+                        "recent_joins",
+                        "longest_tenure",
+                        "role_changes",
+                        "max_cards",
+                        "card_owners",
+                        "donations",
                         "trends",
                     ],
                 },
@@ -344,7 +368,13 @@ TOOLS = [
                     "type": "string",
                     "description": "Which health analysis to run. Default: at_risk.",
                     "default": "at_risk",
-                    "enum": ["at_risk", "hot_streaks", "losing_streaks", "trophy_drops", "promotion_candidates"],
+                    "enum": [
+                        "at_risk",
+                        "hot_streaks",
+                        "losing_streaks",
+                        "trophy_drops",
+                        "promotion_candidates",
+                    ],
                 },
                 "inactivity_days": {
                     "type": "integer",
@@ -413,8 +443,15 @@ TOOLS = [
                     "type": "string",
                     "description": "Optional mode-group filter.",
                     "enum": [
-                        "ladder", "ranked", "war", "special_event",
-                        "tournament", "two_v_two", "friendly", "side_mode", "other",
+                        "ladder",
+                        "ranked",
+                        "war",
+                        "special_event",
+                        "tournament",
+                        "two_v_two",
+                        "friendly",
+                        "side_mode",
+                        "other",
                     ],
                 },
                 "limit": {
@@ -430,8 +467,8 @@ TOOLS = [
         "name": "get_elixir_state",
         "description": (
             "Inspect Elixir's internal operating state: the normalized game-event stream, "
-            "active projects, project details, open/due decision cases, communication intents, "
-            "and message-to-intent traces. Use this when leaders ask what Elixir is monitoring, "
+            "awareness decisions and confirmed posts, and open/due decision cases. "
+            "Use this when leaders ask what Elixir is monitoring, "
             "which recommendations are open, why something was posted or skipped, or what Elixir "
             "would do next. Leadership-only aspects are blocked outside leadership workflows. "
             "Public workflows can only read public event-stream views."
@@ -451,8 +488,7 @@ TOOLS = [
                         "season_window",
                         "war_season",
                         "decision_cases",
-                        "communication_intents",
-                        "communication_trace",
+                        "awareness_activity",
                     ],
                 },
                 "scope": {
@@ -477,18 +513,9 @@ TOOLS = [
                     "type": "string",
                     "description": "Optional event type filter for recent_events.",
                 },
-                "subject_type": {
-                    "type": "string",
-                    "description": "Optional subject type filter for event views, e.g. member, war, clan.",
-                },
                 "subject_key": {
                     "type": "string",
                     "description": "Optional subject key filter for event views.",
-                },
-                "event_class": {
-                    "type": "string",
-                    "description": "Event class for recent_events / event_summary. These views are signal-grain (notable detector events) only; per-battle / game-mode activity is available via the 'game_modes' aspect. Retained for compatibility — 'battle' and 'all' behave like 'signal'.",
-                    "enum": ["signal", "battle", "all"],
                 },
                 "case_type": {
                     "type": "string",
@@ -496,19 +523,7 @@ TOOLS = [
                 },
                 "status": {
                     "type": "string",
-                    "description": "Optional status filter for decision cases or communication intents.",
-                },
-                "workflow": {
-                    "type": "string",
-                    "description": "Optional workflow filter for communication intents.",
-                },
-                "target_channel_key": {
-                    "type": "string",
-                    "description": "Optional target channel key filter for communication intents.",
-                },
-                "message_id": {
-                    "type": "string",
-                    "description": "Discord message id for aspect='communication_trace'.",
+                    "description": "Optional status filter for decision cases.",
                 },
                 "limit": {
                     "type": "integer",
@@ -520,7 +535,6 @@ TOOLS = [
         },
     },
     # ── CARD DOMAIN ────────────────────────────────────────────────────────
-
     {
         "name": "get_deck_intelligence",
         "description": (
@@ -588,7 +602,14 @@ TOOLS = [
                 },
                 "scope": {
                     "type": "string",
-                    "enum": ["all", "competitive", "ladder_ranked", "ladder", "ranked", "war"],
+                    "enum": [
+                        "all",
+                        "competitive",
+                        "ladder_ranked",
+                        "ladder",
+                        "ranked",
+                        "war",
+                    ],
                     "description": "Battle family to analyze. Default competitive.",
                     "default": "competitive",
                 },
@@ -596,7 +617,6 @@ TOOLS = [
             "required": [],
         },
     },
-
     {
         "name": "lookup_cards",
         "description": "Look up Clash Royale cards from the card catalog. Use this for accurate card data including elixir cost, rarity, type, and evolution/hero capability. Always prefer this over relying on memory when discussing card stats or comparisons.",
@@ -636,7 +656,6 @@ TOOLS = [
             "required": [],
         },
     },
-
     {
         "name": "get_member_card_profile",
         "description": (
@@ -723,9 +742,7 @@ TOOLS = [
             "required": ["member_tag", "filter"],
         },
     },
-
     # ── UTILITY ────────────────────────────────────────────────────────────
-
     {
         "name": "get_clan_intel_report",
         "description": (
@@ -784,9 +801,15 @@ TOOLS = [
                 "aspect": {
                     "type": "string",
                     "enum": [
-                        "player", "player_battles", "player_chests",
-                        "clan", "clan_members", "clan_war", "clan_war_log",
-                        "tournament", "events",
+                        "player",
+                        "player_battles",
+                        "player_chests",
+                        "clan",
+                        "clan_members",
+                        "clan_war",
+                        "clan_war_log",
+                        "tournament",
+                        "events",
                         "pathoflegend_location_rankings",
                         "pathoflegend_season_rankings",
                         "leaderboards",
@@ -808,7 +831,17 @@ TOOLS = [
                 },
                 "mode": {
                     "type": "string",
-                    "enum": ["ladder", "ranked", "war", "tournament", "challenge", "path_of_legends", "event", "two_v_two", "friendly"],
+                    "enum": [
+                        "ladder",
+                        "ranked",
+                        "war",
+                        "tournament",
+                        "challenge",
+                        "path_of_legends",
+                        "event",
+                        "two_v_two",
+                        "friendly",
+                    ],
                     "description": "Optional client-side filter for aspect='player_battles'.",
                 },
                 "location_id": {
@@ -832,12 +865,12 @@ TOOLS = [
         "description": (
             "Set metadata for a clan member. Use 'field' to specify what to update.\n\n"
             "Fields:\n"
-            "- birthday: set birth month and day (value: {\"month\": 3, \"day\": 15})\n"
-            "- join_date: set or override join date (value: \"2024-01-15\")\n"
-            "- profile_url: set profile URL (value: \"https://...\")\n"
-            "- note: set a short note or title (value: \"War Machine\")\n"
+            '- birthday: set birth month and day (value: {"month": 3, "day": 15})\n'
+            '- join_date: set or override join date (value: "2024-01-15")\n'
+            '- profile_url: set profile URL (value: "https://...")\n'
+            '- note: set a short note or title (value: "War Machine")\n'
             "- nickname: pin a readable name Elixir prefers over the game name "
-            "everywhere (value: \"Ellipsis\"; empty value clears it)"
+            'everywhere (value: "Ellipsis"; empty value clears it)'
         ),
         "input_schema": {
             "type": "object",
@@ -849,10 +882,16 @@ TOOLS = [
                 "field": {
                     "type": "string",
                     "description": "Which metadata field to set.",
-                    "enum": ["birthday", "join_date", "profile_url", "note", "nickname"],
+                    "enum": [
+                        "birthday",
+                        "join_date",
+                        "profile_url",
+                        "note",
+                        "nickname",
+                    ],
                 },
                 "value": {
-                    "description": "The value to set. For birthday: {\"month\": M, \"day\": D}. For join_date: \"YYYY-MM-DD\". For profile_url: \"https://...\". For note: short text. For nickname: a short readable name (e.g. \"Ellipsis\").",
+                    "description": 'The value to set. For birthday: {"month": M, "day": D}. For join_date: "YYYY-MM-DD". For profile_url: "https://...". For note: short text. For nickname: a short readable name (e.g. "Ellipsis").',
                 },
             },
             "required": ["member_tag", "field", "value"],
@@ -922,7 +961,12 @@ TOOLS = [
                 },
                 "case_type": {
                     "type": "string",
-                    "enum": ["inactivity_review", "promotion_review", "demotion_review", "war_recovery"],
+                    "enum": [
+                        "inactivity_review",
+                        "promotion_review",
+                        "demotion_review",
+                        "war_recovery",
+                    ],
                     "description": "Optional durable decision-case type to create or update when this watch is actionable.",
                 },
             },
@@ -962,7 +1006,12 @@ TOOLS = [
                 },
                 "case_type": {
                     "type": "string",
-                    "enum": ["inactivity_review", "promotion_review", "demotion_review", "war_recovery"],
+                    "enum": [
+                        "inactivity_review",
+                        "promotion_review",
+                        "demotion_review",
+                        "war_recovery",
+                    ],
                     "description": "Optional. Set only for a member kick/promotion/demotion review that should also become a #leader-actions card. Omit for a general followup (still tracked as a decision case).",
                 },
             },

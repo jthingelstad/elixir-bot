@@ -67,7 +67,9 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
         try:
             progress_fn(event)
         except Exception:
-            log.debug("awareness loop: progress observer raised (ignored)", exc_info=True)
+            log.debug(
+                "awareness loop: progress observer raised (ignored)", exc_info=True
+            )
 
     # Cost gate: decide whether this tick is worth the expensive brain BEFORE we
     # spend it. A gated silence (no signals, or a lightweight-triage "stay quiet"
@@ -85,26 +87,36 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
     persist_model = None
     if not gate_decision.get("deliberate"):
         # Deterministic / triage silence — no brain call this tick.
-        plan = {"posts": [], "skipped_reason": gate_decision.get("silence_reason") or "gated silence"}
+        plan = {
+            "posts": [],
+            "skipped_reason": gate_decision.get("silence_reason") or "gated silence",
+        }
         tool_trace: list = []
-        persist_model = f"gate:{gate_decision.get('decider') or gate_decision.get('tier')}"
+        persist_model = (
+            f"gate:{gate_decision.get('decider') or gate_decision.get('tier')}"
+        )
         log.info(
             "awareness gate: %s silence (tier=%s) — skipped brain: %s",
-            gate_decision.get("decider") or "gate", gate_decision.get("tier"),
+            gate_decision.get("decider") or "gate",
+            gate_decision.get("tier"),
             gate_decision.get("silence_reason"),
         )
     else:
         if gate_decision.get("tier") not in ("deliberate", "disabled"):
-            log.info("awareness gate: escalating to brain (tier=%s): %s",
-                     gate_decision.get("tier"), gate_decision.get("reason"))
+            log.info(
+                "awareness gate: escalating to brain (tier=%s): %s",
+                gate_decision.get("tier"),
+                gate_decision.get("reason"),
+            )
         # tool_stats is mutated in place by the tool-calling loop; we read the
         # per-call trace back out for the log and the persisted thought. on_event
         # streams each tool call / truncation / retry into the open thread live.
         tool_stats: dict = {}
         try:
-            plan = run_awareness_tick(
-                read, tool_stats=tool_stats, on_event=_progress
-            ) or {}
+            plan = (
+                run_awareness_tick(read, tool_stats=tool_stats, on_event=_progress)
+                or {}
+            )
         except Exception as exc:
             log.exception("awareness loop: run_awareness_tick failed")
             counters["error"] = f"run_awareness_tick: {exc}"
@@ -158,10 +170,15 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
     # non-failed tick the brain HAS now seen them — mark them revisited so
     # they clear (if the brain wants another look it schedules a fresh revisit).
     if outcome != "failed":
-        surfaced = [r.get("signal_key") for r in (read.get("due_revisits") or []) if r.get("signal_key")]
+        surfaced = [
+            r.get("signal_key")
+            for r in (read.get("due_revisits") or [])
+            if r.get("signal_key")
+        ]
         if surfaced:
             try:
                 from storage import revisits
+
                 counters["revisits_cleared"] = revisits.mark_revisited(surfaced)
             except Exception:
                 log.warning("awareness loop: mark_revisited failed", exc_info=True)
@@ -193,7 +210,9 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
                     since=read.get("generated_at") or "9999-12-31T23:59:59Z",
                 )
             except Exception as exc:
-                log.warning("awareness loop: post receipt linking failed", exc_info=True)
+                log.warning(
+                    "awareness loop: post receipt linking failed", exc_info=True
+                )
                 counters["error"] = counters["error"] or f"receipt_link: {exc}"
     except Exception as exc:
         log.exception("awareness loop: persist_thought failed")
@@ -210,8 +229,12 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
         # the real loop number on the header/thread now that it's known.
         _progress({"type": "end", "render": render, "loop_number": loop_number})
         if progress_fn is None:
-            log.info("awareness loop: no progress_fn; #thinking not delivered "
-                     "(loop #%s, %s)", loop_number, render.get("outcome"))
+            log.info(
+                "awareness loop: no progress_fn; #thinking not delivered "
+                "(loop #%s, %s)",
+                loop_number,
+                render.get("outcome"),
+            )
     except Exception as exc:
         log.exception("awareness loop: thinking render/finalize failed")
         counters["error"] = counters["error"] or f"thinking: {exc}"

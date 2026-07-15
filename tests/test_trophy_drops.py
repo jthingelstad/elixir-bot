@@ -4,6 +4,7 @@ The old MAX-MIN spread labelled climbers as droppers — a member who went
 8700 -> 9004 showed 'drop: 304'. The fix takes the directional first->last net
 and returns only real declines.
 """
+
 from __future__ import annotations
 
 import db
@@ -37,11 +38,19 @@ def test_trophy_drops_excludes_climbers_and_reports_declines():
         )
         # Climber: dipped mid-window but net POSITIVE first->last (old spread bug
         # would have flagged the 8700->9100 range as a 400 "drop").
-        _seed(conn, "#CLIMB", "Andy", [
-            ("2026-07-08", 8700), ("2026-07-09", 9100), ("2026-07-10", 8900), ("2026-07-11", 9004)])
+        _seed(
+            conn,
+            "#CLIMB",
+            "Andy",
+            [
+                ("2026-07-08", 8700),
+                ("2026-07-09", 9100),
+                ("2026-07-10", 8900),
+                ("2026-07-11", 9004),
+            ],
+        )
         # Real dropper: net decline first->last.
-        _seed(conn, "#DROP", "Ditaka", [
-            ("2026-07-08", 12230), ("2026-07-11", 12037)])
+        _seed(conn, "#DROP", "Ditaka", [("2026-07-08", 12230), ("2026-07-11", 12037)])
 
         drops = db.get_trophy_drops(days=30, min_drop=100, conn=conn)
         by_tag = {d["tag"]: d for d in drops}

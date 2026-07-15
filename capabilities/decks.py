@@ -8,26 +8,49 @@ It never pretends Elixir has opponent deck lists or a global ladder dataset.
 
 from __future__ import annotations
 
+import logging
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
-import logging
 from typing import Iterable
 
 import db as db_facade
+from capabilities.contracts import DeckIntelligenceResult
 
 CAPABILITY_ID = "deck_intelligence"
 CONTRACT_VERSION = 1
 log = logging.getLogger("elixir.capabilities.decks")
 
 _WIN_CONDITIONS = {
-    "Balloon", "Battle Ram", "Electro Giant", "Elixir Golem", "Giant",
-    "Goblin Barrel", "Goblin Drill", "Goblin Giant", "Golem", "Graveyard",
-    "Hog Rider", "Lava Hound", "Miner", "Mortar", "Ram Rider", "Royal Giant",
-    "Royal Hogs", "Skeleton Barrel", "Three Musketeers", "Wall Breakers", "X-Bow",
+    "Balloon",
+    "Battle Ram",
+    "Electro Giant",
+    "Elixir Golem",
+    "Giant",
+    "Goblin Barrel",
+    "Goblin Drill",
+    "Goblin Giant",
+    "Golem",
+    "Graveyard",
+    "Hog Rider",
+    "Lava Hound",
+    "Miner",
+    "Mortar",
+    "Ram Rider",
+    "Royal Giant",
+    "Royal Hogs",
+    "Skeleton Barrel",
+    "Three Musketeers",
+    "Wall Breakers",
+    "X-Bow",
 }
 _SIEGE = {"X-Bow", "Mortar"}
 _HEAVY_BEATDOWN = {
-    "Golem", "Lava Hound", "Electro Giant", "Goblin Giant", "Giant", "Elixir Golem",
+    "Golem",
+    "Lava Hound",
+    "Electro Giant",
+    "Goblin Giant",
+    "Giant",
+    "Elixir Golem",
 }
 _BRIDGE_PRESSURE = {"Battle Ram", "Ram Rider", "Royal Hogs"}
 
@@ -59,7 +82,9 @@ def _fingerprint(cards: Iterable[dict]) -> tuple[str, ...]:
             continue
         card_id = card.get("id")
         name = _card_name(card)
-        token = f"id:{card_id}" if card_id is not None else f"name:{(name or '').lower()}"
+        token = (
+            f"id:{card_id}" if card_id is not None else f"name:{(name or '').lower()}"
+        )
         if name or card_id is not None:
             tokens.append(token)
     return tuple(sorted(set(tokens)))
@@ -101,7 +126,11 @@ def _archetype(cards: Iterable[dict]) -> dict:
     average = _average_elixir(cards)
     if names & _SIEGE:
         label = "siege"
-    elif "Goblin Barrel" in names and names & {"Princess", "Dart Goblin", "Skeleton Barrel"}:
+    elif "Goblin Barrel" in names and names & {
+        "Princess",
+        "Dart Goblin",
+        "Skeleton Barrel",
+    }:
         label = "bait"
     elif names & _HEAVY_BEATDOWN:
         label = "beatdown"
@@ -110,7 +139,11 @@ def _archetype(cards: Iterable[dict]) -> dict:
     elif "Royal Giant" in names:
         label = "royal giant control"
     elif "Balloon" in names:
-        label = "balloon cycle" if average is not None and average <= 3.4 else "balloon beatdown"
+        label = (
+            "balloon cycle"
+            if average is not None and average <= 3.4
+            else "balloon beatdown"
+        )
     elif names & _BRIDGE_PRESSURE and names & {"Bandit", "Royal Ghost", "P.E.K.K.A"}:
         label = "bridge spam"
     elif names & {"Hog Rider", "Goblin Drill", "Miner", "Wall Breakers"}:
@@ -158,9 +191,10 @@ def _deck_groups(rows: list[dict]) -> list[dict]:
         else:
             group["draws"] += 1
         group["trophy_delta"] += int(row.get("trophy_change") or 0)
-        group["latest_battle_at"] = max(
-            group["latest_battle_at"] or "", str(row.get("battle_time") or "")
-        ) or None
+        group["latest_battle_at"] = (
+            max(group["latest_battle_at"] or "", str(row.get("battle_time") or ""))
+            or None
+        )
         group["modes"][str(row.get("mode_group") or "unknown")] += 1
         group["outcome_granularity"][
             str(row.get("outcome_granularity") or "battle")
@@ -169,26 +203,30 @@ def _deck_groups(rows: list[dict]) -> list[dict]:
     result = []
     for group in groups.values():
         battles = group["battles"]
-        result.append({
-            "fingerprint": group["fingerprint"],
-            "cards": [
-                {key: card.get(key) for key in ("id", "name", "level", "elixir_cost") if card.get(key) is not None}
-                for card in group["cards"]
-            ],
-            "card_names": _names(group["cards"]),
-            "archetype": _archetype(group["cards"]),
-            "battles": battles,
-            "wins": group["wins"],
-            "losses": group["losses"],
-            "draws": group["draws"],
-            "win_rate": round(group["wins"] / battles, 3) if battles else None,
-            "trophy_delta": group["trophy_delta"],
-            "latest_battle_at": group["latest_battle_at"],
-            "modes": dict(group["modes"].most_common()),
-            "outcome_granularity": dict(
-                group["outcome_granularity"].most_common()
-            ),
-        })
+        result.append(
+            {
+                "fingerprint": group["fingerprint"],
+                "cards": [
+                    {
+                        key: card.get(key)
+                        for key in ("id", "name", "level", "elixir_cost")
+                        if card.get(key) is not None
+                    }
+                    for card in group["cards"]
+                ],
+                "card_names": _names(group["cards"]),
+                "archetype": _archetype(group["cards"]),
+                "battles": battles,
+                "wins": group["wins"],
+                "losses": group["losses"],
+                "draws": group["draws"],
+                "win_rate": round(group["wins"] / battles, 3) if battles else None,
+                "trophy_delta": group["trophy_delta"],
+                "latest_battle_at": group["latest_battle_at"],
+                "modes": dict(group["modes"].most_common()),
+                "outcome_granularity": dict(group["outcome_granularity"].most_common()),
+            }
+        )
     return result
 
 
@@ -212,16 +250,18 @@ def _variants(primary: dict | None, groups: list[dict]) -> list[dict]:
         names = set(group.get("card_names") or [])
         if len(base & names) < 6:
             continue
-        result.append({
-            "archetype": group["archetype"],
-            "battles": group["battles"],
-            "wins": group["wins"],
-            "losses": group["losses"],
-            "win_rate": group["win_rate"],
-            "added": sorted(names - base),
-            "removed": sorted(base - names),
-            "latest_battle_at": group["latest_battle_at"],
-        })
+        result.append(
+            {
+                "archetype": group["archetype"],
+                "battles": group["battles"],
+                "wins": group["wins"],
+                "losses": group["losses"],
+                "win_rate": group["win_rate"],
+                "added": sorted(names - base),
+                "removed": sorted(base - names),
+                "latest_battle_at": group["latest_battle_at"],
+            }
+        )
     return result[:5]
 
 
@@ -250,8 +290,14 @@ def _recent_change(rows: list[dict], groups: list[dict]) -> dict | None:
     return {
         "added": sorted(latest_names - previous_names),
         "removed": sorted(previous_names - latest_names),
-        "latest_deck": {key: latest[key] for key in ("battles", "wins", "losses", "win_rate", "latest_battle_at")},
-        "previous_deck": {key: previous[key] for key in ("battles", "wins", "losses", "win_rate", "latest_battle_at")},
+        "latest_deck": {
+            key: latest[key]
+            for key in ("battles", "wins", "losses", "win_rate", "latest_battle_at")
+        },
+        "previous_deck": {
+            key: previous[key]
+            for key in ("battles", "wins", "losses", "win_rate", "latest_battle_at")
+        },
         "interpretation": "observed association, not proof that the card swap caused the result",
     }
 
@@ -278,16 +324,26 @@ def _upgrade_bottlenecks(source, player_tag: str, *, conn=None) -> list[dict]:
         ),
     )
     return [
-        {key: card.get(key) for key in (
-            "name", "level", "king_tower_gap", "levels_to_max",
-            "ready_to_upgrade", "cards_required_for_next_level",
-        ) if card.get(key) is not None}
+        {
+            key: card.get(key)
+            for key in (
+                "name",
+                "level",
+                "king_tower_gap",
+                "levels_to_max",
+                "ready_to_upgrade",
+                "cards_required_for_next_level",
+            )
+            if card.get(key) is not None
+        }
         for card in ranked[:5]
         if (card.get("king_tower_gap") or 0) > 0 or (card.get("levels_to_max") or 0) > 0
     ]
 
 
-def _member_view(player_tag: str, rows: list[dict], source, *, days: int, scope: str, conn=None) -> dict:
+def _member_view(
+    player_tag: str, rows: list[dict], source, *, days: int, scope: str, conn=None
+) -> dict:
     groups = _sorted_groups(rows)
     primary = groups[0] if groups else None
     total = len(rows)
@@ -321,8 +377,12 @@ def _member_view(player_tag: str, rows: list[dict], source, *, days: int, scope:
             "card_names": _names(current["cards"]),
             "archetype": _archetype(current["cards"]),
             "historical_performance": (
-                {key: match[key] for key in ("battles", "wins", "losses", "win_rate", "trophy_delta")}
-                if match else None
+                {
+                    key: match[key]
+                    for key in ("battles", "wins", "losses", "win_rate", "trophy_delta")
+                }
+                if match
+                else None
             ),
         }
     return {
@@ -341,7 +401,8 @@ def _member_view(player_tag: str, rows: list[dict], source, *, days: int, scope:
         "current_deck": current_summary,
         "current_deck_note": (
             "The profile current deck is a Trophy Road deck and is omitted in war scope."
-            if scope == "war" else None
+            if scope == "war"
+            else None
         ),
         "primary_deck": primary,
         "variants": _variants(primary, groups),
@@ -386,22 +447,28 @@ def _clan_view(rows: list[dict], *, days: int, scope: str) -> dict:
         bucket["wins"] += primary["wins"]
         win_conditions.update(primary["archetype"]["win_conditions"])
         common_cards.update(set(primary["card_names"]))
-        members.append({
-            "player_tag": tag,
-            "player_name": player_rows[0].get("player_name"),
-            "archetype": label,
-            "win_conditions": primary["archetype"]["win_conditions"],
-            "battles": primary["battles"],
-            "win_rate": primary["win_rate"],
-            "primary_deck_share": round(primary["battles"] / len(player_rows), 3),
-        })
+        members.append(
+            {
+                "player_tag": tag,
+                "player_name": player_rows[0].get("player_name"),
+                "archetype": label,
+                "win_conditions": primary["archetype"]["win_conditions"],
+                "battles": primary["battles"],
+                "win_rate": primary["win_rate"],
+                "primary_deck_share": round(primary["battles"] / len(player_rows), 3),
+            }
+        )
     archetype_rows = []
     for label, item in archetypes.items():
-        archetype_rows.append({
-            "archetype": label,
-            **item,
-            "win_rate": round(item["wins"] / item["battles"], 3) if item["battles"] else None,
-        })
+        archetype_rows.append(
+            {
+                "archetype": label,
+                **item,
+                "win_rate": round(item["wins"] / item["battles"], 3)
+                if item["battles"]
+                else None,
+            }
+        )
     return {
         "capability": CAPABILITY_ID,
         "contract_version": CONTRACT_VERSION,
@@ -414,7 +481,9 @@ def _clan_view(rows: list[dict], *, days: int, scope: str) -> dict:
             "deck_observations": len(rows),
         },
         "coverage": {"members_with_observed_decks": len(members)},
-        "archetype_spread": sorted(archetype_rows, key=lambda item: (-item["members"], item["archetype"])),
+        "archetype_spread": sorted(
+            archetype_rows, key=lambda item: (-item["members"], item["archetype"])
+        ),
         "win_condition_spread": [
             {"card": card, "primary_decks": count}
             for card, count in win_conditions.most_common(15)
@@ -423,7 +492,9 @@ def _clan_view(rows: list[dict], *, days: int, scope: str) -> dict:
             {"card": card, "primary_decks": count}
             for card, count in common_cards.most_common(20)
         ],
-        "members": sorted(members, key=lambda item: (-item["battles"], item["player_name"] or "")),
+        "members": sorted(
+            members, key=lambda item: (-item["battles"], item["player_name"] or "")
+        ),
         "evidence_limits": {
             "scope": "POAP KINGS observed decks only; this is clan-local meta, not global ladder meta",
             "opponent_decks_captured": False,
@@ -516,39 +587,47 @@ def _card_impact(
         matched = sorted(name for name in names if name.lower() in targets)
         if not matched:
             continue
-        item = by_player.setdefault(row["player_tag"], {
-            "player_tag": row["player_tag"],
-            "player_name": row.get("player_name"),
-            "matching_cards": set(),
-            "battles": 0,
-            "wins": 0,
-            "losses": 0,
-            "latest_battle_at": None,
-            "current_deck_observed_at": None,
-            "evidence_types": set(),
-        })
+        item = by_player.setdefault(
+            row["player_tag"],
+            {
+                "player_tag": row["player_tag"],
+                "player_name": row.get("player_name"),
+                "matching_cards": set(),
+                "battles": 0,
+                "wins": 0,
+                "losses": 0,
+                "latest_battle_at": None,
+                "current_deck_observed_at": None,
+                "evidence_types": set(),
+            },
+        )
         item["matching_cards"].update(matched)
         item["battles"] += 1
         item["wins"] += 1 if row.get("outcome") == "W" else 0
         item["losses"] += 1 if row.get("outcome") == "L" else 0
-        item["latest_battle_at"] = max(item["latest_battle_at"] or "", row.get("battle_time") or "")
+        item["latest_battle_at"] = max(
+            item["latest_battle_at"] or "", row.get("battle_time") or ""
+        )
         item["evidence_types"].add("recent_battle_deck")
     for deck in current_decks:
         names = set(_names(deck.get("cards") or []))
         matched = sorted(name for name in names if name.lower() in targets)
         if not matched:
             continue
-        item = by_player.setdefault(deck["player_tag"], {
-            "player_tag": deck["player_tag"],
-            "player_name": deck.get("player_name"),
-            "matching_cards": set(),
-            "battles": 0,
-            "wins": 0,
-            "losses": 0,
-            "latest_battle_at": None,
-            "current_deck_observed_at": None,
-            "evidence_types": set(),
-        })
+        item = by_player.setdefault(
+            deck["player_tag"],
+            {
+                "player_tag": deck["player_tag"],
+                "player_name": deck.get("player_name"),
+                "matching_cards": set(),
+                "battles": 0,
+                "wins": 0,
+                "losses": 0,
+                "latest_battle_at": None,
+                "current_deck_observed_at": None,
+                "evidence_types": set(),
+            },
+        )
         item["matching_cards"].update(matched)
         item["current_deck_observed_at"] = deck.get("observed_at")
         item["evidence_types"].add("current_profile_deck")
@@ -559,13 +638,11 @@ def _card_impact(
         item["matching_changes"] = [
             targets[name.lower()] for name in item["matching_cards"]
         ]
-        item["win_rate"] = round(item["wins"] / item["battles"], 3) if item["battles"] else None
+        item["win_rate"] = (
+            round(item["wins"] / item["battles"], 3) if item["battles"] else None
+        )
         members.append(item)
-    observed = {
-        name.lower()
-        for member in members
-        for name in member["matching_cards"]
-    }
+    observed = {name.lower() for member in members for name in member["matching_cards"]}
     return {
         "capability": CAPABILITY_ID,
         "contract_version": CONTRACT_VERSION,
@@ -579,13 +656,18 @@ def _card_impact(
             "sample_battles": _battle_count(rows),
             "deck_observations": len(rows),
         },
-        "affected_members": sorted(members, key=lambda item: (-item["battles"], item["player_name"] or "")),
+        "affected_members": sorted(
+            members, key=lambda item: (-item["battles"], item["player_name"] or "")
+        ),
         "affected_member_count": len(members),
         "changes_without_member_evidence": [
             change for key, change in targets.items() if key not in observed
         ],
         "interpretation": "Who actually uses the named cards and their observed results; does not infer the balance change itself.",
-        "evidence_limits": {"global_meta_claims_supported": False, "opponent_decks_captured": False},
+        "evidence_limits": {
+            "global_meta_claims_supported": False,
+            "opponent_decks_captured": False,
+        },
         "sources": [
             "battle_events.deck_json",
             "player_current_state.current_deck_json",
@@ -605,28 +687,53 @@ def get_deck_intelligence(
     source=None,
     conn=None,
     as_of: datetime | None = None,
-) -> dict:
+) -> DeckIntelligenceResult:
     """Return member, clan-local meta, or named-card impact intelligence."""
     source = _source(source)
     days = max(1, min(int(days or 30), 180))
     if scope not in {"all", "competitive", "ladder_ranked", "ladder", "ranked", "war"}:
-        return {"capability": CAPABILITY_ID, "contract_version": CONTRACT_VERSION,
-                "available": False, "error": "unsupported_scope", "scope": scope}
+        return {
+            "capability": CAPABILITY_ID,
+            "contract_version": CONTRACT_VERSION,
+            "available": False,
+            "error": "unsupported_scope",
+            "scope": scope,
+        }
     if view == "member":
         if not player_tag:
-            return {"capability": CAPABILITY_ID, "contract_version": CONTRACT_VERSION,
-                    "available": False, "error": "player_tag_required"}
+            return {
+                "capability": CAPABILITY_ID,
+                "contract_version": CONTRACT_VERSION,
+                "available": False,
+                "error": "player_tag_required",
+            }
         tag = _tag(player_tag)
-        rows = _invoke(
-            source, "list_deck_battle_history", tag, days=days, scope=scope,
-            limit=1200, conn=conn,
-        ) or []
+        rows = (
+            _invoke(
+                source,
+                "list_deck_battle_history",
+                tag,
+                days=days,
+                scope=scope,
+                limit=1200,
+                conn=conn,
+            )
+            or []
+        )
         return _member_view(tag, rows, source, days=days, scope=scope, conn=conn)
     history_tag = _tag(player_tag) if view == "card_impact" and player_tag else None
-    rows = _invoke(
-        source, "list_deck_battle_history", history_tag, days=days, scope=scope,
-        limit=5000, conn=conn,
-    ) or []
+    rows = (
+        _invoke(
+            source,
+            "list_deck_battle_history",
+            history_tag,
+            days=days,
+            scope=scope,
+            limit=5000,
+            conn=conn,
+        )
+        or []
+    )
     if view == "clan":
         return _clan_view(rows, days=days, scope=scope)
     if view == "card_impact":
@@ -636,12 +743,17 @@ def get_deck_intelligence(
             as_of=as_of or datetime.now(timezone.utc),
         )
         if not normalized_changes:
-            return {"capability": CAPABILITY_ID, "contract_version": CONTRACT_VERSION,
-                    "available": False, "error": "changes_or_cards_required"}
+            return {
+                "capability": CAPABILITY_ID,
+                "contract_version": CONTRACT_VERSION,
+                "available": False,
+                "error": "changes_or_cards_required",
+            }
         try:
-            current_decks = _invoke(
-                source, "list_current_member_decks", history_tag, conn=conn
-            ) or []
+            current_decks = (
+                _invoke(source, "list_current_member_decks", history_tag, conn=conn)
+                or []
+            )
         except (AttributeError, TypeError):
             current_decks = []
         result = _card_impact(
@@ -654,8 +766,13 @@ def get_deck_intelligence(
         if history_tag:
             result["player_tag"] = history_tag
         return result
-    return {"capability": CAPABILITY_ID, "contract_version": CONTRACT_VERSION,
-            "available": False, "error": "unsupported_view", "view": view}
+    return {
+        "capability": CAPABILITY_ID,
+        "contract_version": CONTRACT_VERSION,
+        "available": False,
+        "error": "unsupported_view",
+        "view": view,
+    }
 
 
 __all__ = ["CAPABILITY_ID", "CONTRACT_VERSION", "get_deck_intelligence"]

@@ -31,13 +31,19 @@ def _member_role_grant_status() -> dict:
     }
     if not runtime_app.MEMBER_ROLE_ID:
         return status
-    guild = runtime_app.bot.get_guild(runtime_app.GUILD_ID) if runtime_app.GUILD_ID else None
+    guild = (
+        runtime_app.bot.get_guild(runtime_app.GUILD_ID)
+        if runtime_app.GUILD_ID
+        else None
+    )
     if guild is None:
         status["reason"] = "guild not cached"
         return status
     status["guild_found"] = True
     member_role = guild.get_role(runtime_app.MEMBER_ROLE_ID)
-    bot_role = guild.get_role(runtime_app.BOT_ROLE_ID) if runtime_app.BOT_ROLE_ID else None
+    bot_role = (
+        guild.get_role(runtime_app.BOT_ROLE_ID) if runtime_app.BOT_ROLE_ID else None
+    )
     me = guild.me
     if member_role is None:
         status["reason"] = "member role not found"
@@ -96,7 +102,11 @@ async def _startup_channel_audit_summary() -> str:
             continue
         guild = getattr(channel, "guild", None)
         permissions_for = getattr(channel, "permissions_for", None)
-        if guild is not None and callable(permissions_for) and getattr(runtime_app.bot, "user", None):
+        if (
+            guild is not None
+            and callable(permissions_for)
+            and getattr(runtime_app.bot, "user", None)
+        ):
             me = getattr(guild, "me", None)
             if me is None and hasattr(guild, "get_member"):
                 cache_key = getattr(guild, "id", channel_config["id"])
@@ -120,7 +130,9 @@ async def _startup_channel_audit_summary() -> str:
                 if not getattr(perms, "use_external_emojis", True):
                     missing_soft.append("use_external_emojis")
                 if missing_soft:
-                    issues.append(f"{channel_name} missing perms: {', '.join(missing_soft)}")
+                    issues.append(
+                        f"{channel_name} missing perms: {', '.join(missing_soft)}"
+                    )
                     continue
         ok_names.append(channel_name)
     if not issues:
@@ -142,7 +154,9 @@ async def _post_startup_message() -> bool:
         channel_id = channel_configs[0]["id"]
         channel = await _resolve_runtime_channel(channel_id)
         if channel:
-            recent_posts = await asyncio.to_thread(db.list_channel_messages, channel.id, 5, "assistant")
+            recent_posts = await asyncio.to_thread(
+                db.list_channel_messages, channel.id, 5, "assistant"
+            )
     startup_context = (
         "This is a startup check-in for the private Elixir operations log.\n"
         "Write only the fun Clash Royale-inspired body that follows a fixed startup header.\n"
@@ -183,10 +197,14 @@ async def _post_startup_message() -> bool:
     if await elixir_log.post_event_async(content):
         return True
     if not channel_configs:
-        log.warning("Startup message skipped: no leadership channel configured and elixir-log webhook unavailable")
+        log.warning(
+            "Startup message skipped: no leadership channel configured and elixir-log webhook unavailable"
+        )
         return False
     if not channel:
-        log.warning("Startup message skipped: leadership channel not found or unreachable and elixir-log webhook unavailable")
+        log.warning(
+            "Startup message skipped: leadership channel not found or unreachable and elixir-log webhook unavailable"
+        )
         return False
     try:
         await runtime_app._post_to_elixir(channel, {"content": content})

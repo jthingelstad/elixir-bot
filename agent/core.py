@@ -7,7 +7,7 @@ import subprocess
 import threading
 import time
 
-from anthropic import Anthropic, APIError, APIConnectionError, BadRequestError
+from anthropic import Anthropic, APIConnectionError, APIError, BadRequestError
 
 import db
 from agent.workflow_registry import workflow_model_family
@@ -54,11 +54,15 @@ WORKFLOW_TIMEOUT_OVERRIDES = {
 
 def _get_build_hash():
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=os.path.dirname(__file__) or ".",
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=os.path.dirname(__file__) or ".",
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
     except (subprocess.SubprocessError, OSError):
         return "unknown"
 
@@ -69,7 +73,8 @@ BUILD_HASH = _get_build_hash()
 RELEASE_CODENAME = os.getenv("ELIXIR_RELEASE_CODENAME", "Panoramic Phoenix")
 RELEASE_STAMP = os.getenv("ELIXIR_RELEASE_STAMP", "2026-07-11")
 RELEASE_LABEL = (
-    f"{RELEASE_CODENAME} ({RELEASE_STAMP})" if RELEASE_CODENAME and RELEASE_STAMP
+    f"{RELEASE_CODENAME} ({RELEASE_STAMP})"
+    if RELEASE_CODENAME and RELEASE_STAMP
     else (RELEASE_CODENAME or RELEASE_STAMP or "unversioned")
 )
 
@@ -140,13 +145,17 @@ def _build_system_prompt(*sections):
 
 def response_text(resp) -> str | None:
     """Concatenated text blocks from a native Anthropic Message, or None."""
-    parts = [block.text for block in resp.content if getattr(block, "type", None) == "text"]
+    parts = [
+        block.text for block in resp.content if getattr(block, "type", None) == "text"
+    ]
     return "".join(parts) if parts else None
 
 
 def response_tool_uses(resp) -> list:
     """tool_use blocks (each has .id, .name, .input) from a native Message."""
-    return [block for block in resp.content if getattr(block, "type", None) == "tool_use"]
+    return [
+        block for block in resp.content if getattr(block, "type", None) == "tool_use"
+    ]
 
 
 def _content_has_anthropic_payload(content) -> bool:
@@ -182,7 +191,9 @@ def _sanitize_anthropic_messages(messages):
     if dropped:
         log.info("anthropic_empty_messages_dropped count=%s", dropped)
     if not sanitized:
-        sanitized.append({"role": "user", "content": "No user message content was provided."})
+        sanitized.append(
+            {"role": "user", "content": "No user message content was provided."}
+        )
         log.warning("anthropic_messages_empty_after_sanitize inserted_placeholder=true")
     return sanitized
 
@@ -211,8 +222,9 @@ def _with_message_cache_breakpoint(messages):
     last = messages[-1]
     content = last.get("content")
     if isinstance(content, str):
-        new_content = [{"type": "text", "text": content,
-                        "cache_control": {"type": "ephemeral"}}]
+        new_content = [
+            {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}
+        ]
     elif isinstance(content, list) and content and isinstance(content[-1], dict):
         new_content = list(content)
         new_content[-1] = {**new_content[-1], "cache_control": {"type": "ephemeral"}}
@@ -237,13 +249,18 @@ def _jsonable_block(block):
     if btype == "text":
         return {"type": "text", "text": getattr(block, "text", "")}
     if btype == "tool_use":
-        return {"type": "tool_use", "id": getattr(block, "id", None),
-                "name": getattr(block, "name", None),
-                "input": getattr(block, "input", None)}
+        return {
+            "type": "tool_use",
+            "id": getattr(block, "id", None),
+            "name": getattr(block, "name", None),
+            "input": getattr(block, "input", None),
+        }
     if btype == "tool_result":
-        return {"type": "tool_result",
-                "tool_use_id": getattr(block, "tool_use_id", None),
-                "content": getattr(block, "content", None)}
+        return {
+            "type": "tool_result",
+            "tool_use_id": getattr(block, "tool_use_id", None),
+            "content": getattr(block, "content", None),
+        }
     return {"type": btype or "unknown", "repr": str(block)[:2000]}
 
 
@@ -258,7 +275,9 @@ def _jsonable_messages(messages):
             ser = [_jsonable_block(b) for b in content]
         else:
             ser = content
-        out.append({"role": m.get("role") if isinstance(m, dict) else "?", "content": ser})
+        out.append(
+            {"role": m.get("role") if isinstance(m, dict) else "?", "content": ser}
+        )
     return out
 
 
@@ -267,13 +286,17 @@ def _serialize_prompt(system, messages, tools, max_tokens, temperature):
     Tool DEFINITIONS are large and static; the names are the useful signal."""
     try:
         import json as _json
-        return _json.dumps({
-            "system": system,
-            "messages": _jsonable_messages(messages),
-            "tools": [t.get("name") for t in (tools or []) if isinstance(t, dict)],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }, default=str)
+
+        return _json.dumps(
+            {
+                "system": system,
+                "messages": _jsonable_messages(messages),
+                "tools": [t.get("name") for t in (tools or []) if isinstance(t, dict)],
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+            default=str,
+        )
     except Exception:
         log.debug("prompt capture: prompt serialize failed (ignored)", exc_info=True)
         return None
@@ -286,12 +309,17 @@ def _serialize_response(resp):
         return None
     try:
         import json as _json
-        return _json.dumps({
-            "stop_reason": getattr(resp, "stop_reason", None),
-            "text": response_text(resp),
-            "tool_uses": [{"name": b.name, "input": b.input}
-                          for b in response_tool_uses(resp)],
-        }, default=str)
+
+        return _json.dumps(
+            {
+                "stop_reason": getattr(resp, "stop_reason", None),
+                "text": response_text(resp),
+                "tool_uses": [
+                    {"name": b.name, "input": b.input} for b in response_tool_uses(resp)
+                ],
+            },
+            default=str,
+        )
     except Exception:
         log.debug("prompt capture: response serialize failed (ignored)", exc_info=True)
         return None
@@ -300,7 +328,18 @@ def _serialize_response(resp):
 # ── Main completion function ─────────────────────────────────────────────────
 
 
-def _create_chat_completion(*, workflow, messages, system=None, model=None, temperature=0.7, max_tokens=4096, timeout=60, tools=None, tool_choice=None):
+def _create_chat_completion(
+    *,
+    workflow,
+    messages,
+    system=None,
+    model=None,
+    temperature=0.7,
+    max_tokens=4096,
+    timeout=60,
+    tools=None,
+    tool_choice=None,
+):
     """Call the Anthropic Messages API and return the native Message response.
 
     messages: native Anthropic messages (user/assistant roles only; content is
@@ -313,7 +352,9 @@ def _create_chat_completion(*, workflow, messages, system=None, model=None, temp
     sanitized_messages = _sanitize_anthropic_messages(messages)
     # Snapshot the semantic prompt (pre cache-control markers) for capture — what
     # the model sees, without the ephemeral-cache plumbing.
-    prompt_json = _serialize_prompt(system, sanitized_messages, tools, max_tokens, temperature)
+    prompt_json = _serialize_prompt(
+        system, sanitized_messages, tools, max_tokens, temperature
+    )
 
     cache_enabled = workflow not in WORKFLOWS_WITHOUT_CACHE
     # Stable prefix (system + tools) gets a 1h TTL for periodic workflows so it
@@ -388,7 +429,8 @@ def _create_chat_completion(*, workflow, messages, system=None, model=None, temp
         )
         try:
             db.record_llm_call(
-                workflow, selected_model,
+                workflow,
+                selected_model,
                 ok=True,
                 duration_ms=duration,
                 prompt_tokens=prompt_tokens,
@@ -413,7 +455,8 @@ def _create_chat_completion(*, workflow, messages, system=None, model=None, temp
         )
         try:
             db.record_llm_call(
-                workflow, selected_model,
+                workflow,
+                selected_model,
                 ok=False,
                 error=exc,
                 duration_ms=duration,
@@ -428,12 +471,11 @@ def _create_chat_completion(*, workflow, messages, system=None, model=None, temp
         # runtime package into every agent-layer unit test.
         try:
             from runtime.alerts import schedule_llm_failure_alert
+
             schedule_llm_failure_alert(workflow)
         except Exception:
             log.warning("schedule_llm_failure_alert_import_failed", exc_info=True)
         raise
-
-
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

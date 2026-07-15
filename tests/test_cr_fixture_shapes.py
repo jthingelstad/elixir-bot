@@ -8,6 +8,7 @@ HERE with a clear diff instead of surfacing as a silent None three layers up.
 When a fixture goes stale, refresh it from the raw log (AGENTS.md 'Testing');
 never hand-edit the JSON.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -23,8 +24,14 @@ from tests.conftest import load_cr_fixture
 
 PLAYER_ASPECTS = {"profile", "cards", "ranked"}
 PROFILE_KEYS = {
-    "arena_id", "arena_name", "badges", "best_trophies",
-    "exp_level", "name", "trophies", "wins",
+    "arena_id",
+    "arena_name",
+    "badges",
+    "best_trophies",
+    "exp_level",
+    "name",
+    "trophies",
+    "wins",
 }
 CARDS_KEYS = {"cards", "collection_level"}
 # last/best added 2026-07-04 (ranked-and-profiles.md D6 — rollover detection);
@@ -33,16 +40,33 @@ RANKED_KEYS = {"league", "rank", "trophies", "last", "best"}
 CLAN_ASPECTS = {"clan_entity", "roster"}
 CLAN_ENTITY_KEYS = {"clan_score", "name", "war_trophies"}
 ROSTER_MEMBER_KEYS = {
-    "clan_rank", "donations", "donations_received", "exp_level",
-    "name", "previous_clan_rank", "role", "trophies",
+    "clan_rank",
+    "donations",
+    "donations_received",
+    "exp_level",
+    "name",
+    "previous_clan_rank",
+    "role",
+    "trophies",
 }
 RACE_KEYS = {
-    "clans", "our_fame", "our_tag", "participants", "our_defense",
-    "period_index", "period_type", "season_id", "section_index",
+    "clans",
+    "our_fame",
+    "our_tag",
+    "participants",
+    "our_defense",
+    "period_index",
+    "period_type",
+    "season_id",
+    "section_index",
 }
 RACE_PARTICIPANT_KEYS = {
-    "boat_attacks", "decks_used", "decks_used_today",
-    "fame", "name", "repair_points",
+    "boat_attacks",
+    "decks_used",
+    "decks_used_today",
+    "fame",
+    "name",
+    "repair_points",
 }
 
 
@@ -160,6 +184,7 @@ def test_annotate_never_throws_on_real_payloads(fixture, endpoint):
 # level 16"). This asserts a real roster member round-trips through the
 # projection into player_current_state with its values intact.
 
+
 def test_roster_projection_round_trips_into_player_state(engine_conn):
     from engine.db import canon_tag, ensure_player
     from engine.emitters.clan import project_clan_aspects
@@ -184,15 +209,20 @@ def test_roster_projection_round_trips_into_player_state(engine_conn):
     refresh_player_state(engine_conn, tag, None, member, "2026-07-05T00:00:00Z")
     engine_conn.commit()
 
-    row = dict(engine_conn.execute(
-        "SELECT clan_rank, donations_week, donations_received_week "
-        "FROM player_current_state WHERE player_tag = ?", (tag,)).fetchone())
+    row = dict(
+        engine_conn.execute(
+            "SELECT clan_rank, donations_week, donations_received_week "
+            "FROM player_current_state WHERE player_tag = ?",
+            (tag,),
+        ).fetchone()
+    )
     # These are the exact fields the camelCase bug NULL'd — they must carry the
     # raw CR values through the snake_case projection.
     assert row["clan_rank"] == raw["clanRank"], "clan_rank lost across the seam"
     assert row["donations_week"] == raw["donations"], "donations lost across the seam"
-    assert row["donations_received_week"] == raw["donationsReceived"], \
+    assert row["donations_received_week"] == raw["donationsReceived"], (
         "donations_received lost across the seam"
+    )
 
     # The raw clan fixture has expLevel=0 for everybody. Replaying its roster
     # entry for the profile member cannot erase deep-profile facts.

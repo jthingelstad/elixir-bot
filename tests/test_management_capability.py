@@ -15,7 +15,10 @@ class _ManagementSource:
         return _Connection()
 
     def get_members_at_risk(self, **kwargs):
-        return {"criteria": kwargs, "members": [{"tag": "#A", "kick_state": "recommended"}]}
+        return {
+            "criteria": kwargs,
+            "members": [{"tag": "#A", "kick_state": "recommended"}],
+        }
 
     def get_promotion_candidates(self):
         return {"members": [{"tag": "#B", "promote_state": "eligible"}]}
@@ -42,9 +45,7 @@ def test_management_contract_declares_engine_policy_authority():
             "members_evaluated": 48,
         },
     ):
-        result = get_management_decisions(
-            view="summary", source=_ManagementSource()
-        )
+        result = get_management_decisions(view="summary", source=_ManagementSource())
 
     assert result["capability"] == "management_decisions"
     assert result["contract_version"] == 1

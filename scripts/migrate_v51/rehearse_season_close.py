@@ -6,7 +6,7 @@ awareness-era contract:
 
 * the season and durable award rows finalize once;
 * a ``season_closed`` stream event exists exactly once;
-* no retired deterministic communication intent is enqueued;
+* the retired deterministic delivery queue is absent;
 * the awareness read can see the new season-close signal; and
 * repeating the close creates no duplicate event or award rows.
 
@@ -60,8 +60,6 @@ def main() -> int:
     before_awards = conn.execute(
         "SELECT COUNT(*) FROM awards WHERE season_id = ?", (season_id,)
     ).fetchone()[0]
-    before_intents = conn.execute("SELECT COUNT(*) FROM communication_intents").fetchone()[0]
-
     first_events = close_season(conn, season_id, {}, observed_at)
     conn.commit()
     after_first_awards = conn.execute(
@@ -80,7 +78,6 @@ def main() -> int:
     event_count = conn.execute(
         "SELECT COUNT(*) FROM war_events WHERE dedup_key = ?", (event_key,)
     ).fetchone()[0]
-    intent_count = conn.execute("SELECT COUNT(*) FROM communication_intents").fetchone()[0]
     awards = dict(
         conn.execute(
             "SELECT award_type, COUNT(*) FROM awards WHERE season_id = ? GROUP BY award_type",
@@ -109,12 +106,18 @@ def main() -> int:
         "season finalized": bool(season and season["ended_at"]),
         "war champ recorded": bool(season and season["war_champ_tag"]),
         "free pass recorded": bool(season and season["free_pass_tag"]),
-        "season_closed emitted once": first_events == 1 and second_events == 0 and event_count == 1,
+        "season_closed emitted once": first_events == 1
+        and second_events == 0
+        and event_count == 1,
         "war champ podium present": 1 <= awards.get("war_champ", 0) <= 3,
         "free pass exactly once": awards.get("free_pass", 0) == 1,
         "awards idempotent": after_first_awards >= before_awards
         and after_second_awards == after_first_awards,
-        "no legacy intent enqueued": intent_count == before_intents,
+        "retired delivery queue absent": conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='communication_intents'"
+        ).fetchone()
+        is None,
         "awareness read sees season close": bool(surfaced),
     }
 
