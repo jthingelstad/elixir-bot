@@ -56,6 +56,7 @@ def _run_agent(question: str, login: str, prior: list[dict]) -> str:
             query=question,
         )
     except Exception:
+        log.debug("Observatory chat memory context unavailable", exc_info=True)
         memory_context = None
     result = elixir_agent.respond_in_channel(
         question=question,

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from datetime import datetime, timezone
+import logging
 
 import db
 from capabilities import management as management_capability
@@ -19,6 +20,9 @@ from capabilities import war as war_capability
 from engine.clock import war_clock
 from engine.tick import HOME_CLAN
 from storage import cases, events_read, leader_actions, revisits, runtime_status
+
+
+log = logging.getLogger("elixir.webapp.queries")
 
 
 def _now() -> datetime:
@@ -184,6 +188,11 @@ def members_page() -> dict:
                         p["modes"].items(), key=lambda kv: -kv[1]["battles"])
                 ) or None
             except Exception:
+                log.debug(
+                    "member mode profile unavailable tag=%s",
+                    r.get("player_tag"),
+                    exc_info=True,
+                )
                 r["identity"] = None
                 r["mode_mix"] = None
         leavers = _rows(conn, """
@@ -370,6 +379,7 @@ def recognition_detail(recognition_key: str) -> dict | None:
                 for v in verdicts:
                     v["dimensions"] = _parse_json(v.pop("dimensions_json", None), {})
             except Exception:
+                log.debug("editor verdict history unavailable", exc_info=True)
                 verdicts = []
         return {"claim": claim, "intent": intent, "verdicts": verdicts}
     finally:
@@ -453,6 +463,7 @@ def polling_page() -> dict:
         try:
             plan = engine_polling.plan(conn, now_iso)
         except Exception:
+            log.debug("polling plan preview unavailable", exc_info=True)
             plan = []
         names = {r["player_tag"]: (r.get("current_name") or "") for r in rows}
         plan_rows = [
@@ -502,6 +513,7 @@ def war_page() -> dict:
                 view="snapshot", conn=conn
             )["data"]
         except Exception:
+            log.debug("war snapshot unavailable", exc_info=True)
             snapshot = None
         season_id = (clock or {}).get("season_id")
         section_index = (clock or {}).get("section_index")

@@ -1,6 +1,9 @@
 """Tests for tournament signal generation during polling."""
 
+import asyncio
+
 import db
+from runtime.jobs import _tournament as tournament_jobs
 from runtime.jobs._tournament import _build_battle_played_signal
 from storage.tournament import poll_tournament, register_tournament, store_tournament_battle
 
@@ -456,3 +459,37 @@ def test_build_battle_played_signal_audience_classification():
     neither = _build_battle_played_signal("#2QG9Y9UR", "PK Cup",
         {**base_info, "player1_is_clan_member": False, "player2_is_clan_member": False})
     assert neither["audience"] == "external_observed"
+
+
+def test_tournament_recap_reports_not_posted_without_context(monkeypatch):
+    monkeypatch.setattr(
+        tournament_jobs.db,
+        "build_tournament_recap_context",
+        lambda _tag: None,
+    )
+
+    assert asyncio.run(tournament_jobs._tournament_recap("#2QG9Y9UR")) is False
+
+
+def test_tournament_recap_records_failure_and_reports_not_posted(monkeypatch):
+    error = RuntimeError("recap context failed")
+    incidents = []
+
+    def fail(_tag):
+        raise error
+
+    monkeypatch.setattr(tournament_jobs.db, "build_tournament_recap_context", fail)
+    monkeypatch.setattr(
+        tournament_jobs,
+        "record_incident",
+        lambda component, exc, **kwargs: incidents.append((component, exc, kwargs)),
+    )
+
+    assert asyncio.run(tournament_jobs._tournament_recap("#2QG9Y9UR")) is False
+    assert incidents == [
+        (
+            "tournament.recap",
+            error,
+            {"context": {"tournament_tag": "#2QG9Y9UR"}},
+        )
+    ]

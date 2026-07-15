@@ -14,6 +14,7 @@ from typing import Optional
 import cr_api
 import db
 import elixir_agent
+from apscheduler.jobstores.base import JobLookupError
 from engine import observations
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
@@ -398,18 +399,18 @@ async def resume_pending_tournament_recaps() -> None:
         await _tournament_recap(tag)
 
 
-async def _tournament_recap(tournament_tag: str):
+async def _tournament_recap(tournament_tag: str) -> bool:
     """Generate and post a tournament recap to #elixir."""
     try:
         context = await asyncio.to_thread(db.build_tournament_recap_context, tournament_tag)
         if not context:
             log.warning("Tournament recap: no context for %s", tournament_tag)
-            return
+            return False
 
         recap_text = elixir_agent.generate_tournament_recap(context)
         if not recap_text:
             log.warning("Tournament recap: LLM returned empty for %s", tournament_tag)
-            return
+            return False
 
         tournament = await asyncio.to_thread(db.get_tournament_by_tag, tournament_tag)
         tournament_name = (tournament or {}).get("name") or tournament_tag
@@ -419,11 +420,11 @@ async def _tournament_recap(tournament_tag: str):
         channel_id = _get_singleton_channel_id("elixir")
         if not channel_id:
             log.error("Tournament recap: #elixir channel not configured")
-            return
+            return False
         channel = _bot().get_channel(channel_id)
         if not channel:
             log.error("Tournament recap: could not resolve channel %s", channel_id)
-            return
+            return False
 
         await _post_to_elixir(channel, {"content": full_post})
         await asyncio.to_thread(
@@ -454,15 +455,22 @@ async def _tournament_recap(tournament_tag: str):
         await asyncio.to_thread(_mark_recap_posted)
 
         log.info("Tournament recap posted for %s", tournament_tag)
+        return True
     except Exception as exc:
         log.error("Tournament recap generation failed: %s", exc, exc_info=True)
+        record_incident(
+            "tournament.recap",
+            exc,
+            context={"tournament_tag": tournament_tag},
+        )
+        return False
 
 
 def start_tournament_watch():
     """Add the tournament watch job to the scheduler."""
     try:
         _runtime_app().scheduler.remove_job(_TOURNAMENT_JOB_ID)
-    except Exception:
+    except JobLookupError:
         pass  # job may not exist yet
 
     # Register the coroutine directly so max_instances/coalesce actually guard
@@ -486,5 +494,5 @@ def stop_tournament_watch():
     try:
         _runtime_app().scheduler.remove_job(_TOURNAMENT_JOB_ID)
         log.info("Tournament watch stopped")
-    except Exception:
+    except JobLookupError:
         pass  # job may not exist

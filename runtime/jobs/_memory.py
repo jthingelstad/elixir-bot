@@ -610,6 +610,11 @@ def _build_memory_synthesis_context():
             channel = prompts.discord_singleton_lane(key)
             channel_id = channel.get("id") if isinstance(channel, dict) else None
         except Exception:
+            log.warning(
+                "memory synthesis: channel config failed lane=%s",
+                key,
+                exc_info=True,
+            )
             channel_id = None
         if not channel_id:
             continue
