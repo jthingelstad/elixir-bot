@@ -1,22 +1,30 @@
-"""The Editor — Elixir's editorial-memory feeders + the verdict-table schema.
+"""Elixir's active editorial-learning loop + historical verdict schema.
 
 Reduced 2026-07-10: the inline gate/critic/judge, the living-rubric builder, the
 daily feedback sweep, and the weekly self-review were retired when the awareness
-brain became the sole proactive poster (it composes with depth natively — there
-is no per-post gate anymore). See RELEASES / the awareness transition.
+brain became the sole proactive poster. The old second-LLM per-post critic stays
+retired; current quality control is deterministic and evidence-bound.
 
 What remains is live:
 - ``ensure_editor_schema`` — the ``editor_verdicts`` table, still read by the
   Observatory editorial view for historical verdicts;
 - the auto-feeders that turn human actions into editorial rubric memories:
   ``record_deleted_post`` (an admin deletes an Elixir post) and
-  ``record_copy_edit_pair`` (a leader rewrites action-card copy). These populate
-  the Observatory editorial page.
+  ``record_copy_edit_pair`` (a leader rewrites action-card copy);
+- immediate repetition feedback from the awareness delivery path;
+- retrospective active-output feedback from ``scripts/eval_post_quality.py``.
+
+All feedback is stored as editorial memory and becomes composition guidance on
+the next awareness read.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import re
+from difflib import SequenceMatcher
 
 log = logging.getLogger("elixir.engine.editor")
 
@@ -104,3 +112,165 @@ def record_copy_edit_pair(conn, action_id: int, before: str, after: str) -> int 
     )
     conn.commit()
     return mid
+
+
+def _normalized_copy(value: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", (value or "").lower()))
+
+
+def _similar_copy(conn, lane: str, content: str, message_id: str | None) -> dict | None:
+    current = _normalized_copy(content)
+    if len(current) < 40:
+        return None
+    rows = conn.execute(
+        "SELECT discord_message_id, content_preview, posted_at FROM awareness_posts "
+        "WHERE lane = ? AND (? IS NULL OR discord_message_id != ?) "
+        "ORDER BY posted_at DESC LIMIT 12",
+        (lane, message_id, message_id),
+    ).fetchall()
+    best = None
+    for row in rows:
+        prior = _normalized_copy(row["content_preview"])
+        if len(prior) < 40:
+            continue
+        ratio = SequenceMatcher(None, current, prior).ratio()
+        if ratio >= 0.82 and (best is None or ratio > best["similarity"]):
+            best = {
+                "message_id": row["discord_message_id"],
+                "copy": row["content_preview"],
+                "posted_at": row["posted_at"],
+                "similarity": round(ratio, 3),
+            }
+    return best
+
+
+def _recent_solo_spotlight(conn, post: dict) -> dict | None:
+    tags = [str(tag) for tag in (post.get("member_tags") or []) if tag]
+    if len(tags) != 1 or post.get("leads_with") not in {"milestone", "clan_event"}:
+        return None
+    target = tags[0]
+    rows = conn.execute(
+        "SELECT at, plan_json FROM awareness_thoughts "
+        "WHERE chose_silence = 0 AND at >= datetime('now', '-48 hour') "
+        "ORDER BY at DESC LIMIT 50"
+    ).fetchall()
+    for row in rows:
+        try:
+            plan = json.loads(row["plan_json"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        for prior in plan.get("posts") or []:
+            if not isinstance(prior, dict):
+                continue
+            prior_tags = [str(tag) for tag in (prior.get("member_tags") or []) if tag]
+            if (
+                prior.get("leads_with") in {"milestone", "clan_event"}
+                and prior_tags == [target]
+            ):
+                return {
+                    "at": row["at"],
+                    "summary": prior.get("summary"),
+                    "member_tag": target,
+                }
+    return None
+
+
+def record_active_awareness_quality(
+    conn,
+    *,
+    post: dict,
+    evidence: dict,
+    lane: str,
+    content: str,
+    discord_message_id: str | int | None,
+) -> list[int]:
+    """Immediate deterministic feedback from the production awareness path.
+
+    This does not grade style with another LLM.  It catches two high-confidence
+    editorial failures as soon as a post lands: near-duplicate copy and a
+    routine solo spotlight inside the existing 48-hour cooldown.  The resulting
+    editorial memory is available on the very next awareness read.
+    """
+    message_id = str(discord_message_id) if discord_message_id is not None else None
+    similar = _similar_copy(conn, lane, content, message_id)
+    prior_spotlight = None
+    if not evidence.get("notable_moment"):
+        prior_spotlight = _recent_solo_spotlight(conn, post or {})
+    if not similar and not prior_spotlight:
+        return []
+
+    reasons = []
+    if similar:
+        reasons.append(
+            f"Its wording is {similar['similarity']:.0%} similar to the {similar['posted_at']} post: "
+            f"{similar['copy'][:300]}"
+        )
+    if prior_spotlight:
+        reasons.append(
+            f"It solo-spotlights {prior_spotlight['member_tag']} again inside 48 hours; "
+            f"the earlier beat was {prior_spotlight.get('summary') or '(no summary)'} at "
+            f"{prior_spotlight['at']}."
+        )
+    stable_id = message_id or hashlib.sha1(content.encode("utf-8")).hexdigest()[:16]
+    mid = _add_editorial_memory(
+        conn,
+        title="Anti-pattern: active awareness repetition",
+        body=(
+            f"A live #{lane} awareness post repeated a recent beat. "
+            "Future composition should change the subject or angle, combine it into a roundup, "
+            "or stay silent unless the new moment is explicitly notable.\n\n"
+            + "\n".join(f"- {reason}" for reason in reasons)
+            + f"\n\nPOST: {content[:600]}"
+        ),
+        kind_tag="anti-pattern",
+        event_key=f"active_post_quality:{stable_id}",
+        confidence=0.85,
+        created_by="editor-active-quality",
+        extra_tags=("quality-eval", f"lane:{lane}"),
+    )
+    return [mid] if mid is not None else []
+
+
+def record_post_quality_feedback(
+    conn,
+    *,
+    message_id: str | None,
+    lane: str,
+    source: str,
+    copy: str,
+    findings: list[dict] | None = None,
+    depth: int | None = None,
+    depth_reason: str | None = None,
+    repetition: dict | None = None,
+) -> int | None:
+    """Persist one idempotent editorial lesson from the retrospective eval."""
+    concerns = []
+    for finding in findings or []:
+        concerns.append(f"Game accuracy: {finding.get('issue')}")
+    if depth is not None and depth <= 2:
+        concerns.append(f"Depth {depth}/5: {depth_reason or 'generic or thin'}")
+    if repetition:
+        concerns.append(
+            f"Repetition: {repetition.get('similarity', 0):.0%} similar to "
+            f"message {repetition.get('message_id') or '?'}"
+        )
+    if not concerns:
+        return None
+    stable_id = message_id or hashlib.sha1(
+        f"{lane}|{source}|{copy}".encode("utf-8")
+    ).hexdigest()[:16]
+    return _add_editorial_memory(
+        conn,
+        title="Anti-pattern: live output quality finding",
+        body=(
+            f"The active {source} path produced a #{lane} message that should shape future "
+            "composition.\n\n"
+            + "\n".join(f"- {concern}" for concern in concerns)
+            + f"\n\nPOST: {copy[:700]}"
+        ),
+        kind_tag="anti-pattern",
+        event_key=f"post_quality:{stable_id}",
+        confidence=0.75,
+        created_by="editor-post-quality",
+        extra_tags=("quality-eval", f"lane:{lane}", f"source:{source}"),
+    )

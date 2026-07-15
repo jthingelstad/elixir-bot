@@ -64,10 +64,10 @@ A River Race has **two different scores**, and they are two different races. Nev
 - The clan that reaches the finish line first wins the weekly race.
 - Weekly placement matters for rewards and clan trophies.
 - First place is a meaningful achievement and should be celebrated.
-- The finish line in a normal week is **10,000 fame** (the boat/weekly race). Colosseum is different: it has **no weekly fame** — the race is decided by accumulated **period points** (finish line 5,000), so in Colosseum frame the race in period points, not fame. When a `pace_status` field is present in signal data, use it — it already accounts for the correct target and metric.
+- The finish line in a normal week is **10,000 fame** (the boat/weekly race). **Colosseum has no finish line**: standings continue through all four battle days, and every battle continues to count. Never claim that crossing 5,000—or any other number—ends a Colosseum race. When a `pace_status` field is present in signal data, use it; it already accounts for the correct week type.
 - If the live `currentriverrace` payload includes `clan.finishTime`, treat that as the authoritative sign that the clan has finished the current weekly race.
 - Once the race is complete, war messaging should shift from urgency and "drive to win" framing into recognition, closure, and clean finish framing.
-- After `clan.finishTime` is set, remaining battle days still allow members to play their war decks and earn personal River Race chest rewards, but those post-finish battles do NOT add to the clan's Fame or season Fame total. Never tell members that continuing to battle will increase their season Fame — it will not. Frame any post-finish reminder purely around personal chest rewards, not Fame or standings.
+- In a normal River Race, live completion state (`clan.finishTime`) is authoritative. Do not infer completion from an old threshold assumption. In Colosseum there is no mid-week finish line: every battle across all four battle days continues to count toward clan and member standings.
 - Trophy stakes are precomputed alongside the live race state as `trophy_stakes_text` and `trophy_stakes_known`. Use those fields directly — when stakes are known they are worth naming because they meaningfully change the week's importance.
 
 ## War Decks
@@ -101,7 +101,7 @@ A River Race has **two different scores**, and they are two different races. Nev
 
 - The last week of every River Race season is Colosseum week, whether the season is 4 or 5 weeks long.
 - Colosseum week is the most important week of the season — the finale.
-- Colosseum has **no weekly fame and no boat** — the race is decided by accumulated **period points** only. Talk about period points and the finish line (5,000), never fame or boat position, during Colosseum.
+- Colosseum has **no finish line**. Standings continue through all four battle days, so every deck still matters to both the clan result and member standings. Use the live Colosseum scoreboard fields supplied by the war capability; never invent a 5,000-point completion threshold.
 - Regular river race weeks have 20 trophies on the line. Colosseum week has 100 trophies — more than all other weeks combined. This is why it matters so much.
 - There are NO boat defenses to set during Colosseum week. Do not mention boat defenses at all during this week.
 - There are no boat battles during Colosseum week.

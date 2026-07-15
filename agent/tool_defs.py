@@ -522,6 +522,82 @@ TOOLS = [
     # ── CARD DOMAIN ────────────────────────────────────────────────────────
 
     {
+        "name": "get_deck_intelligence",
+        "description": (
+            "Get structured deck and clan-local metagame intelligence derived from "
+            "Elixir's observed battle history. This is the FIRST tool for deck strategy, "
+            "deck stability, archetypes, variants, recent substitutions, performance, or "
+            "balance-impact questions.\n\n"
+            "Views:\n"
+            "- member: requires member_tag; returns current/primary deck, archetype, win "
+            "conditions, observed W/L, variants, recent card swaps, stability, and upgrade "
+            "bottlenecks.\n"
+            "- clan: clan-local archetype, win-condition, and primary-card spread. This is "
+            "POAP KINGS usage, NOT global ladder meta.\n"
+            "- card_impact (leadership only): requires changes (preferred) or cards; shows which "
+            "clan members actually use those cards and their observed results. Preserve each "
+            "change's direction, source URL/date, effective date, and WIP/final status. An optional "
+            "member_tag narrows the impact to one member. The tool does not infer the balance "
+            "change itself.\n\n"
+            "Evidence boundary: Elixir stores our members' own decks but not opponent deck "
+            "lists. Never turn this result into claims about specific opponent cards or global meta."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "view": {
+                    "type": "string",
+                    "enum": ["member", "clan", "card_impact"],
+                    "default": "member",
+                },
+                "member_tag": {
+                    "type": "string",
+                    "description": "Player tag, name, alias, or Discord handle; required for member view and optional for a leadership card_impact query.",
+                },
+                "cards": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Named changed/affected cards; required for card_impact view.",
+                },
+                "changes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "card": {"type": "string"},
+                            "direction": {
+                                "type": "string",
+                                "enum": ["buff", "nerf", "rework", "mixed", "unknown"],
+                            },
+                            "status": {
+                                "type": "string",
+                                "description": "For example wip, proposed, final, stale, or superseded.",
+                            },
+                            "source_url": {"type": "string"},
+                            "published_at": {"type": "string"},
+                            "effective_at": {"type": "string"},
+                        },
+                        "required": ["card", "direction", "source_url", "published_at"],
+                    },
+                    "description": "Sourced balance items for card_impact. Preferred over bare cards.",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "Observed battle window, 1-180 days. Default 30.",
+                    "default": 30,
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["all", "competitive", "ladder_ranked", "ladder", "ranked", "war"],
+                    "description": "Battle family to analyze. Default competitive.",
+                    "default": "competitive",
+                },
+            },
+            "required": [],
+        },
+    },
+
+    {
         "name": "lookup_cards",
         "description": "Look up Clash Royale cards from the card catalog. Use this for accurate card data including elixir cost, rarity, type, and evolution/hero capability. Always prefer this over relying on memory when discussing card stats or comparisons.",
         "input_schema": {

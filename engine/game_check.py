@@ -20,6 +20,7 @@ The classes it catches map to live incidents:
 - seasonal arena narrated as an arena-up (the PANCAKES! false arena-up).
 - a league name that contradicts the facts' league number/era.
 - an impossible war day ("battle day 5 of 4").
+- a Colosseum finish line / "remaining battles do not count" claim.
 """
 
 from __future__ import annotations
@@ -40,6 +41,20 @@ _LEVEL_RE = re.compile(r"\blevel\s+(\d{1,2})\b", re.IGNORECASE)
 _DAY_OF_RE = re.compile(r"\bday\s+(\d+)\s+of\s+(\d+)\b", re.IGNORECASE)
 _ARENA_UP_RE = re.compile(r"arena[- ]?up|moved up|climbed (?:up |into )|punched into|broke into",
                           re.IGNORECASE)
+_FINISH_LINE_RE = re.compile(r"\bfinish\s+line\b", re.IGNORECASE)
+_NO_FINISH_LINE_RE = re.compile(
+    r"\b(?:no|without)\s+(?:a\s+|the\s+)?finish\s+line\b|"
+    r"\bdoes(?:\s+not|n't)\s+have\s+(?:a\s+|the\s+)?finish\s+line\b",
+    re.IGNORECASE,
+)
+_BATTLES_DO_NOT_COUNT_RE = tuple(
+    re.compile(pattern, re.IGNORECASE | re.DOTALL)
+    for pattern in (
+        r"\b(?:remaining|final[- ]day|those|these|any)\s+(?:war\s+)?(?:battles|decks).{0,45}\b(?:do\s+not|don't|won't|no\s+longer)\s+(?:add|count|matter)",
+        r"\bnone\s+of\s+(?:those|these|the\s+remaining).{0,35}\b(?:battles|decks).{0,45}\b(?:add|count|matter)",
+        r"\b(?:purely|only|just)\s+(?:about|for)\s+(?:personal\s+)?(?:war\s+)?chest\s+rewards\b",
+    )
+)
 
 
 def _finding(claim, issue, severity="warn"):
@@ -132,6 +147,34 @@ def _check_war_day(copy, facts, out):
                                 f"the facts say '{human}'", "warn"))
 
 
+def _check_colosseum(copy, facts, out):
+    if not facts.get("is_colosseum_week"):
+        return
+    text = copy or ""
+    if _FINISH_LINE_RE.search(text) and not _NO_FINISH_LINE_RE.search(text):
+        out.append(
+            _finding(
+                "Colosseum finish line",
+                "Colosseum has no finish line; standings continue through all four battle days",
+                "error",
+            )
+        )
+    for pattern in _BATTLES_DO_NOT_COUNT_RE:
+        match = pattern.search(text)
+        if match:
+            prefix = text[max(0, match.start() - 16):match.start()].lower()
+            if re.search(r"(?:not|n't)\s+$", prefix):
+                continue
+            out.append(
+                _finding(
+                    match.group(0)[:120],
+                    "every Colosseum battle continues to count toward clan and member standings",
+                    "error",
+                )
+            )
+            break
+
+
 def check_post(copy: str, facts: dict, conn=None) -> list[dict]:
     """Cross-check a post's CR claims against game knowledge. Returns a list of
     findings (empty = clean). Conservative: only clear contradictions."""
@@ -142,4 +185,5 @@ def check_post(copy: str, facts: dict, conn=None) -> list[dict]:
     _check_arena(copy, facts, out)
     _check_league(copy, facts, out)
     _check_war_day(copy, facts, out)
+    _check_colosseum(copy, facts, out)
     return out

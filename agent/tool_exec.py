@@ -6,6 +6,7 @@ import cr_api
 from agent.core import log
 from agent.cr_api_tool import _execute_cr_api
 from capabilities import awards as awards_capability
+from capabilities import decks as deck_capability
 from capabilities import game_modes as game_mode_capability
 from capabilities import management as management_capability
 from capabilities import members as member_capability
@@ -443,6 +444,34 @@ def _execute_get_member(arguments, workflow=None):
     return result
 
 
+def _execute_get_deck_intelligence(arguments, workflow=None):
+    view = arguments.get("view", "member")
+    member_tag = arguments.get("member_tag")
+    if view == "card_impact" and workflow not in {
+        "clanops", "channel_update_leadership"
+    }:
+        return {
+            "error": "The 'card_impact' analysis is only available in leadership channels."
+        }
+    if view == "member" or (view == "card_impact" and member_tag):
+        if not member_tag:
+            return {"error": "member_tag_required", "view": view}
+        member_tag = _resolve_member_tag(member_tag)
+        _refresh_member_cache(member_tag, include_battles=True)
+    result = deck_capability.get_deck_intelligence(
+        view=view,
+        player_tag=member_tag,
+        cards=arguments.get("cards"),
+        changes=arguments.get("changes"),
+        days=arguments.get("days", 30),
+        scope=arguments.get("scope", "competitive"),
+        source=db,
+    )
+    if view == "member" and isinstance(result, dict) and member_tag:
+        _annotate_roster_status(result, member_tag)
+    return result
+
+
 def _execute_get_awards(arguments):
     """Execute the get_awards tool — filtered list, per-member leaderboard,
     or current-season standings across the awards table."""
@@ -528,6 +557,7 @@ def _execute_get_river_race(arguments):
         projection = snapshot["projection"]
         period = snapshot["period"]
         return {
+            "game_truth": snapshot.get("game_truth"),
             "primary_metric": projection.get("primary_metric"),
             "race_standings": weekly.get("standings") or [],
             "race_rank": weekly.get("rank"),
@@ -556,6 +586,7 @@ def _execute_get_river_race(arguments):
         if not snapshot.get("available"):
             return {"error": "No active war data available."}
         data = dict(snapshot.get("clock") or {})
+        data["game_truth"] = snapshot.get("game_truth")
         data["now_text"] = render_war_now(data)
         engagement = snapshot.get("engagement") or {}
         remaining = engagement.get("remaining_decks") or {}
@@ -1516,6 +1547,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_clan_game_modes(arguments)
         elif name == "get_elixir_state":
             result = _execute_get_elixir_state(arguments, workflow=workflow)
+        elif name == "get_deck_intelligence":
+            result = _execute_get_deck_intelligence(arguments, workflow=workflow)
         elif name == "lookup_cards":
             result = db.lookup_cards(
                 name=arguments.get("name"),

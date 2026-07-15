@@ -43,6 +43,27 @@ def test_clean_war_day_passes():
     assert g.check_post("battle day 3 of 4 is open", {"war_day_human": "battle day 3 of 4"}) == []
 
 
+def test_colosseum_finish_line_and_no_count_claims_are_rejected():
+    facts = {"is_colosseum_week": True, "finish_line": None}
+    findings = g.check_post(
+        "We crossed the 5,000 finish line, so the remaining battles do not count.",
+        facts,
+    )
+    assert len(findings) == 2
+    assert all(finding["severity"] == "error" for finding in findings)
+
+
+def test_correct_colosseum_mechanics_pass():
+    facts = {"is_colosseum_week": True, "finish_line": None}
+    assert g.check_post(
+        "Colosseum has no finish line; every battle across all four days counts.",
+        facts,
+    ) == []
+    assert g.check_post(
+        "These battles are not purely about personal chest rewards.", facts
+    ) == []
+
+
 def test_league_mismatch_flags():
     # facts say league 7 (Ultimate Champion) but the copy names Champion
     out = g.check_post("reached Champion league!", {"ranked_league": 7})

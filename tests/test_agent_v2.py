@@ -986,6 +986,55 @@ def test_respond_in_channel_injects_war_context_for_war_question():
         assert "Dragon Riders" in user_msg
 
 
+def test_respond_in_channel_repairs_colosseum_contradiction_before_returning():
+    rejected = {
+        "event_type": "channel_response",
+        "summary": "war",
+        "content": "We crossed the 5,000 finish line, so the remaining decks do not count.",
+    }
+    repaired = {
+        **rejected,
+        "content": "Colosseum has no finish line; every battle across all four days counts.",
+    }
+    war = {
+        "available": True,
+        "period": {"period_type": "colosseum", "is_colosseum_week": True},
+        "clock": {
+            "season_id": 129,
+            "week": 5,
+            "phase": "battle",
+            "phase_display": "Battle Day 2",
+            "day_number": 2,
+            "day_total": 4,
+            "time_left_text": "12h 30m",
+            "is_colosseum_week": True,
+            "is_final_battle_day": False,
+            "is_final_practice_day": False,
+            "race_standings": [],
+            "day_standings": [],
+        },
+    }
+    with (
+        patch("elixir_agent._chat_with_tools", side_effect=[rejected, repaired]) as mock_chat,
+        patch("agent.workflows.db.build_clan_trend_summary_context", return_value="trends"),
+        patch("agent.workflows.war_capability.get_war_intelligence", return_value=war),
+    ):
+        result = elixir_agent.respond_in_channel(
+            question="Did we finish Colosseum?",
+            author_name="Jamie",
+            channel_name="#ask-elixir",
+            workflow="interactive",
+            clan_data={"memberList": []},
+            war_data={"state": "colosseum"},
+            conversation_history=[],
+            memory_context={},
+        )
+
+    assert result == repaired
+    assert mock_chat.call_count == 2
+    assert mock_chat.call_args_list[1].kwargs["workflow"] == "game_factual_repair"
+
+
 def test_respond_in_channel_omits_war_context_for_non_war_question():
     """War context should NOT be injected for non-war questions in #ask-elixir."""
     with (

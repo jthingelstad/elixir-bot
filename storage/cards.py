@@ -91,6 +91,159 @@ def get_member_current_deck(tag: str, conn: Optional[sqlite3.Connection] = None)
     }
 
 
+_DECK_HISTORY_SCOPES = {
+    "all": "1=1",
+    "competitive": "b.is_competitive = 1",
+    "ladder_ranked": "(b.is_ladder = 1 OR b.is_ranked = 1)",
+    "ladder": "b.is_ladder = 1",
+    "ranked": "b.is_ranked = 1",
+    "war": "b.is_war = 1",
+}
+
+
+def _deck_catalog(conn) -> dict[int, dict]:
+    return {
+        int(row["card_id"]): dict(row)
+        for row in conn.execute(
+            "SELECT card_id, name, elixir_cost, rarity, card_type, max_level "
+            "FROM card_catalog"
+        ).fetchall()
+    }
+
+
+def _enrich_deck_cards(raw_cards, catalog: dict[int, dict]) -> list[dict]:
+    cards = []
+    for raw in raw_cards:
+        if not isinstance(raw, dict):
+            continue
+        card_id = raw.get("id")
+        known = catalog.get(int(card_id)) if isinstance(card_id, int) else None
+        cards.append({
+            "id": card_id,
+            "name": raw.get("name") or (known or {}).get("name"),
+            "level": raw.get("level"),
+            "elixir_cost": raw.get("elixirCost")
+            if raw.get("elixirCost") is not None
+            else (known or {}).get("elixir_cost"),
+            "rarity": raw.get("rarity") or (known or {}).get("rarity"),
+            "card_type": (known or {}).get("card_type"),
+        })
+    return cards
+
+
+@managed_connection
+def list_current_member_decks(
+    tag: str | None = None,
+    *,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Current eight-card profile decks for one member or the active clan."""
+    where = ["cs.current_deck_json IS NOT NULL"]
+    params = []
+    if tag:
+        where.append("cs.player_tag = ?")
+        params.append(_canon_tag(tag))
+    else:
+        where.append(
+            "EXISTS (SELECT 1 FROM clan_memberships cm "
+            "WHERE cm.player_tag = cs.player_tag AND cm.left_at IS NULL)"
+        )
+    rows = conn.execute(
+        "SELECT cs.player_tag, COALESCE(p.display_name, p.current_name) AS player_name, "
+        "cs.observed_at, cs.current_deck_json FROM player_current_state cs "
+        "JOIN players p ON p.player_tag = cs.player_tag "
+        f"WHERE {' AND '.join(where)} ORDER BY cs.observed_at DESC",
+        tuple(params),
+    ).fetchall()
+    catalog = _deck_catalog(conn)
+    result = []
+    for row in rows:
+        try:
+            cards = _enrich_deck_cards(json.loads(row["current_deck_json"]), catalog)
+        except (TypeError, ValueError):
+            continue
+        if len(cards) != 8:
+            continue
+        result.append({
+            "player_tag": row["player_tag"],
+            "player_name": row["player_name"],
+            "observed_at": row["observed_at"],
+            "cards": cards,
+        })
+    return result
+
+
+@managed_connection
+def list_deck_battle_history(
+    tag: str | None = None,
+    *,
+    days: int = 30,
+    scope: str = "competitive",
+    limit: int = 1200,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Observed own-deck history, enriched with catalog facts in one read.
+
+    This is deliberately a storage primitive: it returns battles and card
+    facts without naming archetypes or deciding which deck is primary.  Those
+    semantics belong to ``capabilities.decks``.
+    """
+    days = max(1, min(int(days or 30), 180))
+    limit = max(1, min(int(limit or 1200), 5000))
+    predicate = _DECK_HISTORY_SCOPES.get(scope, _DECK_HISTORY_SCOPES["competitive"])
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+        "%Y%m%dT%H%M%S.000Z"
+    )
+    where = ["b.deck_json IS NOT NULL", "b.battle_time >= ?", predicate]
+    params: list = [cutoff]
+    if tag:
+        where.append("b.player_tag = ?")
+        params.append(_canon_tag(tag))
+    else:
+        where.append(
+            "EXISTS (SELECT 1 FROM clan_memberships cm "
+            "WHERE cm.player_tag = b.player_tag AND cm.left_at IS NULL)"
+        )
+    params.append(limit)
+    rows = conn.execute(
+        "SELECT b.dedup_key, b.player_tag, "
+        "COALESCE(p.display_name, p.current_name) AS player_name, "
+        "b.battle_time, b.outcome, b.trophy_change, b.mode_group, b.game_mode_id, "
+        "b.game_mode_name, b.is_war, b.is_ladder, b.is_ranked, b.deck_json "
+        "FROM battle_events b JOIN players p ON p.player_tag = b.player_tag "
+        f"WHERE {' AND '.join(where)} "
+        "ORDER BY b.battle_time DESC LIMIT ?",
+        tuple(params),
+    ).fetchall()
+
+    catalog = _deck_catalog(conn)
+    result = []
+    for row in rows:
+        try:
+            raw_cards = json.loads(row["deck_json"] or "[]")
+        except (TypeError, ValueError):
+            continue
+        cards = _enrich_deck_cards(raw_cards, catalog)
+        # Ordinary battles carry one exact 8-card deck. Duel rows concatenate
+        # the 2-3 decks used in the series (16/24 cards), in deck-sized chunks.
+        # Twelve-card boat-defense payloads are not a playable deck and are
+        # deliberately excluded from deck intelligence.
+        if not cards or len(cards) % 8 != 0:
+            continue
+        segment_count = len(cards) // 8
+        for segment_index in range(segment_count):
+            item = dict(row)
+            item.pop("deck_json", None)
+            item["cards"] = cards[segment_index * 8:(segment_index + 1) * 8]
+            item["deck_segment"] = segment_index + 1
+            item["series_deck_count"] = segment_count
+            item["outcome_granularity"] = (
+                "duel_series" if segment_count > 1 else "battle"
+            )
+            result.append(item)
+    return result
+
+
 
 
 def _load_collection_cards(conn, tag: str):

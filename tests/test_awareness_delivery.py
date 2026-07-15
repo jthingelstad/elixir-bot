@@ -347,6 +347,21 @@ def test_recorded_post_is_idempotent_by_discord_message_id(engine_conn):
     assert [tuple(row) for row in rows] == [("elixir", "first receipt")]
 
 
+def test_post_receipt_links_to_persisted_loop(engine_conn):
+    store.record_awareness_post(
+        lane="elixir", content="linked", message_id="link-1", conn=engine_conn
+    )
+    linked = store.attach_awareness_posts_to_loop(
+        77, since="2000-01-01T00:00:00Z", conn=engine_conn
+    )
+
+    row = engine_conn.execute(
+        "SELECT loop_number FROM awareness_posts WHERE discord_message_id = 'link-1'"
+    ).fetchone()
+    assert linked == 1
+    assert row["loop_number"] == 77
+
+
 def test_post_receipt_failure_is_fail_soft_but_records_incident(engine_conn):
     store.record_awareness_post(
         lane="elixir", content="already sent", covers=[object()],

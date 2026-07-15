@@ -10,6 +10,9 @@ from __future__ import annotations
 import re
 from collections import Counter
 
+from capabilities.game_truth import awareness_post_facts
+from engine.game_check import check_post
+
 
 _GENDERED_MEMBER_PRONOUN = re.compile(
     r"\b(?:he|him|his|himself|she|her|hers|herself)\b",
@@ -59,6 +62,67 @@ def _race_is_explicitly_unranked(read: dict) -> bool:
     return any(value is False for value in candidates)
 
 
+def apply_editorial_admission(read: dict, plan: dict) -> tuple[dict, list[dict]]:
+    """Drop only high-confidence routine repeats before they reach Discord.
+
+    The awareness prompt already carries a 48-hour per-member cooldown, but a
+    prompt is not an enforcement boundary.  This admission stays deliberately
+    narrow: it only suppresses a one-signal, one-member milestone/clan-event
+    post when that member was recently solo-highlighted.  Hard-post coverage,
+    notable signals, and multi-signal roundups are never changed here.
+    """
+    if not isinstance(plan, dict) or not isinstance(plan.get("posts"), list):
+        return plan, []
+
+    recent = {
+        str(item.get("member_tag")): item
+        for item in (read.get("recent_member_spotlights") or [])
+        if isinstance(item, dict) and item.get("member_tag") and item.get("solo")
+    }
+    hard_keys = {
+        str(signal.get("signal_key"))
+        for signal in (read.get("hard_post_signals") or [])
+        if isinstance(signal, dict) and signal.get("signal_key")
+    }
+    admitted: list[dict] = []
+    suppressed: list[dict] = []
+    for post in plan["posts"]:
+        if not isinstance(post, dict):
+            admitted.append(post)
+            continue
+        tags = [str(tag) for tag in (post.get("member_tags") or []) if tag]
+        covers = [str(key) for key in (post.get("covers_signal_keys") or []) if key]
+        facts = awareness_post_facts(read, post)
+        is_routine_repeat = (
+            post.get("leads_with") in {"milestone", "clan_event"}
+            and len(tags) == 1
+            and tags[0] in recent
+            and len(facts.get("covered_signals") or []) == 1
+            and not facts.get("notable_moment")
+            and not hard_keys.intersection(covers)
+        )
+        if not is_routine_repeat:
+            admitted.append(post)
+            continue
+        suppressed.append({
+            "member_tag": tags[0],
+            "summary": post.get("summary"),
+            "covers_signal_keys": covers,
+            "prior_spotlight": recent[tags[0]],
+        })
+
+    if not suppressed:
+        return plan, []
+    plan["posts"] = admitted
+    plan["_editorial_suppressed"] = suppressed
+    if not admitted:
+        plan["skipped_reason"] = (
+            "Editorial admission suppressed a routine repeat inside the "
+            "48-hour member spotlight cooldown."
+        )
+    return plan, suppressed
+
+
 def validate_plan(read: dict, plan: dict) -> list[str]:
     """Return stable violation codes for a complete awareness post plan."""
     if not isinstance(plan, dict):
@@ -78,6 +142,17 @@ def validate_plan(read: dict, plan: dict) -> list[str]:
         if unranked and post.get("leads_with") == "war":
             if any(pattern.search(text) for pattern in _UNRANKED_CURRENT_RANK):
                 violations.append(f"post[{index}].current_rank_while_unranked")
+        for finding in check_post(text, awareness_post_facts(read or {}, post)):
+            issue = str(finding.get("issue") or "contradiction").lower()
+            if "colosseum" in issue or "every colosseum battle" in issue:
+                code = "colosseum_mechanics"
+            elif "impossible war day" in issue:
+                code = "war_day"
+            elif "card" in issue or "level" in issue:
+                code = "card_mechanics"
+            else:
+                code = "game_truth"
+            violations.append(f"post[{index}].{code}")
     return violations
 
 
@@ -122,4 +197,4 @@ def validate_repair(original: dict, repaired: dict) -> list[str]:
     return violations
 
 
-__all__ = ["validate_plan", "validate_repair"]
+__all__ = ["apply_editorial_admission", "validate_plan", "validate_repair"]

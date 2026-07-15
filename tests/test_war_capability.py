@@ -60,6 +60,7 @@ def test_war_contract_keeps_weekly_and_daily_races_distinct():
     assert result["daily_race"]["rank"] == 1
     assert result["engagement"]["remaining_decks"]["total"] == 2
     assert result["engagement"]["remaining_decks"]["partial"] == 1
+    assert result["game_truth"]["mechanics"]["finish_line"] == 10000
 
 
 def test_war_season_view_wraps_the_shared_contract():

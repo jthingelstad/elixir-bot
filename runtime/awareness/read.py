@@ -333,6 +333,10 @@ def _compact_signal(event: dict) -> dict:
         compact["badge_tier"] = "legendary" if payload.get("level") is None else "routine"
     elif et in ("arena_changed", "arena_up"):
         compact["arena_name"] = payload.get("arena_name")
+    elif et in _CAKE_DAY_TYPES:
+        for key in ("years", "months", "is_annual"):
+            if payload.get(key) is not None:
+                compact[key] = payload[key]
     return compact
 
 
@@ -526,6 +530,8 @@ def _recent_member_spotlights(conn) -> list[dict]:
             plan = json.loads(r["plan_json"] or "{}")
         except (ValueError, TypeError):
             continue
+        if plan.get("_error"):
+            continue
         for p in plan.get("posts", []):
             if p.get("leads_with") not in ("milestone", "clan_event"):
                 continue
@@ -602,6 +608,34 @@ def _recent_agent_writes(limit: int = 10) -> list[dict]:
         if len(out) >= limit:
             break
     return out
+
+
+def _editorial_guidance(conn, limit: int = 12) -> list[dict]:
+    """Active editorial lessons from human actions and live quality evals.
+
+    This is deliberately separate from ``recent_agent_writes``: those are the
+    awareness brain's own observations, while these are instructions about how
+    its future public copy should change.
+    """
+    import memory_store
+
+    memories = memory_store.select_memories(
+        viewer_scope="leadership",
+        tags=["editorial"],
+        limit=limit,
+        conn=conn,
+    )
+    return [
+        {
+            "memory_id": memory.get("memory_id"),
+            "title": memory.get("title"),
+            "guidance": str(memory.get("body") or "")[:900],
+            "tags": memory.get("tags") or [],
+            "confidence": memory.get("confidence"),
+            "created_at": memory.get("created_at"),
+        }
+        for memory in memories
+    ]
 
 
 def _leader_action_board(conn) -> dict:
@@ -754,6 +788,9 @@ def build_read(conn=None) -> dict:
                 "recent_member_spotlights", lambda: _recent_member_spotlights(conn), []),
             "posting_pulse": _load("posting_pulse", lambda: _posting_pulse(conn), {}),
             "recent_agent_writes": _load("recent_agent_writes", lambda: _recent_agent_writes(), []),
+            "editorial_guidance": _load(
+                "editorial_guidance", lambda: _editorial_guidance(conn), []
+            ),
             "leader_action_board": _load(
                 "leader_action_board", lambda: _leader_action_board(conn),
                 {"open": [], "recent_decisions": []},

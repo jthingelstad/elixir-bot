@@ -136,6 +136,14 @@ _WORKFLOW_SPECS = (
         model_family="chat",
     ),
     WorkflowSpec(
+        "game_factual_repair",
+        response_schema=_CHANNEL_SCHEMA,
+        tools=[],
+        max_tool_rounds=0,
+        tools_allowed=False,
+        model_family="chat",
+    ),
+    WorkflowSpec(
         "ask_elixir_daily",
         response_schema={"required": ["post"]},
         tools=INTERACTIVE_READ_TOOLS,
@@ -166,8 +174,8 @@ _WORKFLOW_SPECS = (
         model_family="chat",
         tools_allowed=False,
     ),
-    # "editorial" workflow retired 2026-07-10 — the Editor gate + eval harness
-    # are gone; the brain composes with depth natively (no per-post critic).
+    # The old second-LLM "editorial" workflow remains retired. Active quality
+    # admission/evaluation is deterministic and feeds editorial memory instead.
     # weekly_digest: brain-powered Weekly Clan Recap (rebuilt 2026-07-11 to
     # compose from the awareness read via tools, like ask_elixir_daily). The
     # workflow key stays "weekly_digest" for lane-routing stability.

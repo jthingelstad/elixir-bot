@@ -64,6 +64,17 @@ def test_daily_points_never_complete_the_weekly_race():
     assert war["race_completed"] is False
 
 
+def test_colosseum_has_no_finish_line_and_score_never_completes_it():
+    colosseum = {
+        "#US": {"name": "POAP KINGS", "fame": 40200, "period_points": 9000},
+        "#RIV": {"name": "R.E.I.C.H", "fame": 700, "period_points": 500},
+    }
+    war = _status(colosseum, period_type="colosseum", period_index=31)
+    assert war["finish_line"] is None
+    assert war["race_completed"] is False
+    assert war["clinches_finish_today"] is False
+
+
 def test_standings_are_single_field_and_never_mixed():
     war = _status(LOOP44)
     # race_standings ordered by fame; day_standings by period points.
@@ -317,8 +328,8 @@ def test_war_season_summary_counts_in_progress_fame(engine_conn):
 
 
 def test_colosseum_is_period_points_only():
-    # Colosseum: no weekly fame/boat — the race is decided by period points, and
-    # the finish line is 5,000 period points.
+    # Colosseum: no weekly fame/boat and no mid-week finish line. The standings
+    # continue through all four battle days even after passing 5,000 points.
     colo = {
         "#US": {"name": "POAP KINGS", "fame": 0, "period_points": 5200},
         "#RIV": {"name": "R.E.I.C.H", "fame": 0, "period_points": 3100},
@@ -326,8 +337,8 @@ def test_colosseum_is_period_points_only():
     war = _status(colo, period_type="colosseum")
     assert war["colosseum_week"] is True
     assert war["primary_metric"] == "period_points"
-    assert war["finish_line"] == 5000
-    assert war["race_completed"] is True   # 5,200 period points >= 5,000
+    assert war["finish_line"] is None
+    assert war["race_completed"] is False
     sb = _standing_block(war)
     assert sb["primary_metric"] == "period_points"
     assert sb["weekly"] is None            # no weekly fame in Colosseum

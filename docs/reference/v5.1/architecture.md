@@ -776,10 +776,12 @@ the LLM:
 ### 16.4 The competitive frame (the 5-clan race)
 
 A River Race is our clan against four others. The war subagent tracks our **race
-position** and produces time-sensitive momentum to `#river-race` — using the clock and
-`pace_status`, the finish line (10,000 fame in normal weeks, 5,000 in Colosseum — game
-constants, not payload fields), and completion state. When the weekly race is already won, it drops urgency and shifts to
-closure and recognition (never guilt-driven).
+position** and produces time-sensitive momentum to `#river-race` using the clock,
+`pace_status`, and completion state. Normal weeks have a 10,000-fame finish line.
+**Colosseum has no finish line**: it is a four-day period-point contest, and every
+battle continues to count toward both clan and member standings. When a normal
+weekly race is already won, Elixir drops urgency and shifts to closure and
+recognition (never guilt-driven).
 
 ### 16.5 War feeds clan management (bounded → persistent)
 
