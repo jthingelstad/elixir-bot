@@ -19,7 +19,9 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
-      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pip install -r requirements.lock -r requirements-dev.txt
+      - name: Verify dependency lock
+        run: python scripts/check_dependency_lock.py
       - name: Lint
         run: ruff check .
       - name: Tests
