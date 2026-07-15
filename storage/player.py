@@ -264,7 +264,6 @@ def snapshot_player_profile(
     _projections.refresh_player_state(conn, tag, player_data, None, now)
     if player_data.get("cards"):
         _projections.refresh_card_collection(conn, tag, player_data.get("cards") or [], now)
-    conn.commit()
     return []
 
 

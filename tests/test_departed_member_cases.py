@@ -21,20 +21,28 @@ from storage.cases import (
 
 @managed_connection
 def _set_membership(player_tag, *, left_at, conn=None):
-    # Seed membership directly; FK parents (clans/players) are irrelevant to the
-    # reconciler, which keys only off clan_memberships.left_at.
-    conn.execute("PRAGMA foreign_keys=OFF")
+    # The reconciler only keys off memberships, but the fixture must still obey
+    # the database's identity spine so the global FK invariant remains useful.
+    conn.execute(
+        "INSERT OR IGNORE INTO clans "
+        "(clan_tag,name,first_seen_at,last_seen_at,is_home) "
+        "VALUES ('#CLAN','Test Clan','2026-01-01','2026-07-04',0)"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO players "
+        "(player_tag,current_name,first_seen_at,last_seen_at) "
+        "VALUES (?, ?, '2026-01-01', '2026-07-04')",
+        (player_tag, player_tag),
+    )
     conn.execute(
         "INSERT INTO clan_memberships (player_tag, clan_tag, joined_at, left_at, join_source) "
         "VALUES (?, '#CLAN', '2026-01-01', ?, 'test')",
         (player_tag, left_at),
     )
-    conn.commit()
 
 
 @managed_connection
 def _action(player_tag, *, action_type, status, decided_at, conn=None):
-    conn.execute("PRAGMA foreign_keys=OFF")
     conn.execute(
         "INSERT INTO leader_action_recommendations "
         "(action_key, action_type, target_player_tag, status, objective, prompt_text, "
@@ -43,7 +51,6 @@ def _action(player_tag, *, action_type, status, decided_at, conn=None):
         (f"{action_type}:{player_tag}:{decided_at}", action_type, player_tag, status,
          decided_at, decided_at, decided_at, decided_at),
     )
-    conn.commit()
 
 
 def _done_kick(player_tag, *, decided_at):

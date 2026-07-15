@@ -103,14 +103,14 @@ def _ensure_last_seen_api_column(conn) -> None:
 
 @managed_connection
 def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection] = None, *, create_if_missing: bool = True) -> int:
-    """Upsert players + player_current_state + player_daily_metrics + open
-    memberships from a live clan roster payload.
+    """Refresh roster-owned state through the engine projection contract.
 
-    v5.1 note: this no longer interferes with join detection — the engine's
-    roster emitter diffs against its own state_baselines row, not against
-    these read models, so interactive flows may snapshot freely (the old
-    'observed'→'active' promotion dance is gone with the status column).
+    Interactive callers may refresh identity/rank/donations, but sparse roster
+    payloads must never erase profile-owned best-trophy/experience facts. The
+    engine projection is the single field-ownership implementation.
     """
+    from engine import projections
+
     observed_at = _utcnow()
     today = chicago_date_for_utc_timestamp(observed_at) or chicago_today()
     _ensure_last_seen_api_column(conn)
@@ -126,37 +126,11 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
             if not existing:
                 continue
         _ensure_member(conn, tag, name=name)
-        arena = member.get("arena") or {}
-        arena_id = arena.get("id") if isinstance(arena, dict) else None
-        arena_name = arena.get("name") if isinstance(arena, dict) else str(arena or "")
-        state = {
-            "observed_at": observed_at,
-            "role": member.get("role", "member"),
-            "exp_level": member.get("expLevel", member.get("exp_level")),
-            "trophies": member.get("trophies", 0),
-            "best_trophies": member.get("bestTrophies", member.get("best_trophies")),
-            "clan_rank": member.get("clanRank", member.get("clan_rank")),
-            "previous_clan_rank": member.get("previousClanRank"),
-            "donations_week": member.get("donations", 0),
-            "donations_received_week": member.get("donationsReceived", member.get("donations_received", 0)),
-            "arena_id": arena_id,
-            "arena_name": arena_name,
-            # Ingested for roster-badge awareness only — so Elixir knows when a
-            # member is wearing the in-game "idle" flag. NOT an engagement signal:
-            # battling remains the kick clock (architecture §13.6).
-            "last_seen_api": member.get("lastSeen") or member.get("last_seen"),
-        }
-        conn.execute(
-            "INSERT INTO player_current_state (player_tag, observed_at, role, exp_level, trophies, best_trophies, clan_rank, previous_clan_rank, donations_week, donations_received_week, arena_id, arena_name, last_seen_api) "
-            "VALUES (:player_tag, :observed_at, :role, :exp_level, :trophies, :best_trophies, :clan_rank, :previous_clan_rank, :donations_week, :donations_received_week, :arena_id, :arena_name, :last_seen_api) "
-            "ON CONFLICT(player_tag) DO UPDATE SET observed_at = excluded.observed_at, role = excluded.role, exp_level = excluded.exp_level, trophies = excluded.trophies, best_trophies = excluded.best_trophies, clan_rank = excluded.clan_rank, previous_clan_rank = excluded.previous_clan_rank, donations_week = excluded.donations_week, donations_received_week = excluded.donations_received_week, arena_id = excluded.arena_id, arena_name = excluded.arena_name, last_seen_api = excluded.last_seen_api",
-            {"player_tag": tag, **state},
+        roster_state = projections.roster_state_from_api(member)
+        projections.refresh_player_state(
+            conn, tag, None, roster_state, observed_at
         )
-        conn.execute(
-            "INSERT INTO player_daily_metrics (player_tag, metric_date, exp_level, trophies, best_trophies, clan_rank, donations_week, donations_received_week, last_seen_api) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(player_tag, metric_date) DO UPDATE SET exp_level = excluded.exp_level, trophies = excluded.trophies, best_trophies = excluded.best_trophies, clan_rank = excluded.clan_rank, donations_week = excluded.donations_week, donations_received_week = excluded.donations_received_week, last_seen_api = excluded.last_seen_api",
-            (tag, today, state["exp_level"], state["trophies"], state["best_trophies"], state["clan_rank"], state["donations_week"], state["donations_received_week"], state["last_seen_api"]),
-        )
+        projections.refresh_daily_metrics(conn, tag, today)
         if create_if_missing and not _get_current_membership(conn, tag):
             # clan_tag defaults to the home clan and FKs clans — guaranteed on
             # migrated DBs (T3) but not fresh ones; ensure defensively.
@@ -169,7 +143,6 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
                 "INSERT INTO clan_memberships (player_tag, joined_at, left_at, join_source, leave_source) VALUES (?, ?, NULL, ?, NULL)",
                 (tag, today, "clan_api_snapshot"),
             )
-    conn.commit()
     return len(seen_tags)
 
 
@@ -764,7 +737,9 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
     roster = get_clan_roster_summary(conn=conn)
     season_id = get_current_season_id(conn=conn)
     cutoff_ts = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
-    cutoff_race = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
+    cutoff_race_day = (
+        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    ).strftime("%Y%m%d")
 
     top_donors = conn.execute(
         "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.role, cs.clan_rank, cs.donations_week "
@@ -778,9 +753,10 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
 
     race_rows = conn.execute(
         "SELECT season_id, section_index, our_rank, trophy_change, our_fame, finish_time, created_date "
-        "FROM war_weeks WHERE created_date >= ? "
-        "ORDER BY created_date DESC LIMIT 3",
-        (cutoff_race,),
+        "FROM war_weeks "
+        "WHERE substr(REPLACE(created_date, '-', ''), 1, 8) >= ? "
+        "ORDER BY season_id DESC, section_index DESC LIMIT 3",
+        (cutoff_race_day,),
     ).fetchall()
     recent_war_races = []
     for row in race_rows:
@@ -833,12 +809,19 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
         if len(metrics) < 2:
             continue
         first, latest = metrics[0], metrics[-1]
+        first_best = first["best_trophies"]
+        latest_best = latest["best_trophies"]
+        best_gain = (
+            latest_best - first_best
+            if first_best is not None and latest_best is not None
+            else None
+        )
         item = {
             "tag": row["tag"],
             "name": row["name"],
             "wins_gain": 0,
             "trophies_change": (latest["trophies"] or 0) - (first["trophies"] or 0),
-            "best_trophies_gain": (latest["best_trophies"] or 0) - (first["best_trophies"] or 0),
+            "best_trophies_gain": best_gain,
             "pol_league_gain": 0,
             "pol_trophies_change": 0,
             "favorite_card": None,

@@ -66,6 +66,12 @@ def parse_cr_time(value) -> datetime | None:
     return dt.astimezone(timezone.utc)
 
 
+def canonical_utc_timestamp(value) -> str | None:
+    """Normalize any accepted CR/ISO representation to sortable ISO-Z text."""
+    dt = parse_cr_time(value)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ") if dt else None
+
+
 def card_display_level(level, max_level) -> int | None:
     """API card levels are rarity-relative (1..maxLevel); the in-game display
     level is `level + (16 - maxLevel)` (docs/cr-api-docs/cards.md — a max-level

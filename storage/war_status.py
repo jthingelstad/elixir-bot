@@ -733,7 +733,8 @@ def get_trophy_changes(since_hours: int = 24, conn: Optional[sqlite3.Connection]
 def get_war_history(n: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     rows = conn.execute(
         "SELECT (season_id * 100 + section_index) AS id, season_id, section_index, our_rank, our_fame, defense_fame, "
-        "finish_time, created_date, NULL AS standings_json FROM war_weeks ORDER BY created_date DESC LIMIT ?",
+        "finish_time, created_date, NULL AS standings_json FROM war_weeks "
+        "ORDER BY season_id DESC, section_index DESC LIMIT ?",
         (n,),
     ).fetchall()
     return _rowdicts(rows)
@@ -810,15 +811,21 @@ def get_latest_war_race_finish_time(
 
 
 def _season_bounds(conn: sqlite3.Connection, season_id: int) -> tuple[Optional[str], Optional[str]]:
-    row = conn.execute(
-        "SELECT MIN(created_date) AS start_date, MAX(created_date) AS end_date "
-        "FROM war_weeks WHERE season_id = ?",
+    first = conn.execute(
+        "SELECT created_date FROM war_weeks WHERE season_id = ? "
+        "AND created_date IS NOT NULL ORDER BY section_index ASC LIMIT 1",
         (season_id,),
     ).fetchone()
-    if not row or not row["start_date"] or not row["end_date"]:
+    last = conn.execute(
+        "SELECT COALESCE(finish_time, created_date) AS end_date FROM war_weeks "
+        "WHERE season_id = ? AND COALESCE(finish_time, created_date) IS NOT NULL "
+        "ORDER BY section_index DESC LIMIT 1",
+        (season_id,),
+    ).fetchone()
+    if not first or not last:
         return None, None
-    start_dt = _parse_cr_time(row["start_date"])
-    end_dt = _parse_cr_time(row["end_date"])
+    start_dt = _parse_cr_time(first["created_date"])
+    end_dt = _parse_cr_time(last["end_date"])
     if not start_dt or not end_dt:
         return None, None
     end_dt = end_dt + timedelta(days=7)

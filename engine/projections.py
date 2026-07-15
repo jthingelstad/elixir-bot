@@ -59,6 +59,35 @@ def _form_summary(wins: int, losses: int, draws: int, sample_size: int, label: s
 
 # ------------------------------------------------------------- player state
 
+def roster_state_from_api(member: dict | None) -> dict:
+    """Normalize one raw clan ``memberList`` entry for the player projection.
+
+    The clan roster owns role/rank/donations/current trophies.  It does *not*
+    own profile-only facts such as best trophies or experience level.  In
+    particular, Supercell currently returns ``expLevel=0`` for every roster
+    member; turning that placeholder into ``None`` is what lets the projection's
+    COALESCE updates preserve the last deep-profile observation.
+    """
+    m = member or {}
+    return {
+        "role": m.get("role"),
+        "trophies": m.get("trophies"),
+        "clan_rank": m.get("clanRank", m.get("clan_rank")),
+        "previous_clan_rank": m.get(
+            "previousClanRank", m.get("previous_clan_rank")
+        ),
+        "donations": m.get("donations"),
+        "donations_received": m.get(
+            "donationsReceived", m.get("donations_received")
+        ),
+        # Experience level is profile-owned. The clan endpoint's expLevel is
+        # currently a placeholder zero, and even a future non-zero value must
+        # not create a second authority for this field.
+        "exp_level": None,
+        "last_seen_api": m.get("lastSeen") or m.get("last_seen"),
+    }
+
+
 def refresh_player_state(conn, player_tag, profile_payload, roster_entry, observed_at):
     """Upsert player_current_state. Roster owns role/clan_rank/donations;
     profile owns exp/best/arena/ranked/deck. Either source may be None —
@@ -74,14 +103,9 @@ def refresh_player_state(conn, player_tag, profile_payload, roster_entry, observ
     # as a "rating" while the real UC rating was 1,867).
     ranked_trophies = _ranked_now.get("trophies")
     deck = p.get("currentDeck")
-    # NOTE: `r` is the PROJECTED roster entry (engine/emitters/clan.py
-    # project_clan_aspects — snake_case keys), not a raw CR memberList item.
-    # Live incident 2026-07-04: camelCase lookups here meant exp_level /
-    # clan_rank / donations_received never populated from roster refreshes.
-    # Raw-key fallbacks kept for direct callers passing CR-shaped dicts.
     vals = {
         "role": r.get("role"),
-        "exp_level": p.get("expLevel") or r.get("exp_level") or r.get("expLevel"),
+        "exp_level": p.get("expLevel") or None,
         "trophies": r.get("trophies") if r.get("trophies") is not None else p.get("trophies"),
         "best_trophies": p.get("bestTrophies"),
         "clan_rank": r.get("clan_rank") or r.get("clanRank"),
@@ -93,6 +117,7 @@ def refresh_player_state(conn, player_tag, profile_payload, roster_entry, observ
         "ranked_league": ranked_league,
         "ranked_trophies": ranked_trophies,
         "current_deck_json": json.dumps(deck, ensure_ascii=False) if deck else None,
+        "last_seen_api": r.get("last_seen_api") or r.get("lastSeen"),
     }
     cols = ", ".join(vals)
     placeholders = ", ".join("?" for _ in vals)
@@ -218,7 +243,7 @@ def refresh_rollups(conn, player_tag, date_chicago, expected_battle_delta=None):
         "DELETE FROM player_daily_battle_rollups WHERE player_tag = ? AND battle_date = ?",
         (tag, date_chicago),
     )
-    _refresh_daily_metrics(conn, tag, date_chicago)
+    refresh_daily_metrics(conn, tag, date_chicago)
     if not rows:
         return
     buckets: dict = {}
@@ -272,7 +297,7 @@ def refresh_rollups(conn, player_tag, date_chicago, expected_battle_delta=None):
         )
 
 
-def _refresh_daily_metrics(conn, tag, date_chicago):
+def refresh_daily_metrics(conn, tag, date_chicago):
     """Upsert the day's player_daily_metrics row from player_current_state.
     last_seen_api carries the in-game lastSeen for roster-badge awareness — it
     is recorded, NOT used as an engagement signal (battling stays the kick

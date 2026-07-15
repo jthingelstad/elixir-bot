@@ -1,10 +1,8 @@
-"""get_member_war_attendance's last_4_weeks window must count war weeks whose
-created_date is stored in EITHER format (QA H5).
+"""Compatibility reads must count legacy war weeks in either date format (QA H5).
 
-war_weeks.created_date is a mix of compact '20260629T093706.000Z' and ISO
-'2026-07-06'. A raw string compare against a compact cutoff drops the ISO rows
-(the two newest weeks) because '-' sorts below digits — understating recent
-attendance that feeds inactivity/kick reads.
+New writes and repaired live data are canonical ISO. This fixture preserves the
+read-side defense against a compact archive/import row: a raw string comparison
+drops the ISO row because '-' sorts below digits, understating recent attendance.
 """
 from __future__ import annotations
 
@@ -31,5 +29,12 @@ def test_recent_war_weeks_count_both_date_formats():
         att = db.get_member_war_attendance("#WK1", season_id=140, conn=conn)
         # Both recent weeks must be counted (buggy raw compare would drop the ISO one).
         assert att["last_4_weeks"]["total_races"] == 2
+        # This compatibility test deliberately introduced a legacy compact row;
+        # leave the shared test DB in the canonical write domain.
+        conn.execute(
+            "UPDATE war_weeks SET created_date='2026-06-29T09:37:06Z' "
+            "WHERE season_id=140 AND section_index=0"
+        )
+        conn.commit()
     finally:
         conn.close()

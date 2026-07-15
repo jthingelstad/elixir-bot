@@ -163,11 +163,20 @@ def test_annotate_never_throws_on_real_payloads(fixture, endpoint):
 def test_roster_projection_round_trips_into_player_state(engine_conn):
     from engine.db import canon_tag, ensure_player
     from engine.emitters.clan import project_clan_aspects
-    from engine.projections import refresh_player_state
+    from engine.projections import refresh_player_state, roster_state_from_api
 
     clan = load_cr_fixture("clan")
     roster = project_clan_aspects(clan)["roster"]["members"]
-    # pick a member with a real, non-zero clan_rank + donations
+    profile = load_cr_fixture("player_evo")
+    profile_tag = canon_tag(profile["tag"])
+    # Use the real profile fixture first: the following sparse roster refresh
+    # must preserve its profile-owned exp/best fields.
+    ensure_player(engine_conn, profile_tag, profile.get("name"), "2026-07-04T23:59:00Z")
+    refresh_player_state(
+        engine_conn, profile_tag, profile, None, "2026-07-04T23:59:00Z"
+    )
+
+    # pick a roster member with a real, non-zero clan_rank + donations
     tag, member = next(iter(roster.items()))
     raw = next(m for m in clan["memberList"] if canon_tag(m["tag"]) == tag)
 
@@ -184,3 +193,21 @@ def test_roster_projection_round_trips_into_player_state(engine_conn):
     assert row["donations_week"] == raw["donations"], "donations lost across the seam"
     assert row["donations_received_week"] == raw["donationsReceived"], \
         "donations_received lost across the seam"
+
+    # The raw clan fixture has expLevel=0 for everybody. Replaying its roster
+    # entry for the profile member cannot erase deep-profile facts.
+    raw_profile_member = dict(raw)
+    raw_profile_member["tag"] = profile_tag
+    refresh_player_state(
+        engine_conn,
+        profile_tag,
+        None,
+        roster_state_from_api(raw_profile_member),
+        "2026-07-05T00:00:00Z",
+    )
+    preserved = engine_conn.execute(
+        "SELECT exp_level, best_trophies FROM player_current_state WHERE player_tag = ?",
+        (profile_tag,),
+    ).fetchone()
+    assert preserved["exp_level"] == profile["expLevel"]
+    assert preserved["best_trophies"] == profile["bestTrophies"]

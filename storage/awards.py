@@ -201,14 +201,20 @@ def _cr_time_to_iso(value: Optional[str]) -> Optional[str]:
 
 
 def _season_bounds(conn, season_id: int) -> tuple[Optional[str], Optional[str]]:
-    row = conn.execute(
-        "SELECT MIN(created_date) AS start_date, MAX(COALESCE(finish_time, created_date)) AS end_date "
-        "FROM war_weeks WHERE season_id = ?",
+    first = conn.execute(
+        "SELECT created_date FROM war_weeks WHERE season_id = ? "
+        "AND created_date IS NOT NULL ORDER BY section_index ASC LIMIT 1",
         (int(season_id),),
     ).fetchone()
-    if not row or not row["start_date"]:
+    last = conn.execute(
+        "SELECT COALESCE(finish_time, created_date) AS end_date FROM war_weeks "
+        "WHERE season_id = ? AND COALESCE(finish_time, created_date) IS NOT NULL "
+        "ORDER BY section_index DESC LIMIT 1",
+        (int(season_id),),
+    ).fetchone()
+    if not first:
         return None, None
-    return row["start_date"], row["end_date"]
+    return first["created_date"], last["end_date"] if last else None
 
 
 @managed_connection

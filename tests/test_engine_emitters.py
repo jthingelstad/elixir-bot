@@ -165,6 +165,44 @@ def test_roster_join_leave_role_change_maintain_memberships(engine_conn):
     assert direction == "promoted"
 
 
+def test_historical_roster_replay_reuses_membership_interval(engine_conn):
+    before = "2026-07-01T09:00:00Z"
+    joined = "2026-07-01T10:00:00Z"
+    left = "2026-07-02T10:00:00Z"
+    empty = _roster([])
+    present = _roster([("#REPLAY", "Replay", "member", 0)])
+
+    _emit_roster(engine_conn, empty, before)
+    engine_conn.execute(
+        "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+        "VALUES ('#REPLAY', 'Replay', ?, ?)",
+        (joined, left),
+    )
+    engine_conn.execute(
+        "INSERT INTO clan_memberships "
+        "(player_tag, joined_at, left_at, join_source, leave_source) "
+        "VALUES ('#REPLAY', ?, ?, 'roster_diff', 'leader_verified_kick')",
+        (joined, left),
+    )
+    engine_conn.commit()
+
+    # Two complete historical replays derive/dedup the events but must reuse
+    # the already-recorded interval and preserve its verified leave reason.
+    for _ in range(2):
+        engine_conn.execute("DELETE FROM state_baselines")
+        _emit_roster(engine_conn, empty, before)
+        _emit_roster(engine_conn, present, joined)
+        _emit_roster(engine_conn, empty, left)
+
+    memberships = engine_conn.execute(
+        "SELECT joined_at, left_at, leave_source FROM clan_memberships "
+        "WHERE player_tag = '#REPLAY'"
+    ).fetchall()
+    assert [tuple(row) for row in memberships] == [
+        (joined, left, "leader_verified_kick")
+    ]
+
+
 def test_roster_change_set_derivation_is_pure_and_deterministic():
     changes = derive_roster_change_set(
         {
