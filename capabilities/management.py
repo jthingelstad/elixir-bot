@@ -163,9 +163,7 @@ def get_management_decisions(
             "decision_cases",
             "revisits",
         ],
-        "data_generation": (
-            generation_snapshot(conn) if conn is not None else None
-        ),
+        "data_generation": (generation_snapshot(conn) if conn is not None else None),
         "data": data,
     }
 

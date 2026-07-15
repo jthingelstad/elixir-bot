@@ -435,9 +435,7 @@ def prepare_delivery_intents(
 
 
 @managed_connection
-def mark_delivery_sending(
-    intent_key: str, *, conn: sqlite3.Connection = None
-) -> bool:
+def mark_delivery_sending(intent_key: str, *, conn: sqlite3.Connection = None) -> bool:
     now = _utcnow()
     cur = conn.execute(
         """UPDATE awareness_delivery_intents

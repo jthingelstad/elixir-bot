@@ -103,7 +103,7 @@ regenerate it after any deliberate dependency upgrade.
 - Tests use temp-file/in-memory SQLite and mocked external services (no API keys needed). The suite runs green in ~8 s.
 - `tests/conftest.py` builds the v5.1 schema from `scripts/migrate_v51/schema_v51.py` (plus the archive's DDL export for carried tables) into a session template, copied per test.
 - Test fixtures handle DB connection lifecycle — use `pytest.fixture` instead of manual try/finally.
-- The pre-commit hook runs `ruff check .` then the full suite (both match CI); `git commit --no-verify` bypasses in an emergency.
+- The pre-commit hook mirrors CI in fail-fast order: dependency lock, docs, exception policy, `ruff check`, `ruff format --check`, capability-contract mypy, then the full suite with the 80% capability-coverage floor. `git commit --no-verify` bypasses in an emergency.
 
 ### Reality-based testing (the three levers beyond the suite)
 

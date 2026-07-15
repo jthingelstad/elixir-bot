@@ -169,9 +169,7 @@ def get_awards_recognition(
         "state": state,
         "period": award_period(resolved_season, award_type),
         "sources": ["awards", "war_participation", "war_attendance_days"],
-        "data_generation": (
-            generation_snapshot(conn) if conn is not None else None
-        ),
+        "data_generation": (generation_snapshot(conn) if conn is not None else None),
         "data": data,
     }
 

@@ -118,9 +118,7 @@ def evaluate_source_freshness(conn, *, now, home_clan: str) -> dict:
     }
 
 
-def start_materialization(
-    conn, *, started_at: str, run_kind: str = "scheduled"
-) -> int:
+def start_materialization(conn, *, started_at: str, run_kind: str = "scheduled") -> int:
     cur = conn.execute(
         "INSERT INTO materialization_runs (started_at, run_kind) VALUES (?, ?)",
         (canonical_utc_timestamp(started_at), run_kind),

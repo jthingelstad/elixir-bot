@@ -155,9 +155,7 @@ def deliver_posts(
                 "uncovered_hard": [],
             }
         ambiguous = [
-            item["intent_key"]
-            for item in existing_work
-            if item["status"] == "sending"
+            item["intent_key"] for item in existing_work if item["status"] == "sending"
         ]
         if ambiguous:
             reason = f"ambiguous prior delivery intents still within lease: {ambiguous}"
@@ -223,7 +221,11 @@ def deliver_posts(
     # pending posts from a prior partial attempt even if this turn chose silence
     # or regrouped its signals, and align diagnostics with the exact stored copy.
     plan["posts"] = [
-        {key: value for key, value in item["post"].items() if key != "_delivery_content"}
+        {
+            key: value
+            for key, value in item["post"].items()
+            if key != "_delivery_content"
+        }
         for item in work
     ]
     covered = {

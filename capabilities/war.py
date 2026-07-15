@@ -425,9 +425,7 @@ def get_war_season_view(
         "view": view,
         "season_id": season_id,
         "sources": ["war_seasons", "war_weeks", "war_participation"],
-        "data_generation": (
-            generation_snapshot(conn) if conn is not None else None
-        ),
+        "data_generation": (generation_snapshot(conn) if conn is not None else None),
         "data": data,
     }
 
