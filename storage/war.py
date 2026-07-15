@@ -1,21 +1,127 @@
-from storage import war_analytics as _war_analytics
-from storage import war_members as _war_members
-from storage import war_status as _war_status
+"""Stable public war read facade.
 
-# v5.1: war_ingest retired — the engine's war emitter owns riverrace ingest
-# (engine/emitters/war.py); this shim now aggregates only the read side.
+The engine's war emitter owns ingest. This module intentionally aggregates the
+three read-side domains without copying arbitrary module namespaces.
+"""
 
+from storage.war_analytics import (
+    ELDER_DONATION_ROLLING_WEEKS,
+    ELDER_ELIGIBILITY_DEFAULTS,
+    INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE,
+    INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT,
+    LOOSE_MEMBER_COUNT,
+    TIGHT_MEMBER_COUNT,
+    compare_fame_per_member_to_previous_season,
+    compare_member_war_to_clan_average,
+    get_clan_boat_battle_record,
+    get_demotion_candidates,
+    get_members_at_risk,
+    get_members_without_war_participation,
+    get_perfect_war_participants,
+    get_promotion_candidates,
+    get_recent_role_changes,
+    get_trending_war_contributors,
+    get_war_battle_win_rates,
+    get_war_champ_standings,
+    get_war_score_trend,
+    get_war_season_history,
+    reconstruct_member_war_decks,
+    war_player_types_by_tag,
+)
+from storage.war_members import (
+    get_member_missed_war_days,
+    get_member_war_attendance,
+    get_member_war_battle_record,
+    get_member_war_stats,
+    get_member_war_status,
+    member_roster_status,
+)
+from storage.war_status import (
+    DAILY_RANK_FAME,
+    FAME_FINISH_LINE,
+    FINAL_BATTLE_PERIOD_OFFSET,
+    FINAL_PRACTICE_PERIOD_OFFSET,
+    FIRST_BATTLE_PERIOD_OFFSET,
+    HOME_CLAN,
+    NORMAL_RIVER_RACE_FINISH_LINE,
+    build_war_now_context,
+    count_war_races_for_season,
+    get_current_season_id,
+    get_current_war_day_state,
+    get_current_war_status,
+    get_latest_clan_boat_defense_status,
+    get_latest_war_participant_snapshot_observed_at,
+    get_latest_war_race_finish_time,
+    get_season_window,
+    get_trophy_changes,
+    get_trophy_drops,
+    get_war_day_state,
+    get_war_deck_status_today,
+    get_war_history,
+    get_war_season_snapshot,
+    get_war_season_summary,
+    get_war_week_summary,
+    get_week_win_streak,
+    is_colosseum_week_confirmed,
+    is_war_section_finalized,
+    list_recent_war_day_summaries,
+)
 
-def __export_public(module):
-    names = getattr(module, "__all__", None) or [
-        name for name in vars(module) if not name.startswith("__")
-    ]
-    for name in names:
-        globals()[name] = getattr(module, name)
-    return names
-
-
-for _module in (_war_status, _war_members, _war_analytics):
-    __export_public(_module)
-
-__all__ = [name for name in globals() if not name.startswith("__")]
+__all__ = [
+    "DAILY_RANK_FAME",
+    "ELDER_DONATION_ROLLING_WEEKS",
+    "ELDER_ELIGIBILITY_DEFAULTS",
+    "FAME_FINISH_LINE",
+    "FINAL_BATTLE_PERIOD_OFFSET",
+    "FINAL_PRACTICE_PERIOD_OFFSET",
+    "FIRST_BATTLE_PERIOD_OFFSET",
+    "HOME_CLAN",
+    "INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE",
+    "INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT",
+    "LOOSE_MEMBER_COUNT",
+    "NORMAL_RIVER_RACE_FINISH_LINE",
+    "TIGHT_MEMBER_COUNT",
+    "build_war_now_context",
+    "compare_fame_per_member_to_previous_season",
+    "compare_member_war_to_clan_average",
+    "count_war_races_for_season",
+    "get_clan_boat_battle_record",
+    "get_current_season_id",
+    "get_current_war_day_state",
+    "get_current_war_status",
+    "get_demotion_candidates",
+    "get_latest_clan_boat_defense_status",
+    "get_latest_war_participant_snapshot_observed_at",
+    "get_latest_war_race_finish_time",
+    "get_member_missed_war_days",
+    "get_member_war_attendance",
+    "get_member_war_battle_record",
+    "get_member_war_stats",
+    "get_member_war_status",
+    "get_members_at_risk",
+    "get_members_without_war_participation",
+    "get_perfect_war_participants",
+    "get_promotion_candidates",
+    "get_recent_role_changes",
+    "get_season_window",
+    "get_trending_war_contributors",
+    "get_trophy_changes",
+    "get_trophy_drops",
+    "get_war_battle_win_rates",
+    "get_war_champ_standings",
+    "get_war_day_state",
+    "get_war_deck_status_today",
+    "get_war_history",
+    "get_war_score_trend",
+    "get_war_season_history",
+    "get_war_season_snapshot",
+    "get_war_season_summary",
+    "get_war_week_summary",
+    "get_week_win_streak",
+    "is_colosseum_week_confirmed",
+    "is_war_section_finalized",
+    "list_recent_war_day_summaries",
+    "member_roster_status",
+    "reconstruct_member_war_decks",
+    "war_player_types_by_tag",
+]

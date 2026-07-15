@@ -1,18 +1,53 @@
-from agent import tool_defs as _tool_defs
-from agent import tool_exec as _tool_exec
-from agent import tool_policy as _tool_policy
+"""Stable public tool definitions, policy, and execution facade."""
 
+from agent.tool_defs import TOOLS
+from agent.tool_exec import (
+    _execute_tool,
+    _refresh_member_cache,
+    _resolve_member_tag,
+    execute_tool,
+)
+from agent.tool_policy import (
+    ALL_TOOLS,
+    AWARENESS_WRITE_BUDGET_PER_TICK,
+    AWARENESS_WRITE_TOOL_NAMES,
+    EXTERNAL_LOOKUP_TOOL_NAMES,
+    INTERACTIVE_READ_TOOLS,
+    INTEL_REPORT_TOOLS,
+    MAX_ROUNDS_BY_WORKFLOW,
+    READ_TOOLS,
+    READ_TOOLS_NO_EXTERNAL,
+    RESPONSE_SCHEMAS_BY_WORKFLOW,
+    TOOLSETS_BY_WORKFLOW,
+    TOOL_DEFINITIONS,
+    TOOL_DEFINITIONS_BY_NAME,
+    TOURNAMENT_RECAP_TOOLS,
+    TOURNAMENT_UPDATE_TOOLS,
+    WRITE_TOOLS,
+)
 
-def __export_public(module):
-    names = getattr(module, "__all__", None) or [
-        name for name in vars(module) if not name.startswith("__")
-    ]
-    for name in names:
-        globals()[name] = getattr(module, name)
-    return names
-
-
-for _module in (_tool_defs, _tool_policy, _tool_exec):
-    __export_public(_module)
-
-__all__ = [name for name in globals() if not name.startswith("__")]
+# The underscored names remain directly importable for old test/evaluation
+# harnesses, but only the supported surface participates in star imports.
+__all__ = [
+    "_execute_tool",
+    "_refresh_member_cache",
+    "_resolve_member_tag",
+    "ALL_TOOLS",
+    "AWARENESS_WRITE_BUDGET_PER_TICK",
+    "AWARENESS_WRITE_TOOL_NAMES",
+    "EXTERNAL_LOOKUP_TOOL_NAMES",
+    "INTERACTIVE_READ_TOOLS",
+    "INTEL_REPORT_TOOLS",
+    "MAX_ROUNDS_BY_WORKFLOW",
+    "READ_TOOLS",
+    "READ_TOOLS_NO_EXTERNAL",
+    "RESPONSE_SCHEMAS_BY_WORKFLOW",
+    "TOOLS",
+    "TOOLSETS_BY_WORKFLOW",
+    "TOOL_DEFINITIONS",
+    "TOOL_DEFINITIONS_BY_NAME",
+    "TOURNAMENT_RECAP_TOOLS",
+    "TOURNAMENT_UPDATE_TOOLS",
+    "WRITE_TOOLS",
+    "execute_tool",
+]
