@@ -213,7 +213,12 @@ _MIXED_TIMESTAMP_TABLES = {
 # v5.1 retention (docs/reference/v5.1/schema.md §1). Durable, never purged: rollups,
 # identity/tenure, awards, war_seasons, recognition_ledger, curated memories.
 _PURGE_TARGETS = [
-    ("raw_api_payloads", "fetched_at", RAW_PAYLOAD_RETENTION_DAYS),
+    ("api_observation_receipts", "fetched_at", RAW_PAYLOAD_RETENTION_DAYS),
+    (
+        "raw_api_payloads",
+        "COALESCE(last_fetched_at, fetched_at)",
+        RAW_PAYLOAD_RETENTION_DAYS,
+    ),
     ("battle_events", "battle_time", BATTLE_EVENT_RETENTION_DAYS),
     ("player_events", "observed_at", PLAYER_EVENT_RETENTION_DAYS),
     ("clan_events", "observed_at", CLAN_EVENT_RETENTION_DAYS),

@@ -287,8 +287,12 @@ def streams_page(stream: str | None, event_type: str | None, limit: int = 100) -
         raw = _rows(
             conn,
             """
-            SELECT payload_id, endpoint, entity_key, fetched_at
-            FROM raw_api_payloads ORDER BY payload_id DESC LIMIT 30""",
+            SELECT p.payload_id, p.endpoint, p.entity_key, p.fetched_at,
+                   p.last_fetched_at, COUNT(r.receipt_id) AS receipt_count
+            FROM raw_api_payloads p
+            LEFT JOIN api_observation_receipts r ON r.payload_id = p.payload_id
+            GROUP BY p.payload_id
+            ORDER BY COALESCE(p.last_fetched_at, p.fetched_at) DESC LIMIT 30""",
         )
         baseline_rows = _rows(
             conn,

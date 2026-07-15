@@ -11,8 +11,10 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, Iterator
 
+import db as db_facade
 from capabilities.contracts import WarIntelligenceResult, WarSeasonViewResult
 from capabilities.game_truth import get_game_truth
+from engine.readiness import generation_snapshot
 from storage import war as war_storage
 
 CAPABILITY_ID = "war_intelligence"
@@ -101,7 +103,13 @@ def _remaining_decks(day: dict) -> dict:
 
 def get_war_intelligence(*, source=None, conn=None) -> WarIntelligenceResult:
     """Return the canonical live-war contract, or ``available=False``."""
+    if conn is None and source in (None, db_facade, war_storage):
+        active_source = source or war_storage
+        with _connection(active_source) as active:
+            active.execute("BEGIN")
+            return get_war_intelligence(source=active_source, conn=active)
     source = _source(source)
+    generation = generation_snapshot(conn) if conn is not None else None
     status = _invoke(source, "get_current_war_status", conn=conn)
     if not isinstance(status, dict):
         return {
@@ -109,6 +117,7 @@ def get_war_intelligence(*, source=None, conn=None) -> WarIntelligenceResult:
             "contract_version": CONTRACT_VERSION,
             "available": False,
             "sources": ["state_baselines:riverrace", "war_attendance_days"],
+            "data_generation": generation,
         }
 
     context = _invoke(source, "build_war_now_context", conn=conn)
@@ -145,6 +154,7 @@ def get_war_intelligence(*, source=None, conn=None) -> WarIntelligenceResult:
             "war_attendance_days",
             "war_participation",
         ],
+        "data_generation": generation,
         "observed_at": status.get("observed_at") or day.get("observed_at"),
         "current_state": current_state,
         "day_state": day_state,
@@ -300,6 +310,18 @@ def get_war_season_view(
     conn=None,
 ) -> WarSeasonViewResult:
     """Return one versioned war-season facet under the ``data`` key."""
+    if conn is None and source in (None, db_facade, war_storage):
+        active_source = source or war_storage
+        with _connection(active_source) as active:
+            active.execute("BEGIN")
+            return get_war_season_view(
+                view=view,
+                season_id=season_id,
+                metric=metric,
+                limit=limit,
+                source=active_source,
+                conn=active,
+            )
     source = _source(source)
     limit = max(1, min(int(limit or 10), 100))
 
@@ -400,6 +422,9 @@ def get_war_season_view(
         "view": view,
         "season_id": season_id,
         "sources": ["war_seasons", "war_weeks", "war_participation"],
+        "data_generation": (
+            generation_snapshot(conn) if conn is not None else None
+        ),
         "data": data,
     }
 

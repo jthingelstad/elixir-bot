@@ -555,15 +555,53 @@ def _ensure_channel(
 
 def _store_raw_payload(
     conn: sqlite3.Connection, endpoint: str, entity_key: str, payload
-) -> None:
+) -> dict | None:
     payload_json = _json_or_none(payload)
     if payload_json is None:
-        return
-    payload_hash = _hash_payload(payload_json)
+        return None
+    # Use the observation envelope's canonical hash, not the serialized
+    # compatibility blob's whitespace-sensitive hash. This is what lets a
+    # generation point back to the exact network receipt that fed it.
+    from engine.db import payload_hash as canonical_payload_hash
+
+    payload_hash = canonical_payload_hash(payload)
+    fetched_at = _utcnow()
     conn.execute(
-        "INSERT OR IGNORE INTO raw_api_payloads (endpoint, entity_key, fetched_at, payload_hash, payload_json) VALUES (?, ?, ?, ?, ?)",
-        (endpoint, entity_key, _utcnow(), payload_hash, payload_json),
+        """INSERT INTO raw_api_payloads
+               (endpoint, entity_key, fetched_at, last_fetched_at,
+                payload_hash, payload_json)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(endpoint, entity_key, payload_hash) DO UPDATE SET
+               last_fetched_at = excluded.last_fetched_at""",
+        (endpoint, entity_key, fetched_at, fetched_at, payload_hash, payload_json),
     )
+    payload_row = conn.execute(
+        """SELECT payload_id FROM raw_api_payloads
+           WHERE endpoint = ? AND entity_key = ? AND payload_hash = ?""",
+        (endpoint, entity_key, payload_hash),
+    ).fetchone()
+    payload_id = int(payload_row["payload_id"])
+    receipt = conn.execute(
+        """INSERT INTO api_observation_receipts
+               (payload_id, endpoint, entity_key, fetched_at, payload_hash,
+                admission_status)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            payload_id,
+            endpoint,
+            entity_key,
+            fetched_at,
+            payload_hash,
+            "pending"
+            if endpoint in {"clan", "currentriverrace", "player", "player_battlelog"}
+            else "not_applicable",
+        ),
+    )
+    return {
+        "payload_id": payload_id,
+        "receipt_id": int(receipt.lastrowid),
+        "payload_hash": payload_hash,
+    }
 
 
 def _existing_tables(conn: sqlite3.Connection) -> set[str]:

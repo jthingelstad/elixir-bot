@@ -11,8 +11,9 @@ import sqlite3
 from typing import Optional
 
 from capabilities.contracts import ClanGameModesResult, ClanGameModeWindowsResult
-from db import managed_connection
+from db import get_connection
 from engine.normalize import ranked_league_name
+from engine.readiness import generation_snapshot
 from storage import player as player_storage
 
 CAPABILITY_ID = "clan_game_modes"
@@ -57,8 +58,7 @@ def _duo_pairs(conn: sqlite3.Connection, *, days: int, limit: int) -> list[dict]
     return [dict(row) for row in rows]
 
 
-@managed_connection
-def get_clan_game_modes(
+def _get_clan_game_modes(
     *,
     days: int = 30,
     mode_group: str | None = None,
@@ -97,6 +97,7 @@ def get_clan_game_modes(
     return {
         "capability": CAPABILITY_ID,
         "contract_version": CONTRACT_VERSION,
+        "data_generation": generation_snapshot(conn),
         "window_days": days,
         "mode_group": mode_group,
         "sources": ["battle_events", "player_current_state", "game_mode_contexts"],
@@ -123,8 +124,38 @@ def get_clan_game_modes(
     }
 
 
-@managed_connection
-def get_clan_game_mode_windows(
+def get_clan_game_modes(
+    *,
+    days: int = 30,
+    mode_group: str | None = None,
+    limit: int = 10,
+    top_members: int = 3,
+    conn: Optional[sqlite3.Connection] = None,
+) -> ClanGameModesResult:
+    """Read one game-mode view from a single materialized DB snapshot."""
+    if conn is not None:
+        return _get_clan_game_modes(
+            days=days,
+            mode_group=mode_group,
+            limit=limit,
+            top_members=top_members,
+            conn=conn,
+        )
+    active = get_connection()
+    try:
+        active.execute("BEGIN")
+        return _get_clan_game_modes(
+            days=days,
+            mode_group=mode_group,
+            limit=limit,
+            top_members=top_members,
+            conn=active,
+        )
+    finally:
+        active.close()
+
+
+def _get_clan_game_mode_windows(
     *,
     windows: tuple[int, ...] = (7, 28),
     limit: int = 10,
@@ -153,8 +184,37 @@ def get_clan_game_mode_windows(
     return {
         "capability": CAPABILITY_ID,
         "contract_version": CONTRACT_VERSION,
+        "data_generation": generation_snapshot(conn),
         "windows": snapshots,
     }
+
+
+def get_clan_game_mode_windows(
+    *,
+    windows: tuple[int, ...] = (7, 28),
+    limit: int = 10,
+    top_members: int = 3,
+    conn: Optional[sqlite3.Connection] = None,
+) -> ClanGameModeWindowsResult:
+    """Read comparable windows from one materialized DB snapshot."""
+    if conn is not None:
+        return _get_clan_game_mode_windows(
+            windows=windows,
+            limit=limit,
+            top_members=top_members,
+            conn=conn,
+        )
+    active = get_connection()
+    try:
+        active.execute("BEGIN")
+        return _get_clan_game_mode_windows(
+            windows=windows,
+            limit=limit,
+            top_members=top_members,
+            conn=active,
+        )
+    finally:
+        active.close()
 
 
 __all__ = [

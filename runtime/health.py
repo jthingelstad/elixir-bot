@@ -175,6 +175,36 @@ def check_data_integrity(conn) -> list[str]:
 
 SILENCE_HOURS = 14  # no Discord output at all in this window → investigate
 LEADER_ACTION_STALE_HOURS = 2  # a proposed card unposted this long → posting broken
+OUTBOX_SENDING_STALE_MINUTES = 15
+OUTBOX_PENDING_STALE_HOURS = 2
+
+
+def check_awareness_outbox(conn) -> list[str]:
+    """Surface delivery work that intentionally fails closed instead of guessing."""
+    problems = []
+    sending = conn.execute(
+        """SELECT COUNT(*) FROM awareness_delivery_intents
+           WHERE status = 'sending'
+             AND datetime(updated_at) < datetime('now', ?)""",
+        (f"-{OUTBOX_SENDING_STALE_MINUTES} minutes",),
+    ).fetchone()[0]
+    if sending:
+        problems.append(
+            f"{sending} awareness delivery intent(s) stuck sending "
+            f">{OUTBOX_SENDING_STALE_MINUTES}m — the next loop should reclaim them"
+        )
+    pending = conn.execute(
+        """SELECT COUNT(*) FROM awareness_delivery_intents
+           WHERE status = 'pending'
+             AND datetime(updated_at) < datetime('now', ?)""",
+        (f"-{OUTBOX_PENDING_STALE_HOURS} hours",),
+    ).fetchone()[0]
+    if pending:
+        problems.append(
+            f"{pending} awareness delivery intent(s) pending "
+            f">{OUTBOX_PENDING_STALE_HOURS}h"
+        )
+    return problems
 
 
 def check_output_silence(conn) -> list[str]:
@@ -223,6 +253,7 @@ def run_all(conn, previous_size: int | None = None) -> tuple[list[str], int]:
         check_poll_starvation,
         check_memory_writes,
         check_new_incidents,
+        check_awareness_outbox,
         check_output_silence,
         check_data_integrity,
     ):

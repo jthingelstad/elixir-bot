@@ -52,13 +52,27 @@ def replay_stream(source: sqlite3.Connection, days: int):
     Oldest-first is load-bearing: the emitters must see states in observation
     order or every diff is wrong.
     """
-    rows = source.execute(
-        """SELECT endpoint, entity_key, payload_json, fetched_at
-           FROM raw_api_payloads
-           WHERE fetched_at >= datetime('now', ?)
-           ORDER BY fetched_at ASC, payload_id ASC""",
-        (f"-{days} days",),
-    )
+    has_receipts = source.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='api_observation_receipts'"
+    ).fetchone()
+    if has_receipts:
+        rows = source.execute(
+            """SELECT r.endpoint, r.entity_key, p.payload_json, r.fetched_at
+               FROM api_observation_receipts r
+               JOIN raw_api_payloads p ON p.payload_id = r.payload_id
+               WHERE r.fetched_at >= datetime('now', ?)
+               ORDER BY r.fetched_at ASC, r.receipt_id ASC""",
+            (f"-{days} days",),
+        )
+    else:
+        rows = source.execute(
+            """SELECT endpoint, entity_key, payload_json, fetched_at
+               FROM raw_api_payloads
+               WHERE fetched_at >= datetime('now', ?)
+               ORDER BY fetched_at ASC, payload_id ASC""",
+            (f"-{days} days",),
+        )
     for r in rows:
         endpoint = ENDPOINT_RENAMES.get(r["endpoint"], r["endpoint"])
         yield endpoint, r["entity_key"], r["payload_json"], r["fetched_at"]

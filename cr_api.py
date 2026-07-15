@@ -21,14 +21,16 @@ from runtime import status as runtime_status
 
 
 def _persist_raw_payload(endpoint_name: str, entity_key: str | None, payload) -> None:
-    """Store a successful CR API response in raw_api_payloads (hash-deduped).
+    """Store a successful CR API response as a receipt plus deduped content.
 
     Endpoints store under their TRUE API names — the legacy
     "riverracelog" → "clan_war_log" alias was removed at the v5.1 cut (C3);
     the archive keeps the old rows.
 
-    Failures here must never break the caller — the raw payload is for audit and
-    debugging, not for the API call's correctness.
+    ``api_observation_receipts`` is append-only (one row per successful HTTP
+    response); ``raw_api_payloads`` remains the bounded content store. Failures
+    here must never break the caller — provenance is diagnostic, not part of the
+    HTTP success contract.
     """
     label = endpoint_name
     key = entity_key or "global"

@@ -160,9 +160,11 @@ def main() -> int:
     conn.commit()
 
     rows = conn.execute(
-        """SELECT endpoint, entity_key, payload_json, fetched_at
-           FROM raw_api_payloads WHERE fetched_at >= ?
-           ORDER BY fetched_at ASC, payload_id ASC""",
+        """SELECT r.endpoint, r.entity_key, p.payload_json, r.fetched_at
+           FROM api_observation_receipts r
+           JOIN raw_api_payloads p ON p.payload_id = r.payload_id
+           WHERE r.fetched_at >= ?
+           ORDER BY r.fetched_at ASC, r.receipt_id ASC""",
         (window_start,),
     ).fetchall()
     print(f"pass 1/2 — historical drift inventory over {len(rows)} payloads...")

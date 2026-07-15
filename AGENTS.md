@@ -24,7 +24,7 @@ Rollback before close-out = old git ref + copy the archive back + relaunch.
 
 - `elixir.py` — Main bot: Discord events, APScheduler, channel routing
 - `elixir_agent.py` — Stable public LLM entrypoint; routes observation, channel replies, and content generation through the `agent/` package
-- `cr_api.py` — Clash Royale API client (clan roster, war status, river race log). The **only** API ingress; every response is appended to `raw_api_payloads` under its true endpoint name
+- `cr_api.py` — Clash Royale API client (clan roster, war status, river race log). The **only** API ingress; every successful response appends an `api_observation_receipts` row under its true endpoint, while identical response bodies share one `raw_api_payloads` content row
 - `engine/` — The v5.1 data engine (spec: `docs/reference/v5.1/`): `tick.py` (production orchestrator), `observations.py` (admission + canonical envelopes), `materialize.py` (the shared observation application path used by production, interactive refresh, and replay), `readiness.py` (source freshness + durable materialization generations), `event_contracts.py` (event vocabulary/routing), `clock.py`, `ingest.py`, `baselines.py` + `emitters/`, `change_sets.py`, `management.py`, `polling.py`, `projections.py`, and `offline.py`. `recognition/` + `delivery.py` are retired proactive machinery, reachable only through `legacy_proactive.py` in explicit offline rehearsals.
 - `capabilities/` — Canonical domain answers shared by agent tools, awareness, scheduled reports, memory synthesis, and admin surfaces. Consumers may compact or present these facts differently, but do not recalculate them. Versioned contracts currently cover `game_modes.py`, `war.py`, `members.py`, `management.py`, and `awards.py`; management answers are explicitly leadership-scoped, while the other contracts are audience-neutral facts.
 - `db/` — SQLite access package: connection discipline, identity helpers, and the storage facade
@@ -44,24 +44,26 @@ Rollback before close-out = old git ref + copy the archive back + relaunch.
 
 One data flow, spec'd in `docs/reference/v5.1/`:
 
-- **One ingress:** `cr_api` → `raw_api_payloads` (14-day rolling analysis buffer, never the system of record).
+- **One ingress:** `cr_api` → append-only `api_observation_receipts` → hash-deduplicated `raw_api_payloads` content (14-day rolling analysis buffer, never the system of record). Admission decisions attach to receipts; `materialization_inputs` link admitted receipts/content hashes to the generation that applied them.
 - **Four event streams:** `battle_events` (native — battles mirror in with exact timestamps; war keys resolved from the battle's own time), `player_events`, `clan_events`, `war_events` (emitted — each poll diffs against its `state_baselines` row; first sight emits nothing; dedup keys make re-processing safe). `engine/event_contracts.py` is the single vocabulary for event ownership, payload floors, time semantics, awareness lanes, and hard-post policy.
 - **One proactive owner:** the unified awareness loop reads the event streams and current projections, decides worthiness and framing in one turn, and posts with hard-floor coverage. The ported deterministic recognizers/delivery consumer remain an explicit offline comparison seam only; production `run_tick` does not import or run them.
 - **Composition policy:** the awareness workflow owns voice and routing. Deterministic code validates the complete plan before any send (including member pronouns and unranked-war claims), permits one wording-only repair, then fails closed so the event resurfaces next loop. There is no member-facing template fallback.
-- **Delivery:** awareness sends first, then records the post in `awareness_posts` as channel-memory/dedup context. A send or hard-floor miss fails the turn without advancing its per-stream cursor checkpoints. The retired at-least-once consumer creates `communication_intents` as a connection-local TEMP table only when an offline rehearsal explicitly enables `legacy_proactive=True`; the table is absent from the operational schema.
+- **Delivery:** awareness validates hard-post coverage before any send, persists every planned post to `awareness_delivery_intents`, then advances each intent `pending → sending → fulfilled`. Explicit send failures return only that intent to pending; the next turn skips already-fulfilled posts. `awareness_posts` remains the delivered channel-memory ledger. A failed turn does not advance event cursors. A crash while an intent is `sending` fails closed during its 15-minute lease, then returns to pending for an at-least-once retry instead of wedging the outbox forever. The retired consumer creates `communication_intents` only as a connection-local TEMP table in explicit offline legacy rehearsals.
 - **Clan management:** `engine/management.py` per `docs/reference/v5.1/management.md` — Layer-1 evaluators (sustained donor / war-reliable / battle-active, 3-of-4-week hysteresis) feed promote/demote/kick candidacy machines. Kick-risk is reactive (fires a leader action through the policy gate mid-tick); promote/demote surface in the Monday 7:00 CT weekly review, which is also the only place the weekly counters roll. Engagement is measured from battles — `lastSeen`/logins are deliberately ignored. Every verdict carries `judgment_status` (`ready` / `held` / `unknown`), its evidence timestamp/reason, and the `materialization_id` that produced it; stale evidence fails closed and is excluded from actionable capability reads.
 - **Adaptive polling:** `poll_state` temperatures (battles → hot; clan-poll deltas → warm; decay to cold) drive a budget of 40 per-player calls/tick, hottest first, with fairness floors (battlelog ≤6 h, profile ≤24 h for everyone). The clan and riverrace calls are cheap fixed overhead outside the budget.
 
 ### Engine Tick Contract
 
-`engine.tick.run_tick(conn, api=…)` runs poll → atomic apply → manage. Poll
+`engine.tick.run_tick(conn, api=…)` runs poll → one atomic generation. Poll
 admission produces canonical `Observation` envelopes. Atomic apply uses
 `engine.materialize` to advance battle rows, emitted deltas/baselines,
-projections, rollups, and successful-poll freshness together; if it fails, all
-of those writes roll back and management is skipped. Every tick records a
-`materialization_runs` generation and per-member judgment readiness. The emitted
-streams and projections are the awareness loop's read. Production, interactive
-tool refreshes, and offline replay all use the same application service. The production
+projections, rollups, successful-poll freshness, readiness, and management
+together; if apply or management fails, all semantic writes roll back. Every
+admitted input lands in `materialization_inputs`, and the final
+`materialization_runs` state commits with the generation. Interactive profile
+and battle-log refreshes create `interactive` generations through the same
+application service; offline replay uses it too. Awareness and primary
+capabilities read one SQLite snapshot and expose its `data_generation`. The production
 entrypoint has no compose/send arguments and cannot enable the retired poster.
 The offline engine follows the
 same awareness-only default, with `legacy_proactive=True` as its explicit
@@ -163,18 +165,18 @@ Three database files exist, with distinct roles:
 
 The engine DB follows the layered retention model (`docs/reference/v5.1/schema.md`):
 
-- L1 raw response log: `raw_api_payloads` (14 d)
+- L1 API provenance: append-only `api_observation_receipts` plus deduplicated `raw_api_payloads` content (14 d)
 - L2 current-state baselines: `state_baselines` (diff substrate; not a read model)
 - L3 event streams: `battle_events` (180 d), `player_events` (180 d), `clan_events` (365 d), `war_events` (365 d)
 - L4 rollups (durable): `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics`, `clan_daily_battle_rollups`
 - L5 identity & tenure (durable): `players`, `player_metadata`, `player_aliases`, `clans`, `discord_users`, `discord_links`, `clan_memberships` — **the CR tag is the key everywhere**; "is X a member" = has an open `clan_memberships` row
 - L6 projections (disposable, rebuilt from streams): `player_current_state`, `player_card_collection`, `player_recent_form`, `member_management`
-- Awareness control: per-stream positions in `stream_cursors`, plus `awareness_thoughts`, `awareness_posts`, and `watches`
+- Awareness control: per-stream positions in `stream_cursors`, plus `awareness_thoughts`, `awareness_delivery_intents`, `awareness_posts`, and `watches`
 - Recognition history: `recognition_ledger` retains intentless award claims plus the retired recognizer's claims; old delivery details live in the pre-migration backup/cold archive, while explicit offline comparisons use a TEMP `communication_intents` queue
 - Clan management: `leader_action_recommendations`, `decision_cases`, `revisits`
 - Bounded war stream: `war_seasons` (durable), `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days`
 - Awards (durable): `awards` — `war_champ` is a ranked podium (season points); `iron_king` is PARTICIPATION (4/4 decks every battle day — unranked, any number earn it, never crown one); `rookie_mvp` = members in their FIRST war season; `free_pass` rotates to the highest-ranked War Champ who did NOT win it last month (`engine/emitters/war.py:close_season`). The LIVE in-progress races are computed on demand via `storage.awards.get_award_races` (top-10, points, tie-aware) and surfaced in the awareness read as `award_races`; `war_champ_lead_change` / `rookie_mvp_lead_change` events emit on a leader change.
-- Engine control: `stream_cursors` (durable), `poll_state`, `runtime_job_status`, `materialization_runs`
+- Engine control: `stream_cursors` (durable), `poll_state`, `runtime_job_status`, `materialization_runs`, `materialization_inputs`
 - Ops singletons + tournaments star + the conversation set (`conversation_threads`, `messages`, `memory_facts`, `memory_episodes`)
 
 All `db` module functions accept an optional `conn` parameter — pass one in tests, omit in production.
@@ -277,7 +279,7 @@ Important rules:
 - `leader-lounge` can read public plus leadership durable memory
 - `reception` should stay focused on onboarding context and avoid unrelated clan-event noise
 - one source signal can create multiple channel outcomes, but durable memory records must stay scope-safe and must not let leadership copy overwrite public memory
-- successful awareness posts are recorded as fulfilled intents for channel memory; failed awareness ticks do not advance their read cursor, so uncovered signals resurface with already-landed posts available for dedup
+- awareness reads are generation-stamped snapshots; validated post plans persist before send, successful posts fulfill their own intents and feed channel memory, and failed ticks do not advance event cursors, so retries send only unfulfilled work
 
 ## Agent Loop Guardrails (Current)
 

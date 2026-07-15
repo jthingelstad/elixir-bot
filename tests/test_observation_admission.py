@@ -325,3 +325,73 @@ def test_storage_facade_rejects_cross_entity_profile_and_bad_battlelog(engine_co
         ).fetchone()[0]
         == 2
     )
+
+
+def test_api_receipts_are_append_only_and_generation_links_exact_input(engine_conn):
+    import db
+    from engine import materialize, readiness
+
+    player = load_cr_fixture("player_plain")
+    raw_key = player["tag"].lstrip("#")
+    first = db._store_raw_payload(engine_conn, "player", raw_key, player)
+    second = db._store_raw_payload(engine_conn, "player", raw_key, player)
+
+    assert first["payload_id"] == second["payload_id"]
+    assert first["receipt_id"] != second["receipt_id"]
+    assert (
+        engine_conn.execute(
+            "SELECT COUNT(*) FROM raw_api_payloads WHERE endpoint = 'player'"
+        ).fetchone()[0]
+        == 1
+    )
+    assert (
+        engine_conn.execute(
+            "SELECT COUNT(*) FROM api_observation_receipts WHERE endpoint = 'player'"
+        ).fetchone()[0]
+        == 2
+    )
+
+    decision, observation = observations.observe(
+        "player",
+        player["tag"],
+        player,
+        "2026-07-15T12:00:00Z",
+        source="interactive_refresh",
+    )
+    assert decision.accepted and observation is not None
+    readiness.record_admission_decision(engine_conn, decision, player)
+    materialize.apply_interactive_observation(engine_conn, observation)
+
+    linked = engine_conn.execute(
+        """SELECT mr.run_kind, mr.status, mi.receipt_id, mi.payload_hash
+           FROM materialization_runs mr
+           JOIN materialization_inputs mi
+             ON mi.materialization_id = mr.materialization_id
+           ORDER BY mr.materialization_id DESC LIMIT 1"""
+    ).fetchone()
+    assert linked["run_kind"] == "interactive"
+    assert linked["status"] == "complete"
+    assert linked["receipt_id"] == second["receipt_id"]
+    assert linked["payload_hash"] == second["payload_hash"]
+    assert readiness.generation_snapshot(engine_conn)["input_count"] == 1
+
+
+def test_rejected_observation_marks_its_network_receipt(engine_conn):
+    import db
+    from engine import readiness
+
+    malformed = {"tag": "#A"}
+    receipt = db._store_raw_payload(engine_conn, "player", "A", malformed)
+    decision, observation = observations.observe(
+        "player", "#A", malformed, "2026-07-15T12:00:00Z", source="engine_tick"
+    )
+    assert observation is None
+    readiness.record_admission_decision(engine_conn, decision, malformed)
+
+    row = engine_conn.execute(
+        "SELECT admission_status, admission_errors_json "
+        "FROM api_observation_receipts WHERE receipt_id = ?",
+        (receipt["receipt_id"],),
+    ).fetchone()
+    assert row["admission_status"] == "rejected"
+    assert "name:not_nonempty_string" in json.loads(row["admission_errors_json"])

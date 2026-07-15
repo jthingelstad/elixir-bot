@@ -38,13 +38,17 @@ not the tick rate, controls API spend). Single process, single writer; APSchedul
 ```
 tick(now):
   1. POLL      — spend the per-tick API budget per the §4 scheduler.
-                 Every response → raw_api_payloads (L1). Nothing else touches the API.
+                 Every successful response → api_observation_receipts (append-only)
+                 → deduplicated raw_api_payloads content (L1). Nothing else touches
+                 the API.
                  engine.observations admits and canonically envelopes the decoded
                  response against its endpoint shape and requested entity identity.
                  Rejection leaves baselines/projections/events and success freshness
                  unchanged; counters + contract incidents explain the silence.
   2. APPLY     — engine.materialize applies all admitted observations in one
-                 transaction shared by production, interactive refresh, and replay.
+                 generation transaction. materialization_inputs records each
+                 admitted receipt/hash. Interactive refreshes create their own
+                 generation through the same application service.
                  The transaction includes the following three logical sublayers:
        INGEST    battle mirror: new battles → battle_events (dedup-keyed inserts).
                  War keys are resolved from the battle's OWN battle_time against
@@ -64,15 +68,17 @@ tick(now):
                  battles), rollups (upsert today's rows), war_weeks /
                  war_week_clans / war_participation / war_attendance_days,
                  member_management inputs, and successful-poll freshness.
-                 Any failure rolls the whole APPLY group back.
-  3. MANAGE    — evaluate source freshness, persist the materialization generation,
-                 then run Layer-1 evaluators + Layer-2 candidacy machines only for
+  3. MANAGE    — still inside the generation transaction, evaluate source freshness
+                 and run Layer-1 evaluators + Layer-2 candidacy machines only for
                  members whose evidence is ready. Stale/missing evidence writes a
                  held judgment and cannot surface as actionable. kick_state transitions fire the Q1 reactive
                  path (a leader action through the existing policy gate).
                  State updates only — the weekly grain (week_anchor,
                  promote_qualifying_weeks) rolls in weekly-leadership-review (§3),
                  never mid-week.
+  4. COMMIT    — persist the final materialization_runs status with all streams,
+                 projections, readiness, and management writes. Apply/manage failure
+                 rolls all semantic writes back and leaves a failed run record.
 ```
 
 **Current production amendment (2026-07-15):** `run_tick` exposes only the data
@@ -197,10 +203,18 @@ Awareness validates the complete post plan before any send. A rejected plan
 gets exactly one no-tools, wording-only repair; routing, signal coverage, relay
 decisions, and factual numbers are immutable. If validation still fails, if a
 send fails, or if a hard-post signal is uncovered, the awareness tick fails and
-its cursor does not advance. The same evidence resurfaces next loop. Successful
-posts are recorded in the purpose-built `awareness_posts` ledger after send so
-the next read has channel-memory dedup context. Thought persistence and consumed
-stream checkpoints commit together. There is no template fallback.
+its cursor does not advance. The same evidence resurfaces next loop. Before the
+first Discord call, every post is inserted into
+`awareness_delivery_intents`. Each post advances independently from `pending` to
+`sending` to `fulfilled`, and fulfilled posts are also recorded in
+`awareness_posts` for channel-memory dedup context. An explicit send failure
+returns only that post to `pending`; a retry skips intents already fulfilled. A
+crash that leaves `sending` without a receipt fails closed during a 15-minute
+lease, then reclaims the intent to `pending` for an at-least-once retry. This
+prefers a rare duplicate over permanently wedging every later awareness post.
+Awareness builds its inputs in one SQLite read
+transaction and exposes the exact `data_generation` it saw. Thought persistence
+and consumed stream checkpoints commit together. There is no template fallback.
 
 ### 5.2 Legacy intent consumer — migration shadow (§17.3)
 

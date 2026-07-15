@@ -60,6 +60,7 @@ def deliver_posts(
     record_fn,
     relay_fn=None,
     repair_fn=None,
+    intent_store=None,
     loop_number: int | None = None,
 ) -> dict:
     """Deliver every post in ``plan``. Returns a result dict:
@@ -98,7 +99,153 @@ def deliver_posts(
     posts = plan.get("posts") or []
     lanes = engine_compose.channels()
     covered: set[str] = set()
+    delivery_posts = []
+
+    # Validate the entire hard side-effect plan before the first Discord send.
+    # Previously an uncovered mandatory signal was discovered only after one
+    # or more posts had already escaped, guaranteeing a partial retry problem.
+    for post in posts:
+        channel = post.get("channel")
+        cfg = lanes.get(channel) if channel in POSTABLE_CHANNELS else None
+        if cfg is None:
+            reason = f"unroutable channel {channel!r}"
+            log.error("awareness deliver: %s — failing tick before send", reason)
+            return {
+                "delivered": 0,
+                "failed": True,
+                "reason": reason,
+                "uncovered_hard": [],
+            }
+        copy = _post_content(post)
+        if not copy:
+            reason = f"empty content for channel {channel!r}"
+            log.error("awareness deliver: %s — failing tick before send", reason)
+            return {
+                "delivered": 0,
+                "failed": True,
+                "reason": reason,
+                "uncovered_hard": [],
+            }
+        prepared_post = dict(post)
+        prepared_post["_delivery_content"] = copy
+        delivery_posts.append(prepared_post)
+        covered.update(post.get("covers_signal_keys") or [])
+
+    mandatory = {
+        signal.get("signal_key")
+        for signal in (read.get("hard_post_signals") or [])
+        if isinstance(signal, dict) and signal.get("signal_key")
+    }
+
+    if intent_store is not None:
+        try:
+            # Load durable work before inserting this draft. Coverage from a
+            # previously fulfilled sibling intent still counts when another
+            # post in the same plan is retrying and the event cursor has not
+            # advanced yet.
+            existing_work = intent_store.prepare_delivery_intents(
+                [], required_signal_keys=mandatory
+            )
+        except Exception as exc:
+            log.exception("awareness deliver: could not load delivery outbox")
+            return {
+                "delivered": 0,
+                "failed": True,
+                "reason": f"delivery intent load failed: {exc}",
+                "uncovered_hard": [],
+            }
+        ambiguous = [
+            item["intent_key"]
+            for item in existing_work
+            if item["status"] == "sending"
+        ]
+        if ambiguous:
+            reason = f"ambiguous prior delivery intents still within lease: {ambiguous}"
+            log.error("awareness deliver: %s", reason)
+            return {
+                "delivered": 0,
+                "failed": True,
+                "reason": reason,
+                "uncovered_hard": [],
+            }
+        existing_covered = {
+            signal_key
+            for item in existing_work
+            for signal_key in (item["post"].get("covers_signal_keys") or [])
+        }
+        uncovered = sorted(mandatory - covered - existing_covered)
+        if uncovered:
+            log.error(
+                "awareness deliver: hard-post floor uncovered %s — "
+                "rejecting plan before persistence",
+                uncovered,
+            )
+            return {
+                "delivered": 0,
+                "failed": True,
+                "reason": f"uncovered hard-post signals: {uncovered}",
+                "uncovered_hard": uncovered,
+            }
+        try:
+            work = intent_store.prepare_delivery_intents(
+                delivery_posts, required_signal_keys=mandatory
+            )
+        except Exception as exc:
+            log.exception("awareness deliver: could not persist delivery plan")
+            return {
+                "delivered": 0,
+                "failed": True,
+                "reason": f"delivery intent prepare failed: {exc}",
+                "uncovered_hard": [],
+            }
+        ambiguous = [item["intent_key"] for item in work if item["status"] == "sending"]
+        if ambiguous:
+            reason = f"ambiguous prior delivery intents still within lease: {ambiguous}"
+            log.error("awareness deliver: %s", reason)
+            return {
+                "delivered": 0,
+                "failed": True,
+                "reason": reason,
+                "uncovered_hard": [],
+            }
+    else:
+        work = [
+            {
+                "intent_key": None,
+                "status": "pending",
+                "post": post,
+                "from_current_plan": True,
+            }
+            for post in delivery_posts
+        ]
+
+    # The outbox, not a fresh LLM re-plan, owns already-persisted work. Include
+    # pending posts from a prior partial attempt even if this turn chose silence
+    # or regrouped its signals, and align diagnostics with the exact stored copy.
+    plan["posts"] = [
+        {key: value for key, value in item["post"].items() if key != "_delivery_content"}
+        for item in work
+    ]
+    covered = {
+        signal_key
+        for item in work
+        for signal_key in (item["post"].get("covers_signal_keys") or [])
+    }
+    uncovered = sorted(mandatory - covered)
+    if uncovered:
+        log.error(
+            "awareness deliver: hard-post floor uncovered %s — failing before send",
+            uncovered,
+        )
+        return {
+            "delivered": 0,
+            "failed": True,
+            "reason": f"uncovered hard-post signals: {uncovered}",
+            "uncovered_hard": uncovered,
+        }
+
     delivered = 0
+    replayed = 0
 
     # Signal keys of any member-join hard-post this tick. A post covering one of
     # these always relays an in-game welcome (see JOIN_EVENT_TYPES).
@@ -110,29 +257,30 @@ def deliver_posts(
         and s.get("signal_key")
     }
 
-    for post in posts:
+    for item in work:
+        if item["status"] == "fulfilled":
+            continue
+        post = item["post"]
+        if not item["from_current_plan"]:
+            replayed += 1
+        intent_key = item["intent_key"]
         channel = post.get("channel")
-        cfg = lanes.get(channel) if channel in POSTABLE_CHANNELS else None
-        if cfg is None:
-            reason = f"unroutable channel {channel!r}"
-            log.error("awareness deliver: %s — failing tick", reason)
-            return {
-                "delivered": delivered,
-                "failed": True,
-                "reason": reason,
-                "uncovered_hard": [],
-            }
+        cfg = lanes[channel]
+        copy = post["_delivery_content"]
 
-        copy = _post_content(post)
-        if not copy:
-            reason = f"empty content for channel {channel!r}"
-            log.error("awareness deliver: %s — failing tick", reason)
-            return {
-                "delivered": delivered,
-                "failed": True,
-                "reason": reason,
-                "uncovered_hard": [],
-            }
+        if intent_store is not None:
+            try:
+                claimed = intent_store.mark_delivery_sending(intent_key)
+                if claimed is False:
+                    raise RuntimeError("intent was no longer pending")
+            except Exception as exc:
+                log.exception("awareness deliver: could not claim delivery intent")
+                return {
+                    "delivered": delivered,
+                    "failed": True,
+                    "reason": f"delivery intent claim failed: {exc}",
+                    "uncovered_hard": [],
+                }
 
         try:
             message_id = post_fn(cfg["channel_id"], copy)
@@ -141,6 +289,13 @@ def deliver_posts(
                 "awareness deliver: send to #%s failed; catch up next loop",
                 cfg.get("channel_name") or channel,
             )
+            if intent_store is not None:
+                try:
+                    intent_store.mark_delivery_pending(intent_key, str(exc))
+                except Exception:
+                    log.exception(
+                        "awareness deliver: could not return failed intent to pending"
+                    )
             return {
                 "delivered": delivered,
                 "failed": True,
@@ -150,6 +305,13 @@ def deliver_posts(
         if message_id is None:
             reason = f"send to #{cfg.get('channel_name') or channel} returned no id"
             log.error("awareness deliver: %s — failing tick", reason)
+            if intent_store is not None:
+                try:
+                    intent_store.mark_delivery_pending(intent_key, reason)
+                except Exception:
+                    log.exception(
+                        "awareness deliver: could not return empty-send intent to pending"
+                    )
             return {
                 "delivered": delivered,
                 "failed": True,
@@ -159,7 +321,7 @@ def deliver_posts(
 
         covers = post.get("covers_signal_keys") or []
         try:
-            record_fn(
+            record_args = dict(
                 lane=channel,
                 content=copy,
                 covers=covers,
@@ -168,11 +330,26 @@ def deliver_posts(
                 post=post,
                 evidence=awareness_post_facts(read, post),
             )
+            if intent_key is not None:
+                record_args["intent_key"] = intent_key
+            record_fn(**record_args)
         except Exception:
             # Recording is dedup-memory only; a failure here must not fail an
             # already-delivered post (it's landed in Discord).
             log.exception("awareness deliver: record post failed (non-fatal)")
-        covered.update(covers)
+        if intent_store is not None:
+            try:
+                intent_store.mark_delivery_fulfilled(
+                    intent_key, message_id, loop_number=loop_number
+                )
+            except Exception as exc:
+                log.exception("awareness deliver: could not fulfill delivery intent")
+                return {
+                    "delivered": delivered + 1,
+                    "failed": True,
+                    "reason": f"delivery intent finalize failed: {exc}",
+                    "uncovered_hard": [],
+                }
         delivered += 1
 
         # Clan-chat escalation rides a delivered post and never fails it — the
@@ -192,30 +369,15 @@ def deliver_posts(
             except Exception:
                 log.exception("awareness deliver: clan-chat relay failed (non-fatal)")
 
-    # Hard-post floor: every mandatory signal must be covered by some post.
-    mandatory = {
-        s.get("signal_key")
-        for s in (read.get("hard_post_signals") or [])
-        if isinstance(s, dict) and s.get("signal_key")
-    }
-    uncovered = sorted(mandatory - covered)
-    if uncovered:
-        log.error(
-            "awareness deliver: hard-post floor uncovered %s — failing tick", uncovered
-        )
-        return {
-            "delivered": delivered,
-            "failed": True,
-            "reason": f"uncovered hard-post signals: {uncovered}",
-            "uncovered_hard": uncovered,
-        }
-
-    return {
+    result = {
         "delivered": delivered,
         "failed": False,
         "reason": None,
         "uncovered_hard": [],
     }
+    if intent_store is not None:
+        result["replayed"] = replayed
+    return result
 
 
 __all__ = ["deliver_posts", "POSTABLE_CHANNELS"]

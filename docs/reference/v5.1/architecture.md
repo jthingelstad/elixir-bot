@@ -47,6 +47,16 @@
 > readiness fields make incomplete or stale evidence explicit to capability
 > consumers. `engine.event_contracts` is the single event vocabulary and owns
 > stream, payload floor, time semantics, awareness lane, and hard-post policy.
+>
+> **Transaction/provenance amendment (2026-07-15):** the generation boundary
+> now includes management and the final run status, not only ingest/projection.
+> Scheduled and interactive observations both create a generation;
+> `materialization_inputs` enumerates its admitted inputs. API transport history
+> is split into append-only `api_observation_receipts` and deduplicated
+> `raw_api_payloads` content, so an unchanged successful poll remains observable.
+> Awareness and primary capabilities expose the exact `data_generation` seen by
+> a single SQLite read snapshot. Awareness validates the complete hard-post plan,
+> persists per-post `awareness_delivery_intents`, and retries only pending posts.
 
 ---
 
