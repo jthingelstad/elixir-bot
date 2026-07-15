@@ -178,8 +178,9 @@ def test_partial_delivery_retry_sends_only_unfulfilled_intent(engine_conn):
         second = deliver_mod.deliver_posts(
             read,
             plan,
-            post_fn=lambda channel_id, copy: retry_sends.append((channel_id, copy))
-            or 902,
+            post_fn=lambda channel_id, copy: (
+                retry_sends.append((channel_id, copy)) or 902
+            ),
             record_fn=record,
             intent_store=IntentStore,
         )
@@ -327,7 +328,11 @@ def test_fulfilled_sibling_counts_while_pending_sibling_retries(engine_conn):
     work = store.prepare_delivery_intents(
         posts, required_signal_keys={"s1", "s2"}, conn=engine_conn
     )
-    first_key = next(item["intent_key"] for item in work if item["post"]["channel"] == "announcements")
+    first_key = next(
+        item["intent_key"]
+        for item in work
+        if item["post"]["channel"] == "announcements"
+    )
     assert store.mark_delivery_sending(first_key, conn=engine_conn) is True
     store.mark_delivery_fulfilled(first_key, 904, conn=engine_conn)
     sent = []

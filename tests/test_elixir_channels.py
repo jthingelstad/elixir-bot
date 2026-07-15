@@ -4244,10 +4244,10 @@ def test_build_clan_status_report_uses_non_war_risk_watchlist():
         mock_risk.assert_called_once_with(
             inactivity_days=7,
             min_donations_week=20,
-                require_war_participation=False,
-                min_war_races=1,
-                season_id=None,
-                conn=ANY,
+            require_war_participation=False,
+            min_war_races=1,
+            season_id=None,
+            conn=ANY,
         )
 
 
@@ -4436,10 +4436,10 @@ def test_build_kick_risk_report_uses_inactivity_only():
         mock_risk.assert_called_once_with(
             inactivity_days=7,
             min_donations_week=0,
-                require_war_participation=False,
-                min_war_races=1,
-                season_id=None,
-                conn=ANY,
+            require_war_participation=False,
+            min_war_races=1,
+            season_id=None,
+            conn=ANY,
         )
     assert report == "**Kick Risk (Inactive 7+ Days)**\n- Vijay — last seen 8 days ago"
 
@@ -4574,10 +4574,10 @@ def test_build_clan_status_short_report_uses_non_war_risk_watchlist():
         mock_risk.assert_called_once_with(
             inactivity_days=7,
             min_donations_week=20,
-                require_war_participation=False,
-                min_war_races=1,
-                season_id=None,
-                conn=ANY,
+            require_war_participation=False,
+            min_war_races=1,
+            season_id=None,
+            conn=ANY,
         )
 
 

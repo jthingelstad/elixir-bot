@@ -147,8 +147,13 @@ See [docs/data-model-erd.md](docs/data-model-erd.md) and
 Use the project virtualenv:
 
 ```bash
+./venv/bin/python scripts/check_dependency_lock.py
+./venv/bin/python scripts/check_docs.py
+./venv/bin/python scripts/check_exception_hygiene.py
 ./venv/bin/ruff check .
-./venv/bin/pytest tests/ -v
+./venv/bin/ruff format --check .
+./venv/bin/mypy capabilities/contracts.py
+./venv/bin/pytest tests/ -q --cov=capabilities --cov-report=term-missing --cov-fail-under=80
 ```
 
 Before deploying engine changes, also run:
