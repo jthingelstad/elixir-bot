@@ -167,7 +167,7 @@ async def handle_raw_reaction_add(payload) -> None:
         feedback_value=feedback_value,
     )
     became_active_down = feedback_value == "down" and feedback.get("became_active_down")
-    # Surface every feedback event in elixir.log so log-triage can see it.
+    # Surface every feedback event in elixir-v5.log so log-triage can see it.
     # Thumbs-down is a quality signal we want to triage promptly, so it goes
     # WARNING; thumbs-up is informational. Only the first thumbs-down per
     # message+user gets WARNING (became_active_down=True) — toggle-and-back

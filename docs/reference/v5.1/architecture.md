@@ -1,20 +1,18 @@
 # Elixir v5.1 — Architecture Design
 
-> **Status:** Draft, in active refinement. This doc has two parts.
-> **Part I** documents *what is there today* — the accumulated schema and its
-> problems — grounded in the live database (`elixir-v5.db`; 75 designed tables + 11
-> FTS/vec/`sqlite_sequence` shadow objects, verified 2026-07-02).
-> **Part II** is the *v5.1 target architecture*: the three activity streams, the
-> emitter, recognition, clan management, ingest/retention, adaptive polling, and
-> Clan Wars.
+> **Status:** Implemented. This doc preserves both the pre-cut diagnosis and the
+> resulting design. **Part I** is a historical snapshot of `elixir-v5.db` on
+> 2026-07-02, not a description of the current runtime. **Part II**, together
+> with the implementation amendments below and the sibling reference specs, is
+> the v5.1 architecture of record.
 >
-> **Scope:** v5.1 is the **recognition + decision engine**, including the
+> **Scope at design time:** v5.1 was the **recognition + decision engine**, including the
 > **read/query layer** that answers member/leader questions (§14.5) and the
 > **deterministic notability core** (§10). Deferred to a later pass: the
-> **conversation & memory design** — curated `clan_memories`, conversational memory,
-> and the interactive-conversation UX (§0).
+> **conversation & memory design** — subsequently implemented and documented in
+> `memory.md`.
 >
-> **Owner:** Jamie · **Last worked:** 2026-07-02
+> **Owner:** Jamie · **Last reviewed:** 2026-07-15
 
 > **Implementation amendment (2026-07-14):** the clean break is complete and
 > production now has two explicit runtime stages. `engine.tick.run_tick` is a
@@ -70,19 +68,20 @@ v5.1 designs.
 
 ---
 
-# Part I — What is there today
+# Part I — Pre-cut state (historical, 2026-07-02)
 
-## 1. Three engine generations, layered
+## 1. Three engine generations were layered
 
-Three generations of data flow are layered on top of each other in the live
-database. This is the source of the "what is all this?" feeling — and, more
-importantly, of Elixir reasoning against **different models at once**.
+Before the clean break, three generations of data flow were layered on top of
+each other in the live database. This was the source of the "what is all this?"
+feeling — and, more importantly, of Elixir reasoning against **different models
+at once**. The table and evidence below describe that retired database only.
 
 | Gen | What it is | Core tables | Status in reality |
 |---|---|---|---|
-| **A** | v4 **event store** | `game_event_stream` → `event_rollups` | AGENTS.md calls it retired/dormant. It is **not gone**: live v5 link tables still FK into `game_event_stream.event_id`. A dead generation the live one is still chained to. |
-| **B** | v4 **signal / delivery** layer | `signal_log`, `signal_outcomes`, `awareness_ticks`, `revisits` | Live. `signal_outcomes` (1,650 rows) has a bolted-on `intent_id` column pointing at the v5 model — a bridge, meaning **both delivery models run at once**. |
-| **C** | **Event Core** (v5) | `detections` → `elixir_projects` / `decision_cases` → `communication_intents` → delivery | The current engine. |
+| **A** | v4 **event store** | `game_event_stream` → `event_rollups` | Retired at the v5.1 clean break. |
+| **B** | v4 **signal / delivery** layer | `signal_log`, `signal_outcomes`, `awareness_ticks`, `revisits` | Retired at the v5.1 clean break. |
+| **C** | **Event Core** (v5) | `detections` → `elixir_projects` / `decision_cases` → `communication_intents` → delivery | Retired at the v5.1 clean break; selected deterministic logic survives only in the offline legacy seam. |
 
 The seams that prove they're entangled rather than cleanly superseded:
 

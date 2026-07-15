@@ -1,11 +1,11 @@
 ---
 name: llm-cost-report
-description: Analyze the llm_calls table in elixir.db to break down Elixir's LLM spend by workflow, model, and day; identify cost drivers; recommend signal-side or model-tier cuts
+description: Analyze the llm_calls table in elixir-v51.db to break down Elixir's LLM spend by workflow, model, and day; identify cost drivers; recommend signal-side or model-tier cuts
 ---
 
 # LLM Cost Report
 
-Read `/Users/jamie/Projects/elixir-bot/elixir.db` (table `llm_calls`), compute real spend using correct Sonnet 4.6 and Haiku 4.5 pricing, and hand the user a short prioritized report: where the money goes, whether caching is paying off, daily trend, anomalies, and concrete next levers. Pairs with `log-triage` ("is the bot alive?") and `awareness-report` ("is the bot making good calls?") — this one answers "where is the money going?"
+Read `/Users/otto/Projects/elixir-bot/elixir-v51.db` (table `llm_calls`), compute real spend using correct Sonnet 4.6 and Haiku 4.5 pricing, and hand the user a short prioritized report: where the money goes, whether caching is paying off, daily trend, anomalies, and concrete next levers. Pairs with `log-triage` ("is the bot alive?") and `awareness-report` ("is the bot making good calls?") — this one answers "where is the money going?"
 
 Budget context: the user's target is **$20/month (~$0.67/day)**. Report current spend against that bar.
 
@@ -49,7 +49,7 @@ Test models (`claude-test-*`) are priced at $0 — filter them out of cost total
 
 ## Queries to run
 
-Run all four queries against `elixir.db` via `sqlite3` and interpret them together.
+Run all four queries against `elixir-v51.db` via read-only `sqlite3` and interpret them together.
 
 ### Q1 — Daily totals and trend
 

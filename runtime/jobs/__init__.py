@@ -34,7 +34,7 @@ from runtime.helpers import (  # noqa: F401
 )
 # _post_to_elixir and _load_live_clan_context are delegation wrappers in
 # _signals.py that forward to runtime.app — excluded to avoid recursion.
-from runtime.jobs._site import (  # noqa: F401
+from runtime.jobs._promotion import (  # noqa: F401
     _promotion_discord_required_text, _promotion_reddit_required_token,
     _promotion_channel_posts, _unwrap_outer_bold,
     _validate_promote_content_or_raise, _promotion_content_cycle,

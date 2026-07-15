@@ -1,4 +1,4 @@
-"""Awards read/write layer — v5.1 (docs/v5.1/schema.md §7.5, Q5).
+"""Awards read/write layer — v5.1 (docs/reference/v5.1/schema.md §7.5, Q5).
 
 Tag-keyed throughout (§7: awards.member_id dropped). Standings compute over
 war_participation (live-upserted by the engine, so the in-progress week is

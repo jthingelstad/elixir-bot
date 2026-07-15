@@ -1,4 +1,4 @@
-"""v5.1 offline rehearsal harness (docs/v5.1/migration.md Phase 0 item 4).
+"""v5.1 offline rehearsal harness (docs/reference/v5.1/migration.md Phase 0 item 4).
 
 Replays the raw-payload window (14 days, `raw_api_payloads`) through the new
 engine's offline entry point into a throwaway DB — exercising

@@ -1,4 +1,4 @@
-"""Clan-management deterministic core (docs/v5.1/management.md — ratified
+"""Clan-management deterministic core (docs/reference/v5.1/management.md — ratified
 2026-07-03). Layer-1 sustained-signal evaluators + Layer-2 candidacy machines.
 
 The LLM reads states, never metrics-to-judgment (management.md §1). The tick

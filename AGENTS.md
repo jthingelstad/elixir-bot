@@ -181,8 +181,8 @@ The clean-break v5.1 baseline in `scripts/migrate_v51/schema_v51.py` is
 migration 0. All post-cut forward changes are ordered and versioned in
 `db/schema.py`; `db.get_connection()` applies them before returning. Runtime
 and domain modules may validate required columns but must never issue `CREATE`
-or `ALTER`. `db/_migrations.py` is the retired pre-v5.1 history, kept for
-reference only. The committed fresh-schema fingerprint test changes with every
+or `ALTER`. The retired pre-v5.1 migration history lives in Git and the cold
+archive rather than executable runtime code. The committed fresh-schema fingerprint test changes with every
 intentional schema change. Backups: `scripts/backup_db.py` covers the
 operational DB only — single database since the memory pass (the archive needs no backup — it never
 changes).

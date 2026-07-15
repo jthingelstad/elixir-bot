@@ -40,5 +40,5 @@ catches. Its per-file baseline makes the existing migration debt explicit: any
 broad catch added, removed, or moved requires a deliberate baseline update.
 
 The baseline is not permission to keep broad catches forever. Narrowing a catch
-should lower it. Archived `db/_migrations.py`, tests, and one-shot scripts are
+should lower it. Tests and one-shot scripts are
 outside this production-runtime budget.

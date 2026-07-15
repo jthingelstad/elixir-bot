@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from storage import war as war_storage
+from capabilities.contracts import WarIntelligenceResult, WarSeasonViewResult
 from capabilities.game_truth import get_game_truth
 
 CAPABILITY_ID = "war_intelligence"
@@ -96,7 +97,7 @@ def _remaining_decks(day: dict) -> dict:
     }
 
 
-def get_war_intelligence(*, source=None, conn=None) -> dict:
+def get_war_intelligence(*, source=None, conn=None) -> WarIntelligenceResult:
     """Return the canonical live-war contract, or ``available=False``."""
     source = _source(source)
     status = _invoke(source, "get_current_war_status", conn=conn)
@@ -296,7 +297,7 @@ def get_war_season_view(
     limit: int = 10,
     source=None,
     conn=None,
-) -> dict:
+) -> WarSeasonViewResult:
     """Return one versioned war-season facet under the ``data`` key."""
     source = _source(source)
     limit = max(1, min(int(limit or 10), 100))

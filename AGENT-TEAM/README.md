@@ -45,30 +45,32 @@ and the Build Manager builds approved work.
 
 ## Current runtime map
 
-Elixir is currently a v5/Event Core hybrid. Roles should use this map when gathering evidence:
+Elixir runs one v5.1 engine and one operational database. Roles should use this
+map when gathering evidence:
 
-- **v5 event store:** `elixir-v5-events.db` is the authoritative event-sourced store for Event
-  Core domain events, detections, recommendations, decision cases, and reactive communication
-  intent history.
-- **v5 operational DB:** `elixir-v5.db` contains operational read models, survivor tables,
-  `detections`, `battle_telemetry`, runtime status, messages, memory indexes, and legacy tables
-  not yet retired.
-- **v5 memory DB:** `elixir-v5-memory.db` is the durable clan-memory store.
-- **Runtime health:** `python -m event_core.live.health` and `python -m event_core.live.monitor`
-  for Event Core health, follower lag, deliverable pending work, and recent reactive ticks.
-- **Legacy teardown — mostly done:** the v4 signal/awareness code is deleted; a few legacy
-  tables (`signal_log`, `signal_detector_cursors`) are still read by live code. Don't treat any
-  of these as the primary live reasoning model unless the task is explicitly about retiring or
-  auditing legacy behavior.
+- **Ingress:** `cr_api.py` is the only Clash Royale API ingress. Every response
+  lands first in `raw_api_payloads` under its true endpoint.
+- **Engine:** `engine.tick.run_tick` is the five-step materializer: poll → ingest
+  → emit → project → manage. The four event streams and their projections live
+  in `elixir-v51.db`.
+- **Proactive behavior:** `runtime.awareness` is the sole live proactive
+  consumer. Its durable evidence is `awareness_thoughts`, `awareness_posts`,
+  per-stream cursors, and `runtime_job_status`.
+- **Operational database:** `elixir-v51.db` also holds identity, management,
+  conversation, durable memory, incidents, and LLM telemetry. The pre-cut
+  `elixir-v5-archive-2026H2.db` is immutable historical evidence only.
+- **Runtime health:** start with `bash scripts/admin.sh status`,
+  `./venv/bin/python scripts/confidence_report.py --quick --json`, open
+  `runtime_incidents`, and the repo-root `elixir-v5.log`.
 
-The short version: **v5/Event Core owns proactive reactive behavior; the operational DB still
-owns many read/query surfaces.** When a role investigates Elixir's flow, check both layers and
-name which layer supplied the evidence.
+The short version: **the engine owns facts and deterministic policy; awareness
+owns proactive communication; capabilities own shared read meaning.** Name the
+layer and table that supplied every finding.
 
 Operations shell activity runs:
 
 ```bash
-bash scripts/admin.sh activity run v5-reactive-tick
+bash scripts/admin.sh activity run engine-health
 ```
 
 This resolves the activity through `runtime/activities.py`, refuses entries with

@@ -1,7 +1,9 @@
 # Elixir v5.1 — Recognition Spec
 
-> **Status:** ✅ Build-ready (`arena_up` 85/bypass ratified 2026-07-03, §9).
-> **Owner:** Jamie · **Last worked:** 2026-07-03
+> **Status:** Implemented as the explicit offline legacy recognition seam. The
+> production awareness loop supersedes this proactive pipeline; see
+> `runtime.md` §2.
+> **Owner:** Jamie · **Last reviewed:** 2026-07-15
 >
 > The notability layer: the deterministic scorer **ported** from
 > `event_core/mind/communication.py` (constants reproduced verbatim, line-cited),

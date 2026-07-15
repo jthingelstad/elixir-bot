@@ -1,14 +1,15 @@
 # Elixir v5.1 — Migration & Cutover
 
-> **Status:** ✅ Build-ready (T14 calendar ledger seed added 2026-07-03; feedback.md rev 4).
-> **Owner:** Jamie · **Last worked:** 2026-07-03
+> **Status:** Complete historical cutover record (T14 calendar ledger seed added
+> 2026-07-03; feedback.md rev 4).
+> **Owner:** Jamie · **Last reviewed:** 2026-07-15
 >
 > The phased build and cutover: archive, carry-forward transforms, teardown,
 > seeding, parity checks, acceptance criteria. Licensed by §6 (clean break,
 > downtime fine, no compatibility layer); disciplined by §14.4 (precious history
 > is defined explicitly, carried deliberately, backed by an immutable archive).
 
-## Phase 0 — Pre-cut prep (current system keeps running)
+## Phase 0 — Pre-cut prep (historical plan)
 
 - Create the tracking issue + child issues per arc (AGENTS.md work-tracking
   convention; label the arc `v5.1`).

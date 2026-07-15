@@ -369,7 +369,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         between the system prompt and the current user message.
     tool_stats: optional dict the caller provides; populated in-place with
         ``write_calls_issued``, ``write_calls_succeeded``, ``write_calls_denied``
-        so the caller can persist the awareness-loop write budget usage.
+        so the caller can persist the awareness-loop tool trace.
     Returns the final parsed response dict, or None.
     """
     messages = []

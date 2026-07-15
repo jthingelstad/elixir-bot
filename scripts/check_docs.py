@@ -14,8 +14,8 @@ MARKDOWN_LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 URI_SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
 # These names describe deleted production paths. They are allowed in archived
-# and locked design documents, but not in the two current operator runbooks.
-RETIRED_RUNBOOK_TERMS = {
+# and historical design documents, but not in current operator/agent guidance.
+RETIRED_GUIDANCE_TERMS = {
     "README.md": (
         "v5-reactive-tick",
         "`war-poll`",
@@ -37,6 +37,48 @@ RETIRED_RUNBOOK_TERMS = {
         "`site-content`",
         "scripts/upgrade.sh",
         "elixir-v5.db",
+    ),
+    "AGENT-TEAM/README.md": (
+        "event_core/",
+        "elixir-v5.db",
+        "elixir-v5-events.db",
+        "v5-reactive-tick",
+    ),
+    "AGENT-TEAM/data-analyst.md": (
+        "event_core/",
+        "elixir-v5.db",
+        "elixir-v5-events.db",
+        "battle_telemetry",
+        "`detections`",
+    ),
+    "AGENT-TEAM/quality-manager.md": (
+        "event_core.live",
+        "elixir-v5.db",
+        "elixir-v5-events.db",
+        "battle_telemetry",
+        "`detections`",
+    ),
+    "AGENT-TEAM/operations-manager.md": (
+        "event_core.live",
+        "elixir-v5.db",
+        "elixir-v5-events.db",
+    ),
+    ".claude/skills/awareness-report/SKILL.md": (
+        "/Users/jamie",
+        "`elixir.db`",
+    ),
+    ".claude/skills/cr-api-doc-audit/SKILL.md": (
+        "/Users/jamie",
+        "`elixir.db`",
+        "180 days",
+    ),
+    ".claude/skills/llm-cost-report/SKILL.md": (
+        "/Users/jamie",
+        "`elixir.db`",
+    ),
+    ".claude/skills/log-triage/SKILL.md": (
+        "/Users/jamie",
+        "`elixir.log`",
     ),
 }
 
@@ -107,7 +149,7 @@ def main() -> int:
     for path in markdown_files:
         findings.extend(_link_findings(path))
 
-    for relative, retired_terms in RETIRED_RUNBOOK_TERMS.items():
+    for relative, retired_terms in RETIRED_GUIDANCE_TERMS.items():
         text = (ROOT / relative).read_text()
         for term in retired_terms:
             if term in text:
