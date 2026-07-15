@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import collections
 import json
+import logging
 from datetime import datetime, timezone
+
+from storage.incidents import record_incident
 
 _TICKS: collections.deque = collections.deque(maxlen=288)  # ~48h at 10-min ticks
 
 _RETENTION_DAYS = 30
+log = logging.getLogger("elixir.webapp.ticks")
 
 
 def record_tick(counters: dict) -> None:
@@ -42,8 +46,14 @@ def record_tick(counters: dict) -> None:
             conn.commit()
         finally:
             conn.close()
-    except Exception:  # persistence must never fail the tick (guard mirrors caller)
-        pass
+    except Exception as exc:  # persistence must never fail the tick
+        log.warning("tick-history persistence failed", exc_info=True)
+        record_incident(
+            "webapp.tick_history.persist",
+            exc,
+            context={"recorded_at": entry.get("recorded_at")},
+            severity="warn",
+        )
 
 
 def recent_ticks(limit: int = 100) -> list[dict]:
@@ -63,5 +73,5 @@ def recent_ticks(limit: int = 100) -> list[dict]:
         finally:
             conn.close()
     except Exception:
-        pass
+        log.debug("persisted tick history unavailable; using memory ring", exc_info=True)
     return [dict(t) for t in list(_TICKS)[:limit]]

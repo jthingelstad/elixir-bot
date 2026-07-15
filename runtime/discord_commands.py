@@ -650,8 +650,12 @@ def register_elixir_app_commands(bot) -> None:
         )
 
         try:
-            await _tournament_recap(tournament["tournament_tag"])
-            await interaction.followup.send(f"Recap posted for **{name}**.", ephemeral=True)
+            posted = await _tournament_recap(tournament["tournament_tag"])
+            if posted:
+                text = f"Recap posted for **{name}**."
+            else:
+                text = f"Recap was not posted for **{name}**; see incidents/logs."
+            await interaction.followup.send(text, ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"Recap generation failed: {e}", ephemeral=True)
 

@@ -13,9 +13,13 @@ render): bold headers + short bullet lines only.
 """
 from __future__ import annotations
 
+import logging
 import re
 
 from db import managed_connection
+
+
+log = logging.getLogger("elixir.elder_standing")
 
 THE_BAR = (
     "Elder is earned, and held, by what you put in — and it's all in your control: "
@@ -194,7 +198,10 @@ def compose_elder_standing_report(*, date: str | None = None, now: str | None = 
         if composed and output_is_grounded(composed, standing):
             return composed, "composed"
     except Exception:
-        pass
+        log.warning(
+            "elder standing composition failed; using deterministic renderer",
+            exc_info=True,
+        )
     return deterministic, "deterministic"
 
 

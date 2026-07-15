@@ -55,7 +55,7 @@ def _record_incident(component, error, context=None, severity="error"):
         from storage.incidents import record_incident
         record_incident(component, error, context=context, severity=severity)
     except Exception:
-        pass
+        log.exception("incident recording boundary failed component=%s", component)
 
 
 CHICAGO = pytz.timezone("America/Chicago")
@@ -1385,7 +1385,7 @@ async def _awareness_event(event: dict) -> None:
                 try:
                     await thread.edit(name=render.get("thread_name") or f"Loop #{n}")
                 except Exception:
-                    pass
+                    log.debug("awareness: #thinking thread rename failed", exc_info=True)
             if msg is not None:
                 embed = discord.Embed(title=render.get("header") or f"🧠 Loop #{n}",
                                       color=render.get("color"),

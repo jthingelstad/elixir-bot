@@ -469,6 +469,7 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         finally:
             pass  # shared operational connection — caller owns its lifecycle
     except Exception:
+        log.debug("database status memory counts unavailable", exc_info=True)
         counts.setdefault("contextual_memory_count", 0)
         counts.setdefault("contextual_leader_notes", 0)
         counts.setdefault("contextual_inferences", 0)

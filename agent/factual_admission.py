@@ -8,9 +8,13 @@ allowed; a persistent contradiction becomes deterministic safe copy.
 from __future__ import annotations
 
 from collections.abc import Callable
+import logging
 
 from capabilities.game_truth import deterministic_correction
 from engine.game_check import check_post
+
+
+log = logging.getLogger("elixir.agent.factual_admission")
 
 
 def _text(value) -> str:
@@ -55,6 +59,7 @@ def admit_structured_response(
         try:
             repaired = repair_fn(response, findings, facts)
         except Exception:
+            log.warning("structured-response wording repair failed", exc_info=True)
             repaired = None
         if (
             isinstance(repaired, dict)

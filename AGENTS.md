@@ -114,8 +114,11 @@ Unit tests target one delta with minimal dicts; these three run the engine again
 The bugs that keep biting are seam/first-use failures that fail *silently*. Three
 tools make them visible:
 
-1. **Incident ledger** — every best-effort/swallowing `except` records to
-   `runtime_incidents` (`storage/incidents.py:record_incident`) before it passes.
+1. **Incident ledger** — abandoned runtime work and cross-table consistency
+   failures record to `runtime_incidents`
+   (`storage/incidents.py:record_incident`). Expected parsing, user/tool errors,
+   and optional enrichment use bounded fallbacks or logs instead of flooding the
+   ledger; see `docs/reference/error-handling.md`.
    An external agent finds all open failures in one query:
    `sqlite3 elixir-v51.db "SELECT at, component, summary, detail FROM runtime_incidents WHERE resolved_at IS NULL ORDER BY at DESC LIMIT 50"`.
    Also on Observatory `/incidents`, and the daily `engine-health` job names them

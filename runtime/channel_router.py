@@ -391,6 +391,11 @@ def _persist_screenshot_memories(memories, channel_id, workflow, source_message_
                 try:
                     resolved_tag = _resolve_member_tag(member_tag_input)
                 except Exception:
+                    _log.warning(
+                        "screenshot memory member resolution failed input=%r",
+                        member_tag_input,
+                        exc_info=True,
+                    )
                     resolved_tag = None
 
             metadata = {
@@ -874,6 +879,11 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
             if isinstance(row, dict):
                 target_name = row.get("current_name") or row.get("name")
         except Exception:
+            _log.debug(
+                "deck review member-name enrichment failed tag=%s",
+                target_tag,
+                exc_info=True,
+            )
             target_name = None
 
     route = f"deck_review_{mode}_{subject}"

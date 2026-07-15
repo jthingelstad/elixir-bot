@@ -10,12 +10,14 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
+import logging
 from typing import Iterable
 
 import db as db_facade
 
 CAPABILITY_ID = "deck_intelligence"
 CONTRACT_VERSION = 1
+log = logging.getLogger("elixir.capabilities.decks")
 
 _WIN_CONDITIONS = {
     "Balloon", "Battle Ram", "Electro Giant", "Elixir Golem", "Giant",
@@ -304,6 +306,11 @@ def _member_view(player_tag: str, rows: list[dict], source, *, days: int, scope:
         try:
             current = _invoke(source, "get_member_current_deck", player_tag, conn=conn)
         except Exception:
+            log.debug(
+                "current deck enrichment unavailable player_tag=%s",
+                player_tag,
+                exc_info=True,
+            )
             current = None
     current_summary = None
     if isinstance(current, dict) and current.get("cards"):

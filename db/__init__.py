@@ -439,8 +439,18 @@ def set_member_nickname(player_tag: str, nickname: Optional[str], *,
             from engine.db import refresh_display_name
 
             refresh_display_name(conn, player_tag)
-        except Exception:
-            pass  # display_name is best-effort; a nickname set must never fail
+        except Exception as exc:
+            # The nickname is authoritative even if its disposable projection
+            # cannot refresh; record the abandoned materialization for repair.
+            from storage.incidents import record_incident
+
+            record_incident(
+                "db.set_member_nickname.refresh_display_name",
+                exc,
+                context={"player_tag": _canon_tag(player_tag)},
+                severity="warn",
+                conn=conn,
+            )
         if owns:
             conn.commit()
     finally:
