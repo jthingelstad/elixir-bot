@@ -1,285 +1,201 @@
 # Elixir Bot
 
-Elixir is an LLM-powered Discord bot for the POAP KINGS Clash Royale clan (`#J2RGCRVG`).
+Elixir is the clan agent for the POAP KINGS Clash Royale clan (`#J2RGCRVG`).
+It combines a deterministic data engine, an LLM awareness loop, scoped memory,
+Discord conversation, and leadership workflows.
 
-It is not a generic chat bot and not a single-feed narrator. Elixir is a channel-native clan agent with:
-- Discord channel lanes like `river-race`, `clan-events`, `leader-lounge`, and `ask-elixir`
-- executable agents/workflows for awareness, conversation, clanops, memory synthesis, content, and specialist tasks
-- a central recurring activity registry for scheduled work
-- scoped memory for public vs leadership context
-- GitHub-backed publishing for poapkings.com
+[AGENTS.md](AGENTS.md) is the source of truth for architecture and repository
+conventions. [SETUP.md](SETUP.md) is the production operations guide.
 
-[AGENTS.md](AGENTS.md) is the repository source of truth for architecture and operating notes. This README is the best high-level introduction to the project.
+## System at a glance
 
-Useful companion docs:
-- [AGENTS.md](AGENTS.md)
-- [SETUP.md](SETUP.md)
-- [VERSIONS.md](VERSIONS.md)
+Elixir has one external data ingress and one proactive voice:
 
-## What Elixir Does
-
-Elixir currently handles four main kinds of work:
-
-1. Discord conversation
-   Elixir answers questions in the right channel with the right lane behavior. `#ask-elixir` is open conversation and screenshot help, `#clan-chat` is mention-driven, and `#leaders` is private clan operations.
-
-2. Signal-driven clan updates
-   Elixir detects roster, war, and progression signals, then fans one source event into one or more destination-specific outcomes. A new member join can become:
-   - a public welcome in `#clan-events`
-   - a factual leadership note in `#leaders`
-
-3. Scheduled recurring activities
-   Elixir runs recurring activities like the `v5-reactive-tick` proactive heartbeat, `war-poll`, `player-progression`, `weekly-recap`, `promotion-content`, and the daily `#ask-elixir` hidden-fact post.
-
-4. POAP KINGS website publishing
-   Elixir generates and publishes structured data for poapkings.com, pushes it to GitHub, and reports publish outcomes in `#website-updates`.
-
-## Current Channel Model
-
-Elixir uses channel lanes instead of one overloaded public stream. A lane is a Discord destination contract: channel id, audience, allowed topics, reply policy, memory scope, and voice. Lanes are not independent agents; they are the rooms where one Elixir speaks.
-
-Primary public/proactive lanes:
-- `#river-race` for River Race scoreboards, recaps, and meaningful war momentum
-- `#player-highlights` for curated player milestones and non-war battle pushes
-- `#clan-events` for joins, promotions, anniversaries, and clan recognitions
-- `#announcements` for the weekly recap and important clan-wide Elixir updates
-- `#recruiting` for recruiting copy members can reuse
-- `#website-updates` for website publish visibility
-
-Primary interactive lanes:
-- `#ask-elixir` for open conversation with Elixir
-- `#clan-chat` for mention-driven general questions
-- `#welcome` for onboarding and identity verification
-- `#leaders` for leadership and clan operations
-
-The live channel contract lives in [prompts/DISCORD.md](prompts/DISCORD.md).
-
-## Recurring Activities
-
-Recurring automated work is defined in [runtime/activities.py](runtime/activities.py). This is the canonical schedule registry.
-
-See `runtime/activities.py` for the exact keys, schedules, and enabled state. The shape today:
-- `v5-reactive-tick`
-  The proactive heartbeat. Runs the Event Core engine (ingest → detections → recommendations/cases → communication intents → confirmed Discord delivery). This replaced the old `clan-awareness` / `war-awareness` ticks.
-- `war-poll`
-  Hourly live war ingest + River Race snapshot pipeline.
-- `player-progression`
-  Refreshes player profiles and battle logs, then emits curated member highlights.
-- `daily-clan-insight`
-  Daily `#ask-elixir` hidden fact when the data supports a genuinely interesting insight.
-- `weekly-recap`
-  Weekly public recap in `#announcements`, plus members-page sync for the website.
-- `promotion-content`
-  Weekly recruiting content for `#recruiting` and the website.
-- Plus `api-sentinel`, `card-catalog-sync`, `award-detection`, `weekly-discord-invite-relay`, `memory-synthesis`, `clan-wars-intel`, and `db-maintenance`.
-
-## Quick Start
-
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+```mermaid
+flowchart LR
+    API["Clash Royale API"] --> INGRESS["cr_api.py"]
+    INGRESS --> RAW["raw_api_payloads<br/>14-day analysis buffer"]
+    INGRESS --> TICK["engine tick<br/>poll → ingest → emit → project → manage"]
+    TICK --> STREAMS["battle, player, clan,<br/>and war event streams"]
+    TICK --> READS["current projections,<br/>rollups, and management state"]
+    STREAMS --> AWARE["hourly awareness loop"]
+    READS --> AWARE
+    AWARE --> PLAN["validated post plan<br/>with hard coverage floors"]
+    PLAN --> DISCORD["member-facing Discord lanes"]
+    TICK --> ACTIONS["leader action cards"]
 ```
 
-Create a `.env` file with the required secrets:
+- `cr_api.py` is the only Clash Royale API ingress. Every response is appended
+  to `raw_api_payloads` under its real endpoint name.
+- `engine.tick.run_tick` runs the five production materialization steps. Each
+  step has its own transaction guard, so one failure is recorded without
+  preventing later steps from running.
+- Event streams are durable history. Projections are disposable read models.
+  Current state is never reconstructed from prompts.
+- The awareness loop reads streams and projections, decides what is worth
+  saying, and is the sole proactive poster. The old deterministic recognition
+  and delivery path is retained only for explicit offline rehearsals.
+- Clan management is deterministic. It writes state and leader actions; it does
+  not delegate promotion, demotion, or kick policy to the model.
+
+The detailed v5.1 design is in [docs/reference/v5.1/](docs/reference/v5.1/).
+
+## Product surfaces
+
+Elixir speaks as one identity across destination-specific Discord lanes:
+
+- `#elixir` — the awareness brain's curated public commentary and updates.
+- `#announcements` — weekly recaps and major system updates.
+- `#actions` — crisp leadership handoff cards and action outcomes.
+- `#ask-elixir` — open member conversation and screenshot help.
+- `#clan-chat` — mention-driven clan help.
+- `#leaders` — private, evidence-grounded clan operations.
+- `#welcome` — onboarding and identity verification.
+- `#recruiting` — reusable recruiting copy.
+
+The exact channel IDs, reply policies, memory scopes, and workflows live in
+[prompts/DISCORD.md](prompts/DISCORD.md).
+
+## Recurring activities
+
+[runtime/activities.py](runtime/activities.py) is the canonical registry for
+activity keys, ownership, schedules, executors, delivery targets, and enabled
+state. The important groups are:
+
+- Core: `engine-tick` and `awareness-loop`.
+- Clan management: `weekly-leadership-review`,
+  `action-outcome-refresh`, and `war-attendance-snapshot`.
+- Member communications: `daily-clan-insight`, `weekly-recap`,
+  `weekly-member-report`, `weekly-elder-standing`, `promotion-content`, and
+  `weekly-discord-invite-relay`.
+- Data and operations: `card-catalog-sync`, `api-sentinel`, `engine-health`,
+  `db-maintenance`, `db-backup`, and `memory-synthesis`.
+- Optional/manual: `clan-wars-intel`; tournament watching is dynamically
+  started and resumed outside the recurring registry.
+
+Do not duplicate schedule values in prose; inspect the registry or use the
+`/clanops activity ...` commands.
+
+## Quick start
+
+Python 3.14 is the supported runtime.
+
+```bash
+python3 -m venv venv
+./venv/bin/pip install -r requirements.lock -r requirements-dev.txt
+# Create .env with the required secrets below.
+./venv/bin/python elixir.py
+```
+
+Required secrets:
 
 ```env
-DISCORD_TOKEN=your_discord_bot_token
-CLAUDE_API_KEY=your_anthropic_api_key
-CR_API_KEY=your_clash_royale_api_key
-ELIXIR_LOG_WEBHOOK_URL=optional_discord_webhook_url_for_elixir_log
+DISCORD_TOKEN=...
+CLAUDE_API_KEY=...
+CR_API_KEY=...
 ```
 
-Start the bot locally:
+Non-secret clan and Discord configuration lives in `prompts/CLAN.md` and
+`prompts/DISCORD.md`. See [SETUP.md](SETUP.md) before running production.
+
+`requirements.txt` contains direct runtime constraints.
+`requirements.lock` is the exact production environment. CI and deployment
+install the lock; development adds `requirements-dev.txt`.
+
+## Repository map
+
+- [elixir.py](elixir.py) — process entrypoint.
+- [elixir_agent.py](elixir_agent.py) — stable public LLM facade.
+- [cr_api.py](cr_api.py) — sole Clash Royale API ingress.
+- [engine/](engine/) — five-step data engine, emitters, projections,
+  management, polling, and offline rehearsal.
+- [db/](db/) — connection discipline, schema checks, and storage facade.
+- [storage/](storage/) — domain persistence and read helpers.
+- [agent/](agent/) — workflow prompts, model loop, tool contracts, and tools.
+- [runtime/](runtime/) — Discord routing, activities, jobs, awareness, health,
+  and the Observatory web app.
+- [prompts/](prompts/) — identity, purpose, clan, channel, lane, and workflow
+  instructions.
+- [scripts/migrate_v51/](scripts/migrate_v51/) — v5.1 baseline schema,
+  archive transforms, and parity/rehearsal tools.
+- [tests/](tests/) — unit, integration, fixture, invariant, and entrypoint tests.
+
+## Database model
+
+The operational database defaults to `elixir-v51.db`. Clash Royale player tags
+are natural keys everywhere. The pre-cut database is the immutable cold archive
+`elixir-v5-archive-2026H2.db` and must never be written.
+
+The runtime data layers are:
+
+1. Raw API responses — bounded analysis buffer, not system of record.
+2. Baselines — current comparison substrate for state-diff emitters.
+3. Event streams — durable battle/player/clan/war facts.
+4. Rollups — durable player and clan daily metrics.
+5. Identity and tenure — players, Discord links, aliases, and memberships.
+6. Projections — rebuildable current state and management views.
+7. Awareness, management, operations, and scoped memory records.
+
+See [docs/data-model-erd.md](docs/data-model-erd.md) and
+[docs/reference/v5.1/schema.md](docs/reference/v5.1/schema.md).
+
+## Tests and confidence gates
+
+Use the project virtualenv:
 
 ```bash
-venv/bin/python elixir.py
+./venv/bin/ruff check .
+./venv/bin/pytest tests/ -v
 ```
 
-See [SETUP.md](SETUP.md) for production setup, `launchd`, optional site publishing config, and operational guidance.
-
-## Running Tests
+Before deploying engine changes, also run:
 
 ```bash
-venv/bin/python -m pytest tests/ -v
+./venv/bin/python scripts/replay_gate.py
+./venv/bin/python scripts/simulate.py
 ```
 
-Tests use in-memory SQLite and mocked external services. No API keys are needed for the test suite.
-
-## Project Structure
-
-Core entrypoints:
-- [elixir.py](elixir.py)
-  Main bot runtime entrypoint.
-- [elixir_agent.py](elixir_agent.py)
-  Stable public LLM entrypoint for replies, updates, and site generation.
-- [heartbeat.py](heartbeat.py)
-  API-driven signal detection for clan, war, and progression events.
-- [cr_api.py](cr_api.py)
-  Clash Royale API client.
-
-Prompt and behavior stack:
-- [prompts/SOUL.md](prompts/SOUL.md)
-  Elixir's persistent identity and stance.
-- [prompts/PURPOSE.md](prompts/PURPOSE.md)
-  Mission and guardrails.
-- [prompts/GAME.md](prompts/GAME.md)
-  Clash Royale mechanics and stable game knowledge.
-- [prompts/CLAN.md](prompts/CLAN.md)
-  POAP KINGS-specific rules, thresholds, and clan identity.
-- [prompts/DISCORD.md](prompts/DISCORD.md)
-  Declarative channel contract.
-- [prompts/lanes/](prompts/lanes/)
-  Discord destination-lane behavior prompts.
-- [prompts/agents/](prompts/agents/)
-  Executable workflow prompts for awareness, memory synthesis, routing, and tournament commentary.
-
-Runtime architecture:
-- [runtime/activities.py](runtime/activities.py)
-  Canonical recurring activity registry.
-- [runtime/channel_router.py](runtime/channel_router.py)
-  Discord message routing and reply-policy enforcement.
-- [event_core/](event_core/)
-  Event-sourced v5 reactive engine (the proactive path that replaced the v4 signal/awareness loop).
-- [runtime/jobs/](runtime/jobs/)
-  Scheduled activity executors.
-- [runtime/admin.py](runtime/admin.py)
-  Admin command dispatch and manual activity execution.
-
-Persistence and intelligence:
-- [db/](db/)
-  SQLite schema and query helpers.
-- [storage/](storage/)
-  Identity, memory, analytics, and message persistence.
-- [agent/](agent/)
-  LLM prompt composition, workflow contracts, tool policy, and chat loop.
-
-Modules:
-- [modules/poap_kings/](modules/poap_kings/)
-  POAP KINGS website integration and GitHub publishing.
-
-## Prompt Model
-
-Principle: prompts define what Elixir says and why. Code defines when, where, and how.
-
-The current prompt stack is:
-- `SOUL.md`
-  Who Elixir is.
-- `PURPOSE.md`
-  What Elixir is for.
-- `GAME.md`
-  Stable Clash Royale knowledge.
-- `CLAN.md`
-  POAP KINGS-specific reality.
-- `DISCORD.md`
-  Server and channel contract.
-- `lanes/*.md`
-  Destination-lane behavior.
-- `agents/*.md`
-  Workflow/agent instructions that are not tied to one Discord channel.
-
-This split matters. It keeps one consistent Elixir identity across very different channels without collapsing everything into one noisy system prompt.
-
-## Memory Model
-
-Elixir uses two memory layers.
-
-Conversational memory:
-- user, member, and channel conversation state
-- recent channel history
-- message summaries and episodes
-
-Durable scoped memory:
-- `public`
-- `leadership`
-- `system_internal`
-
-Important rules:
-- public lanes only read public durable memory
-- `leader-lounge` can read public plus leadership durable memory
-- `reception` should stay focused on onboarding context
-- multi-outcome signals share a source identity, but public and leadership durable memories stay separated so private copy cannot overwrite public memory
-
-## POAP KINGS Website Integration
-
-Elixir owns the dynamic site data written to poapkings.com:
-- `elixirClan.json`
-- `elixirRoster.json`
-- `elixirHome.json`
-- `elixirMembers.json`
-- `elixirPromote.json`
-
-GitHub-backed site publishing lives in [modules/poap_kings/site.py](modules/poap_kings/site.py).
-
-When a real publish happens, Elixir reports it in `#website-updates` with:
-- success or failure
-- commit SHA
-- direct GitHub commit URL
-- repo and branch
-- changed content types when useful
-
-No-change publishes stay quiet.
-
-## Admin and Operations
-
-Elixir's operator commands live in Discord `#leaders`; routine runtime notices go to `#elixir-log` when `ELIXIR_LOG_WEBHOOK_URL` is configured.
-
-Use slash commands under `/elixir ...`.
-
-Examples:
-
-```text
-/elixir system status
-/elixir activity show activity:v5-reactive-tick
-/elixir integration publish integration:poap-kings target:data preview:true
-/elixir member set member:Ditika field:join-date value:2026-03-07
-/elixir signal show view:recent limit:5
-```
-
-The command model is object-first and grouped around:
-- `system`
-- `clan`
-- `member`
-- `memory`
-- `signal`
-- `activity`
-- `integration`
-
-Useful operational docs:
-- [SETUP.md](SETUP.md)
-  Installation, launchd, deploy/update flow, and logs.
-- [AGENTS.md](AGENTS.md)
-  Deeper architecture and repository conventions.
-
-## Reviewing Prompt Failures
-
-Elixir stores failed or unusable Discord prompt attempts in the local `prompt_failures` table.
-
-Review the latest failures with:
+For one consolidated health answer:
 
 ```bash
-venv/bin/python scripts/review_agent_feedback.py --limit 20
-venv/bin/python scripts/review_agent_feedback.py --workflow clanops --json
+./venv/bin/python scripts/confidence_report.py --json
 ```
 
-Use `--json` when you want to hand the failure set to another model for diagnosis.
+The suite uses isolated SQLite databases and mocked external services. Real CR
+payload shapes live in `tests/fixtures/cr/`; refresh them from retained raw
+payloads rather than hand-editing them.
 
-## Cleanup
+## Operations
+
+Production is managed by `launchd` through `scripts/admin.sh`:
 
 ```bash
-venv/bin/python scripts/clean.py
-venv/bin/python scripts/clean.py --db
+bash scripts/admin.sh status
+bash scripts/admin.sh restart
+bash scripts/admin.sh activity run engine-health
 ```
 
-Default cleanup removes caches like `__pycache__` and `.pytest_cache`.
+Member self-service commands live under `/elixir`. Leadership operations live
+under `/clanops`. System telemetry and management surfaces belong in the
+Observatory web app, not general Discord commands.
 
-`--db` also removes local runtime files like `elixir.db` and `elixir.pid`.
+Review model/channel failures with:
 
-## Portability
+```bash
+./venv/bin/python scripts/review_agent_feedback.py --limit 20
+./venv/bin/python scripts/review_agent_feedback.py --workflow clanops --json
+```
 
-The project is designed so a new clan can fork it and mostly rewrite:
-- [prompts/CLAN.md](prompts/CLAN.md)
-- [prompts/DISCORD.md](prompts/DISCORD.md)
-- selected files in [prompts/lanes/](prompts/lanes/)
+## Cleanup and portability
 
-The shared Elixir identity in `SOUL.md`, `PURPOSE.md`, and the game knowledge in `GAME.md` should remain broadly portable.
+```bash
+./venv/bin/python scripts/clean.py
+./venv/bin/python scripts/clean.py --db
+```
+
+The database cleanup option removes only legacy local runtime files; it never
+touches `elixir-v51.db` or the archives.
+
+A new clan primarily rewrites `prompts/CLAN.md`, `prompts/DISCORD.md`, and any
+culture-specific lane prompts. Elixir no longer publishes poapkings.com; the
+site has its own standalone update process.

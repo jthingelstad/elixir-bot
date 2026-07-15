@@ -1,325 +1,255 @@
-# Elixir Bot — Setup & Operations
+# Elixir Bot — Setup and Operations
 
-Operations guide for running Elixir locally or in production.
-
-This document focuses on:
-- install and configuration
-- `launchd` process management
-- deploy/update flow
-- logs and health checks
-- safe cleanup and stateful files
-
-For architecture details, use [AGENTS.md](AGENTS.md). For a high-level product overview, use [README.md](README.md).
+This is the operator guide for local and production execution. For architecture
+and repository rules, read [AGENTS.md](AGENTS.md). For a shorter orientation,
+read [README.md](README.md).
 
 ## Install
 
+Elixir supports Python 3.14. Create the repository virtualenv and reproduce the
+same runtime packages used in production, then add development tools:
+
 ```bash
 cd ~/Projects/elixir-bot
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv venv
+./venv/bin/pip install -r requirements.lock -r requirements-dev.txt
+./venv/bin/python scripts/check_dependency_lock.py
+./venv/bin/pytest tests/ -q
 ```
 
-Verify the install:
-
-```bash
-venv/bin/python -m pytest tests/ -v
-```
-
-The test suite uses in-memory SQLite and mocked external services, so you do not need API keys to validate the install.
+Production installs only `requirements.lock`. `requirements.txt` is the bounded
+set of direct dependencies used when deliberately regenerating that lock.
 
 ## Configure
 
-Create a `.env` file in the project root.
+Create `.env` in the repository root.
 
 Required secrets:
 
 ```env
-DISCORD_TOKEN=your_discord_bot_token
-CLAUDE_API_KEY=your_anthropic_api_key
-CR_API_KEY=your_clash_royale_api_key
+DISCORD_TOKEN=...
+CLAUDE_API_KEY=...
+CR_API_KEY=...
 ```
 
-Optional operational logging:
+Common optional settings:
 
 ```env
-ELIXIR_LOG_WEBHOOK_URL=your_discord_webhook_url_for_elixir_log
+ELIXIR_DB_PATH=/absolute/path/to/elixir-v51.db
+ELIXIR_LOG_WEBHOOK_URL=...
 ELIXIR_LOG_WEBHOOK_USERNAME=Elixir
+ENGINE_TICK_MINUTES=10
+AWARENESS_LOOP_MINUTE=5
 ```
 
-Optional runtime tuning:
+Activity-specific schedule overrides are read by
+[runtime/activities.py](runtime/activities.py) from the runtime module. Prefer
+the registry defaults unless there is an operational reason to change them.
 
-```env
-ELIXIR_DB_PATH=./elixir-v5.db
-HEARTBEAT_INTERVAL_MINUTES=60
-WAR_POLL_MINUTE=0
-WAR_AWARENESS_MINUTE=5
-PLAYER_INTEL_REFRESH_MINUTES=30
-CLANOPS_WEEKLY_REVIEW_DAY=fri
-CLANOPS_WEEKLY_REVIEW_HOUR=19
-WEEKLY_RECAP_DAY=mon
-WEEKLY_RECAP_HOUR=9
-PROMOTION_CONTENT_DAY=fri
-PROMOTION_CONTENT_HOUR=9
-ASK_ELIXIR_DAILY_INSIGHT_HOUR=12
-ASK_ELIXIR_DAILY_INSIGHT_MINUTE=0
-```
+Non-secret configuration is checked in:
 
-Non-secret config lives in prompt files checked into the repo:
-- [prompts/DISCORD.md](prompts/DISCORD.md)
-  Discord IDs, lanes, workflows, reply policy, and memory scope.
-- [prompts/CLAN.md](prompts/CLAN.md)
-  Clan tag, rules, thresholds, and clan-specific identity.
+- [prompts/DISCORD.md](prompts/DISCORD.md) — channel IDs, lanes, reply policy,
+  tool policy, and memory scope.
+- [prompts/CLAN.md](prompts/CLAN.md) — clan identity and policy constants.
 
-## Local Run
+## Database safety
 
-Start Elixir locally:
+The default operational database is `elixir-v51.db`. An empty database is
+initialized from `scripts/migrate_v51/schema_v51.py` and then receives bounded
+forward migrations from `db/schema.py`. A non-empty database without the v5.1
+spine is refused; it is never rebuilt or upgraded in place.
+
+The immutable pre-cut archive is `elixir-v5-archive-2026H2.db`. Never point the
+running bot at it and never change its read-only permissions.
+
+Create an operational backup before every runtime deployment:
 
 ```bash
-source venv/bin/activate
-venv/bin/python elixir.py
+bash scripts/admin.sh backup
 ```
 
-On startup, Elixir should:
-- connect to Discord
-- register scheduled activities from the activity registry
-- post a startup check-in to the #elixir-log webhook with the running build hash
-- seed startup system signals if needed
-
-## Process Management (`launchd`)
-
-Production uses `launchd`. The plist at `~/Library/LaunchAgents/com.poapkings.elixir.plist` should run the venv Python binary directly.
-
-`launchd` is the process owner. Do not manage production with `nohup`, `pkill`, or a background shell process.
-
-### Start
+## Local run
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.poapkings.elixir.plist
+./venv/bin/python elixir.py
 ```
 
-### Stop
+A healthy startup connects to Discord, registers enabled activities from the
+registry, resumes any active tournament watch, seeds one-time system signals,
+and sends a build check-in to the `#elixir-log` webhook when configured.
+
+## Production with launchd
+
+`launchd` is the process owner. Do not mix it with `nohup`, `pkill`, or a
+background shell process.
+
+Install the plist once, then start the service:
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.poapkings.elixir.plist
+bash scripts/admin.sh install
+bash scripts/admin.sh start
+bash scripts/admin.sh status
 ```
 
-### Verify it is running
+Normal controls:
 
 ```bash
-launchctl list | grep com.poapkings.elixir
+bash scripts/admin.sh stop
+bash scripts/admin.sh restart
+bash scripts/admin.sh status
 ```
 
-Typical interpretation:
-- `-` or `0` in the exit-status column usually means healthy
-- a negative value like `-15` means the last run was terminated
+The helper targets `~/Library/LaunchAgents/com.poapkings.elixir.plist` and logs
+stdout/stderr to `./elixir-v5.log`.
 
-### Preferred helper
+## Deploy or update
 
-There is also a local helper script:
+The supported update path backs up the database, stops the service, fast-forward
+pulls `main`, installs the exact production lock, and starts the service:
+
+```bash
+bash scripts/admin.sh upgrade
+```
+
+After any runtime change, verify both process state and fresh behavior:
 
 ```bash
 bash scripts/admin.sh status
-bash scripts/admin.sh start
-bash scripts/admin.sh stop
-bash scripts/admin.sh restart
+tail -100 elixir-v5.log
+./venv/bin/python scripts/confidence_report.py --json
 ```
 
-Use whichever path your deployment prefers, but `launchd` remains the underlying source of truth.
+Do not call a deployment complete merely because the test suite passed. Inspect
+fresh tick/awareness output, open incidents, and the relevant Discord or
+Observatory behavior.
 
-## Deployment / Updating
+## Scheduled activities
 
-If you have the upgrade helper available, use it:
+[runtime/activities.py](runtime/activities.py) is the only schedule source of
+truth. The two heartbeats are:
+
+- `engine-tick` — refreshes raw data, streams, projections, and management
+  state through poll → ingest → emit → project → manage.
+- `awareness-loop` — reads that state, deliberates, and owns proactive public
+  posting.
+
+Inspect or run manual-safe activities through the leadership surface:
+
+```text
+/clanops activity list
+/clanops activity show
+/clanops activity run
+```
+
+Shell operators can use the same registry contract without starting a second
+Discord gateway session:
 
 ```bash
-bash scripts/upgrade.sh
+bash scripts/admin.sh activity run engine-health
+./venv/bin/python -m runtime.activity_runner run daily-clan-insight
 ```
 
-Manual deploy flow:
+Activities with `manual_trigger_allowed=False` will refuse a manual run.
+
+## Leadership commands
+
+Member email self-service lives under `/elixir`. Operator commands live under
+`/clanops` and are restricted by channel and role.
+
+Common leadership operations include:
+
+```text
+/clanops clan status
+/clanops clan war
+/clanops clan members
+/clanops member show
+/clanops member set
+/clanops relay status
+/clanops activity list
+/clanops tournament status
+```
+
+Use the Observatory for system telemetry, incidents, awareness-loop inspection,
+and other management views removed from Discord.
+
+## Health and incident checks
+
+Run the consolidated report:
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.poapkings.elixir.plist
-cd ~/Projects/elixir-bot
-git pull
-source venv/bin/activate
-pip install -r requirements.txt
-launchctl load ~/Library/LaunchAgents/com.poapkings.elixir.plist
-launchctl list | grep com.poapkings.elixir
+./venv/bin/python scripts/confidence_report.py --json
 ```
 
-Database migrations run automatically at startup.
+Inspect unresolved best-effort failures directly when needed:
 
-## Scheduled Activities
-
-The canonical schedule source is [runtime/activities.py](runtime/activities.py).
-
-Current recurring activity set (read `runtime/activities.py` for exact schedules and enabled state):
-- `v5-reactive-tick`
-  The proactive Event Core heartbeat — replaced the old `clan-awareness` / `war-awareness` ticks.
-- `war-poll`
-  Hourly live war ingest + River Race snapshot.
-- `player-progression`, `card-catalog-sync`, `award-detection`
-- `daily-clan-insight`, `weekly-recap`, `promotion-content`, `weekly-discord-invite-relay`, `clan-wars-intel`
-- `api-sentinel`, `memory-synthesis`, `db-maintenance`
-
-Use the live admin surface when you want the actual schedule rendered from the registry instead of trusting this file:
-
-```text
-/elixir system schedule
+```bash
+sqlite3 elixir-v51.db \
+  "SELECT at, component, summary, detail FROM runtime_incidents WHERE resolved_at IS NULL ORDER BY at DESC LIMIT 50"
 ```
 
-## Health Checks
+For model, validation, or channel failures:
 
-Useful live checks:
-
-```text
-/elixir system status
-/elixir signal show view:recent limit:5
-/elixir activity list
+```bash
+./venv/bin/python scripts/review_agent_feedback.py --limit 20
+./venv/bin/python scripts/review_agent_feedback.py --workflow clanops --json
 ```
 
-Useful Discord checks:
-- `/elixir system status`
-- `/elixir system schedule`
-- `/elixir system storage`
-- `/elixir system storage view:clan`
-- `/elixir system storage view:war`
-- `/elixir system storage view:memory`
-- `/elixir clan war`
-- `/elixir clan status`
+For engine changes, run the reality gates before deployment:
 
-Manual non-posting previews are available for many admin jobs:
-
-```text
-/elixir activity run activity:site-content preview:true
-/elixir activity run activity:weekly-recap preview:true
-/elixir activity run activity:promotion-content preview:true
+```bash
+./venv/bin/python scripts/replay_gate.py
+./venv/bin/python scripts/simulate.py
 ```
-
-Preview mode suppresses Discord sends and GitHub site pushes, but still runs the job logic.
 
 ## Logs
 
-Elixir logs to stdout/stderr. In production, `launchd` captures those logs according to the plist's `StandardOutPath` and `StandardErrorPath`.
+Production stdout and stderr are written to `elixir-v5.log`. `elixir.log` is an
+older root-level log that may still be useful for historical diagnosis; new
+launchd output goes to `elixir-v5.log`.
 
-### What healthy startup looks like
-
-Typical healthy startup lines include:
-
-```text
-Elixir online as ...
-Scheduler started — v5-reactive-tick — Every 60 minutes., war-poll — Every hour at :45 CT., player-progression — Every 30 minutes., ... api-sentinel — Every 240 minutes., db-maintenance — ...
-```
-
-You should also see:
-- a startup message in #elixir-log
-- activity registration from the scheduler summary
-
-### What to look for in logs
-
-General errors:
+Useful reads:
 
 ```bash
-grep "ERROR" /path/to/elixir.log | tail -20
+tail -100 elixir-v5.log
+rg 'ERROR|Traceback|runtime_incident' elixir-v5.log
+rg 'prompt_failure' elixir-v5.log
 ```
 
-Prompt failures:
+## Stateful files and retention
 
-```bash
-grep "prompt_failure" /path/to/elixir.log | tail -20
-```
+- `elixir-v51.db` — live operational state, streams, projections, management,
+  conversation, and durable memory.
+- `elixir-v51.db-wal` / `elixir-v51.db-shm` — SQLite WAL sidecars while live.
+- `elixir-v5-archive-2026H2.db` — immutable cold archive.
+- `elixir-v5.log` — active launchd log.
+- `.env` — local secrets; never commit it.
 
-### Prompt failure review
-
-When Discord prompt generation fails or falls back:
-
-```bash
-venv/bin/python scripts/review_agent_feedback.py --limit 20
-venv/bin/python scripts/review_agent_feedback.py --workflow clanops --json
-```
-
-The backing data lives in the `prompt_failures` table in `elixir.db`.
-
-## Manual Runtime Checks
-
-Safe local heartbeat inspection:
-
-```bash
-source venv/bin/activate
-venv/bin/python -c "import heartbeat; result = heartbeat.tick(); print(f'{len(result.signals)} signals')"
-```
-
-This reads from the Clash Royale API and writes to the local DB, but does not post to Discord.
-
-If you want to run a recurring activity directly through the supported admin surface, use:
-
-```text
-/elixir activity run activity:player-progression preview:true
-/elixir activity run activity:daily-clan-insight preview:true
-```
-
-## Member Metadata Operations
-
-Use the admin surface instead of direct database edits:
-
-```text
-/elixir member set member:Ditika field:join-date value:2026-03-07
-/elixir member clear member:Ditika field:join-date
-/elixir member set member:"King Levy" field:birthday value:02-14
-/elixir member set member:"King Thing" field:profile-url value:https://example.com
-/elixir member set member:"King Levy" field:poap-address value:0xabc123...
-/elixir member set member:"King Thing" field:note value:"Founder and systems builder"
-```
-
-These commands are also exposed in Discord leadership/admin flows.
-
-## Stateful Files and Data
-
-### `elixir.db`
-
-Default path: `./elixir.db`, unless overridden by `ELIXIR_DB_PATH`.
-
-It contains:
-- member identity and metadata
-- Discord links
-- conversation and channel memory
-- prompt failures
-- current clan/member state
-- player analytics and battle facts
-- war state and participation
-- raw ingest and signal logs
-
-It is safe to delete if you want a clean local reset, but you will lose history and memory.
-
-### Log files
-
-Only exist if your `launchd` plist writes stdout/stderr to a file.
-
-It is safe to rotate, truncate, or delete those logs while the service is stopped.
+The database has layered retention: raw API payloads are short-lived, event
+streams are bounded, and identity, rollups, awards, management history, and
+memory are durable. `db-maintenance` applies the configured retention policy.
 
 ## Cleanup
 
-Remove transient local files:
+Remove caches:
 
 ```bash
-venv/bin/python scripts/clean.py
+./venv/bin/python scripts/clean.py
 ```
 
-Remove caches plus local runtime state like `elixir.db` and `elixir.pid`:
+Also remove known legacy runtime files:
 
 ```bash
-venv/bin/python scripts/clean.py --db
+./venv/bin/python scripts/clean.py --db
 ```
 
-## Common Drift To Watch For
+The cleanup command never removes `elixir-v51.db` or either archive.
 
-The following are common sources of stale docs or stale assumptions:
-- activity cadence changed in `runtime/activities.py`
-- channel contract changed in `prompts/DISCORD.md`
-- reply policy changed for a channel like `#ask-elixir`
-- startup behavior changed in `runtime/app.py`
+## Operator source-of-truth map
 
-When in doubt, trust code over prose:
-- scheduler truth: [runtime/activities.py](runtime/activities.py)
-- channel truth: [prompts/DISCORD.md](prompts/DISCORD.md)
-- admin command truth: [runtime/admin.py](runtime/admin.py)
+- Architecture and policy: [AGENTS.md](AGENTS.md)
+- Activity registry: [runtime/activities.py](runtime/activities.py)
+- Channel contract: [prompts/DISCORD.md](prompts/DISCORD.md)
+- Process helper: [scripts/admin.sh](scripts/admin.sh)
+- Baseline schema: [scripts/migrate_v51/schema_v51.py](scripts/migrate_v51/schema_v51.py)
+- Forward schema changes: [db/schema.py](db/schema.py)
+- Runtime confidence: [scripts/confidence_report.py](scripts/confidence_report.py)

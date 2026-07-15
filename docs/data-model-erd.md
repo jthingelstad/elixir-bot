@@ -1,421 +1,79 @@
 # Data Model ERD
 
-Reference ERD for Elixir's live SQLite schema in [db/__init__.py](/Users/jamie/Projects/elixir-bot/db/__init__.py).
-
-Notes:
-- This reflects the current implemented schema, not the earlier design sketch.
-- `memory_facts` and `memory_episodes` use polymorphic `subject_type` / `subject_key`, so they are shown as standalone entities rather than hard-linked foreign keys.
-- `signal_log` and `cake_day_announcements` are operational support tables, not part of the main member/war graph.
+Logical map of Elixir's v5.1 operational database. The executable baseline is
+[`scripts/migrate_v51/schema_v51.py`](../scripts/migrate_v51/schema_v51.py);
+bounded post-cut additions live in [`db/schema.py`](../db/schema.py). This page
+shows ownership and flow rather than every column.
 
 ```mermaid
 erDiagram
-    members {
-        integer member_id PK
-        text player_tag UK
-        text current_name
-        text status
-        text first_seen_at
-        text last_seen_at
-    }
+    clans ||--o{ clan_memberships : contains
+    players ||--o{ clan_memberships : has_tenure
+    players ||--o{ player_aliases : has
+    players ||--o{ discord_links : linked_to
+    discord_users ||--o{ discord_links : verifies
 
-    member_metadata {
-        integer member_id PK, FK
-        text joined_at
-        integer birth_month
-        integer birth_day
-        text profile_url
-        text poap_address
-        text note
-    }
+    raw_api_payloads ||--o{ state_baselines : informs
+    raw_api_payloads ||--o{ battle_events : mirrors
+    state_baselines ||--o{ player_events : diffs_to
+    state_baselines ||--o{ clan_events : diffs_to
+    state_baselines ||--o{ war_events : diffs_to
 
-    member_aliases {
-        integer alias_id PK
-        integer member_id FK
-        text alias
-        text source
-        text observed_at
-    }
+    players ||--o{ battle_events : participates
+    players ||--o{ player_events : changes
+    clans ||--o{ clan_events : changes
+    clans ||--o{ war_events : races
 
-    discord_users {
-        text discord_user_id PK
-        text username
-        text global_name
-        text display_name
-        text first_seen_at
-        text last_seen_at
-    }
+    battle_events ||--o{ player_daily_battle_rollups : rolls_up
+    player_events ||--o{ player_daily_metrics : rolls_up
+    clan_events ||--o{ clan_daily_metrics : rolls_up
+    battle_events ||--o{ clan_daily_battle_rollups : rolls_up
 
-    discord_links {
-        integer discord_link_id PK
-        text discord_user_id FK
-        integer member_id FK
-        text discord_username
-        text discord_display_name
-        text linked_at
-        text source
-        real confidence
-        integer is_primary
-    }
+    players ||--o| player_current_state : projects
+    players ||--o| player_recent_form : projects
+    players ||--o| member_management : evaluates
+    players ||--o{ leader_action_recommendations : concerns
+    decision_cases ||--o{ leader_action_recommendations : produces
 
-    discord_channels {
-        text channel_id PK
-        text channel_name
-        text channel_kind
-        text first_seen_at
-        text last_seen_at
-    }
+    war_seasons ||--o{ war_weeks : contains
+    war_weeks ||--o{ war_week_clans : includes
+    war_weeks ||--o{ war_participation : records
+    players ||--o{ war_participation : participates
+    war_seasons ||--o{ awards : grants
+    players ||--o{ awards : receives
 
-    conversation_threads {
-        integer thread_id PK
-        text scope_type
-        text scope_key
-        text channel_id FK
-        text discord_user_id FK
-        integer member_id FK
-        text created_at
-        text last_active_at
-    }
-
-    messages {
-        integer message_id PK
-        text discord_message_id UK
-        integer thread_id FK
-        text channel_id FK
-        text discord_user_id FK
-        integer member_id FK
-        text author_type
-        text workflow
-        text event_type
-        text content
-        text summary
-        text created_at
-        text raw_json
-    }
-
-    memory_facts {
-        integer fact_id PK
-        text subject_type
-        text subject_key
-        text fact_type
-        text fact_value
-        real confidence
-        integer source_message_id FK
-        text created_at
-        text updated_at
-        text expires_at
-    }
-
-    memory_episodes {
-        integer episode_id PK
-        text subject_type
-        text subject_key
-        text episode_type
-        text summary
-        integer importance
-        text source_message_ids_json
-        text created_at
-    }
-
-    channel_state {
-        text channel_id PK, FK
-        text last_elixir_post_at
-        text last_topics_json
-        text recent_style_notes_json
-        text last_summary
-    }
-
-    clan_memberships {
-        integer membership_id PK
-        integer member_id FK
-        text joined_at
-        text left_at
-        text join_source
-        text leave_source
-    }
-
-    member_current_state {
-        integer member_id PK, FK
-        text observed_at
-        text role
-        integer exp_level
-        integer trophies
-        integer best_trophies
-        integer clan_rank
-        integer previous_clan_rank
-        integer donations_week
-        integer donations_received_week
-        integer arena_id
-        text arena_name
-        text arena_raw_name
-        text last_seen_api
-        text source
-        text raw_json
-    }
-
-    member_state_snapshots {
-        integer snapshot_id PK
-        integer member_id FK
-        text observed_at
-        text name
-        text role
-        integer exp_level
-        integer trophies
-        integer best_trophies
-        integer clan_rank
-        integer previous_clan_rank
-        integer donations_week
-        integer donations_received_week
-        integer arena_id
-        text arena_name
-        text arena_raw_name
-        text last_seen_api
-        text raw_json
-    }
-
-    member_daily_metrics {
-        integer metric_id PK
-        integer member_id FK
-        text metric_date
-        integer exp_level
-        integer trophies
-        integer best_trophies
-        integer clan_rank
-        integer donations_week
-        integer donations_received_week
-        text last_seen_api
-    }
-
-    player_profile_snapshots {
-        integer snapshot_id PK
-        integer member_id FK
-        text fetched_at
-        integer exp_level
-        integer trophies
-        integer best_trophies
-        integer wins
-        integer losses
-        integer battle_count
-        integer total_donations
-        integer donations
-        integer donations_received
-        integer war_day_wins
-        integer challenge_max_wins
-        integer challenge_cards_won
-        integer tournament_battle_count
-        integer tournament_cards_won
-        integer three_crown_wins
-        integer current_favourite_card_id
-        text current_favourite_card_name
-        text league_statistics_json
-        text current_deck_json
-        text cards_json
-        text badges_json
-        text achievements_json
-        text raw_json
-    }
-
-    member_card_collection_snapshots {
-        integer snapshot_id PK
-        integer member_id FK
-        text fetched_at
-        text cards_json
-    }
-
-    member_deck_snapshots {
-        integer snapshot_id PK
-        integer member_id FK
-        text fetched_at
-        text source
-        text mode_scope
-        text deck_hash
-        text deck_json
-        integer sample_size
-    }
-
-    member_card_usage_snapshots {
-        integer snapshot_id PK
-        integer member_id FK
-        text fetched_at
-        text source
-        text mode_scope
-        integer sample_battles
-        text cards_json
-    }
-
-    member_battle_facts {
-        integer battle_fact_id PK
-        integer member_id FK
-        text battle_time
-        text battle_type
-        text game_mode_name
-        integer game_mode_id
-        text deck_selection
-        integer arena_id
-        text arena_name
-        integer crowns_for
-        integer crowns_against
-        text outcome
-        integer trophy_change
-        integer starting_trophies
-        integer is_competitive
-        integer is_ladder
-        integer is_ranked
-        integer is_war
-        integer is_special_event
-        text deck_json
-        text support_cards_json
-        text opponent_name
-        text opponent_tag
-        text opponent_clan_tag
-        text raw_json
-    }
-
-    member_recent_form {
-        integer form_id PK
-        integer member_id FK
-        text computed_at
-        text scope
-        integer sample_size
-        integer wins
-        integer losses
-        integer draws
-        integer current_streak
-        text current_streak_type
-        real win_rate
-        real avg_crown_diff
-        real avg_trophy_change
-        text form_label
-        text summary
-    }
-
-    war_current_state {
-        integer war_id PK
-        text observed_at
-        text war_state
-        text clan_tag
-        text clan_name
-        integer fame
-        integer repair_points
-        integer period_points
-        integer clan_score
-        text raw_json
-    }
-
-    war_day_status {
-        integer status_id PK
-        integer member_id FK
-        text battle_date
-        text observed_at
-        integer fame
-        integer repair_points
-        integer boat_attacks
-        integer decks_used_total
-        integer decks_used_today
-        text raw_json
-    }
-
-    war_races {
-        integer war_race_id PK
-        integer season_id
-        integer section_index
-        text created_date
-        integer our_rank
-        integer trophy_change
-        integer our_fame
-        integer total_clans
-        text finish_time
-        text raw_json
-    }
-
-    war_participation {
-        integer participation_id PK
-        integer war_race_id FK
-        integer member_id FK
-        text player_tag
-        text player_name
-        integer fame
-        integer repair_points
-        integer boat_attacks
-        integer decks_used
-        integer decks_used_today
-        text raw_json
-    }
-
-    raw_api_payloads {
-        integer payload_id PK
-        text endpoint
-        text entity_key
-        text fetched_at
-        text payload_hash
-        text payload_json
-    }
-
-    clan_voyages {
-        integer voyage_id PK
-        text voyage_key UK
-        text clan_tag
-        text clan_name
-        text event_name
-        text season_key
-        text event_end_at
-        text observed_at
-        integer completed
-        text status
-        text source_message_ids_json
-    }
-
-    clan_voyage_entries {
-        integer entry_id PK
-        integer voyage_id FK
-        integer rank
-        text player_name_raw
-        text player_tag
-        integer member_id FK
-        text role_label
-        integer points
-        real confidence
-        text source_message_id
-    }
-
-    signal_log {
-        text signal_date
-        text signal_type
-    }
-
-    cake_day_announcements {
-        integer id PK
-        text announcement_date
-        text announcement_type
-        text target_tag
-        text recorded_at
-    }
-
-    members ||--|| member_metadata : has
-    members ||--o{ member_aliases : has
-    members ||--o{ discord_links : linked
-    discord_users ||--o{ discord_links : owns
-    discord_channels ||--o{ conversation_threads : scopes
-    discord_users ||--o{ conversation_threads : starts
-    members ||--o{ conversation_threads : maps
+    awareness_loops ||--o{ awareness_posts : plans
+    awareness_loops ||--o{ awareness_actions : acts
     conversation_threads ||--o{ messages : contains
-    discord_channels ||--o{ messages : hosts
-    discord_users ||--o{ messages : authors
-    members ||--o{ messages : subjects
-    messages ||--o{ memory_facts : sources
-    discord_channels ||--|| channel_state : tracks
-    members ||--o{ clan_memberships : has
-    members ||--|| member_current_state : current
-    members ||--o{ member_state_snapshots : snapshots
-    members ||--o{ member_daily_metrics : metrics
-    members ||--o{ player_profile_snapshots : profiles
-    members ||--o{ member_card_collection_snapshots : collections
-    members ||--o{ member_deck_snapshots : decks
-    members ||--o{ member_card_usage_snapshots : card_usage
-    members ||--o{ member_battle_facts : battles
-    members ||--o{ member_recent_form : form
-    members ||--o{ war_day_status : daily_war
-    war_races ||--o{ war_participation : includes
-    members o|--o{ war_participation : contributes
-    clan_voyages ||--o{ clan_voyage_entries : captures
-    members o|--o{ clan_voyage_entries : resolves
+    memories ||--o{ memory_tags : classified_by
+    memories ||--o{ memory_log : changes
 ```
+
+## Layer ownership
+
+| Layer | Representative tables | Contract |
+|---|---|---|
+| API buffer | `raw_api_payloads` | Append-only raw responses, retained for 14 days; never the system of record. |
+| Diff substrate | `state_baselines` | Latest normalized comparison state; first sight emits no change event. |
+| Streams | `battle_events`, `player_events`, `clan_events`, `war_events` | Durable typed facts with deterministic dedup keys. |
+| Rollups | `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics`, `clan_daily_battle_rollups` | Durable Chicago-day aggregates. |
+| Identity and tenure | `players`, `clans`, `clan_memberships`, `player_aliases`, `discord_users`, `discord_links` | Clash Royale tag is the natural player key; membership is an open tenure row. |
+| Projections | `player_current_state`, `player_card_collection`, `player_recent_form`, `member_management` | Rebuildable query models, not primary history. |
+| War and awards | `war_seasons`, `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days`, `awards` | Bounded war truth plus durable honors. |
+| Awareness and leadership | `awareness_loops`, `awareness_posts`, `awareness_actions`, `decision_cases`, `leader_action_recommendations`, `revisits` | Deliberation, delivery bookkeeping, and policy outcomes. |
+| Conversation and memory | `conversation_threads`, `messages`, `memories`, `memory_tags`, `memory_log`, `memories_fts` | Channel-scoped conversation and public/leadership durable memory. |
+| Runtime control | `stream_cursors`, `poll_state`, `runtime_job_status`, `runtime_incidents` | Progress, adaptive polling, job health, and best-effort failure visibility. |
+
+## Invariants
+
+- Player identity is the Clash Royale tag; no synthetic member ID is used by
+  the v5.1 engine.
+- Current membership means exactly one open `clan_memberships` row.
+- Stream and ledger keys are deterministic so replay is idempotent.
+- Suffixless internal timestamps are UTC; reporting-day rollups use
+  America/Chicago.
+- Projections may be rebuilt. Identity, tenure, streams, rollups, awards,
+  management history, and memory are durable.
+
+For column-level schema and retention details, see
+[`docs/reference/v5.1/schema.md`](reference/v5.1/schema.md).
