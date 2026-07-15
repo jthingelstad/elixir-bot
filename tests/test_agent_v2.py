@@ -1,4 +1,3 @@
-import pytest
 """Focused tests for agent query tools (consolidated tool layer)."""
 
 import json
@@ -486,15 +485,12 @@ def test_execute_tool_get_war_season_trending_uses_db():
 def _mock_war_player_type_conn():
     """Create a mock connection that satisfies _war_player_type queries."""
     mock_conn = Mock()
-    # member_id lookup
-    member_row = {"member_id": 1}
-    # _war_player_type query result
-    war_type_row = {"total_races": 10, "races_played": 8}
+    member_row = {"player_tag": "#ABC123"}
+    war_type_row = {"total": 10, "played": 8}
     mock_conn.execute.return_value.fetchone.side_effect = [member_row, war_type_row]
     return mock_conn
 
 
-@pytest.mark.xfail(reason="tool result shape drift vs pre-cut expectations; read layer works - assertions need the v5.1 shapes", strict=False)
 def test_execute_tool_get_member_war_detail_vs_clan_avg():
     with (
         patch("elixir_agent.db") as mock_db,
@@ -753,7 +749,6 @@ def test_execute_tool_get_river_race_engagement():
         mock_db.build_war_now_context.assert_called_once()
 
 
-@pytest.mark.xfail(reason="tool result shape drift vs pre-cut expectations; read layer works - assertions need the v5.1 shapes", strict=False)
 def test_execute_tool_get_member_war_detail_attendance_resolves_member():
     with (
         patch("elixir_agent.db") as mock_db,
@@ -864,7 +859,6 @@ def test_execute_tool_get_war_season_boat_battles_and_trends():
         mock_db.compare_fame_per_member_to_previous_season.assert_called_once_with(season_id=129)
 
 
-@pytest.mark.xfail(reason="tool result shape drift vs pre-cut expectations; read layer works - assertions need the v5.1 shapes", strict=False)
 def test_execute_tool_get_member_war_detail_missed_days():
     with (
         patch("elixir_agent.db") as mock_db,

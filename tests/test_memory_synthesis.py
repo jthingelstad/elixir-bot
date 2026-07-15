@@ -61,7 +61,6 @@ def test_memory_synthesis_workflow_has_empty_toolset_and_strict_schema():
 # _apply_memory_synthesis_plan
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(reason="asserts retired metadata key (war_week_id); the v5.1 writer dedupes via source_event_key", strict=False)
 def test_apply_plan_writes_arc_memories_with_elixir_synthesis_source(memdb):
     plan = {
         "arc_memories": [
@@ -88,7 +87,7 @@ def test_apply_plan_writes_arc_memories_with_elixir_synthesis_source(memdb):
     assert arc["source_type"] == "elixir_synthesis"
     assert arc["is_inference"] == 0
     assert arc["confidence"] == 1.0
-    assert arc["war_week_id"] == "131:5"
+    assert arc["source_event_key"] == "131:131:5"
     assert "arc" in (arc.get("tags") or [])
 
 
