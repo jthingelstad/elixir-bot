@@ -226,6 +226,7 @@ def _mgmt_rows(conn):
         "LEFT JOIN player_current_state cs ON cs.player_tag = mm.player_tag "
         "WHERE EXISTS (SELECT 1 FROM clan_memberships cm "
         "  WHERE cm.player_tag = mm.player_tag AND cm.left_at IS NULL) "
+        "AND mm.judgment_status = 'ready' "
         "ORDER BY COALESCE(cs.clan_rank, 999), name COLLATE NOCASE"
     ).fetchall()
 
@@ -245,6 +246,8 @@ def get_members_at_risk(
     (management.md §3.3). Parameters are kept for caller compatibility; the
     thresholds live in the engine's management constants."""
     from storage.war_status import get_current_season_id
+
+    del inactivity_days, min_donations_week, require_war_participation, min_war_races
 
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
@@ -275,22 +278,6 @@ def get_members_at_risk(
                 }
             )
         donations_week = row["donations_week"] or 0
-        if donations_week < min_donations_week:
-            reasons.append(
-                {
-                    "type": "low_donations",
-                    "detail": f"{donations_week} donations this week",
-                    "value": donations_week,
-                }
-            )
-        if require_war_participation and (row["war_attendance_rate"] or 0) <= 0:
-            reasons.append(
-                {
-                    "type": "low_war_participation",
-                    "detail": "no war participation this window",
-                    "value": 0,
-                }
-            )
         if reasons:
             item = {
                 "tag": row["tag"],
@@ -330,11 +317,14 @@ def get_members_at_risk(
         "season_id": season_id,
         "criteria": {
             "source": "member_management projection (management.md §3.3)",
-            "inactivity_days_floor": inactivity_days,
-            "inactivity_threshold_formula": "max(7, trophies/1000 * 1.4) days without a battle",
-            "min_donations_week": min_donations_week,
-            "require_war_participation": require_war_participation,
-            "min_war_races": min_war_races,
+            "rescored": False,
+            "readiness": "judgment_status=ready",
+            "compatibility_parameters_ignored": [
+                "inactivity_days",
+                "min_donations_week",
+                "require_war_participation",
+                "min_war_races",
+            ],
             "include_leadership": include_leadership,
         },
         "members": flagged,

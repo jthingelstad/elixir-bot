@@ -40,7 +40,7 @@ POSTABLE_CHANNELS = ("announcements", "elixir")
 # even if the brain didn't set relay_to_clan_chat. The prompt also mandates the
 # brain author the `clan_chat` welcome (with account detail) so the copy stays
 # grounded; this backstop guarantees the card exists regardless.
-JOIN_EVENT_TYPES = frozenset({"member_join", "member_joined"})
+JOIN_EVENT_TYPES = frozenset({"member_joined"})
 
 
 def _post_content(post: dict) -> str:

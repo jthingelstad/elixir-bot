@@ -59,7 +59,15 @@ def insert_game_event(
 ) -> int:
     """INSERT OR IGNORE one game_events row. Returns rows inserted (0 on dedup).
     The caller owns the transaction (mirrors insert_stream_event)."""
+    from engine.event_contracts import validate_event
+
     ensure_schema(conn)
+    _, observed_at = validate_event(
+        table="game_events",
+        event_type=event_type,
+        payload=payload,
+        observed_at=observed_at,
+    )
     cur = conn.execute(
         """INSERT OR IGNORE INTO game_events
                (dedup_key, event_type, change_key, subject_tag, observed_at,

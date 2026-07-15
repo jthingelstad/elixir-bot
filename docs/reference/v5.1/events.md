@@ -9,6 +9,12 @@
 > what §9/§11 designed but never built (arena-up, clan-entity movement,
 > demotions). `recognition.md` owns what is *notable*; this doc owns what *exists*.
 > Table shapes are in `schema.md` §5.
+>
+> **Executable contract (2026-07-15):** `engine/event_contracts.py` is the
+> machine-enforced catalog for current event types. Every event write validates
+> stream ownership, its minimum payload, and a canonical UTC timestamp there;
+> awareness derives lane routing and hard-post floors from the same registry.
+> This prose explains the semantics, but it is no longer a second runtime list.
 
 ## 1. Rules that apply to every event
 

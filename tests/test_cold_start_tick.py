@@ -128,5 +128,16 @@ def test_cold_start_tick_survives_empty_db(tmp_path):
         # First sight emits nothing, but the roster/players got established —
         # the exact thing that FK-failed before the fix.
         assert conn.execute("SELECT COUNT(*) FROM players").fetchone()[0] == 2
+        run = conn.execute(
+            "SELECT status, poll_ok, apply_ok, manage_ok "
+            "FROM materialization_runs ORDER BY materialization_id DESC LIMIT 1"
+        ).fetchone()
+        assert tuple(run) == ("partial", 1, 1, 1)
+        judgments = conn.execute(
+            "SELECT judgment_status, judgment_reason FROM member_management"
+        ).fetchall()
+        assert judgments
+        assert all(row["judgment_status"] == "held" for row in judgments)
+        assert all("battle_stream_empty" in row["judgment_reason"] for row in judgments)
     finally:
         conn.close()

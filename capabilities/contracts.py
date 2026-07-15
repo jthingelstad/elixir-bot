@@ -75,6 +75,8 @@ class ManagementDecisionResult(SourcedCapabilityEnvelope):
     view: str
     audience: str
     policy: dict[str, Any]
+    readiness: dict[str, Any]
+    freshness: dict[str, Any]
     data: Any
 
 

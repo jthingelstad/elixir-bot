@@ -238,7 +238,7 @@ def test_offline_replay_idempotent(tmp_path, v51_schema_template):
     eng.close()
 
 
-def test_tick_ingest_commit_survives_later_emit_failure(
+def test_tick_materialization_rolls_back_all_derived_writes_on_emit_failure(
     tmp_path, v51_schema_template, monkeypatch
 ):
     import shutil
@@ -265,15 +265,16 @@ def test_tick_ingest_commit_survives_later_emit_failure(
     def boom(*args, **kwargs):
         raise RuntimeError("emit failed after ingest")
 
-    monkeypatch.setattr("engine.tick.emit", boom)
+    monkeypatch.setattr("engine.materialize.emit", boom)
 
     try:
         counters = run_tick(
             conn,
             api=Api(),
         )
-        assert "emit_error" in counters
-        assert conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0] == 1
+        assert "materialize_error" in counters
+        assert counters["manage_skipped"] == "materialization_not_ready"
+        assert conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0] == 0
     finally:
         conn.close()
 

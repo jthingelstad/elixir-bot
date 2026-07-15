@@ -274,20 +274,22 @@ def snapshot_player_profile(
     expected_tag: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
-    """v5.1: deep-poll persistence is the engine's job — delegate to its
-    emitters (baseline diff → player_events) and projections. Returns [] (the
-    old signal list is retired; recognition consumes the event streams)."""
-    from engine import observations
-    from engine import projections as _projections
-    from engine.db import ensure_player
-    from engine.emitters import emit
-    from engine.emitters.player import project_player_aspects
+    """Apply an interactive profile refresh through the engine's canonical
+    observation path. Returns [] (the retired signal list stays retired)."""
+    from engine import materialize, observations
     from storage.incidents import record_incident
 
     requested_tag = expected_tag or (
         player_data.get("tag") if isinstance(player_data, dict) else ""
     )
-    admission = observations.admit("player", requested_tag, player_data)
+    now = _utcnow()
+    admission, observation = observations.observe(
+        "player",
+        requested_tag,
+        player_data,
+        now,
+        source="interactive_refresh",
+    )
     if not admission.accepted:
         record_incident(
             "storage.snapshot_player_profile",
@@ -297,17 +299,12 @@ def snapshot_player_profile(
             conn=conn,
         )
         return []
-
-    tag = _canon_tag(player_data.get("tag"))
-    now = _utcnow()
-    ensure_player(conn, tag, player_data.get("name"), now)
-    for aspect, aspect_payload in project_player_aspects(player_data).items():
-        emit(conn, "player", tag, aspect, aspect_payload, now)
-    _projections.refresh_player_state(conn, tag, player_data, None, now)
-    if player_data.get("cards"):
-        _projections.refresh_card_collection(
-            conn, tag, player_data.get("cards") or [], now
-        )
+    assert observation is not None
+    materialize.apply_observation(
+        conn,
+        observation,
+        track_poll_freshness=True,
+    )
     return []
 
 
@@ -1059,21 +1056,26 @@ def _detect_battle_pulse_signals(
 def snapshot_player_battlelog(
     player_tag: str, battle_log: list[dict], conn: Optional[sqlite3.Connection] = None
 ) -> list[dict]:
-    """v5.1: battle persistence is the engine's mirror — delegate to
-    engine.ingest + form/rollup projections. Returns [] (signals retired)."""
+    """Apply an interactive battlelog refresh through the engine's canonical
+    observation path. Returns [] (the retired signal list stays retired)."""
     from datetime import datetime as _dt
     from datetime import timezone as _tz
 
-    from engine import ingest as _ingest
-    from engine import observations
-    from engine import projections as _projections
-    from engine.db import ensure_player
+    from engine import materialize, observations
     from storage.incidents import record_incident
 
     tag = _canon_tag(player_tag)
     if not tag:
         return []
-    admission = observations.admit("player_battlelog", tag, battle_log)
+    now_dt = _dt.now(_tz.utc)
+    now = _utcnow()
+    admission, observation = observations.observe(
+        "player_battlelog",
+        tag,
+        battle_log,
+        now,
+        source="interactive_refresh",
+    )
     if not admission.accepted:
         record_incident(
             "storage.snapshot_player_battlelog",
@@ -1083,14 +1085,13 @@ def snapshot_player_battlelog(
             conn=conn,
         )
         return []
-    now_dt = _dt.now(_tz.utc)
-    now = _utcnow()
-    ensure_player(conn, tag, None, now)
-    inserted = _ingest.mirror_battles(conn, tag, battle_log, now, None, now=now_dt)
-    if inserted:
-        _projections.refresh_form(conn, tag, now=now)
-        _projections.refresh_rollups(conn, tag, chicago_today())
-    conn.commit()
+    assert observation is not None
+    materialize.apply_observation(
+        conn,
+        observation,
+        now=now_dt,
+        track_poll_freshness=True,
+    )
     return []
 
 

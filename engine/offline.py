@@ -12,13 +12,9 @@ import json
 import os
 from datetime import datetime, timezone
 
-from engine import ingest, observations, projections
-from engine.clock import infer_season_id, war_clock
-from engine.db import canon_tag, connect, ensure_player
-from engine.emitters import emit
-from engine.emitters.clan import project_clan_aspects
-from engine.emitters.player import project_player_aspects
-from engine.emitters.war import project_race_aspect
+from engine import materialize, observations
+from engine.clock import infer_season_id
+from engine.db import connect
 from engine.normalize import parse_cr_time
 from engine.recognition.compose import render_intent
 
@@ -34,7 +30,6 @@ class OfflineEngine:
         self.conn = connect(db_path)
         self.clock = None
         self.counters: dict[str, int] = {}
-        self._touched: set[str] = set()
         # Replay starts from a database that already knows its historical
         # season boundaries. Freeze that timeline before apply() mutates any
         # war rows. Using infer_season_id's latest-section heuristic while
@@ -80,66 +75,52 @@ class OfflineEngine:
         except (TypeError, ValueError):
             self._count("bad_payload")
             return
-        now = datetime.fromisoformat(fetched_at.replace("Z", "+00:00")).astimezone(
-            timezone.utc
-        )
+        now = parse_cr_time(fetched_at)
+        if now is None:
+            self._count("bad_observed_at")
+            return
         expected_key = (
             HOME_CLAN if endpoint in {"clan", "currentriverrace"} else entity_key
         )
         if endpoint in {"clan", "currentriverrace", "player", "player_battlelog"}:
-            result = observations.admit(endpoint, expected_key, payload)
-            if not result.accepted:
+            decision, observation = observations.observe(
+                endpoint,
+                expected_key,
+                payload,
+                fetched_at,
+                source="offline_replay",
+            )
+            if not decision.accepted:
                 self._count("observation_rejections")
                 self._count(f"{endpoint}_observation_rejections")
                 return
             self._count("observations_accepted")
+            assert observation is not None
+            season_id = (
+                self._season_id_at(payload, now)
+                if endpoint == "currentriverrace"
+                else None
+            )
+            applied = materialize.apply_observation(
+                self.conn,
+                observation,
+                clock=self.clock,
+                now=now,
+                season_id_override=season_id,
+            )
+            self._count("events", applied.events_emitted)
+            self._count("battles", applied.battles_ingested)
+            self._count("players_projected", applied.players_projected)
+            if applied.clock is not None:
+                self.clock = applied.clock
         if endpoint == "clan":
             self._count("clan_polls")
-            for aspect, aspect_payload in project_clan_aspects(payload).items():
-                self._count(
-                    "events",
-                    emit(
-                        self.conn, "clan", HOME_CLAN, aspect, aspect_payload, fetched_at
-                    ),
-                )
         elif endpoint == "currentriverrace":
             self._count("race_polls")
-            season_id = self._season_id_at(payload, now)
-            self.clock = war_clock(payload, now, season_id=season_id)
-            if self.clock.season_id is not None:
-                race_aspect = project_race_aspect(payload, self.clock.season_id)
-                self._count(
-                    "events",
-                    emit(
-                        self.conn,
-                        "riverrace",
-                        HOME_CLAN,
-                        "race",
-                        race_aspect,
-                        fetched_at,
-                    ),
-                )
         elif endpoint == "player":
-            tag = canon_tag(entity_key)
-            ensure_player(self.conn, tag, payload.get("name"), fetched_at)
             self._count("profile_polls")
-            for aspect, aspect_payload in project_player_aspects(payload).items():
-                self._count(
-                    "events",
-                    emit(self.conn, "player", tag, aspect, aspect_payload, fetched_at),
-                )
-            self._touched.add(tag)
         elif endpoint == "player_battlelog":
-            tag = canon_tag(entity_key)
-            ensure_player(self.conn, tag, None, fetched_at)
             self._count("battlelog_polls")
-            self._count(
-                "battles",
-                ingest.mirror_battles(
-                    self.conn, tag, payload, fetched_at, self.clock, now=now
-                ),
-            )
-            self._touched.add(tag)
         # riverracelog / cards / events / clan_by_tag: no offline consumer
         self.conn.commit()
 
@@ -171,9 +152,6 @@ class OfflineEngine:
         def compose_fn(intent) -> str | None:
             return render_intent(intent)  # deterministic; no LLM offline
 
-        for tag in sorted(self._touched):
-            projections.refresh_form(self.conn, tag, now=now_iso)
-            projections.refresh_management_inputs(self.conn, tag, now=now_iso)
         rec: dict = {}
         d: dict = {}
         if legacy_proactive:

@@ -12,18 +12,8 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from engine import baselines, ingest, management, observations, polling, projections
-from engine.clock import infer_season_id, period_anchor_from_events, war_clock
-from engine.db import canon_tag, chicago_today, ensure_clan, ensure_player, utcnow
-from engine.emitters import emit
-from engine.emitters.clan import (
-    calendar_already_ran,
-    emit_calendar,
-    mark_calendar_ran,
-    project_clan_aspects,
-)
-from engine.emitters.player import project_player_aspects
-from engine.emitters.war import project_race_aspect
+from engine import baselines, management, materialize, observations, polling, readiness
+from engine.db import canon_tag, ensure_clan, ensure_player, utcnow
 
 log = logging.getLogger("engine.tick")
 
@@ -146,13 +136,7 @@ def _anchored_clock(conn, cr_shaped: dict, now: datetime, season_id):
     """Two-pass clock: compute once to locate the current period, then again
     with the drift-adaptive anchor (the war_day_opened event's observed_at —
     carried learning: CR's reset hour skews per season)."""
-    prelim = war_clock(cr_shaped, now, season_id=season_id)
-    anchor = period_anchor_from_events(
-        conn, prelim.season_id, prelim.section_index, prelim.war_day_index
-    )
-    if anchor is None:
-        return prelim
-    return war_clock(cr_shaped, now, season_id=season_id, period_anchor=anchor)
+    return materialize.anchored_clock(conn, cr_shaped, now, season_id)
 
 
 def _current_clock(conn, now: datetime):
@@ -160,17 +144,7 @@ def _current_clock(conn, now: datetime):
     engine.emitters.war.project_race_aspect) by adapting it back to the
     CR payload keys war_clock reads. Fresh polls this tick recompute the
     clock from the raw payload anyway; this covers startup/gap ticks."""
-    row = baselines.get_baseline(conn, "riverrace", HOME_CLAN, "race")
-    if row is None:
-        return None
-    p = json.loads(row["payload_json"])
-    cr_shaped = {
-        "periodType": p.get("period_type"),
-        "periodIndex": p.get("period_index"),
-        "sectionIndex": p.get("section_index"),
-        "clan": {"tag": p.get("our_tag"), "fame": p.get("our_fame")},
-    }
-    return _anchored_clock(conn, cr_shaped, now, p.get("season_id"))
+    return materialize.current_clock(conn, now, home_clan=HOME_CLAN)
 
 
 def run_tick(conn, now: datetime | None = None, *, api) -> dict:
@@ -184,12 +158,16 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
     now = now or datetime.now(timezone.utc)
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     counters: dict = {}
+    materialization_id = readiness.start_materialization(conn, started_at=now_iso)
+    conn.commit()
+    counters["materialization_id"] = materialization_id
 
     # -- step 0/1: POLL (clan heartbeat + clock-gated riverrace + budgeted players)
     clan_payload = None
-    race_payload = None
-    player_payloads: dict[str, dict] = {}
-    battlelogs: dict[str, list] = {}
+    clan_observation = None
+    race_observation = None
+    player_observations: dict[str, observations.Observation] = {}
+    battlelog_observations: dict[str, observations.Observation] = {}
 
     clock = _current_clock(conn, now)
 
@@ -206,14 +184,23 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
     with _guard(counters, "poll", conn):
         contract_rejections: dict[str, list[dict]] = {}
         raw_clan_payload = api.get_clan()
-        result = observations.admit("clan", HOME_CLAN, raw_clan_payload)
+        result, admitted = observations.observe(
+            "clan", HOME_CLAN, raw_clan_payload, now_iso, source="engine_tick"
+        )
         if _count_admission(counters, result, contract_rejections):
             clan_payload = raw_clan_payload
+            clan_observation = admitted
         if _riverrace_due(conn, clock, now):
             raw_race_payload = api.get_current_war()
-            result = observations.admit("currentriverrace", HOME_CLAN, raw_race_payload)
+            result, admitted = observations.observe(
+                "currentriverrace",
+                HOME_CLAN,
+                raw_race_payload,
+                now_iso,
+                source="engine_tick",
+            )
             if _count_admission(counters, result, contract_rejections):
-                race_payload = raw_race_payload
+                race_observation = admitted
         if clan_payload:
             ensure_clan(
                 conn, HOME_CLAN, clan_payload.get("name"), now_iso, is_home=True
@@ -256,131 +243,154 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
             conn.commit()
             if endpoint == "battlelog":
                 raw_battlelog = api.get_player_battle_log(tag)
-                result = observations.admit("player_battlelog", tag, raw_battlelog)
+                result, admitted = observations.observe(
+                    "player_battlelog",
+                    tag,
+                    raw_battlelog,
+                    now_iso,
+                    source="engine_tick",
+                )
                 if _count_admission(counters, result, contract_rejections):
-                    battlelogs[tag] = raw_battlelog
-                    polling.note_poll_succeeded(conn, tag, "battlelog", now_iso)
+                    assert admitted is not None
+                    battlelog_observations[tag] = admitted
             else:
                 raw_player_payload = api.get_player(tag)
-                result = observations.admit("player", tag, raw_player_payload)
+                result, admitted = observations.observe(
+                    "player",
+                    tag,
+                    raw_player_payload,
+                    now_iso,
+                    source="engine_tick",
+                )
                 if _count_admission(counters, result, contract_rejections):
-                    player_payloads[tag] = raw_player_payload
-                    polling.note_poll_succeeded(conn, tag, "profile", now_iso)
+                    assert admitted is not None
+                    player_observations[tag] = admitted
             conn.commit()
         _record_contract_rejections(conn, contract_rejections)
         conn.commit()
 
-    # refresh the clock from the fresh race payload before ingest needs it
-    if race_payload:
-        season_id = infer_season_id(conn, race_payload)
-        clock = _anchored_clock(conn, race_payload, now, season_id)
+    poll_succeeded = "poll_error" not in counters
+    readiness.update_materialization(
+        conn,
+        materialization_id,
+        status="running",
+        poll_ok=poll_succeeded,
+    )
+    conn.commit()
 
-    # -- step 2: INGEST — battle mirror (war keys from the battle's own time)
-    with _guard(counters, "ingest", conn):
-        new_battles_total = 0
-        for tag, battlelog in battlelogs.items():
-            n = ingest.mirror_battles(conn, tag, battlelog, now_iso, clock, now=now)
-            new_battles_total += n
-            if n:
-                polling.update_heat(conn, tag, new_battles=True, now=now_iso)
-        counters["battles_ingested"] = new_battles_total
-        conn.commit()
+    # -- steps 2-4: APPLY — one atomic observation-to-data transaction.
+    # Native battle rows, emitted deltas, current-state projections, rollups,
+    # and poll freshness now either advance together or not at all.
+    materialization_succeeded = poll_succeeded
+    if materialization_succeeded:
+        with _guard(counters, "materialize", conn):
+            emitted = 0
+            battles_ingested = 0
+            projected: set[str] = set()
 
-    # -- step 3: EMIT — diff baselines → events; calendar once per Chicago day
-    with _guard(counters, "emit", conn):
-        emitted = 0
-        if clan_payload:
-            for aspect, aspect_payload in project_clan_aspects(clan_payload).items():
-                emitted += emit(
-                    conn, "clan", HOME_CLAN, aspect, aspect_payload, now_iso
+            if race_observation is not None:
+                applied = materialize.apply_observation(
+                    conn,
+                    race_observation,
+                    now=now,
+                    track_poll_freshness=True,
                 )
-        if race_payload and clock and clock.season_id is not None:
-            race_aspect = project_race_aspect(race_payload, clock.season_id)
-            emitted += emit(conn, "riverrace", HOME_CLAN, "race", race_aspect, now_iso)
-        for tag, payload in player_payloads.items():
-            aspects = project_player_aspects(payload)
-            for aspect, aspect_payload in aspects.items():
-                emitted += emit(conn, "player", tag, aspect, aspect_payload, now_iso)
-        today = chicago_today()
-        if not calendar_already_ran(conn, today):
-            emitted += emit_calendar(conn, today)
-            mark_calendar_ran(conn, today)
-        # A verified LEAVE (leader confirmed via a departure_verification card)
-        # emits member_left_verified — the held goodbye the brain may now narrate.
-        # A confirmed KICK emits nothing. Raw member_left is no longer a hard-post.
-        from engine.emitters.clan import emit_verified_leave_events
-
-        emitted += emit_verified_leave_events(conn, HOME_CLAN, now_iso)
-        # Award-race lead changes (War Champ / Rookie MVP) → clan_events, so the
-        # season-long competitions are event-driven. Fail-soft: an awards read
-        # must never sink the core emit above. Only while a season is active.
-        if clock and clock.season_id is not None:
-            try:
-                import db as _db
-
-                races = _db.get_award_races(conn=conn)
-                champ = races.get("war_champ_leader")
-                rookie = (races.get("rookie_mvp") or [None])[0]
-                payload = {
-                    "season_id": clock.season_id,
-                    "war_champ_leader": {
-                        k: champ.get(k) for k in ("tag", "name", "points")
-                    }
-                    if champ
-                    else None,
-                    "rookie_mvp_leader": {
-                        k: rookie.get(k) for k in ("tag", "name", "points")
-                    }
-                    if rookie
-                    else None,
-                }
-                emitted += emit(
-                    conn, "clan", HOME_CLAN, "award_races", payload, now_iso
+                emitted += applied.events_emitted
+                if applied.clock is not None:
+                    clock = applied.clock
+            if clan_observation is not None:
+                applied = materialize.apply_observation(
+                    conn,
+                    clan_observation,
+                    now=now,
+                    track_poll_freshness=True,
                 )
-            except Exception:
-                log.warning("emit award_races failed (non-fatal)", exc_info=True)
-        # Game-level stream: new /events + event badges from the sentinel store
-        # (new cards emit from the daily catalog sync). Fail-soft — a sentinel
-        # read must never sink the player/clan/war emit above; the emit:game
-        # cursor + dedup keys make a retry next tick safe.
-        try:
-            from engine.emitters.game import emit_game_from_sentinel
-
-            emitted += emit_game_from_sentinel(conn, now_iso)
-        except Exception:
-            log.exception("game emit from sentinel failed; retrying next tick")
-        counters["events_emitted"] = emitted
-        conn.commit()
-
-    # -- step 4: PROJECT — refresh what the polls touched
-    with _guard(counters, "project", conn):
-        roster_by_tag = {
-            canon_tag(m.get("tag")): projections.roster_state_from_api(m)
-            for m in (clan_payload or {}).get("memberList", [])
-        }
-        touched = set(player_payloads) | set(battlelogs) | set(roster_by_tag)
-        today = chicago_today()
-        for tag in touched:
-            profile = player_payloads.get(tag)
-            projections.refresh_player_state(
-                conn, tag, profile, roster_by_tag.get(tag), now_iso
+                emitted += applied.events_emitted
+                projected.update(
+                    canon_tag(member.get("tag"))
+                    for member in (clan_payload or {}).get("memberList", [])
+                )
+            for tag, observation in player_observations.items():
+                applied = materialize.apply_observation(
+                    conn,
+                    observation,
+                    now=now,
+                    track_poll_freshness=True,
+                )
+                emitted += applied.events_emitted
+                projected.add(tag)
+            for tag, observation in battlelog_observations.items():
+                applied = materialize.apply_observation(
+                    conn,
+                    observation,
+                    clock=clock,
+                    now=now,
+                    track_poll_freshness=True,
+                )
+                battles_ingested += applied.battles_ingested
+                projected.add(tag)
+            derived = materialize.apply_tick_derivations(
+                conn,
+                clock=clock,
+                observed_at=now_iso,
             )
-            if profile and profile.get("cards"):
-                projections.refresh_card_collection(
-                    conn, tag, profile.get("cards") or [], now_iso
-                )
-            if tag in battlelogs:
-                projections.refresh_form(conn, tag, now=now_iso)
-                projections.refresh_rollups(conn, tag, today)
-            projections.refresh_management_inputs(conn, tag, now=now_iso)
-        if clan_payload:
-            projections.refresh_clan_rollups(conn, clan_payload, today, now_iso)
-        counters["players_projected"] = len(touched)
+            emitted += derived.events_emitted
+            counters["materialization_degraded"] = derived.degraded
+            counters["battles_ingested"] = battles_ingested
+            counters["events_emitted"] = emitted
+            counters["players_projected"] = len(projected)
+            conn.commit()
+        materialization_succeeded = "materialize_error" not in counters
+    else:
+        counters["materialize_skipped"] = "poll_failed"
+
+    source_freshness = None
+    if materialization_succeeded:
+        source_freshness = readiness.evaluate_source_freshness(
+            conn,
+            now=now_iso,
+            home_clan=HOME_CLAN,
+        )
+        counters["management_members_ready"] = source_freshness["members_ready"]
+        counters["management_members_held"] = source_freshness["members_held"]
+        readiness.update_materialization(
+            conn,
+            materialization_id,
+            status="running",
+            apply_ok=True,
+            source_freshness=source_freshness,
+        )
         conn.commit()
+
+    if not materialization_succeeded:
+        counters["manage_skipped"] = "materialization_not_ready"
+        counters["proactive_posting"] = "awareness_only"
+        counters["tick_completed_at"] = utcnow()
+        errors = {
+            key: value for key, value in counters.items() if key.endswith("_error")
+        }
+        readiness.update_materialization(
+            conn,
+            materialization_id,
+            status="failed",
+            completed_at=counters["tick_completed_at"],
+            poll_ok=poll_succeeded,
+            apply_ok=False,
+            manage_ok=False,
+            counters=counters,
+            errors=errors,
+        )
+        conn.commit()
+        return counters
 
     # -- step 5: MANAGE — kick_state is reactive (Q1); weekly grain rolls in the review
     with _guard(counters, "manage", conn):
-        transitions = management.run_tick_evaluators(conn, now=now_iso)
+        transitions = management.run_tick_evaluators(
+            conn,
+            now=now_iso,
+            readiness=source_freshness,
+            materialization_id=materialization_id,
+        )
         counters["kick_transitions"] = len(transitions)
         withdrawals = management.withdraw_stale_actions(conn, now=now_iso)
         counters["management_withdrawals"] = sum(
@@ -494,4 +504,20 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
 
     counters["proactive_posting"] = "awareness_only"
     counters["tick_completed_at"] = utcnow()
+    manage_succeeded = "manage_error" not in counters
+    complete = manage_succeeded and bool(source_freshness and source_freshness["ready"])
+    errors = {key: value for key, value in counters.items() if key.endswith("_error")}
+    readiness.update_materialization(
+        conn,
+        materialization_id,
+        status="complete" if complete else "partial",
+        completed_at=counters["tick_completed_at"],
+        poll_ok=poll_succeeded,
+        apply_ok=True,
+        manage_ok=manage_succeeded,
+        source_freshness=source_freshness,
+        counters=counters,
+        errors=errors,
+    )
+    conn.commit()
     return counters

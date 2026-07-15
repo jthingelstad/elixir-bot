@@ -15,8 +15,18 @@ optional so additive API evolution does not stop the engine.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal, TypeAlias
 
-from engine.normalize import canon_tag, parse_cr_time
+from engine.db import payload_hash
+from engine.normalize import canon_tag, canonical_utc_timestamp, parse_cr_time
+
+ObservationEndpoint: TypeAlias = Literal[
+    "clan",
+    "currentriverrace",
+    "player",
+    "player_battlelog",
+]
+ObservationPayload: TypeAlias = dict | list[dict]
 
 _RACE_PERIOD_TYPES = {"training", "warDay", "colosseum"}
 _CLAN_ROLES = {"member", "elder", "coLeader", "leader"}
@@ -38,6 +48,50 @@ class Admission:
     def transport_failure(self) -> bool:
         """No decoded response exists; transport telemetry owns the detail."""
         return self.errors == ("payload:missing",)
+
+
+@dataclass(frozen=True)
+class Observation:
+    """One admitted, canonically enveloped CR API observation.
+
+    Endpoint payloads intentionally remain byte-faithful dictionaries/lists;
+    their domain projections are built by :mod:`engine.materialize`.  The
+    envelope removes the representational ambiguity that previously let each
+    caller choose its own tag, timestamp, source, and payload identity.
+    """
+
+    endpoint: ObservationEndpoint
+    entity_key: str
+    observed_at: str
+    payload_hash: str
+    payload: ObservationPayload
+    source: str
+
+
+def observe(
+    endpoint: ObservationEndpoint,
+    entity_key: str,
+    payload,
+    observed_at,
+    *,
+    source: str,
+) -> tuple[Admission, Observation | None]:
+    """Admit a response and, on success, return its canonical envelope."""
+    decision = admit(endpoint, entity_key, payload)
+    if not decision.accepted:
+        return decision, None
+    canonical_at = canonical_utc_timestamp(observed_at)
+    if canonical_at is None:
+        invalid = Admission(endpoint, decision.entity_key, ("observed_at:invalid",))
+        return invalid, None
+    return decision, Observation(
+        endpoint=endpoint,
+        entity_key=decision.entity_key,
+        observed_at=canonical_at,
+        payload_hash=payload_hash(payload),
+        payload=payload,
+        source=str(source or "unknown"),
+    )
 
 
 def _is_int(value) -> bool:
@@ -324,3 +378,13 @@ def admit(endpoint: str, entity_key: str, payload) -> Admission:
     else:
         errors.append("endpoint:unsupported")
     return Admission(endpoint, canon_tag(entity_key), tuple(errors))
+
+
+__all__ = [
+    "Admission",
+    "Observation",
+    "ObservationEndpoint",
+    "ObservationPayload",
+    "admit",
+    "observe",
+]

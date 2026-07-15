@@ -27,7 +27,14 @@ class _ManagementSource:
         return {"members": []}
 
     def list_leader_actions(self, **kwargs):
-        return [{"action_id": 1, "status": kwargs.get("status", "approved")}]
+        return [
+            {
+                "action_id": 1,
+                "status": kwargs.get("status", "approved"),
+                "action_type": "kick_recommendation",
+                "target_player_tag": "#A",
+            }
+        ]
 
     def decision_case_snapshot(self, **kwargs):
         return {"due": [{"case_id": 2}], "open": [], "query": kwargs}
@@ -48,9 +55,11 @@ def test_management_contract_declares_engine_policy_authority():
         result = get_management_decisions(view="summary", source=_ManagementSource())
 
     assert result["capability"] == "management_decisions"
-    assert result["contract_version"] == 1
+    assert result["contract_version"] == 2
     assert result["audience"] == "leadership"
     assert result["policy"]["rescored"] is False
+    assert result["policy"]["fail_closed_on_stale_evidence"] is True
+    assert result["readiness"]["counts"]["unknown"] == 0
     assert result["data"]["actionable"]["kick"][0]["player_tag"] == "#A"
 
 
@@ -67,3 +76,23 @@ def test_management_board_packages_verdicts_and_workflow_state():
     assert data["workflow"]["open_actions"][0]["action_id"] == 1
     assert data["workflow"]["decision_cases"]["due"][0]["case_id"] == 2
     assert data["workflow"]["pending_revisits"][0]["revisit_id"] == 3
+
+
+def test_management_board_holds_actions_whose_evidence_is_not_ready():
+    with patch(
+        "capabilities.management.management_read_summary",
+        return_value={
+            "actionable": {},
+            "building_counts": {},
+            "members_evaluated": 1,
+            "readiness": {
+                "counts": {"ready": 0, "held": 1, "unknown": 0},
+                "held_members": [{"player_tag": "#A"}],
+            },
+        },
+    ):
+        result = get_management_decisions(view="board", source=_ManagementSource())
+
+    workflow = result["data"]["workflow"]
+    assert workflow["open_actions"] == []
+    assert workflow["held_actions"][0]["target_player_tag"] == "#A"

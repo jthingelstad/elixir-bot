@@ -209,4 +209,33 @@ def mirror_battles(
         }
         cur = conn.execute(_INSERT_SQL, [row[c] for c in _INSERT_COLUMNS])
         inserted += cur.rowcount
+        if cur.rowcount == 0:
+            # The same battle can arrive first through an interactive tool
+            # refresh, where no current war clock is available, and later
+            # through the scheduled engine tick.  Deduplication must not make
+            # that first, thinner observation permanent: enrich only missing
+            # facts while preserving the original native event row.
+            conn.execute(
+                "UPDATE battle_events SET "
+                "season_id = COALESCE(season_id, ?), "
+                "section_index = COALESCE(section_index, ?), "
+                "war_day_index = COALESCE(war_day_index, ?), "
+                "teammate_tag = COALESCE(teammate_tag, ?), "
+                "league_number = COALESCE(league_number, ?), "
+                "deck_json = COALESCE(deck_json, ?), "
+                "arena_id = COALESCE(arena_id, ?), "
+                "arena_name = COALESCE(arena_name, ?) "
+                "WHERE dedup_key = ?",
+                (
+                    season_id,
+                    section_index,
+                    war_day_index,
+                    row["teammate_tag"],
+                    row["league_number"],
+                    row["deck_json"],
+                    row["arena_id"],
+                    row["arena_name"],
+                    dedup_key,
+                ),
+            )
     return inserted
