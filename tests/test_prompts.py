@@ -206,6 +206,20 @@ def test_awareness_prompt_enforces_they_them_at_compose_time():
     assert "they/them" in agent_prompts._awareness_system().lower()
 
 
+def test_awareness_prompt_grounds_current_award_status_in_live_races():
+    """Regression (#143): the poster restated a member's *past* Iron King (S131,
+    from their trophy case) as a *current-season* 'on the Iron King track' claim,
+    even inventing '4/4 battle days so far' — though the live award_races list
+    excluded them. Current-season award status must trace to award_races; a past
+    award may only be spoken as history."""
+    agent_md = prompts.agent_prompt("awareness").lower()
+    # the guard must name the failure mode: current status vs. the trophy case
+    assert "trophy case" in agent_md
+    assert "award_races" in agent_md
+    # and reach the composed awareness system prompt
+    assert "trophy case" in agent_prompts._awareness_system().lower()
+
+
 def test_thresholds():
     """Thresholds are parsed from CLAN.md."""
     t = prompts.thresholds()
