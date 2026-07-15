@@ -13,9 +13,9 @@ from db import (
     _card_level,
     _rowdicts,
     _utcnow,
-    chicago_today,
     chicago_date_for_cr_timestamp,
     chicago_day_bounds_utc,
+    chicago_today,
     get_connection,
     managed_connection,
 )
@@ -62,15 +62,28 @@ def _badge_category(name: str | None) -> str:
         return "challenge"
     if badge_name in {"2v2", "RampUp", "SuddenDeath", "Draft", "2xElixir"}:
         return "mode"
-    if badge_name in {"EmoteCollection", "BannerCollection", "CollectionLevel", "ClanDonations"}:
+    if badge_name in {
+        "EmoteCollection",
+        "BannerCollection",
+        "CollectionLevel",
+        "ClanDonations",
+    }:
         return "collection"
-    if badge_name.startswith("SeasonalBadge_") or badge_name.startswith("MergeTacticsBadge_"):
+    if badge_name.startswith("SeasonalBadge_") or badge_name.startswith(
+        "MergeTacticsBadge_"
+    ):
         return "seasonal"
     if special_event_context_for_badge(badge_name):
         return "event"
     if badge_name.startswith("Crl") or badge_name in {"EasterEgg"}:
         return "event"
-    if badge_name in {"YearsPlayed", "BattleWins", "ClanWarWins", "ClanWarsVeteran", "LadderTop1000"}:
+    if badge_name in {
+        "YearsPlayed",
+        "BattleWins",
+        "ClanWarWins",
+        "ClanWarsVeteran",
+        "LadderTop1000",
+    }:
         return "career"
     return "general"
 
@@ -82,7 +95,7 @@ def _badge_label(name: str | None) -> str | None:
     if badge_name in BADGE_NAME_OVERRIDES:
         return BADGE_NAME_OVERRIDES[badge_name]
     if badge_name.startswith("Mastery") and len(badge_name) > len("Mastery"):
-        return f"{_split_identifier_words(badge_name[len('Mastery'):])} Mastery"
+        return f"{_split_identifier_words(badge_name[len('Mastery') :])} Mastery"
     return _split_identifier_words(badge_name)
 
 
@@ -90,7 +103,7 @@ def _badge_card_name(name: str | None) -> str | None:
     badge_name = str(name or "").strip()
     if not badge_name.startswith("Mastery") or len(badge_name) <= len("Mastery"):
         return None
-    return _split_identifier_words(badge_name[len("Mastery"):])
+    return _split_identifier_words(badge_name[len("Mastery") :])
 
 
 def _badge_signal_fields(badge: dict | None) -> dict:
@@ -111,10 +124,12 @@ def _badge_signal_fields(badge: dict | None) -> dict:
         fields["badge_card_name"] = card_name
     event_context = special_event_context_for_badge(name)
     if event_context:
-        fields.update({
-            "event_name": event_context["event_name"],
-            "event_recognition_guidance": event_context["recognition_guidance"],
-        })
+        fields.update(
+            {
+                "event_name": event_context["event_name"],
+                "event_recognition_guidance": event_context["recognition_guidance"],
+            }
+        )
     return fields
 
 
@@ -141,7 +156,9 @@ def _indexed_items(items: list[dict] | None) -> dict[str, dict]:
 
 def _years_played_metadata_fields(player_data: dict, *, fetched_at: str) -> dict:
     badges = player_data.get("badges") or []
-    years_played = next((badge for badge in badges if badge.get("name") == "YearsPlayed"), None)
+    years_played = next(
+        (badge for badge in badges if badge.get("name") == "YearsPlayed"), None
+    )
     if not years_played:
         return {
             "cr_account_age_days": None,
@@ -151,8 +168,12 @@ def _years_played_metadata_fields(player_data: dict, *, fetched_at: str) -> dict
     age_days = years_played.get("progress")
     age_years = years_played.get("level")
     return {
-        "cr_account_age_days": age_days if isinstance(age_days, int) and age_days >= 0 else None,
-        "cr_account_age_years": age_years if isinstance(age_years, int) and age_years >= 0 else None,
+        "cr_account_age_days": age_days
+        if isinstance(age_days, int) and age_days >= 0
+        else None,
+        "cr_account_age_years": age_years
+        if isinstance(age_years, int) and age_years >= 0
+        else None,
         "cr_account_age_updated_at": fetched_at,
     }
 
@@ -166,20 +187,41 @@ def _profile_badge_metadata_fields(player_data: dict, *, fetched_at: str) -> dic
     collection_level = badges.get("CollectionLevel") or {}
     return {
         "cr_collection_level": _nonnegative_int(collection_level.get("progress")),
-        "cr_collection_level_badge_tier": _nonnegative_int(collection_level.get("level")),
-        "cr_collection_level_badge_max_tier": _nonnegative_int(collection_level.get("maxLevel")),
+        "cr_collection_level_badge_tier": _nonnegative_int(
+            collection_level.get("level")
+        ),
+        "cr_collection_level_badge_max_tier": _nonnegative_int(
+            collection_level.get("maxLevel")
+        ),
         "cr_collection_level_updated_at": fetched_at,
-        "cr_clan_war_wins": _nonnegative_int((badges.get("ClanWarWins") or {}).get("progress")),
-        "cr_battle_wins": _nonnegative_int((badges.get("BattleWins") or {}).get("progress")),
-        "cr_clan_donations": _nonnegative_int((badges.get("ClanDonations") or {}).get("progress")),
-        "cr_banner_count": _nonnegative_int((badges.get("BannerCollection") or {}).get("progress")),
-        "cr_emote_count": _nonnegative_int((badges.get("EmoteCollection") or {}).get("progress")),
+        "cr_clan_war_wins": _nonnegative_int(
+            (badges.get("ClanWarWins") or {}).get("progress")
+        ),
+        "cr_battle_wins": _nonnegative_int(
+            (badges.get("BattleWins") or {}).get("progress")
+        ),
+        "cr_clan_donations": _nonnegative_int(
+            (badges.get("ClanDonations") or {}).get("progress")
+        ),
+        "cr_banner_count": _nonnegative_int(
+            (badges.get("BannerCollection") or {}).get("progress")
+        ),
+        "cr_emote_count": _nonnegative_int(
+            (badges.get("EmoteCollection") or {}).get("progress")
+        ),
         "cr_profile_badges_updated_at": fetched_at,
     }
 
 
 def _games_per_day_metadata_fields(member_id: int, *, computed_at: str, conn) -> dict:
-    cutoff = (datetime.fromisoformat(chicago_today()) - timedelta(days=max(GAMES_PER_DAY_WINDOW_DAYS - 1, 0))).date().isoformat()
+    cutoff = (
+        (
+            datetime.fromisoformat(chicago_today())
+            - timedelta(days=max(GAMES_PER_DAY_WINDOW_DAYS - 1, 0))
+        )
+        .date()
+        .isoformat()
+    )
     row = conn.execute(
         "SELECT COALESCE(SUM(battles), 0) AS total_battles "
         "FROM player_daily_battle_rollups WHERE member_id = ? AND battle_date >= ?",
@@ -236,10 +278,10 @@ def snapshot_player_profile(
     emitters (baseline diff → player_events) and projections. Returns [] (the
     old signal list is retired; recognition consumes the event streams)."""
     from engine import observations
+    from engine import projections as _projections
     from engine.db import ensure_player
     from engine.emitters import emit
     from engine.emitters.player import project_player_aspects
-    from engine import projections as _projections
     from storage.incidents import record_incident
 
     requested_tag = expected_tag or (
@@ -263,15 +305,24 @@ def snapshot_player_profile(
         emit(conn, "player", tag, aspect, aspect_payload, now)
     _projections.refresh_player_state(conn, tag, player_data, None, now)
     if player_data.get("cards"):
-        _projections.refresh_card_collection(conn, tag, player_data.get("cards") or [], now)
+        _projections.refresh_card_collection(
+            conn, tag, player_data.get("cards") or [], now
+        )
     return []
 
 
 @managed_connection
-def get_player_intel_refresh_targets(limit: int = 12, stale_after_hours: int = 6, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_player_intel_refresh_targets(
+    limit: int = 12,
+    stale_after_hours: int = 6,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     """v5.1: staleness reads poll_state (the adaptive scheduler's ledger,
     runtime.md §4) instead of profile-snapshot ages."""
-    stale_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=stale_after_hours)).strftime("%Y-%m-%dT%H:%M:%S")
+    stale_cutoff = (
+        datetime.now(timezone.utc).replace(tzinfo=None)
+        - timedelta(hours=stale_after_hours)
+    ).strftime("%Y-%m-%dT%H:%M:%S")
     rows = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, "
         "cs.role, cs.clan_rank, ps.last_profile_poll AS last_profile_at, "
@@ -290,8 +341,12 @@ def get_player_intel_refresh_targets(limit: int = 12, stale_after_hours: int = 6
     targets = []
     for row in rows:
         item = dict(row)
-        item["needs_profile_refresh"] = item["last_profile_at"] is None or item["last_profile_at"] < stale_cutoff
-        item["needs_battle_refresh"] = item["last_battle_at"] is None or item["last_battle_at"] < stale_cutoff
+        item["needs_profile_refresh"] = (
+            item["last_profile_at"] is None or item["last_profile_at"] < stale_cutoff
+        )
+        item["needs_battle_refresh"] = (
+            item["last_battle_at"] is None or item["last_battle_at"] < stale_cutoff
+        )
         if not item["needs_profile_refresh"] and not item["needs_battle_refresh"]:
             continue
         targets.append(_member_reference_fields(conn, row["tag"], item))
@@ -316,7 +371,14 @@ def _classify_battle(battle: dict) -> dict:
     is_war = mode_group == "war"
     is_ladder = mode_group == "ladder"
     is_ranked = mode_group == "ranked"
-    is_competitive = mode_group in {"ladder", "ranked", "war", "special_event", "tournament", "two_v_two"}
+    is_competitive = mode_group in {
+        "ladder",
+        "ranked",
+        "war",
+        "special_event",
+        "tournament",
+        "two_v_two",
+    }
     is_special_event = mode_group == "special_event"
     return {
         "mode_group": mode_group,
@@ -342,7 +404,17 @@ def _battle_mode_group(
     event_tag=None,
     tournament_tag=None,
 ) -> str:
-    if any(value is not None for value in (battle_type, game_mode_id, game_mode_name, deck_selection, event_tag, tournament_tag)):
+    if any(
+        value is not None
+        for value in (
+            battle_type,
+            game_mode_id,
+            game_mode_name,
+            deck_selection,
+            event_tag,
+            tournament_tag,
+        )
+    ):
         return classify_battle_mode(
             battle_type=battle_type,
             game_mode_id=game_mode_id,
@@ -397,7 +469,9 @@ def _expected_battle_delta_for_day(member_id: int, battle_date: str, conn=None):
     return None
 
 
-def _recompute_player_daily_battle_rollups(member_id: int, battle_dates=None, conn=None):
+def _recompute_player_daily_battle_rollups(
+    member_id: int, battle_dates=None, conn=None
+):
     close = conn is None
     conn = conn or get_connection()
     try:
@@ -424,7 +498,11 @@ def _recompute_player_daily_battle_rollups(member_id: int, battle_dates=None, co
                 "FROM battle_events "
                 "WHERE member_id = ? AND REPLACE(REPLACE(battle_time, '.000Z', ''), 'Z', '') >= REPLACE(REPLACE(?, '.000Z', ''), 'Z', '') "
                 "AND REPLACE(REPLACE(battle_time, '.000Z', ''), 'Z', '') < REPLACE(REPLACE(?, '.000Z', ''), 'Z', '')",
-                (member_id, start_utc.replace("-", "").replace(":", "").replace("T", "T"), end_utc.replace("-", "").replace(":", "").replace("T", "T")),
+                (
+                    member_id,
+                    start_utc.replace("-", "").replace(":", "").replace("T", "T"),
+                    end_utc.replace("-", "").replace(":", "").replace("T", "T"),
+                ),
             ).fetchall()
             conn.execute(
                 "DELETE FROM player_daily_battle_rollups WHERE member_id = ? AND battle_date = ?",
@@ -476,12 +554,20 @@ def _recompute_player_daily_battle_rollups(member_id: int, battle_dates=None, co
                 bucket["crowns_for"] += int(row["crowns_for"] or 0)
                 bucket["crowns_against"] += int(row["crowns_against"] or 0)
                 bucket["trophy_change_total"] += int(row["trophy_change"] or 0)
-                if bucket["first_battle_at"] is None or row["battle_time"] < bucket["first_battle_at"]:
+                if (
+                    bucket["first_battle_at"] is None
+                    or row["battle_time"] < bucket["first_battle_at"]
+                ):
                     bucket["first_battle_at"] = row["battle_time"]
-                if bucket["last_battle_at"] is None or row["battle_time"] > bucket["last_battle_at"]:
+                if (
+                    bucket["last_battle_at"] is None
+                    or row["battle_time"] > bucket["last_battle_at"]
+                ):
                     bucket["last_battle_at"] = row["battle_time"]
 
-            expected_battle_delta = _expected_battle_delta_for_day(member_id, battle_date, conn=conn)
+            expected_battle_delta = _expected_battle_delta_for_day(
+                member_id, battle_date, conn=conn
+            )
             captured_battles = len(rows)
             completeness_ratio = None
             is_complete = 0
@@ -546,12 +632,16 @@ def _recompute_clan_daily_battle_rollups(battle_dates=None, conn=None):
             rows = conn.execute(
                 "SELECT DISTINCT battle_date FROM player_daily_battle_rollups"
             ).fetchall()
-            battle_dates = sorted(row["battle_date"] for row in rows if row["battle_date"])
+            battle_dates = sorted(
+                row["battle_date"] for row in rows if row["battle_date"]
+            )
         else:
             battle_dates = sorted({date for date in (battle_dates or []) if date})
 
         for battle_date in battle_dates:
-            clan_tag, clan_name = _current_clan_identity_for_rollups(battle_date, conn=conn)
+            clan_tag, clan_name = _current_clan_identity_for_rollups(
+                battle_date, conn=conn
+            )
             member_rows = conn.execute(
                 "SELECT member_id, mode_group, game_mode_id, game_mode_name, battles, wins, losses, draws, crowns_for, crowns_against, trophy_change_total, captured_battles, expected_battle_delta, completeness_ratio, is_complete "
                 "FROM player_daily_battle_rollups "
@@ -606,18 +696,37 @@ def _recompute_clan_daily_battle_rollups(battle_dates=None, conn=None):
 
             aggregated_at = _utcnow()
             for bucket in buckets.values():
-                contributing = [member_day_summary[member_id] for member_id in bucket["members"]]
-                expected_known = all(item.get("expected_battle_delta") is not None for item in contributing)
+                contributing = [
+                    member_day_summary[member_id] for member_id in bucket["members"]
+                ]
+                expected_known = all(
+                    item.get("expected_battle_delta") is not None
+                    for item in contributing
+                )
                 captured_battles = None
                 expected_battle_delta = None
                 completeness_ratio = None
                 is_complete = 0
                 if expected_known:
-                    captured_battles = sum(int(item.get("captured_battles") or 0) for item in contributing)
-                    expected_battle_delta = sum(int(item.get("expected_battle_delta") or 0) for item in contributing)
+                    captured_battles = sum(
+                        int(item.get("captured_battles") or 0) for item in contributing
+                    )
+                    expected_battle_delta = sum(
+                        int(item.get("expected_battle_delta") or 0)
+                        for item in contributing
+                    )
                     denominator = max(expected_battle_delta, 1)
-                    completeness_ratio = min(1.0, round(captured_battles / denominator, 4))
-                    is_complete = 1 if all(int(item.get("is_complete") or 0) == 1 for item in contributing) else 0
+                    completeness_ratio = min(
+                        1.0, round(captured_battles / denominator, 4)
+                    )
+                    is_complete = (
+                        1
+                        if all(
+                            int(item.get("is_complete") or 0) == 1
+                            for item in contributing
+                        )
+                        else 0
+                    )
 
                 conn.execute(
                     "INSERT INTO clan_daily_battle_rollups (battle_date, clan_tag, clan_name, mode_group, game_mode_id, game_mode_name, members_active, battles, wins, losses, draws, crowns_for, crowns_against, trophy_change_total, captured_battles, expected_battle_delta, completeness_ratio, is_complete, last_aggregated_at) "
@@ -690,7 +799,9 @@ def _opponent_card_names(opponent_deck_json):
     return [c.get("name") for c in cards if isinstance(c, dict) and c.get("name")]
 
 
-def _compute_recent_opponents_summary(member_id, mode_predicate, conn, *, limit=_OPPONENTS_SUMMARY_LIMIT):
+def _compute_recent_opponents_summary(
+    member_id, mode_predicate, conn, *, limit=_OPPONENTS_SUMMARY_LIMIT
+):
     """Build a recent_opponents_summary block for streak/push/promotion signals.
 
     Reads the last `limit` battles in the given mode (mode_predicate is a SQL
@@ -722,18 +833,30 @@ def _compute_recent_opponents_summary(member_id, mode_predicate, conn, *, limit=
             payload = json.loads(row["raw_json"] or "{}")
         except (json.JSONDecodeError, TypeError, ValueError):
             payload = {}
-        opp_payload = (payload.get("opponent") or [{}])[0] if isinstance(payload, dict) else {}
-        starting_trophies = opp_payload.get("startingTrophies") if isinstance(opp_payload, dict) else None
-        opponents.append({
-            "name": row["opponent_name"],
-            "tag": row["opponent_tag"],
-            "trophies": starting_trophies if isinstance(starting_trophies, int) else None,
-            "deck_summary": _opponent_card_names(row["opponent_deck_json"]),
-            "_recency_index": idx,
-        })
+        opp_payload = (
+            (payload.get("opponent") or [{}])[0] if isinstance(payload, dict) else {}
+        )
+        starting_trophies = (
+            opp_payload.get("startingTrophies")
+            if isinstance(opp_payload, dict)
+            else None
+        )
+        opponents.append(
+            {
+                "name": row["opponent_name"],
+                "tag": row["opponent_tag"],
+                "trophies": starting_trophies
+                if isinstance(starting_trophies, int)
+                else None,
+                "deck_summary": _opponent_card_names(row["opponent_deck_json"]),
+                "_recency_index": idx,
+            }
+        )
 
     opp_block = {}
-    trophies_present = [o["trophies"] for o in opponents if isinstance(o["trophies"], int)]
+    trophies_present = [
+        o["trophies"] for o in opponents if isinstance(o["trophies"], int)
+    ]
     if trophies_present:
         sorted_trophies = sorted(trophies_present)
         median = sorted_trophies[len(sorted_trophies) // 2]
@@ -744,13 +867,19 @@ def _compute_recent_opponents_summary(member_id, mode_predicate, conn, *, limit=
         )
 
     # Sort by trophies desc (None last), tiebreak by recency. Top N.
-    opponents.sort(key=lambda o: (
-        -(o["trophies"] if isinstance(o["trophies"], int) else 0),
-        o["_recency_index"],
-    ))
+    opponents.sort(
+        key=lambda o: (
+            -(o["trophies"] if isinstance(o["trophies"], int) else 0),
+            o["_recency_index"],
+        )
+    )
     notable = []
     for opp in opponents[:_NOTABLE_OPPONENT_LIMIT]:
-        entry = {"name": opp["name"], "tag": opp["tag"], "deck_summary": opp["deck_summary"]}
+        entry = {
+            "name": opp["name"],
+            "tag": opp["tag"],
+            "deck_summary": opp["deck_summary"],
+        }
         if isinstance(opp["trophies"], int):
             entry["trophies"] = opp["trophies"]
         notable.append(entry)
@@ -761,7 +890,8 @@ def _compute_recent_opponents_summary(member_id, mode_predicate, conn, *, limit=
         player_cards = json.loads(rows[0]["deck_json"] or "[]")
         if isinstance(player_cards, list):
             player_card_names = [
-                c.get("name") for c in player_cards
+                c.get("name")
+                for c in player_cards
                 if isinstance(c, dict) and c.get("name")
             ]
     except (json.JSONDecodeError, TypeError, ValueError):
@@ -818,14 +948,18 @@ def _capture_previous_battle_state(member_id: int, conn=None) -> dict:
     on streaks that were already hot."""
     return {
         mode: {
-            "latest_battle_time": _latest_battle_time_for_mode(member_id, mode, conn=conn),
+            "latest_battle_time": _latest_battle_time_for_mode(
+                member_id, mode, conn=conn
+            ),
             "streak": _current_streak_for_mode(member_id, mode, conn=conn),
         }
         for mode in _BATTLE_MODE_PREDICATES
     }
 
 
-def _detect_battle_pulse_signals(member_id: int, tag: str, name: str | None, previous_state: dict, conn=None) -> list[dict]:
+def _detect_battle_pulse_signals(
+    member_id: int, tag: str, name: str | None, previous_state: dict, conn=None
+) -> list[dict]:
     """Emit hot-streak and trophy-push signals per battle mode.
 
     v4.7: split from a single ladder_ranked_10 scope into per-mode signals so
@@ -861,22 +995,27 @@ def _detect_battle_pulse_signals(member_id: int, tag: str, name: str | None, pre
             and int(current_streak.get("current_streak") or 0) >= 4
             and not (previous_type == "W" and previous_count >= 4)
         ):
-            signals.append({
-                "type": "battle_hot_streak",
-                "mode": mode,
-                "tag": tag,
-                "name": name,
-                "streak": int(current_streak.get("current_streak") or 0),
-                "new_battle_count": len(new_rows),
-                "latest_battle_type": new_rows[0]["battle_type"],
-                "latest_mode_name": new_rows[0]["game_mode_name"],
-                "recent_opponents_summary": _compute_recent_opponents_summary(
-                    member_id, predicate, conn,
-                ),
-            })
+            signals.append(
+                {
+                    "type": "battle_hot_streak",
+                    "mode": mode,
+                    "tag": tag,
+                    "name": name,
+                    "streak": int(current_streak.get("current_streak") or 0),
+                    "new_battle_count": len(new_rows),
+                    "latest_battle_type": new_rows[0]["battle_type"],
+                    "latest_mode_name": new_rows[0]["game_mode_name"],
+                    "recent_opponents_summary": _compute_recent_opponents_summary(
+                        member_id,
+                        predicate,
+                        conn,
+                    ),
+                }
+            )
 
         trophy_rows = [
-            row for row in new_rows
+            row
+            for row in new_rows
             if row["trophy_change"] is not None and row["starting_trophies"] is not None
         ]
         trophy_delta = int(sum((row["trophy_change"] or 0) for row in trophy_rows))
@@ -888,35 +1027,46 @@ def _detect_battle_pulse_signals(member_id: int, tag: str, name: str | None, pre
             wins = sum(1 for row in new_rows if row["outcome"] == "W")
             losses = sum(1 for row in new_rows if row["outcome"] == "L")
             draws = sum(1 for row in new_rows if row["outcome"] == "D")
-            signals.append({
-                "type": "battle_trophy_push",
-                "mode": mode,
-                "tag": tag,
-                "name": name,
-                "battle_count": len(trophy_rows),
-                "wins": wins,
-                "losses": losses,
-                "draws": draws,
-                "trophy_delta": trophy_delta,
-                "from_trophies": from_trophies,
-                "to_trophies": to_trophies,
-                "trophies_per_battle": round(trophy_delta / max(1, len(trophy_rows)), 1),
-                "latest_battle_type": new_rows[0]["battle_type"],
-                "latest_mode_name": new_rows[0]["game_mode_name"],
-                "recent_opponents_summary": _compute_recent_opponents_summary(
-                    member_id, predicate, conn,
-                ),
-            })
+            signals.append(
+                {
+                    "type": "battle_trophy_push",
+                    "mode": mode,
+                    "tag": tag,
+                    "name": name,
+                    "battle_count": len(trophy_rows),
+                    "wins": wins,
+                    "losses": losses,
+                    "draws": draws,
+                    "trophy_delta": trophy_delta,
+                    "from_trophies": from_trophies,
+                    "to_trophies": to_trophies,
+                    "trophies_per_battle": round(
+                        trophy_delta / max(1, len(trophy_rows)), 1
+                    ),
+                    "latest_battle_type": new_rows[0]["battle_type"],
+                    "latest_mode_name": new_rows[0]["game_mode_name"],
+                    "recent_opponents_summary": _compute_recent_opponents_summary(
+                        member_id,
+                        predicate,
+                        conn,
+                    ),
+                }
+            )
     return signals
 
 
 @managed_connection
-def snapshot_player_battlelog(player_tag: str, battle_log: list[dict], conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def snapshot_player_battlelog(
+    player_tag: str, battle_log: list[dict], conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     """v5.1: battle persistence is the engine's mirror — delegate to
     engine.ingest + form/rollup projections. Returns [] (signals retired)."""
-    from datetime import datetime as _dt, timezone as _tz
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
 
-    from engine import ingest as _ingest, observations, projections as _projections
+    from engine import ingest as _ingest
+    from engine import observations
+    from engine import projections as _projections
     from engine.db import ensure_player
     from storage.incidents import record_incident
 
@@ -973,7 +1123,9 @@ def get_member_recent_losses(
     and current loss-streak context. Powers the `losses` include on get_member.
     """
     member_tag = _canon_tag(tag)
-    predicate = _LOSSES_SCOPE_PREDICATES.get(scope, _LOSSES_SCOPE_PREDICATES["competitive_10"])
+    predicate = _LOSSES_SCOPE_PREDICATES.get(
+        scope, _LOSSES_SCOPE_PREDICATES["competitive_10"]
+    )
     member_row = conn.execute(
         "SELECT player_tag AS member_id, COALESCE(display_name, current_name) AS current_name FROM players WHERE player_tag = ?",
         (member_tag,),
@@ -1007,7 +1159,9 @@ def get_member_recent_losses(
         for r in losses
         if r["crowns_for"] is not None and r["crowns_against"] is not None
     ]
-    avg_crown_deficit = round(sum(crown_diffs) / len(crown_diffs), 2) if crown_diffs else None
+    avg_crown_deficit = (
+        round(sum(crown_diffs) / len(crown_diffs), 2) if crown_diffs else None
+    )
     current_loss_streak = 0
     for row in rows:
         if row["outcome"] == "L":
@@ -1057,7 +1211,9 @@ def get_member_recent_battles(
     Powers the `battles` include on get_member.
     """
     member_tag = _canon_tag(tag)
-    predicate = _LOSSES_SCOPE_PREDICATES.get(scope, _LOSSES_SCOPE_PREDICATES["overall_10"])
+    predicate = _LOSSES_SCOPE_PREDICATES.get(
+        scope, _LOSSES_SCOPE_PREDICATES["overall_10"]
+    )
     member_row = conn.execute(
         "SELECT player_tag AS member_id, COALESCE(display_name, current_name) AS current_name FROM players WHERE player_tag = ?",
         (member_tag,),
@@ -1088,13 +1244,20 @@ def get_member_recent_battles(
             "opponent_tag": row["opponent_tag"],
             "opponent_clan_tag": row["opponent_clan_tag"],
         }
-        for field, raw in (("own_deck", row["deck_json"]), ("opponent_deck", row["opponent_deck_json"])):
+        for field, raw in (
+            ("own_deck", row["deck_json"]),
+            ("opponent_deck", row["opponent_deck_json"]),
+        ):
             try:
                 cards = json.loads(raw or "[]")
             except (TypeError, ValueError):
                 cards = []
             if isinstance(cards, list) and cards:
-                entry[field] = [c.get("name") for c in cards if isinstance(c, dict) and c.get("name")]
+                entry[field] = [
+                    c.get("name")
+                    for c in cards
+                    if isinstance(c, dict) and c.get("name")
+                ]
         battles.append(entry)
     result = {
         "member_tag": member_tag,
@@ -1144,7 +1307,9 @@ def _rollup_summary(rows) -> dict:
 
 
 @managed_connection
-def get_member_ranked_status(tag: str, days: int = 30, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_member_ranked_status(
+    tag: str, days: int = 30, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     member_tag = _canon_tag(tag)
     member_row = conn.execute(
         "SELECT player_tag AS member_id, COALESCE(display_name, current_name) AS current_name FROM players WHERE player_tag = ?",
@@ -1163,15 +1328,19 @@ def get_member_ranked_status(tag: str, days: int = 30, conn: Optional[sqlite3.Co
     profile = None
     if cs:
         profile = {
-            "fetched_at": cs["fetched_at"], "trophies": cs["trophies"],
+            "fetched_at": cs["fetched_at"],
+            "trophies": cs["trophies"],
             "best_trophies": cs["best_trophies"],
             "current_path_of_legend_season_result_json": None,
             "last_path_of_legend_season_result_json": None,
             "best_path_of_legend_season_result_json": None,
-            "ranked_league": cs["ranked_league"], "ranked_trophies": cs["ranked_trophies"],
+            "ranked_league": cs["ranked_league"],
+            "ranked_trophies": cs["ranked_trophies"],
         }
 
-    rollups = list_player_daily_battle_rollups(member_tag, days=days, mode_group="ranked", conn=conn)
+    rollups = list_player_daily_battle_rollups(
+        member_tag, days=days, mode_group="ranked", conn=conn
+    )
     recent = _rollup_summary(rollups)
     latest_battle = conn.execute(
         "SELECT battle_time, game_mode_id, game_mode_name, league_number, outcome, trophy_change "
@@ -1184,8 +1353,14 @@ def get_member_ranked_status(tag: str, days: int = 30, conn: Optional[sqlite3.Co
         "member_tag": member_tag,
         "member_name": member_row["current_name"],
         "window_days": max(1, int(days or 30)),
-        "current": ({"leagueNumber": profile.get("ranked_league"), "trophies": profile.get("ranked_trophies")}
-                    if profile and profile.get("ranked_league") is not None else None),
+        "current": (
+            {
+                "leagueNumber": profile.get("ranked_league"),
+                "trophies": profile.get("ranked_trophies"),
+            }
+            if profile and profile.get("ranked_league") is not None
+            else None
+        ),
         "last": None,
         "best": None,
         "trophy_road": {
@@ -1197,14 +1372,25 @@ def get_member_ranked_status(tag: str, days: int = 30, conn: Optional[sqlite3.Co
     }
     if latest_battle:
         result["latest_ranked_battle"] = dict(latest_battle)
-    result["note"] = "Use player-facing 'Ranked'; API fields are stored as Path of Legend/pathOfLegend."
+    result["note"] = (
+        "Use player-facing 'Ranked'; API fields are stored as Path of Legend/pathOfLegend."
+    )
     return result
 
 
 @managed_connection
-def list_player_daily_battle_rollups(tag: str, days: int = 30, mode_group: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def list_player_daily_battle_rollups(
+    tag: str,
+    days: int = 30,
+    mode_group: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     member_tag = _canon_tag(tag)
-    cutoff = (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0))).date().isoformat()
+    cutoff = (
+        (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0)))
+        .date()
+        .isoformat()
+    )
     where = ["r.player_tag = ?", "r.battle_date >= ?"]
     params = [member_tag, cutoff]
     if mode_group:
@@ -1221,7 +1407,12 @@ def list_player_daily_battle_rollups(tag: str, days: int = 30, mode_group: Optio
 
 
 @managed_connection
-def get_member_mode_activity(tag: str, days: int = 30, mode_group: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_member_mode_activity(
+    tag: str,
+    days: int = 30,
+    mode_group: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
     member_tag = _canon_tag(tag)
     member_row = conn.execute(
         "SELECT player_tag AS member_id, COALESCE(display_name, current_name) AS current_name FROM players WHERE player_tag = ?",
@@ -1229,7 +1420,9 @@ def get_member_mode_activity(tag: str, days: int = 30, mode_group: Optional[str]
     ).fetchone()
     if not member_row:
         return None
-    rows = list_player_daily_battle_rollups(member_tag, days=days, mode_group=mode_group, conn=conn)
+    rows = list_player_daily_battle_rollups(
+        member_tag, days=days, mode_group=mode_group, conn=conn
+    )
     by_group: dict[str, dict] = {}
     by_game_mode: dict[tuple[str, Optional[int]], dict] = {}
     for row in rows:
@@ -1269,15 +1462,26 @@ def get_member_mode_activity(tag: str, days: int = 30, mode_group: Optional[str]
             bucket["trophy_delta"] += int(row["trophy_change_total"] or 0)
 
     for bucket in list(by_group.values()) + list(by_game_mode.values()):
-        bucket["win_rate"] = round(bucket["wins"] / bucket["battles"], 4) if bucket["battles"] else None
+        bucket["win_rate"] = (
+            round(bucket["wins"] / bucket["battles"], 4) if bucket["battles"] else None
+        )
 
     return {
         "member_tag": member_tag,
         "member_name": member_row["current_name"],
         "window_days": max(1, int(days or 30)),
         "mode_group": mode_group,
-        "by_group": sorted(by_group.values(), key=lambda item: (-item["battles"], item["mode_group"])),
-        "by_game_mode": sorted(by_game_mode.values(), key=lambda item: (-item["battles"], item["mode_group"], item.get("game_mode_id") or 0)),
+        "by_group": sorted(
+            by_group.values(), key=lambda item: (-item["battles"], item["mode_group"])
+        ),
+        "by_game_mode": sorted(
+            by_game_mode.values(),
+            key=lambda item: (
+                -item["battles"],
+                item["mode_group"],
+                item.get("game_mode_id") or 0,
+            ),
+        ),
     }
 
 
@@ -1298,7 +1502,9 @@ def get_member_special_event_activity(
     if not member_row:
         return None
     days = max(1, int(days or 14))
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+        "%Y%m%dT%H%M%S.000Z"
+    )
     where = ["bf.player_tag = ?", "bf.is_special_event = 1", "bf.battle_time >= ?"]
     params: list = [member_row["member_id"], cutoff]
     if game_mode_id is not None:
@@ -1327,7 +1533,9 @@ def get_member_special_event_activity(
         item["wins"] = int(item.get("wins") or 0)
         item["losses"] = int(item.get("losses") or 0)
         total_battles += item["battles"]
-        item["win_rate"] = round(item["wins"] / item["battles"], 4) if item["battles"] else None
+        item["win_rate"] = (
+            round(item["wins"] / item["battles"], 4) if item["battles"] else None
+        )
         _enrich_special_event_item(item, event_contexts)
         modes.append(item)
     return {
@@ -1340,8 +1548,17 @@ def get_member_special_event_activity(
 
 
 @managed_connection
-def list_clan_daily_battle_rollups(days: int = 30, clan_tag: Optional[str] = None, mode_group: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    cutoff = (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0))).date().isoformat()
+def list_clan_daily_battle_rollups(
+    days: int = 30,
+    clan_tag: Optional[str] = None,
+    mode_group: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    cutoff = (
+        (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0)))
+        .date()
+        .isoformat()
+    )
     where = ["battle_date >= ?"]
     params = [cutoff]
     if clan_tag:
@@ -1363,7 +1580,11 @@ def _special_event_badge_completions(days: int, conn) -> dict[str, list[dict]]:
     badge_names = special_event_badge_names()
     if not badge_names:
         return {}
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff = (
+        (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30))))
+        .replace(tzinfo=None)
+        .strftime("%Y-%m-%dT%H:%M:%S")
+    )
     placeholders = ",".join("?" for _ in badge_names)
     rows = conn.execute(
         "SELECT player_tag AS tag, json_extract(payload_json, '$.badge_name') AS badge_name, "
@@ -1388,9 +1609,11 @@ def _special_event_badge_completions(days: int, conn) -> dict[str, list[dict]]:
             "latest_badge_event": row["latest_badge_event"],
         }
         if context:
-            item.update({
-                "event_name": context["event_name"],
-            })
+            item.update(
+                {
+                    "event_name": context["event_name"],
+                }
+            )
         completions_by_tag.setdefault(row["tag"], []).append(item)
     return completions_by_tag
 
@@ -1445,7 +1668,9 @@ def _enrich_special_event_item(item: dict, context_index: dict[str, dict]) -> di
 
 
 def _special_event_activity(days: int, limit: int, conn) -> list[dict]:
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).strftime("%Y%m%dT%H%M%S.000Z")
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))
+    ).strftime("%Y%m%dT%H%M%S.000Z")
     event_contexts = _special_event_context_index(conn)
     rows = conn.execute(
         "SELECT bf.game_mode_id, bf.game_mode_name, bf.event_tag, "
@@ -1478,7 +1703,9 @@ def _special_event_activity(days: int, limit: int, conn) -> list[dict]:
             "trophy_delta": int(row["trophy_delta"] or 0),
             "latest_battle": row["latest_battle"],
         }
-        item["win_rate"] = round(item["wins"] / item["battles"], 4) if item["battles"] else None
+        item["win_rate"] = (
+            round(item["wins"] / item["battles"], 4) if item["battles"] else None
+        )
         activity.append(_enrich_special_event_item(item, event_contexts))
     return activity
 
@@ -1488,7 +1715,9 @@ def _special_event_participation(
     limit: int,
     conn,
 ) -> list[dict]:
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).strftime("%Y%m%dT%H%M%S.000Z")
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))
+    ).strftime("%Y%m%dT%H%M%S.000Z")
     event_contexts = _special_event_context_index(conn)
     rows = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, "
@@ -1514,12 +1743,16 @@ def _special_event_participation(
         item["losses"] = int(item.get("losses") or 0)
         item["win_rate"] = round(wins / battles, 4) if battles else None
         _enrich_special_event_item(item, event_contexts)
-        participation.append(_member_reference_fields(conn, item.pop("member_id"), item))
+        participation.append(
+            _member_reference_fields(conn, item.pop("member_id"), item)
+        )
     return participation
 
 
 @managed_connection
-def get_clan_mode_top_members(days: int = 7, per_mode: int = 3, conn: Optional[sqlite3.Connection] = None) -> dict:
+def get_clan_mode_top_members(
+    days: int = 7, per_mode: int = 3, conn: Optional[sqlite3.Connection] = None
+) -> dict:
     """Top most-active members per mode group over the window — the NAMED activity
     behind the aggregate mode mix (who's grinding ranked, pushing an event, running
     2v2 or ladder). Sourced from the authoritative battle_events store, keyed by
@@ -1568,7 +1801,12 @@ def get_clan_mode_top_members(days: int = 7, per_mode: int = 3, conn: Optional[s
 
 
 @managed_connection
-def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None, limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> dict:
+def get_clan_game_mode_summary(
+    days: int = 30,
+    mode_group: Optional[str] = None,
+    limit: int = 10,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
     days = max(1, int(days or 30))
     limit = max(1, min(int(limit or 10), 50))
     # QA H12/M12: read the mode mix from the authoritative battle_events store,
@@ -1609,24 +1847,30 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
                 "trophy_delta": 0,
             },
         )
-        group_bucket["members_active"] = max(group_bucket["members_active"], int(row["members_active"] or 0))
+        group_bucket["members_active"] = max(
+            group_bucket["members_active"], int(row["members_active"] or 0)
+        )
         for key in ("battles", "wins", "losses", "draws"):
             group_bucket[key] += int(row[key] or 0)
         group_bucket["trophy_delta"] += int(row["trophy_delta"] or 0)
-        by_game_mode.append({
-            "mode_group": group,
-            "label": mode_group_label(group),
-            "game_mode_id": row["game_mode_id"],
-            "game_mode_name": row["game_mode_name"],
-            "members_active": row["members_active"],
-            "battles": row["battles"] or 0,
-            "wins": row["wins"] or 0,
-            "losses": row["losses"] or 0,
-            "draws": row["draws"] or 0,
-            "trophy_delta": row["trophy_delta"] or 0,
-        })
+        by_game_mode.append(
+            {
+                "mode_group": group,
+                "label": mode_group_label(group),
+                "game_mode_id": row["game_mode_id"],
+                "game_mode_name": row["game_mode_name"],
+                "members_active": row["members_active"],
+                "battles": row["battles"] or 0,
+                "wins": row["wins"] or 0,
+                "losses": row["losses"] or 0,
+                "draws": row["draws"] or 0,
+                "trophy_delta": row["trophy_delta"] or 0,
+            }
+        )
     for bucket in list(by_group.values()) + by_game_mode:
-        bucket["win_rate"] = round(bucket["wins"] / bucket["battles"], 4) if bucket["battles"] else None
+        bucket["win_rate"] = (
+            round(bucket["wins"] / bucket["battles"], 4) if bucket["battles"] else None
+        )
 
     member_count_rows = conn.execute(
         "SELECT b.mode_group, COUNT(DISTINCT b.player_tag) AS members_active "
@@ -1660,7 +1904,9 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
         battles = int(item.get("ranked_battles") or 0)
         wins = int(item.get("wins") or 0)
         item["win_rate"] = round(wins / battles, 4) if battles else None
-        ranked_activity.append(_member_reference_fields(conn, item.pop("member_id"), item))
+        ranked_activity.append(
+            _member_reference_fields(conn, item.pop("member_id"), item)
+        )
 
     profile_rows = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, "
@@ -1674,17 +1920,27 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
     ranked_profiles = []
     progress_keys: dict[str, dict] = {}
     for row in profile_rows:
-        pol = {"leagueNumber": row["ranked_league"], "trophies": row["ranked_trophies"], "rank": None}
+        pol = {
+            "leagueNumber": row["ranked_league"],
+            "trophies": row["ranked_trophies"],
+            "rank": None,
+        }
         if pol.get("leagueNumber") is not None:
-            ranked_profiles.append(_member_reference_fields(conn, row["member_id"], {
-                "tag": row["tag"],
-                "name": row["name"],
-                "league_number": pol.get("leagueNumber"),
-                "ranked_trophies": pol.get("trophies"),
-                "rank": pol.get("rank"),
-                "trophy_road_trophies": row["trophies"],
-                "best_trophies": row["best_trophies"],
-            }))
+            ranked_profiles.append(
+                _member_reference_fields(
+                    conn,
+                    row["member_id"],
+                    {
+                        "tag": row["tag"],
+                        "name": row["name"],
+                        "league_number": pol.get("leagueNumber"),
+                        "ranked_trophies": pol.get("trophies"),
+                        "rank": pol.get("rank"),
+                        "trophy_road_trophies": row["trophies"],
+                        "best_trophies": row["best_trophies"],
+                    },
+                )
+            )
         progress = _json_object(row["progress_json"])
         for key, value in progress.items():
             entry = progress_keys.setdefault(
@@ -1701,10 +1957,15 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
             if isinstance(value, dict):
                 trophies = value.get("trophies")
                 best = value.get("bestTrophies")
-                if isinstance(trophies, int) and (entry["max_trophies"] is None or trophies > entry["max_trophies"]):
+                if isinstance(trophies, int) and (
+                    entry["max_trophies"] is None or trophies > entry["max_trophies"]
+                ):
                     entry["max_trophies"] = trophies
                     entry["top_member"] = row["name"]
-                if isinstance(best, int) and (entry["max_best_trophies"] is None or best > entry["max_best_trophies"]):
+                if isinstance(best, int) and (
+                    entry["max_best_trophies"] is None
+                    or best > entry["max_best_trophies"]
+                ):
                     entry["max_best_trophies"] = best
     ranked_profiles.sort(
         key=lambda item: (
@@ -1728,11 +1989,18 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
     return {
         "window_days": days,
         "mode_group": mode_group,
-        "by_group": sorted(by_group.values(), key=lambda item: (-item["battles"], item["mode_group"])),
-        "by_game_mode": _special_event_activity(days, limit, conn) if mode_group == "special_event" else by_game_mode[:limit],
+        "by_group": sorted(
+            by_group.values(), key=lambda item: (-item["battles"], item["mode_group"])
+        ),
+        "by_game_mode": _special_event_activity(days, limit, conn)
+        if mode_group == "special_event"
+        else by_game_mode[:limit],
         "ranked_activity": ranked_activity,
         "ranked_profiles": ranked_profiles[:limit],
-        "side_mode_progress": sorted(progress_keys.values(), key=lambda item: (-item["members"], item["progress_key"]))[:limit],
+        "side_mode_progress": sorted(
+            progress_keys.values(),
+            key=lambda item: (-item["members"], item["progress_key"]),
+        )[:limit],
         "event_participation": event_participation,
         "event_badge_completions": [
             completion
@@ -1762,15 +2030,40 @@ def _recompute_member_recent_form(member_id: int, conn=None):
                 current_streak += 1
             else:
                 break
-        diffs = [(r["crowns_for"] or 0) - (r["crowns_against"] or 0) for r in rows if r["crowns_for"] is not None and r["crowns_against"] is not None]
-        trophy_changes = [r["trophy_change"] for r in rows if r["trophy_change"] is not None]
+        diffs = [
+            (r["crowns_for"] or 0) - (r["crowns_against"] or 0)
+            for r in rows
+            if r["crowns_for"] is not None and r["crowns_against"] is not None
+        ]
+        trophy_changes = [
+            r["trophy_change"] for r in rows if r["trophy_change"] is not None
+        ]
         avg_crown_diff = round(sum(diffs) / len(diffs), 2) if diffs else None
-        avg_trophy_change = round(sum(trophy_changes) / len(trophy_changes), 2) if trophy_changes else None
+        avg_trophy_change = (
+            round(sum(trophy_changes) / len(trophy_changes), 2)
+            if trophy_changes
+            else None
+        )
         label = _build_form_label(wins, losses, sample_size)
         summary = _build_form_summary(wins, losses, draws, sample_size, label)
         conn.execute(
             "INSERT INTO player_recent_form (player_tag, computed_at, scope, sample_size, wins, losses, draws, current_streak, current_streak_type, win_rate, avg_crown_diff, avg_trophy_change, form_label, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(player_tag, scope) DO UPDATE SET computed_at = excluded.computed_at, sample_size = excluded.sample_size, wins = excluded.wins, losses = excluded.losses, draws = excluded.draws, current_streak = excluded.current_streak, current_streak_type = excluded.current_streak_type, win_rate = excluded.win_rate, avg_crown_diff = excluded.avg_crown_diff, avg_trophy_change = excluded.avg_trophy_change, form_label = excluded.form_label, summary = excluded.summary",
-            (member_id, _utcnow(), scope, sample_size, wins, losses, draws, current_streak, streak_type, round(wins / sample_size, 4) if sample_size else 0, avg_crown_diff, avg_trophy_change, label, summary),
+            (
+                member_id,
+                _utcnow(),
+                scope,
+                sample_size,
+                wins,
+                losses,
+                draws,
+                current_streak,
+                streak_type,
+                round(wins / sample_size, 4) if sample_size else 0,
+                avg_crown_diff,
+                avg_trophy_change,
+                label,
+                summary,
+            ),
         )
     conn.commit()

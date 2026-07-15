@@ -60,7 +60,12 @@ def _clean_text(value) -> str:
 
 
 def _json_dumps(value) -> str:
-    return json.dumps(value if value is not None else {}, sort_keys=True, default=str, ensure_ascii=False)
+    return json.dumps(
+        value if value is not None else {},
+        sort_keys=True,
+        default=str,
+        ensure_ascii=False,
+    )
 
 
 def _loads_dict(value) -> dict:
@@ -301,10 +306,14 @@ def build_improvement_github_issue_body(suggestion: dict) -> str:
         if not isinstance(item, dict):
             continue
         label = _clean_text(item.get("label") or item.get("type") or "evidence")
-        detail = _clean_text(item.get("detail") or item.get("summary") or item.get("note"))
+        detail = _clean_text(
+            item.get("detail") or item.get("summary") or item.get("note")
+        )
         if detail:
             evidence_lines.append(f"- {label}: {detail}")
-    metrics = evidence.get("metrics") if isinstance(evidence.get("metrics"), dict) else {}
+    metrics = (
+        evidence.get("metrics") if isinstance(evidence.get("metrics"), dict) else {}
+    )
     metric_lines = [f"- {key}: {value}" for key, value in sorted(metrics.items())]
     if not evidence_lines and evidence.get("summary"):
         evidence_lines.append(f"- summary: {_clean_text(evidence.get('summary'))}")
@@ -335,11 +344,13 @@ def build_improvement_github_issue_body(suggestion: dict) -> str:
     ]
     if metric_lines:
         body.extend(["", "## Metrics", "", *metric_lines[:12]])
-    body.extend([
-        "",
-        "## Triage",
-        "",
-        "- [ ] Human reviewed the suggestion",
-        "- [ ] Scope accepted, revised, or closed as not planned",
-    ])
+    body.extend(
+        [
+            "",
+            "## Triage",
+            "",
+            "- [ ] Human reviewed the suggestion",
+            "- [ ] Scope accepted, revised, or closed as not planned",
+        ]
+    )
     return "\n".join(body).strip() + "\n"

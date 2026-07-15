@@ -1,11 +1,18 @@
 """Scorer constants are law (recognition.md §2–§3): every value asserted
 verbatim; accrual, coalescing, cohort machinery."""
+
 from __future__ import annotations
 
 import json
 
 from engine.recognition import scorer
-from engine.recognition.scorer import Candidate, base_score, cohort_waves, decide, sort_key
+from engine.recognition.scorer import (
+    Candidate,
+    base_score,
+    cohort_waves,
+    decide,
+    sort_key,
+)
 
 NOW = "2026-07-01T12:00:00Z"
 
@@ -67,15 +74,22 @@ def test_celebrate_priority_table_verbatim():
 
 
 def _cand(event_type, key=None, tag="#A", at=NOW, payload=None, arrival=0):
-    return Candidate(key=key or f"{event_type}:{tag}:x", event_type=event_type,
-                     subject_tag=tag, occurred_at=at, payload=payload or {},
-                     arrival=arrival)
+    return Candidate(
+        key=key or f"{event_type}:{tag}:x",
+        event_type=event_type,
+        subject_tag=tag,
+        occurred_at=at,
+        payload=payload or {},
+        arrival=arrival,
+    )
 
 
 def test_same_tick_coalescing_picks_by_priority():
-    group = [_cand("best_trophies_peak", arrival=0),
-             _cand("card_level_milestone", arrival=1),
-             _cand("collection_level_milestone", arrival=2)]
+    group = [
+        _cand("best_trophies_peak", arrival=0),
+        _cand("card_level_milestone", arrival=1),
+        _cand("collection_level_milestone", arrival=2),
+    ]
     selected = max(group, key=sort_key)
     assert selected.event_type == "card_level_milestone"
 
@@ -98,7 +112,8 @@ def test_decide_sums_stored_evidence(engine_conn):
     engine_conn.execute(
         "INSERT INTO player_events (dedup_key, event_type, player_tag, observed_at,"
         " payload_json, created_at) VALUES (?, 'pol_promotion', '#A', ?, ?, ?)",
-        ("pol_promotion:#A:6", "2026-06-25T12:00:00Z", json.dumps({"league": 6}), NOW))
+        ("pol_promotion:#A:6", "2026-06-25T12:00:00Z", json.dumps({"league": 6}), NOW),
+    )
     engine_conn.commit()
     selected = _cand("best_trophies_peak")  # 40 + 45 = 85 ≥ 80
     post, score, _ = decide(engine_conn, "#A", selected, [selected], None)
@@ -130,17 +145,24 @@ def test_decide_cutoff_at_last_highlight(engine_conn):
     engine_conn.execute(
         "INSERT INTO player_events (dedup_key, event_type, player_tag, observed_at,"
         " payload_json, created_at) VALUES (?, 'pol_promotion', '#A', ?, ?, ?)",
-        ("pol_promotion:#A:6", "2026-06-25T12:00:00Z", json.dumps({}), NOW))
+        ("pol_promotion:#A:6", "2026-06-25T12:00:00Z", json.dumps({}), NOW),
+    )
     engine_conn.commit()
     # last posted highlight AFTER that evidence → evidence excluded
-    post, score, _ = decide(engine_conn, "#A", _cand("best_trophies_peak"),
-                            [_cand("best_trophies_peak")], "2026-06-30T00:00:00Z")
+    post, score, _ = decide(
+        engine_conn,
+        "#A",
+        _cand("best_trophies_peak"),
+        [_cand("best_trophies_peak")],
+        "2026-06-30T00:00:00Z",
+    )
     assert post is False and score == 40
 
 
 def test_cohort_wave_three_members_same_day():
-    cands = [_cand("badge_earned", key=f"badge_earned:#{i}:x", tag=f"#{i}")
-             for i in "ABC"]
+    cands = [
+        _cand("badge_earned", key=f"badge_earned:#{i}:x", tag=f"#{i}") for i in "ABC"
+    ]
     waves = cohort_waves(cands)
     assert len(waves) == 1
     key = next(iter(waves))
@@ -149,6 +171,11 @@ def test_cohort_wave_three_members_same_day():
 
 
 def test_no_cohort_below_three_or_wrong_type():
-    assert cohort_waves([_cand("badge_earned", tag="#A"),
-                         _cand("badge_earned", tag="#B")]) == {}
-    assert cohort_waves([_cand("collection_level_milestone", tag=f"#{i}") for i in "ABC"]) == {}
+    assert (
+        cohort_waves([_cand("badge_earned", tag="#A"), _cand("badge_earned", tag="#B")])
+        == {}
+    )
+    assert (
+        cohort_waves([_cand("collection_level_milestone", tag=f"#{i}") for i in "ABC"])
+        == {}
+    )

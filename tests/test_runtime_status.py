@@ -1,5 +1,10 @@
-import db
+import asyncio
+import threading
+import time
+
 import pytest
+
+import db
 from runtime import status as runtime_status
 
 
@@ -83,3 +88,27 @@ def test_clear_stale_running_jobs_keeps_current_process_job_running(monkeypatch)
 
     assert runtime_status.clear_stale_running_jobs() == []
     assert saved == []
+
+
+def test_async_job_status_persistence_never_blocks_event_loop(monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_save(name, state):
+        started.set()
+        release.wait(timeout=2)
+
+    monkeypatch.setattr(db, "save_runtime_job_status", slow_save)
+
+    async def exercise():
+        before = time.monotonic()
+        runtime_status.mark_job_start("nonblocking")
+        elapsed = time.monotonic() - before
+        assert elapsed < 0.1
+        assert await asyncio.to_thread(started.wait, 1)
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        release.set()
+        runtime_status.flush_status_writes()

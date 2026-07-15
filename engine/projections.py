@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 
 from db import chicago_date_for_cr_timestamp, chicago_day_bounds_utc
-
 from engine.db import canon_tag, utcnow
 
 # Scope predicates carried verbatim from storage/player.py::_LOSSES_SCOPE_PREDICATES —
@@ -51,13 +50,16 @@ def _form_label(wins: int, losses: int, sample_size: int) -> str:
     return "mixed"
 
 
-def _form_summary(wins: int, losses: int, draws: int, sample_size: int, label: str) -> str:
+def _form_summary(
+    wins: int, losses: int, draws: int, sample_size: int, label: str
+) -> str:
     if sample_size == 0:
         return "No recent battles recorded."
     return f"{wins}-{losses}-{draws} over the last {sample_size} battles ({label})."
 
 
 # ------------------------------------------------------------- player state
+
 
 def roster_state_from_api(member: dict | None) -> dict:
     """Normalize one raw clan ``memberList`` entry for the player projection.
@@ -73,13 +75,9 @@ def roster_state_from_api(member: dict | None) -> dict:
         "role": m.get("role"),
         "trophies": m.get("trophies"),
         "clan_rank": m.get("clanRank", m.get("clan_rank")),
-        "previous_clan_rank": m.get(
-            "previousClanRank", m.get("previous_clan_rank")
-        ),
+        "previous_clan_rank": m.get("previousClanRank", m.get("previous_clan_rank")),
         "donations": m.get("donations"),
-        "donations_received": m.get(
-            "donationsReceived", m.get("donations_received")
-        ),
+        "donations_received": m.get("donationsReceived", m.get("donations_received")),
         # Experience level is profile-owned. The clan endpoint's expLevel is
         # currently a placeholder zero, and even a future non-zero value must
         # not create a second authority for this field.
@@ -106,14 +104,19 @@ def refresh_player_state(conn, player_tag, profile_payload, roster_entry, observ
     vals = {
         "role": r.get("role"),
         "exp_level": p.get("expLevel") or None,
-        "trophies": r.get("trophies") if r.get("trophies") is not None else p.get("trophies"),
+        "trophies": r.get("trophies")
+        if r.get("trophies") is not None
+        else p.get("trophies"),
         "best_trophies": p.get("bestTrophies"),
         "clan_rank": r.get("clan_rank") or r.get("clanRank"),
         "previous_clan_rank": r.get("previous_clan_rank") or r.get("previousClanRank"),
         "donations_week": r.get("donations"),
-        "donations_received_week": r.get("donations_received") or r.get("donationsReceived"),
+        "donations_received_week": r.get("donations_received")
+        or r.get("donationsReceived"),
         "arena_id": arena.get("id") if arena else (r.get("arena") or {}).get("id"),
-        "arena_name": arena.get("name") if arena else (r.get("arena") or {}).get("name"),
+        "arena_name": arena.get("name")
+        if arena
+        else (r.get("arena") or {}).get("name"),
         "ranked_league": ranked_league,
         "ranked_trophies": ranked_trophies,
         "current_deck_json": json.dumps(deck, ensure_ascii=False) if deck else None,
@@ -150,13 +153,19 @@ def refresh_card_collection(conn, player_tag, cards_payload, observed_at):
                    evolution_level = excluded.evolution_level,
                    observed_at = excluded.observed_at""",
             (
-                tag, card_id, card.get("level"), card.get("count"),
-                card.get("starLevel"), card.get("evolutionLevel"), observed_at,
+                tag,
+                card_id,
+                card.get("level"),
+                card.get("count"),
+                card.get("starLevel"),
+                card.get("evolutionLevel"),
+                observed_at,
             ),
         )
 
 
 # --------------------------------------------------------------------- form
+
 
 def refresh_form(conn, player_tag, now=None):
     """Recompute player_recent_form for every carried scope (last 10 battles
@@ -206,17 +215,26 @@ def refresh_form(conn, player_tag, now=None):
                    avg_trophy_change = excluded.avg_trophy_change,
                    form_label = excluded.form_label, summary = excluded.summary""",
             (
-                tag, scope, computed_at, sample_size, wins, losses, draws,
-                streak, streak_type,
+                tag,
+                scope,
+                computed_at,
+                sample_size,
+                wins,
+                losses,
+                draws,
+                streak,
+                streak_type,
                 round(wins / sample_size, 4) if sample_size else 0,
                 round(sum(diffs) / len(diffs), 2) if diffs else None,
                 round(sum(changes) / len(changes), 2) if changes else None,
-                label, _form_summary(wins, losses, draws, sample_size, label),
+                label,
+                _form_summary(wins, losses, draws, sample_size, label),
             ),
         )
 
 
 # ------------------------------------------------------------------ rollups
+
 
 def refresh_rollups(conn, player_tag, date_chicago, expected_battle_delta=None):
     """Upsert player_daily_battle_rollups (+ the day's player_daily_metrics
@@ -252,9 +270,16 @@ def refresh_rollups(conn, player_tag, date_chicago, expected_battle_delta=None):
         b = buckets.setdefault(
             key,
             {
-                "game_mode_name": row["game_mode_name"], "battles": 0, "wins": 0,
-                "losses": 0, "draws": 0, "crowns_for": 0, "crowns_against": 0,
-                "trophy_change_total": 0, "first": None, "last": None,
+                "game_mode_name": row["game_mode_name"],
+                "battles": 0,
+                "wins": 0,
+                "losses": 0,
+                "draws": 0,
+                "crowns_for": 0,
+                "crowns_against": 0,
+                "trophy_change_total": 0,
+                "first": None,
+                "last": None,
             },
         )
         b["battles"] += 1
@@ -288,10 +313,24 @@ def refresh_rollups(conn, player_tag, date_chicago, expected_battle_delta=None):
                    last_aggregated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                tag, date_chicago, mode_group, game_mode_id, b["game_mode_name"],
-                b["battles"], b["wins"], b["losses"], b["draws"], b["crowns_for"],
-                b["crowns_against"], b["trophy_change_total"], b["first"], b["last"],
-                captured, expected_battle_delta, completeness, is_complete,
+                tag,
+                date_chicago,
+                mode_group,
+                game_mode_id,
+                b["game_mode_name"],
+                b["battles"],
+                b["wins"],
+                b["losses"],
+                b["draws"],
+                b["crowns_for"],
+                b["crowns_against"],
+                b["trophy_change_total"],
+                b["first"],
+                b["last"],
+                captured,
+                expected_battle_delta,
+                completeness,
+                is_complete,
                 aggregated_at,
             ),
         )
@@ -320,9 +359,15 @@ def refresh_daily_metrics(conn, tag, date_chicago):
                donations_received_week = excluded.donations_received_week,
                last_seen_api = COALESCE(excluded.last_seen_api, player_daily_metrics.last_seen_api)""",
         (
-            tag, date_chicago, state["exp_level"], state["trophies"],
-            state["best_trophies"], state["clan_rank"], state["donations_week"],
-            state["donations_received_week"], last_seen_api,
+            tag,
+            date_chicago,
+            state["exp_level"],
+            state["trophies"],
+            state["best_trophies"],
+            state["clan_rank"],
+            state["donations_week"],
+            state["donations_received_week"],
+            last_seen_api,
         ),
     )
 
@@ -355,17 +400,26 @@ def refresh_clan_rollups(conn, clan_payload, date_chicago, observed_at):
                top_member_trophies = excluded.top_member_trophies,
                observed_at = excluded.observed_at""",
         (
-            date_chicago, canon_tag(c.get("tag") or ""), c.get("name"),
-            len(members), max(0, 50 - len(members)), c.get("clanScore"),
-            c.get("clanWarTrophies"), c.get("requiredTrophies"),
-            c.get("donationsPerWeek"), sum(m.get("donations") or 0 for m in members),
-            sum(trophies), round(sum(trophies) / len(trophies), 2) if trophies else None,
-            max(trophies) if trophies else None, observed_at,
+            date_chicago,
+            canon_tag(c.get("tag") or ""),
+            c.get("name"),
+            len(members),
+            max(0, 50 - len(members)),
+            c.get("clanScore"),
+            c.get("clanWarTrophies"),
+            c.get("requiredTrophies"),
+            c.get("donationsPerWeek"),
+            sum(m.get("donations") or 0 for m in members),
+            sum(trophies),
+            round(sum(trophies) / len(trophies), 2) if trophies else None,
+            max(trophies) if trophies else None,
+            observed_at,
         ),
     )
 
 
 # -------------------------------------------------- management metric inputs
+
 
 def refresh_management_inputs(conn, player_tag, now=None):
     """Recompute member_management's evidence/metric columns (schema.md §6.3).
@@ -434,7 +488,11 @@ def refresh_management_inputs(conn, player_tag, now=None):
                war_attendance_rate = excluded.war_attendance_rate,
                battle_days_last_28 = excluded.battle_days_last_28""",
         (
-            tag, now, tag, now[:10], tenure_days,
+            tag,
+            now,
+            tag,
+            now[:10],
+            tenure_days,
             role_row["role"] if role_row else None,
             round(donations, 2) if donations is not None else None,
             round(fame, 2) if fame is not None else None,

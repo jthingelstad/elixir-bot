@@ -7,12 +7,20 @@ import db
 import prompts
 
 __all__ = [
-    "_channel_scope", "_channel_conversation_scope",
-    "_channel_msg_kwargs", "_author_msg_kwargs",
+    "_channel_scope",
+    "_channel_conversation_scope",
+    "_channel_msg_kwargs",
+    "_author_msg_kwargs",
     "_strip_bot_mentions",
-    "_is_bot_mentioned", "_leading_bot_mention_pattern", "_get_channel_behavior",
-    "_get_singleton_channel", "_get_singleton_channel_id", "_channel_reply_target_name",
-    "_safe_reply", "_reply_text", "_share_channel_result",
+    "_is_bot_mentioned",
+    "_leading_bot_mention_pattern",
+    "_get_channel_behavior",
+    "_get_singleton_channel",
+    "_get_singleton_channel_id",
+    "_channel_reply_target_name",
+    "_safe_reply",
+    "_reply_text",
+    "_share_channel_result",
     "_channel_config_by_key",
 ]
 
@@ -69,7 +77,7 @@ def _strip_bot_mentions(text: str) -> str:
         match = pattern.match(text)
         if not match:
             break
-        text = text[match.end():].lstrip()
+        text = text[match.end() :].lstrip()
     return text.strip()
 
 
@@ -143,7 +151,9 @@ async def _reply_text(message, content):
     sent_messages = []
     for post in posts:
         safe_post = _discord_safe_content(post)
-        safe_post = _runtime_app()._resolve_custom_emoji(safe_post, getattr(message, "guild", None))
+        safe_post = _runtime_app()._resolve_custom_emoji(
+            safe_post, getattr(message, "guild", None)
+        )
         if len(safe_post) > DISCORD_MAX_MESSAGE_LEN:
             for chunk in _chunk_for_discord(safe_post):
                 sent = await _safe_reply(message, chunk)
@@ -173,7 +183,10 @@ async def _share_channel_result(result, workflow):
     await _post_to_elixir(target_channel, {"content": share_content})
     await asyncio.to_thread(
         db.save_message,
-        _channel_scope(target_channel), "assistant", share_content,
+        _channel_scope(target_channel),
+        "assistant",
+        share_content,
         **_channel_msg_kwargs(target_channel),
-        workflow=workflow, event_type=result.get("event_type"),
+        workflow=workflow,
+        event_type=result.get("event_type"),
     )

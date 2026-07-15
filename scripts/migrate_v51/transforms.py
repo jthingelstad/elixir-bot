@@ -38,12 +38,23 @@ VERBATIM_TABLES = [
     # T11 (decision_cases/revisits handled separately — renames)
     "leader_action_recommendations",
     # T12 conversation set
-    "conversation_threads", "messages", "memory_facts", "memory_episodes",
+    "conversation_threads",
+    "messages",
+    "memory_facts",
+    "memory_episodes",
     # T13 ops singletons
-    "llm_calls", "prompt_failures", "prompt_feedback", "system_signals",
-    "api_sentinel_observations", "arena_relay_screenshot_observations",
-    "discord_channels", "channel_state", "game_mode_contexts", "card_catalog",
-    "elixir_improvement_suggestions", "runtime_job_status",
+    "llm_calls",
+    "prompt_failures",
+    "prompt_feedback",
+    "system_signals",
+    "api_sentinel_observations",
+    "arena_relay_screenshot_observations",
+    "discord_channels",
+    "channel_state",
+    "game_mode_contexts",
+    "card_catalog",
+    "elixir_improvement_suggestions",
+    "runtime_job_status",
     # T4 half
     "discord_users",
 ]
@@ -139,7 +150,7 @@ def t5_memberships(conn):
 def t6_awards(conn):
     deprecated = conn.execute(
         f"""SELECT COUNT(*) FROM arch.awards
-            WHERE award_type IN ({','.join('?' * len(DEPRECATED_AWARD_TYPES))})""",
+            WHERE award_type IN ({",".join("?" * len(DEPRECATED_AWARD_TYPES))})""",
         DEPRECATED_AWARD_TYPES,
     ).fetchone()[0]
     if deprecated:
@@ -205,13 +216,21 @@ def t8_clan_rollups(conn):
                joins_today, leaves_today, net_member_change, observed_at
            FROM arch.clan_daily_metrics"""
     )  # raw_json dropped (L1 owns raw)
-    conn.execute("INSERT INTO clan_daily_battle_rollups SELECT * FROM arch.clan_daily_battle_rollups")
+    conn.execute(
+        "INSERT INTO clan_daily_battle_rollups SELECT * FROM arch.clan_daily_battle_rollups"
+    )
 
 
 def t9_war(conn):
     """After T3 (clans FK) and T6 (champ/free-pass tags). Max season = in progress."""
-    _clear(conn, "war_attendance_days", "war_participation", "war_week_clans",
-           "war_weeks", "war_seasons")
+    _clear(
+        conn,
+        "war_attendance_days",
+        "war_participation",
+        "war_week_clans",
+        "war_weeks",
+        "war_seasons",
+    )
     conn.execute(
         """INSERT INTO war_seasons (season_id, started_at, ended_at, final_rank,
                                     weeks, war_champ_tag, free_pass_tag)
@@ -324,7 +343,7 @@ def t14_ledger_seed(conn):
             SELECT dedup_key, 'migration-seed:clan',
                    json_array(dedup_key), 0, occurred_at
             FROM arch.detections
-            WHERE detection_type IN ({','.join('?' * len(CALENDAR_TYPES))})
+            WHERE detection_type IN ({",".join("?" * len(CALENDAR_TYPES))})
               AND occurred_at >= strftime('%Y%m%dT%H%M%S', 'now', '-14 days')""",
         CALENDAR_TYPES,
     )

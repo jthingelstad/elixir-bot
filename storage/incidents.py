@@ -24,6 +24,7 @@ from typing import Any, Optional
 
 log = logging.getLogger("elixir.incidents")
 
+
 def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -32,7 +33,9 @@ def ensure_incidents_schema(conn: sqlite3.Connection) -> None:
     """Compatibility assertion; db.schema owns incident-ledger creation."""
     from db.schema import require_columns
 
-    require_columns(conn, "runtime_incidents", {"incident_id", "component", "resolved_at"})
+    require_columns(
+        conn, "runtime_incidents", {"incident_id", "component", "resolved_at"}
+    )
 
 
 def record_incident(
@@ -48,7 +51,9 @@ def record_incident(
     try:
         if isinstance(error, BaseException):
             summary = f"{type(error).__name__}: {error}"
-            detail = "".join(_tb.format_exception(type(error), error, error.__traceback__))
+            detail = "".join(
+                _tb.format_exception(type(error), error, error.__traceback__)
+            )
         else:
             summary = str(error)
             detail = "".join(_tb.format_stack()[:-1])  # caller stack, sans this frame
@@ -62,14 +67,21 @@ def record_incident(
         own = conn is None
         if own:
             import db as _db
+
             conn = _db.get_connection()
         try:
             ensure_incidents_schema(conn)
             conn.execute(
                 "INSERT INTO runtime_incidents (at, component, severity, summary, "
                 "detail, context_json) VALUES (?, ?, ?, ?, ?, ?)",
-                (_utcnow(), component, severity if severity in ("warn", "error") else "error",
-                 summary[:500], detail, ctx),
+                (
+                    _utcnow(),
+                    component,
+                    severity if severity in ("warn", "error") else "error",
+                    summary[:500],
+                    detail,
+                    ctx,
+                ),
             )
             if own:
                 conn.commit()
@@ -83,11 +95,14 @@ def record_incident(
 def open_incidents(conn: sqlite3.Connection, *, limit: int = 100) -> list[dict]:
     """Unresolved incidents, newest first (for the Observatory + health check)."""
     ensure_incidents_schema(conn)
-    return [dict(r) for r in conn.execute(
-        "SELECT incident_id, at, component, severity, summary, detail, context_json "
-        "FROM runtime_incidents WHERE resolved_at IS NULL ORDER BY at DESC LIMIT ?",
-        (limit,),
-    ).fetchall()]
+    return [
+        dict(r)
+        for r in conn.execute(
+            "SELECT incident_id, at, component, severity, summary, detail, context_json "
+            "FROM runtime_incidents WHERE resolved_at IS NULL ORDER BY at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    ]
 
 
 def count_open_since(conn: sqlite3.Connection, *, hours: int = 24) -> int:

@@ -1,9 +1,13 @@
 """Tournament watch."""
 
 __all__ = [
-    "TOURNAMENT_POLL_MINUTES", "TOURNAMENT_BATTLE_LOG_SPACING_SECONDS",
-    "_TOURNAMENT_JOB_ID", "_tournament_watch_tick", "_tournament_recap",
-    "start_tournament_watch", "stop_tournament_watch",
+    "TOURNAMENT_POLL_MINUTES",
+    "TOURNAMENT_BATTLE_LOG_SPACING_SECONDS",
+    "_TOURNAMENT_JOB_ID",
+    "_tournament_watch_tick",
+    "_tournament_recap",
+    "start_tournament_watch",
+    "stop_tournament_watch",
 ]
 
 import asyncio
@@ -11,17 +15,21 @@ import logging
 import os
 from typing import Optional
 
+from apscheduler.jobstores.base import JobLookupError
+
 import cr_api
 import db
 import elixir_agent
-from apscheduler.jobstores.base import JobLookupError
 from engine import observations
-from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
-from runtime.helpers._common import _post_to_elixir
 from runtime.discord_posting import compose_and_post
+from runtime.helpers import (
+    _channel_msg_kwargs,
+    _channel_scope,
+    _get_singleton_channel_id,
+)
+from runtime.helpers._common import _post_to_elixir
 from storage.incidents import record_incident
-
 
 TOURNAMENT_POLL_MINUTES = int(os.getenv("TOURNAMENT_POLL_MINUTES", "5"))
 TOURNAMENT_BATTLE_LOG_SPACING_SECONDS = 0.5
@@ -182,7 +190,9 @@ async def _tournament_watch_tick():
         api_data = await asyncio.to_thread(cr_api.get_tournament, tag)
         if api_data is None:
             log.warning("Tournament watch: API returned None for %s", tag)
-            runtime_status.mark_job_failure("tournament_watch", f"API returned None for {tag}")
+            runtime_status.mark_job_failure(
+                "tournament_watch", f"API returned None for {tag}"
+            )
             return
 
         poll_result = await asyncio.to_thread(db.poll_tournament, tag, api_data)
@@ -197,11 +207,14 @@ async def _tournament_watch_tick():
         # Tournament-own timing, so battle-played signals can cite the
         # tournament's clock instead of the war/river-race clock.
         from storage.tournament import _compute_ends_time
+
         _duration_s = api_data.get("duration")
         _started_time = api_data.get("startedTime") or tournament.get("started_time")
         tournament_timing = {
             "duration_seconds": _duration_s,
-            "duration_minutes": (_duration_s // 60) if isinstance(_duration_s, int) else None,
+            "duration_minutes": (_duration_s // 60)
+            if isinstance(_duration_s, int)
+            else None,
             "started_time": _started_time,
             "ends_time": _compute_ends_time(_started_time, _duration_s),
         }
@@ -211,8 +224,12 @@ async def _tournament_watch_tick():
             for p in participants:
                 p_tag = p["player_tag"]
                 try:
-                    battle_log = await asyncio.to_thread(cr_api.get_player_battle_log, p_tag)
-                    admission = observations.admit("player_battlelog", p_tag, battle_log)
+                    battle_log = await asyncio.to_thread(
+                        cr_api.get_player_battle_log, p_tag
+                    )
+                    admission = observations.admit(
+                        "player_battlelog", p_tag, battle_log
+                    )
                     if not admission.accepted:
                         if not admission.transport_failure:
                             await asyncio.to_thread(
@@ -239,27 +256,43 @@ async def _tournament_watch_tick():
                                 )
                                 if battle_info:
                                     battles_captured += 1
-                                    live_signals.append(_build_battle_played_signal(
-                                        tag, tournament_name, battle_info,
-                                        tournament_timing=tournament_timing,
-                                    ))
+                                    live_signals.append(
+                                        _build_battle_played_signal(
+                                            tag,
+                                            tournament_name,
+                                            battle_info,
+                                            tournament_timing=tournament_timing,
+                                        )
+                                    )
                         # Also feed through existing battle log pipeline
-                        await asyncio.to_thread(db.snapshot_player_battlelog, p_tag, battle_log)
+                        await asyncio.to_thread(
+                            db.snapshot_player_battlelog, p_tag, battle_log
+                        )
                 except Exception as e:
-                    log.warning("Tournament watch: battle log failed for %s: %s", p_tag, e)
+                    log.warning(
+                        "Tournament watch: battle log failed for %s: %s", p_tag, e
+                    )
                 await asyncio.sleep(TOURNAMENT_BATTLE_LOG_SPACING_SECONDS)
 
         # Handle tournament end
         if api_status == "ended" and tournament["status"] != "ended":
             await asyncio.to_thread(db.finalize_tournament, tag, api_data)
-            log.info("Tournament %s ended — posting close, deferring recap %ds", tag, TOURNAMENT_RECAP_DELAY_SECONDS)
+            log.info(
+                "Tournament %s ended — posting close, deferring recap %ds",
+                tag,
+                TOURNAMENT_RECAP_DELAY_SECONDS,
+            )
             # The "tournament_ended" signal in live_signals would otherwise
             # generate a chatty narrative post via tournament_update.
             # Replace it with a deterministic facts + leaderboard post and
             # defer the LLM recap so the two don't land on top of each other.
-            live_signals = [s for s in live_signals if s.get("type") != "tournament_ended"]
+            live_signals = [
+                s for s in live_signals if s.get("type") != "tournament_ended"
+            ]
             await _post_tournament_close(tag, api_data)
-            _schedule_tournament_recap(tag, delay_seconds=TOURNAMENT_RECAP_DELAY_SECONDS)
+            _schedule_tournament_recap(
+                tag, delay_seconds=TOURNAMENT_RECAP_DELAY_SECONDS
+            )
             stop_tournament_watch()
 
         # Post live tournament signals directly to #elixir (v5-style),
@@ -272,7 +305,8 @@ async def _tournament_watch_tick():
                     log.error("Tournament watch: #elixir channel not found")
                 else:
                     ok = await compose_and_post(
-                        channel, lane="elixir",
+                        channel,
+                        lane="elixir",
                         context=_tournament_signal_context(live_signals),
                     )
                     if not ok:
@@ -302,7 +336,9 @@ def _tournament_signal_context(signals: list[dict]) -> str:
     )
 
 
-def _format_tournament_close_post(tournament_name: str, api_data: dict, *, top_n: int = 10) -> str:
+def _format_tournament_close_post(
+    tournament_name: str, api_data: dict, *, top_n: int = 10
+) -> str:
     """Deterministic close-out post for a tournament.
 
     Facts only — final leaderboard, deck format, total participants. The
@@ -310,13 +346,11 @@ def _format_tournament_close_post(tournament_name: str, api_data: dict, *, top_n
     """
     members = api_data.get("membersList") or []
     top = sorted(members, key=lambda m: m.get("rank") or 999)[:top_n]
-    deck_label = (
-        {
-            "draftCompetitive": "Triple Draft",
-            "collection": "Bring Your Own Deck",
-            "draft": "Draft",
-        }.get(api_data.get("deckSelection") or "", api_data.get("deckSelection") or "")
-    )
+    deck_label = {
+        "draftCompetitive": "Triple Draft",
+        "collection": "Bring Your Own Deck",
+        "draft": "Draft",
+    }.get(api_data.get("deckSelection") or "", api_data.get("deckSelection") or "")
     header_bits = [f"{len(members)} players"]
     if deck_label:
         header_bits.append(deck_label)
@@ -340,7 +374,9 @@ async def _post_tournament_close(tournament_tag: str, api_data: dict) -> None:
     """Post the deterministic close-out (facts + leaderboard) to #elixir."""
     try:
         tournament = await asyncio.to_thread(db.get_tournament_by_tag, tournament_tag)
-        tournament_name = (tournament or {}).get("name") or api_data.get("name") or tournament_tag
+        tournament_name = (
+            (tournament or {}).get("name") or api_data.get("name") or tournament_tag
+        )
         text = _format_tournament_close_post(tournament_name, api_data)
         channel_id = _get_singleton_channel_id("elixir")
         if not channel_id:
@@ -373,6 +409,7 @@ def _schedule_tournament_recap(tournament_tag: str, *, delay_seconds: int) -> No
     window, the boot-time check in resume_pending_tournament_recaps()
     picks up the recap so it isn't lost.
     """
+
     def _kick():
         _bot().loop.create_task(_tournament_recap(tournament_tag))
 
@@ -402,7 +439,9 @@ async def resume_pending_tournament_recaps() -> None:
 async def _tournament_recap(tournament_tag: str) -> bool:
     """Generate and post a tournament recap to #elixir."""
     try:
-        context = await asyncio.to_thread(db.build_tournament_recap_context, tournament_tag)
+        context = await asyncio.to_thread(
+            db.build_tournament_recap_context, tournament_tag
+        )
         if not context:
             log.warning("Tournament recap: no context for %s", tournament_tag)
             return False
@@ -440,8 +479,10 @@ async def _tournament_recap(tournament_tag: str) -> bool:
         # Update recap_posted_at. Use _canon_tag — tournaments are stored
         # WITH the leading "#", so a bare lstrip+upper on the input would
         # never match.
-        from db import get_connection, _utcnow, _canon_tag
+        from db import _canon_tag, _utcnow, get_connection
+
         canon_tag = _canon_tag(tournament_tag)
+
         def _mark_recap_posted():
             conn = get_connection()
             try:
@@ -452,6 +493,7 @@ async def _tournament_recap(tournament_tag: str) -> bool:
                 conn.commit()
             finally:
                 conn.close()
+
         await asyncio.to_thread(_mark_recap_posted)
 
         log.info("Tournament recap posted for %s", tournament_tag)

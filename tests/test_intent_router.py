@@ -10,7 +10,6 @@ import pytest
 from agent import intent_router
 from runtime import intent_registry
 
-
 # ── Registry sanity ──────────────────────────────────────────────────────────
 
 
@@ -18,7 +17,9 @@ def test_every_route_has_required_fields():
     for route in intent_registry.ROUTES:
         assert isinstance(route["key"], str) and route["key"]
         assert isinstance(route["label"], str) and route["label"]
-        assert isinstance(route["router_description"], str) and route["router_description"]
+        assert (
+            isinstance(route["router_description"], str) and route["router_description"]
+        )
         assert isinstance(route["examples"], list) and route["examples"]
         assert isinstance(route["workflows"], set) and route["workflows"]
         assert isinstance(route.get("requires_mention", False), bool)
@@ -56,7 +57,11 @@ def test_router_route_summaries_includes_descriptions():
 def _mock_tool_call_response(args: dict) -> SimpleNamespace:
     """Build the native Anthropic Message shape that classify_intent expects."""
     return SimpleNamespace(
-        content=[SimpleNamespace(type="tool_use", id="call_1", name="select_route", input=args)],
+        content=[
+            SimpleNamespace(
+                type="tool_use", id="call_1", name="select_route", input=args
+            )
+        ],
         stop_reason="tool_use",
     )
 
@@ -64,7 +69,9 @@ def _mock_tool_call_response(args: dict) -> SimpleNamespace:
 def _patch_classify(args: dict | None, *, raise_exc: Exception | None = None):
     """Patch the LLM call inside classify_intent."""
     if raise_exc is not None:
-        return patch("agent.intent_router._create_chat_completion", side_effect=raise_exc)
+        return patch(
+            "agent.intent_router._create_chat_completion", side_effect=raise_exc
+        )
     return patch(
         "agent.intent_router._create_chat_completion",
         return_value=_mock_tool_call_response(args or {}),
@@ -82,7 +89,8 @@ def test_classify_returns_route_from_tool_call():
     with _patch_classify(args):
         intent = intent_router.classify_intent(
             "recommend four new war decks for me",
-            workflow="interactive", mentioned=True,
+            workflow="interactive",
+            mentioned=True,
         )
     assert intent["route"] == "deck_suggest"
     assert intent["mode"] == "war"
@@ -92,10 +100,16 @@ def test_classify_returns_route_from_tool_call():
 
 
 def test_classify_help_phrasing_routes_to_help():
-    args = {"route": "help", "confidence": 0.95, "rationale": "general capability question"}
+    args = {
+        "route": "help",
+        "confidence": 0.95,
+        "rationale": "general capability question",
+    }
     with _patch_classify(args):
         intent = intent_router.classify_intent(
-            "how can you help me?", workflow="interactive", mentioned=True,
+            "how can you help me?",
+            workflow="interactive",
+            mentioned=True,
         )
     assert intent["route"] == "help"
     assert intent["mode"] is None  # help has no mode_choices
@@ -105,15 +119,24 @@ def test_classify_strips_mode_for_modeless_routes():
     """If the LLM hands back a mode for a route that doesn't support modes, drop it."""
     args = {"route": "kick_risk", "mode": "war", "confidence": 0.9, "rationale": "x"}
     with _patch_classify(args):
-        intent = intent_router.classify_intent("who's at risk", workflow="clanops", mentioned=True)
+        intent = intent_router.classify_intent(
+            "who's at risk", workflow="clanops", mentioned=True
+        )
     assert intent["route"] == "kick_risk"
     assert intent["mode"] is None
 
 
 def test_classify_drops_invalid_mode_for_deck_routes():
-    args = {"route": "deck_review", "mode": "supersonic", "confidence": 0.8, "rationale": "x"}
+    args = {
+        "route": "deck_review",
+        "mode": "supersonic",
+        "confidence": 0.8,
+        "rationale": "x",
+    }
     with _patch_classify(args):
-        intent = intent_router.classify_intent("review my deck", workflow="interactive", mentioned=True)
+        intent = intent_router.classify_intent(
+            "review my deck", workflow="interactive", mentioned=True
+        )
     assert intent["route"] == "deck_review"
     assert intent["mode"] is None
 
@@ -121,7 +144,9 @@ def test_classify_drops_invalid_mode_for_deck_routes():
 def test_classify_falls_back_when_route_unknown():
     args = {"route": "totally_made_up", "confidence": 0.5, "rationale": "?"}
     with _patch_classify(args):
-        intent = intent_router.classify_intent("hi", workflow="interactive", mentioned=True)
+        intent = intent_router.classify_intent(
+            "hi", workflow="interactive", mentioned=True
+        )
     assert intent["route"] == "llm_chat"
     assert intent["fallback_reason"].startswith("unknown_route")
 
@@ -132,23 +157,36 @@ def test_classify_falls_back_when_no_tool_call():
         content=[SimpleNamespace(type="text", text="I think it's deck_review")],
         stop_reason="end_turn",
     )
-    with patch("agent.intent_router._create_chat_completion", return_value=no_tool_resp):
-        intent = intent_router.classify_intent("anything", workflow="interactive", mentioned=True)
+    with patch(
+        "agent.intent_router._create_chat_completion", return_value=no_tool_resp
+    ):
+        intent = intent_router.classify_intent(
+            "anything", workflow="interactive", mentioned=True
+        )
     assert intent["route"] == "llm_chat"
     assert intent["fallback_reason"] == "no_tool_call"
 
 
 def test_classify_falls_back_on_llm_error():
     with _patch_classify(None, raise_exc=RuntimeError("network down")):
-        intent = intent_router.classify_intent("anything", workflow="interactive", mentioned=True)
+        intent = intent_router.classify_intent(
+            "anything", workflow="interactive", mentioned=True
+        )
     assert intent["route"] == "llm_chat"
     assert intent["fallback_reason"].startswith("llm_error")
 
 
 def test_classify_target_member_is_normalized():
-    args = {"route": "deck_review", "target_member": "stranger", "confidence": 0.7, "rationale": "x"}
+    args = {
+        "route": "deck_review",
+        "target_member": "stranger",
+        "confidence": 0.7,
+        "rationale": "x",
+    }
     with _patch_classify(args):
-        intent = intent_router.classify_intent("review", workflow="interactive", mentioned=True)
+        intent = intent_router.classify_intent(
+            "review", workflow="interactive", mentioned=True
+        )
     assert intent["target_member"] is None
 
 
@@ -160,7 +198,9 @@ def test_classify_uses_lightweight_model_by_default():
         captured["model"] = kwargs.get("model")
         captured["workflow"] = kwargs.get("workflow")
         captured["tool_choice"] = kwargs.get("tool_choice")
-        return _mock_tool_call_response({"route": "help", "confidence": 0.9, "rationale": "x"})
+        return _mock_tool_call_response(
+            {"route": "help", "confidence": 0.9, "rationale": "x"}
+        )
 
     with patch("agent.intent_router._create_chat_completion", side_effect=fake_call):
         intent_router.classify_intent("help", workflow="interactive", mentioned=False)
@@ -179,7 +219,9 @@ def test_help_report_interactive_includes_registry_capabilities():
     report = _build_help_report("interactive")
     assert "Elixir Help — Interactive" in report
     # The deck_suggest route's example should now appear in help text.
-    assert "recommend four new war decks for me" in report or "build me a deck" in report
+    assert (
+        "recommend four new war decks for me" in report or "build me a deck" in report
+    )
 
 
 def test_help_report_clanops_keeps_operator_command_section():
@@ -188,5 +230,5 @@ def test_help_report_clanops_keeps_operator_command_section():
     report = _build_help_report("clanops")
     assert "Elixir Help — ClanOps" in report
     assert "/clanops clan status" in report
-    assert "/elixir system" not in report          # system dropped from Discord
+    assert "/elixir system" not in report  # system dropped from Discord
     assert "Operator commands" in report

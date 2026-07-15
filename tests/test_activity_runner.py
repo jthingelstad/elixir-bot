@@ -39,27 +39,36 @@ def test_run_activity_once_rejects_unknown_activity():
 
 
 def test_retired_activities_are_unknown():
-    # the v5.1 cut retired these registry keys outright (runtime.md §3);
-    # v5-reactive-tick is excluded — it lives on as a legacy alias of engine-tick
-    for retired in ("war-poll", "player-progression",
-                    "award-detection", "leadership-action-scan"):
+    # The v5.1 cut retired these registry keys outright (runtime.md §3).
+    for retired in (
+        "v5-reactive-tick",
+        "war-poll",
+        "player-progression",
+        "award-detection",
+        "leadership-action-scan",
+    ):
         with pytest.raises(UnknownActivityError):
             asyncio.run(run_activity_once(retired, runtime_module=SimpleNamespace()))
 
 
 def test_run_activity_once_rejects_non_manual_activity_before_calling_job():
     runtime = SimpleNamespace(
-        _war_attendance_snapshot=lambda: pytest.fail("should not run"))
+        _war_attendance_snapshot=lambda: pytest.fail("should not run")
+    )
 
     with pytest.raises(ManualActivityNotAllowed):
-        asyncio.run(run_activity_once("war-attendance-snapshot", runtime_module=runtime))
+        asyncio.run(
+            run_activity_once("war-attendance-snapshot", runtime_module=runtime)
+        )
 
 
 def test_run_shell_activity_rejects_non_manual_activity_before_rest_setup(monkeypatch):
     async def fail_rest_setup(_runtime_module):
         pytest.fail("REST setup should not run")
 
-    monkeypatch.setattr("runtime.activity_runner._build_rest_channel_lookup", fail_rest_setup)
+    monkeypatch.setattr(
+        "runtime.activity_runner._build_rest_channel_lookup", fail_rest_setup
+    )
 
     with pytest.raises(ManualActivityNotAllowed):
         asyncio.run(run_shell_activity("war-attendance-snapshot"))
@@ -69,7 +78,9 @@ def test_run_shell_activity_rejects_unknown_activity_before_rest_setup(monkeypat
     async def fail_rest_setup(_runtime_module):
         pytest.fail("REST setup should not run")
 
-    monkeypatch.setattr("runtime.activity_runner._build_rest_channel_lookup", fail_rest_setup)
+    monkeypatch.setattr(
+        "runtime.activity_runner._build_rest_channel_lookup", fail_rest_setup
+    )
 
     with pytest.raises(UnknownActivityError):
         asyncio.run(run_shell_activity("not-real"))

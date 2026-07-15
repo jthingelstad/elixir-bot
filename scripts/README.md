@@ -46,22 +46,20 @@ Override via env:
 - `ELIXIR_BACKUP_DIR` — destination dir (default: `~/elixir-backups`)
 
 ### `elixir_state.py`
-Read-only inspection of Elixir's internal event stream, projects, decision
-cases, and communication intents.
+Read-only inspection of Elixir's event streams, awareness activity, war state,
+and decision cases.
 
 ```bash
 python scripts/elixir_state.py summary
 python scripts/elixir_state.py events --days 28 --scope leadership
+python scripts/elixir_state.py awareness --limit 25
+python scripts/elixir_state.py war --json
 python scripts/elixir_state.py cases --status due
-python scripts/elixir_state.py intents --status failed --json
-python scripts/elixir_state.py projects --project-key war_season:133 --json
-python scripts/elixir_state.py rollups --rollup-type war_cycle --json
 ```
 
 Use this when you need to answer "what is Elixir monitoring?", "what
-recommendations are open?", or "what recent communications failed?" without
-reading raw Discord history. The `rollups` view is the long-term companion to
-the 90-day event stream.
+recommendations are open?", or "what did awareness recently post or skip?"
+without reading raw Discord history.
 
 ### `clean.py`
 Remove local cache/build cruft.

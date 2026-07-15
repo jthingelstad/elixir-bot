@@ -7,14 +7,15 @@ system prompts (deck review, promotion, war observations, etc.).
 """
 
 import prompts
-
 from agent.core import _build_system_prompt
 from runtime.emoji import available_emoji_names
 
 
 def _discord_emoji_guidance(*, allow_in_sensitive: bool = False) -> str:
     names = available_emoji_names()
-    emoji_list = ", ".join(f":{name}:" for name in names) if names else "(none configured)"
+    emoji_list = (
+        ", ".join(f":{name}:" for name in names) if names else "(none configured)"
+    )
     lines = [
         "Emoji in Discord-ready messages — use the literal :name: shortcode syntax and only these sources:",
         f"- Elixir server custom emoji: {emoji_list}. These are the only custom emoji that exist.",
@@ -23,7 +24,9 @@ def _discord_emoji_guidance(*, allow_in_sensitive: bool = False) -> str:
         "Do not invent custom emoji names. Shortcodes that match neither list above (e.g. :poap:, :poap_kings:) are stripped before posting.",
     ]
     if not allow_in_sensitive:
-        lines.append("Avoid emoji in sensitive, corrective, or serious leadership messages.")
+        lines.append(
+            "Avoid emoji in sensitive, corrective, or serious leadership messages."
+        )
     return "\n".join(lines) + "\n\n"
 
 
@@ -38,7 +41,7 @@ def _discord_formatting_guidance() -> str:
         "for example `- **Name** — wins: 12 · losses: 3 · fame: 2400`.\n\n"
         "Discord has a hard 2000-character limit per message and will split longer content at exactly the 2000th character — usually mid-sentence, which looks bad. "
         "Aim to keep each message under 1900 characters. "
-        "If the response genuinely needs more room, return `content` as an array of strings like `[\"first message\", \"second message\"]` and split at a clean paragraph or section break. Each element is sent as its own Discord message.\n\n"
+        'If the response genuinely needs more room, return `content` as an array of strings like `["first message", "second message"]` and split at a clean paragraph or section break. Each element is sent as its own Discord message.\n\n'
     )
 
 
@@ -72,8 +75,7 @@ def _help_system(channel_name: str, *, role: str) -> str:
         "system status. You can also point to the slash commands (`/clanops ...`), "
         "but lead with the natural-language help."
         if role == "clanops"
-        else
-        "You are answering a 'how can you help me?' style question in a member-facing channel. "
+        else "You are answering a 'how can you help me?' style question in a member-facing channel. "
         "Speak as a clan teammate — concrete about what a regular player can ask: their own deck, "
         "card collection, recent form, war participation, signature cards, or general clan questions. "
         "Mention that you are read-only here and don't make admin decisions."
@@ -96,7 +98,9 @@ def _help_system(channel_name: str, *, role: str) -> str:
     )
 
 
-def _proactive_channel_system(channel_name: str, lane_key: str, *, leadership: bool = False):
+def _proactive_channel_system(
+    channel_name: str, lane_key: str, *, leadership: bool = False
+):
     purpose, knowledge, channel_context = _lane_base(channel_name, lane_key)
     memory_scope = "leadership plus public" if leadership else "public"
     return _build_system_prompt(
@@ -126,7 +130,7 @@ def _proactive_channel_system(channel_name: str, lane_key: str, *, leadership: b
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_update", '
         '"member_tags": [], "member_names": [], "summary": "one sentence", '
-        '"content": "full Discord-ready markdown post OR [\"post 1\", \"post 2\"]", "metadata": {}}\n\n'
+        '"content": "full Discord-ready markdown post OR ["post 1", "post 2"]", "metadata": {}}\n\n'
         "If the signals are genuinely not worth posting about, abstain. Two ways to abstain:\n"
         "- Return exactly: null\n"
         '- Or return: {"event_type": "channel_update", "summary": "why skipping", "content": "", "metadata": {"decision": "no_post", "reason": "short tag"}}\n\n'
@@ -252,7 +256,7 @@ def _clan_chat_copy_system():
         "Treat it as part of Elixir's in-game relay persona, not as Discord metadata. "
         "If `signature.enabled` is false, do not sign the message.\n\n"
         "Return JSON only, with no markdown wrapper:\n"
-        "{\"messages\": [\"message 1\", \"message 2\"], \"summary\": \"short summary\"}",
+        '{"messages": ["message 1", "message 2"], "summary": "short summary"}',
     )
 
 
@@ -329,13 +333,13 @@ def _interactive_system(channel_name):
         "Chain aspect='player_battles' into aspect='player' or aspect='clan' to scout opponents. "
         "If the user asks about something the CR API doesn't expose (battle IDs, match IDs, historical clan rosters), say so plainly — do not improvise.\n\n"
         "For member-specific factual questions like join date, how long someone has been playing, recent activity, deck, war status, or trend details, use the member tools instead of relying on the clipped roster snapshot or memory.\n\n"
-        "When a request is genuinely ambiguous in a way that would change which tool you call (e.g. \"my cards\" could mean current deck, war decks, full collection, ready-to-upgrade, or by rarity; \"recent\" could mean today's session vs last 10 battles), ask one focused clarifying question instead of guessing. Skip the clarification when there's an obvious default or the answer wouldn't change much across interpretations.\n\n"
-        "For card questions, start with `get_member_card_profile` — it's a cheap fixed-size digest that answers most broad questions (\"how am I doing on cards\", \"what should I upgrade\", \"do I have legendaries\", \"tell me about my cards\"). It includes per-rarity counts, ready-to-upgrade tops, closest-to-max tops, and king-tower gaps. Only call `lookup_member_cards` when the user wants a specific slice the digest doesn't cover. Pick the filter that matches their intent: `deck=true` for the current Trophy Road deck, `mode=war` for war decks (note: inferred, not authoritative), `rarity=legendary` etc. for collection-by-rarity, `ready_to_upgrade=true` for what they can level up right now, `name=<card>` for a single card.\n\n"
+        'When a request is genuinely ambiguous in a way that would change which tool you call (e.g. "my cards" could mean current deck, war decks, full collection, ready-to-upgrade, or by rarity; "recent" could mean today\'s session vs last 10 battles), ask one focused clarifying question instead of guessing. Skip the clarification when there\'s an obvious default or the answer wouldn\'t change much across interpretations.\n\n'
+        'For card questions, start with `get_member_card_profile` — it\'s a cheap fixed-size digest that answers most broad questions ("how am I doing on cards", "what should I upgrade", "do I have legendaries", "tell me about my cards"). It includes per-rarity counts, ready-to-upgrade tops, closest-to-max tops, and king-tower gaps. Only call `lookup_member_cards` when the user wants a specific slice the digest doesn\'t cover. Pick the filter that matches their intent: `deck=true` for the current Trophy Road deck, `mode=war` for war decks (note: inferred, not authoritative), `rarity=legendary` etc. for collection-by-rarity, `ready_to_upgrade=true` for what they can level up right now, `name=<card>` for a single card.\n\n'
         "Do not call `get_member` with `include=['cards']` — that path returns a verbose 100+ card payload that overflows context. Use the card-specific tools above instead.\n\n"
         "When card data includes mode fields like `supports_evo`, `supports_hero`, `evo_unlocked`, `hero_unlocked`, `mode_label`, or `mode_status_label`, explain them in player terms as Evo, Hero, or Evo + Hero. "
-        "Those current-deck and collection fields describe ownership, support, or current slot configuration; do not call them \"evolution level,\" and do not infer battle deployment from them. "
+        'Those current-deck and collection fields describe ownership, support, or current slot configuration; do not call them "evolution level," and do not infer battle deployment from them. '
         "When battle-derived entries such as `signature_cards`, losses cards, or opponent card summaries include `played_as`, that means the card was actually deployed in that mode in recent battles. "
-        "For example, `played_as: \"evo\"` means you can say the player actually used that card as Evo in those battles.\n\n"
+        'For example, `played_as: "evo"` means you can say the player actually used that card as Evo in those battles.\n\n'
         "Current gold, wild cards, and other upgrade resources are not exposed by any tool. Treat them as unknown. "
         "If someone asks what they can upgrade right now, say resources are unknown and answer with upgrade priorities or cards closest to max instead.\n\n"
         "If a follow-up question exposes that an earlier answer assumed a missing fact, correct yourself clearly and continue from the corrected context.\n\n"
@@ -351,18 +355,18 @@ def _interactive_system(channel_name):
         "For 'what's been happening' / 'this week' use `get_elixir_state` aspect='recent_events' or aspect='event_summary'; "
         "for the River Race season trajectory — week-by-week rank and fame — use aspect='season_window'. "
         "Questions like 'who's been grinding ranked', 'how's our 2v2 going', or 'what's our season looking like' should pull these, not the roster snapshot.\n\n"
-        "Members can react to your responses with 👍 or 👎 to give feedback — 👎 triggers an automatic offer for them to retry. Occasionally (perhaps once every 5–10 substantive responses, not every turn) close your reply with a brief one-liner inviting that feedback, e.g. *\"React 👍 or 👎 if this helped or missed — I learn from it.\"* Only do this on substantive answers, never on greetings, clarifying questions, deflections, or quick acknowledgements. Don't repeat the nudge in the same conversation thread.\n\n"
+        'Members can react to your responses with 👍 or 👎 to give feedback — 👎 triggers an automatic offer for them to retry. Occasionally (perhaps once every 5–10 substantive responses, not every turn) close your reply with a brief one-liner inviting that feedback, e.g. *"React 👍 or 👎 if this helped or missed — I learn from it."* Only do this on substantive answers, never on greetings, clarifying questions, deflections, or quick acknowledgements. Don\'t repeat the nudge in the same conversation thread.\n\n'
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
-        "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
-        "If they specify a target channel, include \"share_channel\" with that exact channel name. Otherwise default to #elixir.\n\n"
+        'A user may ask you to share something with the clan. When they do, use event_type "channel_share" and include a "share_content" field. '
+        'If they specify a target channel, include "share_channel" with that exact channel name. Otherwise default to #elixir.\n\n'
         "When someone tells you something to remember, corrects a fact, or states a durable fact worth persisting, "
-        "include a \"memories\" array in your JSON response. "
-        "Each entry: {\"title\": \"short label\", \"body\": \"full fact\", \"action\": \"save\" or \"correct\", "
-        "\"member_tag\": \"player tag, name, or handle if member-specific, or null\", \"tags\": [\"tag1\"]}.\n"
+        'include a "memories" array in your JSON response. '
+        'Each entry: {"title": "short label", "body": "full fact", "action": "save" or "correct", '
+        '"member_tag": "player tag, name, or handle if member-specific, or null", "tags": ["tag1"]}.\n'
         "CRITICAL: If your response text acknowledges remembering, noting, correcting, or updating something, "
         "you MUST include a corresponding entry in the memories array. "
         "Never claim you have updated memory without including it in the array.\n"
-        "For corrections (action: \"correct\"), the body contains the NEW correct information. "
+        'For corrections (action: "correct"), the body contains the NEW correct information. '
         "The system will search for and archive the old conflicting memory automatically.\n"
         "If no memories need saving, omit the field or use an empty array.\n\n"
         f"{_discord_formatting_guidance()}"
@@ -396,11 +400,11 @@ def _clanops_system(channel_name):
         "If a member is referenced by name or Discord handle, resolve them first instead of guessing.\n\n"
         "When leaders ask what you are monitoring, which recommendations are open, what you would do next, "
         "why you posted something, or whether a recommendation was declined, use `get_elixir_state` first. "
-        "Use aspect='decision_cases' for open/due recommendations, aspect='communication_intents' for recent planned/skipped/delivered/failed communications, "
+        "Use aspect='decision_cases' for open/due recommendations, aspect='awareness_activity' for recent post-vs-silence decisions and confirmed deliveries, "
         "aspect='war_season' for the live war-season snapshot, "
         "aspect='event_summary' or aspect='recent_events' for the event stream, "
         "aspect='game_modes' for per-mode clan battle activity (Trophy Road, Path of Legends, 2v2, events, with win rates and top players), "
-        "and aspect='communication_trace' with a Discord message id when explaining a specific post. "
+        "and `lookup_reference` with an L-number from awareness activity when explaining a specific loop. "
         "Do not reconstruct this from Discord history alone when structured state is available.\n\n"
         "The cr_api tool is your bridge to the live Clash Royale API for ANY external player, clan, or tournament by tag. "
         "Reach for it when a user hands you a tag — e.g. 'tell me about player #ABC', 'how is clan #XYZ', 'scout the clan I just lost to'. "
@@ -412,9 +416,9 @@ def _clanops_system(channel_name):
         "If someone asks for deck advice based on their card levels or their whole collection, use the card-collection tool instead of only looking at their current deck.\n\n"
         "If someone asks which cards they have unlocked by rarity, like legendary cards or champions, use the card-collection tool for the full collection and pass a rarity filter when useful. Do not answer those questions from the current deck.\n\n"
         "When card data includes mode fields like `supports_evo`, `supports_hero`, `evo_unlocked`, `hero_unlocked`, `mode_label`, or `mode_status_label`, explain them in player terms as Evo, Hero, or Evo + Hero. "
-        "Those current-deck and collection fields describe ownership, support, or current slot configuration; do not call them \"evolution level,\" and do not infer battle deployment from them. "
+        'Those current-deck and collection fields describe ownership, support, or current slot configuration; do not call them "evolution level," and do not infer battle deployment from them. '
         "When battle-derived entries such as `signature_cards`, losses cards, or opponent card summaries include `played_as`, that means the card was actually deployed in that mode in recent battles. "
-        "For example, `played_as: \"evo\"` means you can say the player actually used that card as Evo in those battles.\n\n"
+        'For example, `played_as: "evo"` means you can say the player actually used that card as Evo in those battles.\n\n'
         "Current gold, wild cards, and other upgrade resources are not exposed by any tool. Treat them as unknown. "
         "If someone asks what they can upgrade right now, say resources are unknown and answer with upgrade priorities or cards closest to max instead.\n\n"
         "Use recent conversation turns to resolve follow-up questions, and if a new turn reveals that an earlier answer assumed a missing fact, correct the earlier claim instead of compounding it.\n\n"
@@ -423,19 +427,19 @@ def _clanops_system(channel_name):
         "If someone asks about those badge-backed metrics, use the named profile fields directly instead of reading raw badge JSON. "
         "Only say that exact account age is not recorded when those fields are actually missing.\n\n"
         "When leadership tells you something to remember, corrects a fact, makes a decision, "
-        "or states a durable fact worth persisting, include a \"memories\" array in your JSON response. "
-        "Each entry: {\"title\": \"short label\", \"body\": \"full fact\", \"action\": \"save\" or \"correct\", "
-        "\"member_tag\": \"player tag, name, or handle if member-specific, or null\", \"tags\": [\"tag1\"]}.\n"
+        'or states a durable fact worth persisting, include a "memories" array in your JSON response. '
+        'Each entry: {"title": "short label", "body": "full fact", "action": "save" or "correct", '
+        '"member_tag": "player tag, name, or handle if member-specific, or null", "tags": ["tag1"]}.\n'
         "CRITICAL: If your response text acknowledges remembering, noting, correcting, or updating something, "
         "you MUST include a corresponding entry in the memories array. "
         "Never claim you have updated memory without including it in the array.\n"
-        "For corrections (action: \"correct\"), the body contains the NEW correct information. "
+        'For corrections (action: "correct"), the body contains the NEW correct information. '
         "The system will search for and archive the old conflicting memory automatically.\n"
         "If no memories need saving, omit the field or use an empty array.\n\n"
         "For performance, momentum, or roster-health questions over time, prefer the long-term trend tools and summaries.\n\n"
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
-        "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
-        "If they specify a target channel, include \"share_channel\" with that exact channel name. Otherwise default to #elixir.\n\n"
+        'A user may ask you to share something with the clan. When they do, use event_type "channel_share" and include a "share_content" field. '
+        'If they specify a target channel, include "share_channel" with that exact channel name. Otherwise default to #elixir.\n\n'
         f"{_discord_formatting_guidance()}"
         f"{_discord_emoji_guidance(allow_in_sensitive=True)}"
         "Respond with JSON only (no markdown wrapper):\n"
@@ -450,7 +454,9 @@ def _clanops_system(channel_name):
     )
 
 
-def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "review"):
+def _deck_review_system(
+    channel_name, *, mode: str = "regular", subject: str = "review"
+):
     """System prompt for the deck_review workflow.
 
     mode: 'regular' (Trophy Road / current deck) or 'war' (the four river-race war decks).
@@ -470,7 +476,7 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
         "Use screenshot evidence as the user's provided context, then use tools for authoritative card facts, player collection levels, recent losses, war state, and recommendations.\n\n"
         "Always call lookup_cards before claiming anything about a card's elixir cost, rarity, type, or evolution capability — and BEFORE computing any average or total elixir cost across a deck or set of cards. Memory is NEVER an acceptable source for elixir costs, even when 'just adding them up'.\n"
         "If the user message includes a VERIFIED CARD ELIXIR COSTS block, treat those values as authoritative and use them directly instead of calling lookup_cards again for those cards.\n"
-        "Before suggesting any card swap, verify the player owns the candidate at competitive level. Use `lookup_member_cards(filter={\"name\":\"<card>\"})` for a single-card check, or `get_member_card_profile` for a collection overview. Never recommend a card the player does not own at competitive level. Do NOT call get_member with include=['cards'] — that path is deprecated.\n"
+        'Before suggesting any card swap, verify the player owns the candidate at competitive level. Use `lookup_member_cards(filter={"name":"<card>"})` for a single-card check, or `get_member_card_profile` for a collection overview. Never recommend a card the player does not own at competitive level. Do NOT call get_member with include=[\'cards\'] — that path is deprecated.\n'
         "Always call get_deck_intelligence(view='member') before giving advice, using scope='war', 'ranked', 'ladder', or 'ladder_ranked' to match the user's mode. Ground claims in its observed primary deck, variants, stability, substitutions, and W/L evidence. Elixir does NOT store opponent deck lists, so never cite specific opponent cards or claim a matchup pattern the evidence does not contain. Use cr_api on a named opponent only when a specific live lookup is genuinely needed.\n\n"
     )
 
@@ -519,15 +525,13 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
             "If you cannot satisfy the no-overlap + ownership constraints, say so and ask the user which deck they want simplified.\n\n"
         )
     else:
-        subject_guidance = (
-            "REVIEW MODE: You are critiquing an EXISTING deck. Highlight strengths first, then 1–3 specific concrete swap suggestions grounded in recent losses and the player's collection. Don't redesign the whole deck unless asked.\n\n"
-        )
+        subject_guidance = "REVIEW MODE: You are critiquing an EXISTING deck. Highlight strengths first, then 1–3 specific concrete swap suggestions grounded in recent losses and the player's collection. Don't redesign the whole deck unless asked.\n\n"
 
     closing_guidance = (
         "Card mode labels (`mode_label`, `supports_evo`, `supports_hero`, `evo_unlocked`, `hero_unlocked`) describe ownership, support, or current slot configuration. "
         "Refer to them as Evo, Hero, or Evo + Hero, but do not call them 'evolution level' or infer battle deployment from them. "
         "By contrast, battle-derived `played_as` fields on `signature_cards`, losses cards, or opponent card summaries mean the card was actually deployed in that mode in recent battles. "
-        "When `played_as: \"evo\"` appears there, you can say the player or opponent actually used that card as Evo.\n\n"
+        'When `played_as: "evo"` appears there, you can say the player or opponent actually used that card as Evo.\n\n'
         "Current gold and upgrade resources are not exposed by any tool. Treat them as unknown rather than guessing.\n\n"
         f"{_discord_formatting_guidance()}"
         f"{_discord_emoji_guidance()}"
@@ -557,7 +561,11 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
         purpose,
         knowledge,
         channel_context,
-        base_guidance + mode_guidance + subject_guidance + closing_guidance + response_format,
+        base_guidance
+        + mode_guidance
+        + subject_guidance
+        + closing_guidance
+        + response_format,
     )
 
 
@@ -578,7 +586,7 @@ def _arena_relay_observation_system(channel_name: str):
         "When the screenshot reveals a durable fact leaders should remember later, include a `memories` array. "
         "Save only clear, useful facts: member availability, stated absence/return timing, promotion or role-change evidence, recurring chat context, completed/blocked action evidence, or stable player-state observations that may affect future advice. "
         "Do not save temporary UI counts like current open boat-defense slots unless they explain an action outcome or a short-lived operational blocker. "
-        "Each memory entry must be: {\"title\": \"short label\", \"body\": \"screenshot-observed fact with timestamp/context\", \"action\": \"save\" or \"correct\", \"member_tag\": \"player tag, visible player name, or null\", \"confidence\": 0.6-0.95, \"tags\": [\"screenshot\", \"availability\"]}. "
+        'Each memory entry must be: {"title": "short label", "body": "screenshot-observed fact with timestamp/context", "action": "save" or "correct", "member_tag": "player tag, visible player name, or null", "confidence": 0.6-0.95, "tags": ["screenshot", "availability"]}. '
         "Use `member_tag` when the fact is about one visible/resolvable member, otherwise null. "
         "If no durable facts should be saved, use an empty memories array.\n\n"
         "Also include an `observation` object so Elixir can track screenshot learning over time. "
@@ -596,7 +604,7 @@ def _arena_relay_observation_system(channel_name: str):
         '"summary": "one sentence observation summary", '
         '"content": "Discord-ready concise readout", '
         '"observation": {"screenshot_type": "boat_defense", "players": [], "actionable_facts": [], "uncertainty": null}, '
-        ''
+        ""
         '"memories": []}'
     )
     return _build_system_prompt(purpose, knowledge, channel_context, guidance)
@@ -807,8 +815,7 @@ def _tournament_update_system():
         prompts.identity_block(),
         prompts.knowledge_block(),
         prompts.agent_prompt("tournament"),
-        f"{_discord_formatting_guidance()}"
-        f"{_discord_emoji_guidance()}",
+        f"{_discord_formatting_guidance()}{_discord_emoji_guidance()}",
     )
 
 
@@ -873,6 +880,7 @@ def _channel_lane_system(channel_name: str, *, leadership: bool = False):
         ),
         leadership=leadership,
     )
+
 
 __all__ = [
     "_interactive_system",

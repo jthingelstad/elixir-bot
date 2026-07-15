@@ -1,4 +1,5 @@
 """Evergreen nudges: quiet-period gating, rate cap, cooldown, rotation."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -52,7 +53,9 @@ def test_due_nudge_picks_never_sent(engine_conn):
     c = engine_conn
     ensure_schema(c)
     item = due_nudge(c, NOW)
-    assert item is not None and item["nudge_key"] in {n["nudge_key"] for n in SEED_NUDGES}
+    assert item is not None and item["nudge_key"] in {
+        n["nudge_key"] for n in SEED_NUDGES
+    }
     assert "forbidden_terms" in item  # parsed for the composer
 
 
@@ -69,10 +72,14 @@ def test_per_item_cooldown_and_rotation(engine_conn):
     c = engine_conn
     ensure_schema(c)
     # discord_invite sent 40d ago (past its 30d cooldown), poap_faq 10d ago (within)
-    c.execute("UPDATE evergreen_nudges SET last_sent_at=? WHERE nudge_key='discord_invite'",
-              (_iso(NOW - timedelta(days=40)),))
-    c.execute("UPDATE evergreen_nudges SET last_sent_at=? WHERE nudge_key='poap_faq'",
-              (_iso(NOW - timedelta(days=10)),))
+    c.execute(
+        "UPDATE evergreen_nudges SET last_sent_at=? WHERE nudge_key='discord_invite'",
+        (_iso(NOW - timedelta(days=40)),),
+    )
+    c.execute(
+        "UPDATE evergreen_nudges SET last_sent_at=? WHERE nudge_key='poap_faq'",
+        (_iso(NOW - timedelta(days=10)),),
+    )
     c.commit()
     # global cap counts from the most recent send (poap_faq, 10d ago) → past 7d, ok.
     item = due_nudge(c, NOW)
@@ -86,10 +93,14 @@ def test_pending_card_blocks(engine_conn):
     c = engine_conn
     ensure_schema(c)
     from db import create_leader_action_recommendation
+
     create_leader_action_recommendation(
-        action_type="in_game_relay", objective="clan_nudge",
-        prompt_text="x", source_signal_key="evergreen_nudge:test",
-        source_signal_type="evergreen_nudge", conn=c,
+        action_type="in_game_relay",
+        objective="clan_nudge",
+        prompt_text="x",
+        source_signal_key="evergreen_nudge:test",
+        source_signal_type="evergreen_nudge",
+        conn=c,
     )
     c.commit()
     assert due_nudge(c, NOW) is None  # a proposed nudge card already pending

@@ -13,14 +13,14 @@ from __future__ import annotations
 from engine.emitters import insert_stream_event
 
 CARD_UNLOCK_RARITIES = {"legendary", "champion"}  # detectors.py:239 UNLOCK_RARITIES
-CARD_LEVEL_MIN = 16          # detectors.py:187 MIN_LEVEL
+CARD_LEVEL_MIN = 16  # detectors.py:187 MIN_LEVEL
 COLLECTION_LEVEL_STEP = 100  # detectors.py:297 STEP
-CAREER_WINS_STEP = 1000      # detectors.py:67 STEP
+CAREER_WINS_STEP = 1000  # detectors.py:67 STEP
 # Trophy peaks fire every 250 (was 100). A 100-trophy step made a "new personal
 # best" fire on tiny increments — the 24h review saw the same climber posted for
 # 13,000 then 13,142 hours later. 250 is the deterministic minimum delta before a
 # peak re-surfaces; the brain applies a further per-member cooldown on top.
-BEST_TROPHIES_STEP = 250     # detectors.py:53 (raised from 100, 2026-07-12)
+BEST_TROPHIES_STEP = 250  # detectors.py:53 (raised from 100, 2026-07-12)
 # detectors.py:91 said 10 — the OLD Path of Legends scale. The mid-2025 rework
 # has seven leagues (7 = Ultimate Champion), so the carried constant meant
 # ultimate_champion_reached could never fire (found building ranked seasons,
@@ -75,10 +75,14 @@ def project_player_aspects(payload: dict) -> dict[str, dict]:
         },
         "collection_level": badges.get("CollectionLevel") or {},
     }
+
     def _season_result(key: str) -> dict:
         r = payload.get(key) or {}
-        return {"league": r.get("leagueNumber"), "rank": r.get("rank"),
-                "trophies": r.get("trophies")}
+        return {
+            "league": r.get("leagueNumber"),
+            "rank": r.get("rank"),
+            "trophies": r.get("trophies"),
+        }
 
     pol = payload.get("currentPathOfLegendSeasonResult") or {}
     ranked = {
@@ -93,11 +97,15 @@ def project_player_aspects(payload: dict) -> dict[str, dict]:
     return {"profile": profile, "cards": cards, "ranked": ranked}
 
 
-def _emit(conn, tag, observed_at, window_start, event_type, dedup_suffix, payload) -> int:
+def _emit(
+    conn, tag, observed_at, window_start, event_type, dedup_suffix, payload
+) -> int:
     return insert_stream_event(
         conn,
         "player_events",
-        dedup_key=f"{event_type}:{tag}:{dedup_suffix}" if dedup_suffix else f"{event_type}:{tag}",
+        dedup_key=f"{event_type}:{tag}:{dedup_suffix}"
+        if dedup_suffix
+        else f"{event_type}:{tag}",
         event_type=event_type,
         subject_cols={"player_tag": tag},
         observed_at=observed_at,
@@ -115,24 +123,57 @@ def emit_profile(conn, tag, old, new, observed_at, window_start) -> int:
     # #164 + memory cr-progression-model-2026.
     # career_wins_milestone — every 1000 (CareerWinsMilestoneDetector)
     for m in _milestones(old.get("wins"), new.get("wins"), CAREER_WINS_STEP):
-        n += _emit(conn, tag, observed_at, window_start, "career_wins_milestone", m,
-                   {"milestone": m, "wins": new.get("wins")})
+        n += _emit(
+            conn,
+            tag,
+            observed_at,
+            window_start,
+            "career_wins_milestone",
+            m,
+            {"milestone": m, "wins": new.get("wins")},
+        )
     # best_trophies_peak — every 100 (BestTrophiesPeakDetector)
-    for b in _milestones(old.get("best_trophies"), new.get("best_trophies"), BEST_TROPHIES_STEP):
-        n += _emit(conn, tag, observed_at, window_start, "best_trophies_peak", b,
-                   {"boundary": b, "best_trophies": new.get("best_trophies")})
+    for b in _milestones(
+        old.get("best_trophies"), new.get("best_trophies"), BEST_TROPHIES_STEP
+    ):
+        n += _emit(
+            conn,
+            tag,
+            observed_at,
+            window_start,
+            "best_trophies_peak",
+            b,
+            {"boundary": b, "best_trophies": new.get("best_trophies")},
+        )
     # badge_earned — newly-present badge (BadgeEarnedDetector; keyed by name)
     old_badges = old.get("badges") or {}
     for name, info in (new.get("badges") or {}).items():
         if name not in old_badges:
-            n += _emit(conn, tag, observed_at, window_start, "badge_earned", name,
-                       {"badge_name": name, "level": (info or {}).get("level")})
+            n += _emit(
+                conn,
+                tag,
+                observed_at,
+                window_start,
+                "badge_earned",
+                name,
+                {"badge_name": name, "level": (info or {}).get("level")},
+            )
     # arena_changed — §11's profile-side arena-up confirmation (new in v5.1)
     old_arena, new_arena = old.get("arena_id"), new.get("arena_id")
     if new_arena is not None and old_arena is not None and new_arena != old_arena:
-        n += _emit(conn, tag, observed_at, window_start, "arena_changed", new_arena,
-                   {"arena_id": new_arena, "arena_name": new.get("arena_name"),
-                    "prev_arena_id": old_arena})
+        n += _emit(
+            conn,
+            tag,
+            observed_at,
+            window_start,
+            "arena_changed",
+            new_arena,
+            {
+                "arena_id": new_arena,
+                "arena_name": new.get("arena_name"),
+                "prev_arena_id": old_arena,
+            },
+        )
     return n
 
 
@@ -146,24 +187,50 @@ def emit_cards(conn, tag, old, new, observed_at, window_start) -> int:
         # new_champion_unlocked is deliberately NOT carried (events.md §6:
         # rarity payload + ledger replace the double-post path).
         if card_id not in old_cards and card.get("rarity") in CARD_UNLOCK_RARITIES:
-            n += _emit(conn, tag, observed_at, window_start, "card_unlocked", card_id,
-                       {"card_id": int(card_id), "card_name": card.get("name"),
-                        "rarity": card.get("rarity")})
+            n += _emit(
+                conn,
+                tag,
+                observed_at,
+                window_start,
+                "card_unlocked",
+                card_id,
+                {
+                    "card_id": int(card_id),
+                    "card_name": card.get("name"),
+                    "rarity": card.get("rarity"),
+                },
+            )
         # card_level_milestone — each level ≥16 (CardLevelMilestoneDetector)
         new_level = card.get("level")
         if isinstance(new_level, int):
             old_level = prev.get("level") if isinstance(prev.get("level"), int) else -1
             for milestone in range(max(old_level + 1, CARD_LEVEL_MIN), new_level + 1):
-                n += _emit(conn, tag, observed_at, window_start, "card_level_milestone",
-                           f"{card_id}:{milestone}",
-                           {"card_id": int(card_id), "card_name": card.get("name"),
-                            "milestone": milestone})
+                n += _emit(
+                    conn,
+                    tag,
+                    observed_at,
+                    window_start,
+                    "card_level_milestone",
+                    f"{card_id}:{milestone}",
+                    {
+                        "card_id": int(card_id),
+                        "card_name": card.get("name"),
+                        "milestone": milestone,
+                    },
+                )
     # collection_level_milestone — CollectionLevel badge progress, step 100
     old_cl = (old.get("collection_level") or {}).get("progress")
     new_cl = (new.get("collection_level") or {}).get("progress")
     for m in _milestones(old_cl, new_cl, COLLECTION_LEVEL_STEP):
-        n += _emit(conn, tag, observed_at, window_start, "collection_level_milestone", m,
-                   {"milestone": m, "collection_level": new_cl})
+        n += _emit(
+            conn,
+            tag,
+            observed_at,
+            window_start,
+            "collection_level_milestone",
+            m,
+            {"milestone": m, "collection_level": new_cl},
+        )
     return n
 
 
@@ -179,19 +246,40 @@ def emit_ranked(conn, tag, old, new, observed_at, window_start) -> int:
     orank, nrank = old.get("rank"), new.get("rank")
     # pol_promotion — league increase (PathOfLegendDetector)
     if isinstance(ol, int) and isinstance(nl, int) and nl > ol:
-        n += _emit(conn, tag, observed_at, window_start, "pol_promotion", nl,
-                   {"league": nl, "prev_league": ol})
+        n += _emit(
+            conn,
+            tag,
+            observed_at,
+            window_start,
+            "pol_promotion",
+            nl,
+            {"league": nl, "prev_league": ol},
+        )
         # ultimate_champion_reached — crossing into league 10
         if nl == ULTIMATE_CHAMPION_LEAGUE and ol < ULTIMATE_CHAMPION_LEAGUE:
-            n += _emit(conn, tag, observed_at, window_start, "ultimate_champion_reached", None,
-                       {"league": nl})
+            n += _emit(
+                conn,
+                tag,
+                observed_at,
+                window_start,
+                "ultimate_champion_reached",
+                None,
+                {"league": nl},
+            )
     # pol_global_rank_attained — rank attained or improved (lower = better);
     # key = to_rank (events.md §3: key prefix = event_type, rank attained)
     from engine.normalize import pol_rank_improved
 
     if pol_rank_improved(orank, nrank):
-        n += _emit(conn, tag, observed_at, window_start, "pol_global_rank_attained", nrank,
-                   {"from_rank": orank, "to_rank": nrank, "league": nl})
+        n += _emit(
+            conn,
+            tag,
+            observed_at,
+            window_start,
+            "pol_global_rank_attained",
+            nrank,
+            {"from_rank": orank, "to_rank": nrank, "league": nl},
+        )
 
     # Ranked season rollover (ranked-and-profiles.md §2.1): `last` changes
     # only at the monthly reset. First-diff guard (D6): a baseline written
@@ -200,7 +288,8 @@ def emit_ranked(conn, tag, old, new, observed_at, window_start) -> int:
     old_last, new_last = old.get("last"), new.get("last")
     if (
         "last" in old
-        and isinstance(old_last, dict) and isinstance(new_last, dict)
+        and isinstance(old_last, dict)
+        and isinstance(new_last, dict)
         and old_last != new_last
         and new_last.get("league") is not None
     ):

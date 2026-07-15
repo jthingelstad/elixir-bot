@@ -10,8 +10,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Optional
 
-from db import managed_connection
 from capabilities.contracts import ClanGameModesResult, ClanGameModeWindowsResult
+from db import managed_connection
 from engine.normalize import ranked_league_name
 from storage import player as player_storage
 
@@ -25,13 +25,17 @@ def _ranked_standings(profiles: list[dict]) -> list[dict]:
         league = profile.get("league_number")
         if league is None:
             continue
-        standings.append({
-            "member_ref": profile.get("member_ref") or profile.get("name") or profile.get("tag"),
-            "player_tag": profile.get("player_tag") or profile.get("tag"),
-            "league": league,
-            "league_name": ranked_league_name(league),
-            "rating": profile.get("ranked_trophies"),
-        })
+        standings.append(
+            {
+                "member_ref": profile.get("member_ref")
+                or profile.get("name")
+                or profile.get("tag"),
+                "player_tag": profile.get("player_tag") or profile.get("tag"),
+                "league": league,
+                "league_name": ranked_league_name(league),
+                "rating": profile.get("ranked_trophies"),
+            }
+        )
     return standings
 
 

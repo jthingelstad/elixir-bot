@@ -117,7 +117,9 @@ def compute_season_award_outcome(conn, season_id: int) -> dict:
         }
         for row in rows
     ]
-    standings.sort(key=lambda entry: (-entry["points"], -entry["donations"], entry["tag"]))
+    standings.sort(
+        key=lambda entry: (-entry["points"], -entry["donations"], entry["tag"])
+    )
     _assign_ranks(standings, "points")
 
     active_rows = conn.execute(
@@ -140,9 +142,7 @@ def compute_season_award_outcome(conn, season_id: int) -> dict:
         for tag, total in donations.items()
         if total > 0 and tag in active_names
     ]
-    donation_champs.sort(
-        key=lambda entry: (-entry["total_donations"], entry["tag"])
-    )
+    donation_champs.sort(key=lambda entry: (-entry["total_donations"], entry["tag"]))
     _assign_ranks(donation_champs, "total_donations")
 
     rookie_rows = conn.execute(
@@ -194,12 +194,19 @@ def compute_season_award_outcome(conn, season_id: int) -> dict:
         (int(season_id),),
     ).fetchone()
     last_free_pass = (
-        {"season_id": int(prior["season_id"]), "tag": prior["tag"], "name": prior["name"]}
-        if prior else None
+        {
+            "season_id": int(prior["season_id"]),
+            "tag": prior["tag"],
+            "name": prior["name"],
+        }
+        if prior
+        else None
     )
     champion = standings[0] if standings else None
     prior_tag = last_free_pass["tag"] if last_free_pass else None
-    free_pass = next((entry for entry in standings if entry["tag"] != prior_tag), champion)
+    free_pass = next(
+        (entry for entry in standings if entry["tag"] != prior_tag), champion
+    )
     return {
         "season_id": int(season_id),
         "standings": standings,
@@ -208,7 +215,9 @@ def compute_season_award_outcome(conn, season_id: int) -> dict:
         "last_free_pass": last_free_pass,
         "free_pass": free_pass,
         "free_pass_tag": free_pass["tag"] if free_pass else None,
-        "rotation_applied": bool(champion and free_pass and champion["tag"] != free_pass["tag"]),
+        "rotation_applied": bool(
+            champion and free_pass and champion["tag"] != free_pass["tag"]
+        ),
         "donation_champs": donation_champs,
         "rookie_mvps": rookie_mvps,
         # Every active participant with points receives the silent participation

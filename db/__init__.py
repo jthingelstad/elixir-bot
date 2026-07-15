@@ -126,7 +126,9 @@ def chicago_date_for_cr_timestamp(value: Optional[str]) -> Optional[str]:
 def chicago_day_bounds_utc(metric_date: str) -> tuple[str, str]:
     local_start = datetime.strptime(metric_date, "%Y-%m-%d").replace(tzinfo=CHICAGO_TZ)
     utc_start = local_start.astimezone(timezone.utc).replace(tzinfo=None)
-    utc_end = (local_start + timedelta(days=1)).astimezone(timezone.utc).replace(tzinfo=None)
+    utc_end = (
+        (local_start + timedelta(days=1)).astimezone(timezone.utc).replace(tzinfo=None)
+    )
     return (
         utc_start.strftime("%Y-%m-%dT%H:%M:%S"),
         utc_end.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -149,7 +151,11 @@ def _rowdicts(rows: Iterable[sqlite3.Row]) -> list[dict]:
 
 
 def _hash_payload(payload) -> str:
-    data = payload if isinstance(payload, str) else json.dumps(payload, sort_keys=True, default=str)
+    data = (
+        payload
+        if isinstance(payload, str)
+        else json.dumps(payload, sort_keys=True, default=str)
+    )
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
@@ -219,7 +225,9 @@ def _build_form_label(wins: int, losses: int, sample_size: int) -> str:
     return "mixed"
 
 
-def _build_form_summary(wins: int, losses: int, draws: int, sample_size: int, label: str) -> str:
+def _build_form_summary(
+    wins: int, losses: int, draws: int, sample_size: int, label: str
+) -> str:
     if sample_size == 0:
         return "No recent battles recorded."
     return f"{wins}-{losses}-{draws} over the last {sample_size} battles ({label})."
@@ -247,7 +255,9 @@ def _played_as(card: dict) -> Optional[str]:
     return None
 
 
-def _aggregate_card_usage_from_battle_facts(rows: Iterable[sqlite3.Row]) -> tuple[int, list[dict]]:
+def _aggregate_card_usage_from_battle_facts(
+    rows: Iterable[sqlite3.Row],
+) -> tuple[int, list[dict]]:
     counts: dict[tuple[str, Optional[str]], int] = {}
     icons: dict[str, str] = {}
     total = 0
@@ -279,7 +289,12 @@ def _aggregate_card_usage_from_battle_facts(rows: Iterable[sqlite3.Row]) -> tupl
     return total, summary
 
 
-def _ensure_member(conn: sqlite3.Connection, tag: str, name: Optional[str] = None, status: Optional[str] = None) -> str:
+def _ensure_member(
+    conn: sqlite3.Connection,
+    tag: str,
+    name: Optional[str] = None,
+    status: Optional[str] = None,
+) -> str:
     """Upsert the player identity row; returns the canonical tag (§7: the tag
     IS the key — pre-v5.1 this returned a synthetic member_id). The `status`
     parameter is accepted-and-ignored: membership is an open clan_memberships
@@ -309,7 +324,13 @@ def _ensure_member(conn: sqlite3.Connection, tag: str, name: Optional[str] = Non
 _ensure_player = _ensure_member  # v5.1 name; same function
 
 
-def _ensure_thread(conn: sqlite3.Connection, scope: str, channel_id=None, discord_user_id=None, member_id=None) -> int:
+def _ensure_thread(
+    conn: sqlite3.Connection,
+    scope: str,
+    channel_id=None,
+    discord_user_id=None,
+    member_id=None,
+) -> int:
     scope_type, scope_key = _normalize_scope(scope)
     row = conn.execute(
         "SELECT thread_id FROM conversation_threads WHERE scope_type = ? AND scope_key = ?",
@@ -345,7 +366,9 @@ def _get_current_membership(conn: sqlite3.Connection, player_tag: str):
     ).fetchone()
 
 
-def _trusted_current_joined_at(conn: sqlite3.Connection, player_tag: str) -> Optional[str]:
+def _trusted_current_joined_at(
+    conn: sqlite3.Connection, player_tag: str
+) -> Optional[str]:
     membership = conn.execute(
         # roster_diff = the v5.1 engine OBSERVED the join (most direct evidence
         # there is); its absence here made recent_joins blind to every
@@ -382,26 +405,53 @@ def _current_joined_at(conn: sqlite3.Connection, player_tag: str) -> Optional[st
     return membership["joined_at"] if membership else None
 
 
-_MEMBER_METADATA_COLUMNS = frozenset({
-    # poap_address dropped (Q4: POAP paused; archive keeps historical values)
-    "joined_at", "birth_month", "birth_day", "profile_url", "note",
-    "generated_bio", "generated_highlight", "generated_profile_updated_at",
-    "cr_account_age_days", "cr_account_age_years", "cr_account_age_updated_at",
-    "cr_games_per_day", "cr_games_per_day_window_days", "cr_games_per_day_updated_at",
-    "cr_collection_level", "cr_collection_level_badge_tier", "cr_collection_level_badge_max_tier",
-    "cr_collection_level_updated_at", "cr_clan_war_wins", "cr_battle_wins",
-    "cr_clan_donations", "cr_banner_count", "cr_emote_count", "cr_profile_badges_updated_at",
-    "preferred_nickname", "nickname_source", "nickname_updated_at",
-    "email", "email_verified_at", "email_source",
-})
+_MEMBER_METADATA_COLUMNS = frozenset(
+    {
+        # poap_address dropped (Q4: POAP paused; archive keeps historical values)
+        "joined_at",
+        "birth_month",
+        "birth_day",
+        "profile_url",
+        "note",
+        "generated_bio",
+        "generated_highlight",
+        "generated_profile_updated_at",
+        "cr_account_age_days",
+        "cr_account_age_years",
+        "cr_account_age_updated_at",
+        "cr_games_per_day",
+        "cr_games_per_day_window_days",
+        "cr_games_per_day_updated_at",
+        "cr_collection_level",
+        "cr_collection_level_badge_tier",
+        "cr_collection_level_badge_max_tier",
+        "cr_collection_level_updated_at",
+        "cr_clan_war_wins",
+        "cr_battle_wins",
+        "cr_clan_donations",
+        "cr_banner_count",
+        "cr_emote_count",
+        "cr_profile_badges_updated_at",
+        "preferred_nickname",
+        "nickname_source",
+        "nickname_updated_at",
+        "email",
+        "email_verified_at",
+        "email_source",
+    }
+)
 
 
-def _upsert_member_metadata(conn: sqlite3.Connection, player_tag: str, **fields) -> None:
+def _upsert_member_metadata(
+    conn: sqlite3.Connection, player_tag: str, **fields
+) -> None:
     bad = set(fields) - _MEMBER_METADATA_COLUMNS
     if bad:
         raise ValueError(f"Invalid player_metadata columns: {bad}")
     tag = _canon_tag(player_tag)
-    row = conn.execute("SELECT player_tag FROM player_metadata WHERE player_tag = ?", (tag,)).fetchone()
+    row = conn.execute(
+        "SELECT player_tag FROM player_metadata WHERE player_tag = ?", (tag,)
+    ).fetchone()
     if not row:
         conn.execute("INSERT INTO player_metadata (player_tag) VALUES (?)", (tag,))
     updates = []
@@ -411,13 +461,20 @@ def _upsert_member_metadata(conn: sqlite3.Connection, player_tag: str, **fields)
         values.append(value)
     if updates:
         values.append(tag)
-        conn.execute(f"UPDATE player_metadata SET {', '.join(updates)} WHERE player_tag = ?", values)
+        conn.execute(
+            f"UPDATE player_metadata SET {', '.join(updates)} WHERE player_tag = ?",
+            values,
+        )
 
 
-def set_member_nickname(player_tag: str, nickname: Optional[str], *,
-                        source: Optional[str] = "leader",
-                        observed_at: Optional[str] = None,
-                        conn: Optional[sqlite3.Connection] = None) -> None:
+def set_member_nickname(
+    player_tag: str,
+    nickname: Optional[str],
+    *,
+    source: Optional[str] = "leader",
+    observed_at: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
     """Set (or clear, when nickname is None) a player's stored preferred
     nickname. `source` is 'leader' (hand-picked) or 'generated'/'placeholder'
     (engine/nicknames.py). Commits only when it owns the connection, so it is
@@ -428,7 +485,8 @@ def set_member_nickname(player_tag: str, nickname: Optional[str], *,
     try:
         clean = (nickname or "").strip() or None
         _upsert_member_metadata(
-            conn, player_tag,
+            conn,
+            player_tag,
             preferred_nickname=clean,
             nickname_source=(source if clean else None),
             nickname_updated_at=(observed_at or _utcnow()),
@@ -458,7 +516,9 @@ def set_member_nickname(player_tag: str, nickname: Optional[str], *,
             conn.close()
 
 
-def _parse_optional_int(value: Optional[str], *, field_name: str, minimum: int, maximum: int) -> Optional[int]:
+def _parse_optional_int(
+    value: Optional[str], *, field_name: str, minimum: int, maximum: int
+) -> Optional[int]:
     text = (value or "").strip()
     if not text:
         return None
@@ -471,12 +531,16 @@ def _parse_optional_int(value: Optional[str], *, field_name: str, minimum: int, 
     return parsed
 
 
-def _ensure_channel(conn: sqlite3.Connection, channel_id, channel_name=None, channel_kind=None) -> None:
+def _ensure_channel(
+    conn: sqlite3.Connection, channel_id, channel_name=None, channel_kind=None
+) -> None:
     if channel_id is None:
         return
     channel_id = str(channel_id)
     now = _utcnow()
-    row = conn.execute("SELECT channel_id FROM discord_channels WHERE channel_id = ?", (channel_id,)).fetchone()
+    row = conn.execute(
+        "SELECT channel_id FROM discord_channels WHERE channel_id = ?", (channel_id,)
+    ).fetchone()
     if row:
         conn.execute(
             "UPDATE discord_channels SET channel_name = COALESCE(?, channel_name), channel_kind = COALESCE(?, channel_kind), last_seen_at = ? WHERE channel_id = ?",
@@ -489,7 +553,9 @@ def _ensure_channel(conn: sqlite3.Connection, channel_id, channel_name=None, cha
         )
 
 
-def _store_raw_payload(conn: sqlite3.Connection, endpoint: str, entity_key: str, payload) -> None:
+def _store_raw_payload(
+    conn: sqlite3.Connection, endpoint: str, entity_key: str, payload
+) -> None:
     payload_json = _json_or_none(payload)
     if payload_json is None:
         return
@@ -548,6 +614,8 @@ def _configure_connection(conn: sqlite3.Connection, path: str) -> None:
         # side-writers (cr_api raw-payload persistence, tool paths) must wait
         # instead of failing with 'database is locked'.
         conn.execute("PRAGMA busy_timeout = 30000")
+
+
 def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     path = os.fspath(db_path or _resolve_db_path())
     conn = sqlite3.connect(path)
@@ -598,6 +666,7 @@ def managed_connection(fn: Callable) -> Callable:
     the commit here removes that whole footgun class (the old decorator only
     opened/closed, forcing every writer to commit unconditionally).
     """
+
     @functools.wraps(fn)
     def wrapper(*args, conn=None, **kwargs):
         owns = conn is None
@@ -614,6 +683,7 @@ def managed_connection(fn: Callable) -> Callable:
         finally:
             if owns:
                 conn.close()
+
     return wrapper
 
 
@@ -801,18 +871,14 @@ _FACADE_EXPORT_GROUPS = {
         "clear_prompt_feedback",
         "get_llm_call",
         "get_message_by_discord_message_id",
-        "get_signal_detector_cursor",
         "list_channel_messages",
         "list_llm_calls",
         "list_pending_system_signals",
         "list_prompt_failures",
         "list_prompt_feedback",
         "list_prompt_review_items",
-        "list_signal_detector_cursors",
         "list_thread_messages",
         "mark_prompt_feedback_retry_invited",
-        "mark_signal_completed",
-        "mark_signal_sent",
         "mark_system_signal_announced",
         "purge_old_conversations",
         "queue_system_signal",
@@ -821,11 +887,6 @@ _FACADE_EXPORT_GROUPS = {
         "save_message",
         "update_message_summary",
         "upsert_prompt_feedback",
-        "upsert_signal_detector_cursor",
-        "was_signal_completed",
-        "was_signal_completed_any_date",
-        "was_signal_sent",
-        "was_signal_sent_any_date",
     ),
     "storage.cases": (
         "CASE_DEFERRED",
@@ -836,12 +897,10 @@ _FACADE_EXPORT_GROUPS = {
         "backfill_decision_cases_from_leader_actions",
         "decision_case_snapshot",
         "expire_departure_verification_cards",
-        "get_communication_trace_for_message",
         "get_decision_case",
         "get_decision_case_by_id",
         "list_decision_cases",
         "list_due_decision_cases",
-        "list_recent_communication_intents",
         "raise_departure_verification_cards",
         "reconcile_departed_member_cases",
         "reconcile_uncorroborated_member_cases",
@@ -859,8 +918,6 @@ _FACADE_EXPORT_GROUPS = {
         "summarize_event_windows",
     ),
     "storage.api_sentinel": (
-        "EVENT_SENTINEL_SIGNAL_TYPE",
-        "SCHEMA_SENTINEL_SIGNAL_TYPE",
         "bootstrap_api_sentinel_baseline",
         "build_api_sentinel_observations",
         "list_api_sentinel_observations",
@@ -872,27 +929,16 @@ _FACADE_EXPORT_GROUPS = {
         "upsert_game_mode_contexts_from_leaderboards",
     ),
     "storage.metadata": (
-        "backfill_join_dates",
         "clear_member_birthday",
         "clear_member_join_date",
         "clear_member_note",
-        "clear_member_poap_address",
         "clear_member_profile_url",
-        "clear_member_tenure",
-        "get_birthdays_today",
-        "get_join_anniversaries_today",
-        "get_member_metadata",
-        "get_member_metadata_map",
         "list_member_metadata_rows",
         "purge_old_data",
-        "record_join_date",
         "set_member_birthday",
-        "set_member_generated_profile",
         "set_member_join_date",
         "set_member_note",
-        "set_member_poap_address",
         "set_member_profile_url",
-        "upsert_member_generated_profiles",
     ),
     "storage.tournament": (
         "build_tournament_recap_context",
@@ -995,6 +1041,7 @@ _FACADE_EXPORT_GROUPS = {
         "upsert_improvement_suggestion",
     ),
     "storage.runtime_status": (
+        "get_awareness_activity",
         "get_awareness_loop_by_number",
         "list_runtime_job_status",
         "save_runtime_job_status",

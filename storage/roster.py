@@ -6,7 +6,6 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-
 _NON_FOLD_CHARS = re.compile(r"[^a-z0-9 ]+")
 _FOLD_WHITESPACE = re.compile(r"\s+")
 
@@ -17,6 +16,7 @@ def _hours_since_iso(value: Optional[str]) -> Optional[float]:
     if not value:
         return None
     from engine.normalize import parse_cr_time
+
     dt = parse_cr_time(value)
     if dt is None:
         try:
@@ -26,6 +26,7 @@ def _hours_since_iso(value: Optional[str]) -> Optional[float]:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return max(0.0, (datetime.now(timezone.utc) - dt).total_seconds() / 3600)
+
 
 # v5.1: "active member" = has an open clan_memberships row (§7); the old
 # members.status column is gone. `m` must alias players in the outer query.
@@ -75,6 +76,7 @@ def pick_best_match(matches: list[dict]) -> dict | None:
         return top
     return None
 
+
 from db import (
     _canon_tag,
     _current_joined_at,
@@ -102,7 +104,12 @@ def _ensure_last_seen_api_column(conn) -> None:
 
 
 @managed_connection
-def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection] = None, *, create_if_missing: bool = True) -> int:
+def snapshot_members(
+    member_list: list[dict],
+    conn: Optional[sqlite3.Connection] = None,
+    *,
+    create_if_missing: bool = True,
+) -> int:
     """Refresh roster-owned state through the engine projection contract.
 
     Interactive callers may refresh identity/rank/donations, but sparse roster
@@ -122,14 +129,14 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
         seen_tags.add(tag)
         name = member.get("name") or ""
         if not create_if_missing:
-            existing = conn.execute("SELECT player_tag FROM players WHERE player_tag = ?", (tag,)).fetchone()
+            existing = conn.execute(
+                "SELECT player_tag FROM players WHERE player_tag = ?", (tag,)
+            ).fetchone()
             if not existing:
                 continue
         _ensure_member(conn, tag, name=name)
         roster_state = projections.roster_state_from_api(member)
-        projections.refresh_player_state(
-            conn, tag, None, roster_state, observed_at
-        )
+        projections.refresh_player_state(conn, tag, None, roster_state, observed_at)
         projections.refresh_daily_metrics(conn, tag, today)
         if create_if_missing and not _get_current_membership(conn, tag):
             # clan_tag defaults to the home clan and FKs clans — guaranteed on
@@ -147,7 +154,11 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
 
 
 @managed_connection
-def snapshot_clan_daily_metrics(clan_data: Optional[dict], conn: Optional[sqlite3.Connection] = None, observed_at: Optional[str] = None) -> str:
+def snapshot_clan_daily_metrics(
+    clan_data: Optional[dict],
+    conn: Optional[sqlite3.Connection] = None,
+    observed_at: Optional[str] = None,
+) -> str:
     observed_at = observed_at or _utcnow()
     metric_date = chicago_date_for_utc_timestamp(observed_at) or chicago_today()
     clan_tag = _canon_tag((clan_data or {}).get("tag")) or "#J2RGCRVG"
@@ -157,9 +168,17 @@ def snapshot_clan_daily_metrics(clan_data: Optional[dict], conn: Optional[sqlite
     if not isinstance(member_count, int):
         member_count = len(member_list)
     total_member_trophies = sum((member.get("trophies") or 0) for member in member_list)
-    avg_member_trophies = round(total_member_trophies / member_count, 2) if member_count else 0.0
-    top_member_trophies = max((member.get("trophies") or 0) for member in member_list) if member_list else 0
-    weekly_donations_total = sum((member.get("donations") or 0) for member in member_list)
+    avg_member_trophies = (
+        round(total_member_trophies / member_count, 2) if member_count else 0.0
+    )
+    top_member_trophies = (
+        max((member.get("trophies") or 0) for member in member_list)
+        if member_list
+        else 0
+    )
+    weekly_donations_total = sum(
+        (member.get("donations") or 0) for member in member_list
+    )
     joins_today = conn.execute(
         "SELECT COUNT(*) AS cnt FROM clan_memberships WHERE joined_at = ?",
         (metric_date,),
@@ -197,8 +216,16 @@ def snapshot_clan_daily_metrics(clan_data: Optional[dict], conn: Optional[sqlite
 
 
 @managed_connection
-def list_clan_daily_metrics(days: int = 30, clan_tag: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    cutoff = (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0))).date().isoformat()
+def list_clan_daily_metrics(
+    days: int = 30,
+    clan_tag: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    cutoff = (
+        (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0)))
+        .date()
+        .isoformat()
+    )
     where = ["metric_date >= ?"]
     params = [cutoff]
     if clan_tag:
@@ -223,10 +250,14 @@ def get_active_roster_map(conn: Optional[sqlite3.Connection] = None) -> dict[str
 
 
 @managed_connection
-def get_member_history(tag: str, days: int = 30, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_member_history(
+    tag: str, days: int = 30, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     """Role/trophy history from first-class events + daily metrics
     (schema.md §9: history stops diffing snapshot pairs)."""
-    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff = (
+        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    ).strftime("%Y-%m-%dT%H:%M:%S")
     tag = _canon_tag(tag)
     daily = conn.execute(
         "SELECT d.metric_date, d.trophies, d.best_trophies, d.donations_week AS donations, "
@@ -241,25 +272,46 @@ def get_member_history(tag: str, days: int = 30, conn: Optional[sqlite3.Connecti
         "AND observed_at >= ? ORDER BY observed_at ASC",
         (tag, cutoff),
     ).fetchall()
-    name_row = conn.execute("SELECT current_name FROM players WHERE player_tag = ?", (tag,)).fetchone()
+    name_row = conn.execute(
+        "SELECT current_name FROM players WHERE player_tag = ?", (tag,)
+    ).fetchone()
     name = name_row["current_name"] if name_row else None
     out = []
     for d in daily:
         item = dict(d)
-        item.update({"tag": tag, "name": name, "recorded_at": d["metric_date"],
-                     "role": None, "arena_id": None, "arena_name": None, "last_seen": None})
+        item.update(
+            {
+                "tag": tag,
+                "name": name,
+                "recorded_at": d["metric_date"],
+                "role": None,
+                "arena_id": None,
+                "arena_name": None,
+                "last_seen": None,
+            }
+        )
         out.append(item)
     for e in events:
-        out.append({
-            "tag": tag, "name": name, "recorded_at": e["observed_at"],
-            "event_type": e["event_type"], "event_payload": e["payload_json"],
-        })
+        out.append(
+            {
+                "tag": tag,
+                "name": name,
+                "recorded_at": e["observed_at"],
+                "event_type": e["event_type"],
+                "event_payload": e["payload_json"],
+            }
+        )
     out.sort(key=lambda item: str(item.get("recorded_at") or ""))
     return out
 
 
 @managed_connection
-def resolve_member(query: str, status: Optional[str] = "active", limit: int = 5, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def resolve_member(
+    query: str,
+    status: Optional[str] = "active",
+    limit: int = 5,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     query = (query or "").strip()
     if not query:
         return []
@@ -288,9 +340,7 @@ def resolve_member(query: str, status: Optional[str] = "active", limit: int = 5,
         (status,),
     ).fetchall()
     aliases = {}
-    for row in conn.execute(
-        "SELECT player_tag, alias FROM player_aliases"
-    ).fetchall():
+    for row in conn.execute("SELECT player_tag, alias FROM player_aliases").fetchall():
         aliases.setdefault(row["player_tag"], []).append(row["alias"])
 
     candidates = []
@@ -349,7 +399,9 @@ def resolve_member(query: str, status: Optional[str] = "active", limit: int = 5,
 
 
 @managed_connection
-def list_members(status: str = "active", conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def list_members(
+    status: str = "active", conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     predicate = _ACTIVE if status == "active" else "1=1"
     rows = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag, m.current_name, "
@@ -381,6 +433,7 @@ def list_members(status: str = "active", conn: Optional[sqlite3.Connection] = No
 @managed_connection
 def get_clan_roster_summary(conn: Optional[sqlite3.Connection] = None) -> dict:
     from storage.war import get_current_war_status
+
     row = conn.execute(
         # Collection Level is the CR 2026 progression metric (expLevel is dead).
         # AVG ignores NULLs — averages only members whose collection level is synced.
@@ -414,7 +467,9 @@ def get_clan_roster_summary(conn: Optional[sqlite3.Connection] = None) -> dict:
 
 
 @managed_connection
-def get_member_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_member_profile(
+    tag: str, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     row = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag, COALESCE(m.display_name, m.current_name) AS member_name, "
         f"CASE WHEN {_ACTIVE} THEN 'active' ELSE 'observed' END AS status, "
@@ -503,16 +558,29 @@ def _career_fields_from_baseline(conn, player_tag: str) -> dict:
     out["career_wins"] = payload.get("wins")
     out["career_losses"] = payload.get("losses")
     out["career_battle_count"] = payload.get("battle_count", payload.get("battleCount"))
-    out["career_total_donations"] = payload.get("total_donations", payload.get("totalDonations"))
+    out["career_total_donations"] = payload.get(
+        "total_donations", payload.get("totalDonations")
+    )
     out["war_day_wins"] = payload.get("war_day_wins", payload.get("warDayWins"))
-    out["challenge_max_wins"] = payload.get("challenge_max_wins", payload.get("challengeMaxWins"))
-    out["three_crown_wins"] = payload.get("three_crown_wins", payload.get("threeCrownWins"))
-    out["current_favourite_card_name"] = payload.get("favourite_card", payload.get("currentFavouriteCard", {}).get("name") if isinstance(payload.get("currentFavouriteCard"), dict) else None)
+    out["challenge_max_wins"] = payload.get(
+        "challenge_max_wins", payload.get("challengeMaxWins")
+    )
+    out["three_crown_wins"] = payload.get(
+        "three_crown_wins", payload.get("threeCrownWins")
+    )
+    out["current_favourite_card_name"] = payload.get(
+        "favourite_card",
+        payload.get("currentFavouriteCard", {}).get("name")
+        if isinstance(payload.get("currentFavouriteCard"), dict)
+        else None,
+    )
     return out
 
 
 @managed_connection
-def get_member_membership_summary(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_member_membership_summary(
+    tag: str, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     row = conn.execute(
         "SELECT player_tag, current_name FROM players WHERE player_tag = ?",
         (_canon_tag(tag),),
@@ -545,7 +613,8 @@ def get_member_membership_summary(tag: str, conn: Optional[sqlite3.Connection] =
     prior_stints = sum(
         1
         for membership in memberships
-        if membership["left_at"] or (
+        if membership["left_at"]
+        or (
             current_membership_id is not None
             and membership["membership_id"] != current_membership_id
         )
@@ -569,7 +638,9 @@ def get_member_membership_summary(tag: str, conn: Optional[sqlite3.Connection] =
 
 
 @managed_connection
-def get_member_overview(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_member_overview(
+    tag: str, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     from storage.war import get_member_war_status
 
     profile = get_member_profile(tag, conn=conn)
@@ -581,7 +652,9 @@ def get_member_overview(tag: str, conn: Optional[sqlite3.Connection] = None) -> 
 
 
 @managed_connection
-def list_longest_tenure_members(limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def list_longest_tenure_members(
+    limit: int = 10, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     today = datetime.now(timezone.utc).date()
     rows = conn.execute(
         "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.role, cs.trophies, cs.clan_rank "
@@ -596,7 +669,9 @@ def list_longest_tenure_members(limit: int = 10, conn: Optional[sqlite3.Connecti
             continue
         joined_day = joined_date[:10]
         try:
-            tenure_days = (today - datetime.strptime(joined_day, "%Y-%m-%d").date()).days
+            tenure_days = (
+                today - datetime.strptime(joined_day, "%Y-%m-%d").date()
+            ).days
         except ValueError:
             tenure_days = None
         item = dict(row)
@@ -613,9 +688,12 @@ def list_longest_tenure_members(limit: int = 10, conn: Optional[sqlite3.Connecti
 
 
 @managed_connection
-def list_recent_joins(days: int = 30, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def list_recent_joins(
+    days: int = 30, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     from storage.war import get_current_season_id
-    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=days))
+
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=days)
     season_id = get_current_season_id(conn=conn)
     rows = conn.execute(
         "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.role, cs.trophies, cs.clan_rank "
@@ -663,7 +741,9 @@ def list_recent_joins(days: int = 30, conn: Optional[sqlite3.Connection] = None)
 
 
 @managed_connection
-def get_member_recent_form(tag: str, scope: str = "competitive_10", conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_member_recent_form(
+    tag: str, scope: str = "competitive_10", conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     row = conn.execute(
         "SELECT f.player_tag, f.scope, f.sample_size, f.wins, f.losses, f.draws, f.current_streak, "
         "f.current_streak_type, f.win_rate, f.avg_crown_diff, f.avg_trophy_change, f.form_label, f.summary, f.computed_at "
@@ -690,7 +770,11 @@ def _streak_row(conn, row, scope: str) -> dict:
 
 
 @managed_connection
-def get_members_on_losing_streak(min_streak: int = 3, scope: str = "competitive_10", conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_members_on_losing_streak(
+    min_streak: int = 3,
+    scope: str = "competitive_10",
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     rows = conn.execute(
         "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.clan_rank, cs.role, "
         "f.current_streak, f.current_streak_type, f.wins, f.losses, f.sample_size, f.form_label, f.summary, f.computed_at "
@@ -710,7 +794,11 @@ def get_members_on_losing_streak(min_streak: int = 3, scope: str = "competitive_
 
 
 @managed_connection
-def get_members_on_hot_streak(min_streak: int = 4, scope: str = "ladder_ranked_10", conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_members_on_hot_streak(
+    min_streak: int = 4,
+    scope: str = "ladder_ranked_10",
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     rows = conn.execute(
         "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.clan_rank, cs.role, "
         "f.current_streak, f.current_streak_type, f.wins, f.losses, f.draws, f.sample_size, "
@@ -729,14 +817,18 @@ def get_members_on_hot_streak(min_streak: int = 4, scope: str = "ladder_ranked_1
 
 
 @managed_connection
-def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] = None) -> dict:
+def get_weekly_digest_summary(
+    days: int = 7, conn: Optional[sqlite3.Connection] = None
+) -> dict:
     from storage.war import get_current_season_id
     from storage.war_analytics import get_trending_war_contributors, get_war_score_trend
     from storage.war_status import get_trophy_changes, get_war_season_summary
 
     roster = get_clan_roster_summary(conn=conn)
     season_id = get_current_season_id(conn=conn)
-    cutoff_ts = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff_ts = (
+        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    ).strftime("%Y-%m-%dT%H:%M:%S")
     cutoff_race_day = (
         datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
     ).strftime("%Y%m%d")
@@ -749,7 +841,9 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
         "ORDER BY COALESCE(cs.donations_week, 0) DESC, cs.clan_rank ASC, m.current_name COLLATE NOCASE "
         "LIMIT 5"
     ).fetchall()
-    donors = [_member_reference_fields(conn, row["tag"], dict(row)) for row in top_donors]
+    donors = [
+        _member_reference_fields(conn, row["tag"], dict(row)) for row in top_donors
+    ]
 
     race_rows = conn.execute(
         "SELECT season_id, section_index, our_rank, trophy_change, our_fame, finish_time, created_date "
@@ -760,13 +854,15 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
     ).fetchall()
     recent_war_races = []
     for row in race_rows:
-        standings = _rowdicts(conn.execute(
-            "SELECT wwc.rank, c.name, wwc.clan_tag AS tag, wwc.fame, NULL AS trophy_change "
-            "FROM war_week_clans wwc LEFT JOIN clans c ON c.clan_tag = wwc.clan_tag "
-            "WHERE wwc.season_id = ? AND wwc.section_index = ? "
-            "ORDER BY COALESCE(wwc.rank, 99) ASC LIMIT 3",
-            (row["season_id"], row["section_index"]),
-        ).fetchall())
+        standings = _rowdicts(
+            conn.execute(
+                "SELECT wwc.rank, c.name, wwc.clan_tag AS tag, wwc.fame, NULL AS trophy_change "
+                "FROM war_week_clans wwc LEFT JOIN clans c ON c.clan_tag = wwc.clan_tag "
+                "WHERE wwc.season_id = ? AND wwc.section_index = ? "
+                "ORDER BY COALESCE(wwc.rank, 99) ASC LIMIT 3",
+                (row["season_id"], row["section_index"]),
+            ).fetchall()
+        )
         top_participants = conn.execute(
             "SELECT wp.player_tag AS tag, COALESCE(p.display_name, p.current_name) AS name, wp.fame AS points, wp.repair_points, wp.decks_used "
             "FROM war_participation wp LEFT JOIN players p ON p.player_tag = wp.player_tag "
@@ -775,24 +871,34 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
             "LIMIT 3",
             (row["season_id"], row["section_index"]),
         ).fetchall()
-        participants = [_member_reference_fields(conn, p["tag"], dict(p)) for p in top_participants]
-        recent_war_races.append({
-            "season_id": row["season_id"],
-            "week": (row["section_index"] + 1) if row["section_index"] is not None else None,
-            "section_index": row["section_index"],
-            "created_date": row["created_date"],
-            "our_rank": row["our_rank"],
-            "trophy_change": row["trophy_change"],
-            "our_fame": row["our_fame"],
-            "total_clans": len(standings) or None,
-            "finish_time": row["finish_time"],
-            "top_participants": participants,
-            "standings_preview": standings,
-        })
+        participants = [
+            _member_reference_fields(conn, p["tag"], dict(p)) for p in top_participants
+        ]
+        recent_war_races.append(
+            {
+                "season_id": row["season_id"],
+                "week": (row["section_index"] + 1)
+                if row["section_index"] is not None
+                else None,
+                "section_index": row["section_index"],
+                "created_date": row["created_date"],
+                "our_rank": row["our_rank"],
+                "trophy_change": row["trophy_change"],
+                "our_fame": row["our_fame"],
+                "total_clans": len(standings) or None,
+                "finish_time": row["finish_time"],
+                "top_participants": participants,
+                "standings_preview": standings,
+            }
+        )
 
     trophy_changes = get_trophy_changes(since_hours=max(24, days * 24), conn=conn)
-    trophy_risers = [item for item in trophy_changes if (item.get("change") or 0) > 0][:5]
-    trophy_drops = [item for item in trophy_changes if (item.get("change") or 0) < 0][:3]
+    trophy_risers = [item for item in trophy_changes if (item.get("change") or 0) > 0][
+        :5
+    ]
+    trophy_drops = [item for item in trophy_changes if (item.get("change") or 0) < 0][
+        :3
+    ]
 
     # Progression from daily metrics (player_profile_snapshots retired).
     progression = []
@@ -839,17 +945,30 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
     recent_joins = list_recent_joins(days=days, conn=conn)[:5]
     hot_streaks = get_members_on_hot_streak(min_streak=4, conn=conn)[:5]
     war_score_trend = get_war_score_trend(days=days, conn=conn)
-    season_summary = get_war_season_summary(season_id=season_id, top_n=5, conn=conn) if season_id is not None else None
+    season_summary = (
+        get_war_season_summary(season_id=season_id, top_n=5, conn=conn)
+        if season_id is not None
+        else None
+    )
     recent_race_count = len(recent_war_races)
-    trending_war = get_trending_war_contributors(
-        season_id=season_id,
-        recent_races=max(1, min(3, recent_race_count)) if recent_race_count else 1,
-        limit=5,
-        conn=conn,
-    ) if season_id is not None else {"members": []}
+    trending_war = (
+        get_trending_war_contributors(
+            season_id=season_id,
+            recent_races=max(1, min(3, recent_race_count)) if recent_race_count else 1,
+            limit=5,
+            conn=conn,
+        )
+        if season_id is not None
+        else {"members": []}
+    )
 
     from storage.awards import get_season_awards_standings
-    season_awards = get_season_awards_standings(season_id=season_id, conn=conn) if season_id is not None else None
+
+    season_awards = (
+        get_season_awards_standings(season_id=season_id, conn=conn)
+        if season_id is not None
+        else None
+    )
 
     return {
         "window_days": days,

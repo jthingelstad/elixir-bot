@@ -24,8 +24,9 @@ from agent.tool_policy import (
 )
 
 EXTERNAL_LOOKUP_CAP = 5
+from anthropic import APIConnectionError, APIError
+
 from agent.tool_exec import _execute_tool
-from anthropic import APIError, APIConnectionError
 
 
 def _preview_text(value, limit=500):
@@ -47,7 +48,11 @@ def _summarize_tool_args(args: dict, limit: int = 120) -> str:
         return ""
     parts = []
     for k, v in args.items():
-        sv = json.dumps(v, default=str, ensure_ascii=False) if not isinstance(v, str) else v
+        sv = (
+            json.dumps(v, default=str, ensure_ascii=False)
+            if not isinstance(v, str)
+            else v
+        )
         if len(sv) > 40:
             sv = sv[:37] + "…"
         parts.append(f"{k}={sv}")
@@ -77,7 +82,9 @@ def _summarize_tool_result(result) -> str:
     return f"ok · {len(raw)}B"
 
 
-def _failure_payload(kind, detail=None, *, response_text=None, parsed_obj=None, phase=None):
+def _failure_payload(
+    kind, detail=None, *, response_text=None, parsed_obj=None, phase=None
+):
     payload = {"kind": kind}
     if detail is not None:
         payload["detail"] = str(detail)
@@ -90,6 +97,7 @@ def _failure_payload(kind, detail=None, *, response_text=None, parsed_obj=None, 
     preview_source = parsed_obj if parsed_obj is not None else response_text
     payload["result_preview"] = _preview_text(preview_source)
     return {"_error": payload}
+
 
 def _parse_response(text):
     """Parse LLM JSON response, handling markdown fences.
@@ -109,7 +117,9 @@ def _parse_response(text):
         return json.loads(cleaned.strip())
     except (json.JSONDecodeError, ValueError, IndexError):
         if text:
-            log.warning("LLM returned plain text instead of JSON, wrapping: %s", text[:120])
+            log.warning(
+                "LLM returned plain text instead of JSON, wrapping: %s", text[:120]
+            )
             return {"content": text, "summary": "agent response"}
         return None
 
@@ -131,7 +141,7 @@ def _parse_json_response(text):
     # Extract from markdown code fence (handles preamble before ```)
     fence = text.find("```")
     if fence != -1:
-        inner = text[fence + 3:]
+        inner = text[fence + 3 :]
         end = inner.find("```")
         if end != -1:
             inner = inner[:end]
@@ -176,8 +186,12 @@ def _validate_response(workflow, parsed_obj, response_schema=None):
 
     if workflow == "observation":
         allowed = {
-            "clan_observation", "arena_milestone", "donation_milestone",
-            "war_update", "member_join", "member_leave",
+            "clan_observation",
+            "arena_milestone",
+            "donation_milestone",
+            "war_update",
+            "member_join",
+            "member_leave",
         }
         et = parsed_obj.get("event_type")
         if et not in allowed:
@@ -188,7 +202,10 @@ def _validate_response(workflow, parsed_obj, response_schema=None):
             return False, f"invalid event_type for {workflow}: {et}"
     elif workflow == "reception":
         if parsed_obj.get("event_type") != "reception_response":
-            return False, f"invalid event_type for reception: {parsed_obj.get('event_type')}"
+            return (
+                False,
+                f"invalid event_type for reception: {parsed_obj.get('event_type')}",
+            )
     elif workflow in {"interactive", "clanops"}:
         et = parsed_obj.get("event_type")
         if et == "channel_response":
@@ -236,7 +253,13 @@ def _strip_context_image_fields(value):
     if isinstance(value, dict):
         cleaned = {}
         for key, item in value.items():
-            if str(key).lower() in {"iconurls", "icon_url", "iconurl", "image_url", "imageurl"}:
+            if str(key).lower() in {
+                "iconurls",
+                "icon_url",
+                "iconurl",
+                "image_url",
+                "imageurl",
+            }:
                 continue
             cleaned[key] = _strip_context_image_fields(item)
         return cleaned
@@ -312,7 +335,9 @@ def _build_tool_result_envelope(name, raw_result):
             envelope["meta"]["returned_count"] = TOOL_RESULT_MAX_ITEMS
             log.warning(
                 "tool_result_truncated tool=%s reason=item_limit original=%d returned=%d",
-                name, original_count, TOOL_RESULT_MAX_ITEMS,
+                name,
+                original_count,
+                TOOL_RESULT_MAX_ITEMS,
             )
 
     serialized = json.dumps(envelope, default=str)
@@ -343,7 +368,10 @@ def _build_tool_result_envelope(name, raw_result):
             envelope["meta"]["dropped_fields"] = dropped_paths
         log.warning(
             "tool_result_truncated tool=%s reason=char_limit char_size=%d char_limit=%d dropped=%s",
-            name, original_size, TOOL_RESULT_MAX_CHARS, dropped_paths or "data_replaced",
+            name,
+            original_size,
+            TOOL_RESULT_MAX_CHARS,
+            dropped_paths or "data_replaced",
         )
 
     return json.dumps(envelope, default=str)
@@ -359,10 +387,20 @@ def _tool_result_succeeded(envelope_json: str) -> bool:
     return bool(envelope.get("ok")) and envelope.get("error") is None
 
 
-def _chat_with_tools(system_prompt, user_message, conversation_history=None,
-                     temperature=0.7, max_tokens=4096, workflow="generic",
-                     allowed_tools=None, response_schema=None, strict_json=True,
-                     return_errors=False, tool_stats=None, on_event=None):
+def _chat_with_tools(
+    system_prompt,
+    user_message,
+    conversation_history=None,
+    temperature=0.7,
+    max_tokens=4096,
+    workflow="generic",
+    allowed_tools=None,
+    response_schema=None,
+    strict_json=True,
+    return_errors=False,
+    tool_stats=None,
+    on_event=None,
+):
     """Run a chat completion with tool-calling loop.
 
     conversation_history: optional list of {role, content} dicts to inject
@@ -439,24 +477,46 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
     def _parse_and_validate(content, repair_allowed, phase):
         nonlocal validation_failure_count
         try:
-            parsed = _parse_json_response(content) if strict_json else _parse_response(content or "null")
+            parsed = (
+                _parse_json_response(content)
+                if strict_json
+                else _parse_response(content or "null")
+            )
         except (json.JSONDecodeError, ValueError) as e:
             validation_failure_count += 1
             if not repair_allowed:
-                log.warning("validation_failure workflow=%s reason=parse_error detail=%s", workflow, e)
+                log.warning(
+                    "validation_failure workflow=%s reason=parse_error detail=%s",
+                    workflow,
+                    e,
+                )
                 if return_errors:
-                    return _failure_payload("parse_error", e, response_text=content, phase=phase)
+                    return _failure_payload(
+                        "parse_error", e, response_text=content, phase=phase
+                    )
                 return None
             return "__REPAIR__", f"Invalid JSON. Error: {e}"
 
-        ok, error = _validate_response(workflow, parsed, response_schema=response_schema)
+        ok, error = _validate_response(
+            workflow, parsed, response_schema=response_schema
+        )
         if ok:
             return parsed
         validation_failure_count += 1
         if not repair_allowed:
-            log.warning("validation_failure workflow=%s reason=schema_error detail=%s", workflow, error)
+            log.warning(
+                "validation_failure workflow=%s reason=schema_error detail=%s",
+                workflow,
+                error,
+            )
             if return_errors:
-                return _failure_payload("schema_error", error, response_text=content, parsed_obj=parsed, phase=phase)
+                return _failure_payload(
+                    "schema_error",
+                    error,
+                    response_text=content,
+                    parsed_obj=parsed,
+                    phase=phase,
+                )
             return None
         return "__REPAIR__", f"Schema validation failed: {error}"
 
@@ -464,7 +524,12 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         return getattr(resp, "stop_reason", None) == "max_tokens"
 
     def _truncation_failure(phase, content):
-        log.warning("llm_truncated workflow=%s phase=%s max_tokens=%d", workflow, phase, max_tokens)
+        log.warning(
+            "llm_truncated workflow=%s phase=%s max_tokens=%d",
+            workflow,
+            phase,
+            max_tokens,
+        )
         _emit({"type": "truncation", "phase": phase, "max_tokens": max_tokens})
         if return_errors:
             return _failure_payload(
@@ -480,8 +545,14 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         log.info(
             "agent_loop workflow=%s tool_rounds=%d tools_called=%s denied_tools=%d "
             "validation_failures=%d prompt_chars=%d completion_chars=%d completion_latencies_ms=%s",
-            workflow, round_num, tools_called, denied_tool_count, validation_failure_count,
-            prompt_chars, completion_chars, completion_latencies_ms,
+            workflow,
+            round_num,
+            tools_called,
+            denied_tool_count,
+            validation_failure_count,
+            prompt_chars,
+            completion_chars,
+            completion_latencies_ms,
         )
 
     for _round in range(max_tool_rounds + 1):
@@ -502,24 +573,28 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             if _is_truncated(resp):
                 _log_agent_loop(_round)
                 return _truncation_failure("initial_response", initial_content)
-            parsed = _parse_and_validate(initial_content or "null", repair_allowed=True, phase="initial_response")
+            parsed = _parse_and_validate(
+                initial_content or "null", repair_allowed=True, phase="initial_response"
+            )
             if isinstance(parsed, tuple) and parsed[0] == "__REPAIR__":
                 messages.append({"role": "assistant", "content": initial_content})
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        f"Your previous response was invalid: {parsed[1]}. "
-                        "Reply NOW with valid JSON only that satisfies the required schema. "
-                        "Do not call any more tools. Do not return `null` or an empty string. "
-                        "You already have everything you need from the tool results above — "
-                        "use them to write a real `content` string that answers the user. "
-                        "If the user's question turned out to have a false premise (e.g. they "
-                        "asked about a card they don't own, or asked 'is X maxed' when X isn't), "
-                        "still return a valid response object whose `content` explains plainly "
-                        "what you found. Never abstain by returning null — abstaining only "
-                        "produces a fallback error message visible to the user."
-                    ),
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Your previous response was invalid: {parsed[1]}. "
+                            "Reply NOW with valid JSON only that satisfies the required schema. "
+                            "Do not call any more tools. Do not return `null` or an empty string. "
+                            "You already have everything you need from the tool results above — "
+                            "use them to write a real `content` string that answers the user. "
+                            "If the user's question turned out to have a false premise (e.g. they "
+                            "asked about a card they don't own, or asked 'is X maxed' when X isn't), "
+                            "still return a valid response object whose `content` explains plainly "
+                            "what you found. Never abstain by returning null — abstaining only "
+                            "produces a fallback error message visible to the user."
+                        ),
+                    }
+                )
                 try:
                     # Repair attempts must not be allowed to escape into more
                     # tool calls — the model's already had its tool budget and
@@ -528,7 +603,9 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                 except (APIError, APIConnectionError) as e:
                     log.error("LLM API repair error: %s", e)
                     if return_errors:
-                        return _failure_payload("llm_api_error", e, phase="repair_completion")
+                        return _failure_payload(
+                            "llm_api_error", e, phase="repair_completion"
+                        )
                     return None
 
                 repaired = response_text(repair_resp) or ""
@@ -536,7 +613,9 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                 if _is_truncated(repair_resp):
                     _log_agent_loop(_round)
                     return _truncation_failure("repair_response", repaired)
-                parsed = _parse_and_validate(repaired or "null", repair_allowed=False, phase="repair_response")
+                parsed = _parse_and_validate(
+                    repaired or "null", repair_allowed=False, phase="repair_response"
+                )
 
             _log_agent_loop(_round)
             return parsed
@@ -553,64 +632,88 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                 denied_tool_count += 1
                 log.warning(
                     "tool_denied workflow=%s tool=%s reason=not_allowed_for_workflow",
-                    workflow, fn_name,
+                    workflow,
+                    fn_name,
                 )
-                result = json.dumps({
-                    "error": "tool_not_allowed",
-                    "tool": fn_name,
-                    "workflow": workflow,
-                })
-            elif fn_name in EXTERNAL_LOOKUP_TOOL_NAMES and external_lookup_calls >= EXTERNAL_LOOKUP_CAP:
+                result = json.dumps(
+                    {
+                        "error": "tool_not_allowed",
+                        "tool": fn_name,
+                        "workflow": workflow,
+                    }
+                )
+            elif (
+                fn_name in EXTERNAL_LOOKUP_TOOL_NAMES
+                and external_lookup_calls >= EXTERNAL_LOOKUP_CAP
+            ):
                 denied_tool_count += 1
                 log.warning(
                     "tool_denied workflow=%s tool=%s reason=external_lookup_cap calls=%d",
-                    workflow, fn_name, external_lookup_calls,
+                    workflow,
+                    fn_name,
+                    external_lookup_calls,
                 )
-                result = json.dumps({
-                    "error": "external_lookup_cap_reached",
-                    "tool": fn_name,
-                    "cap": EXTERNAL_LOOKUP_CAP,
-                    "hint": "External CR API lookups are capped per turn. Summarize with what you already have.",
-                })
+                result = json.dumps(
+                    {
+                        "error": "external_lookup_cap_reached",
+                        "tool": fn_name,
+                        "cap": EXTERNAL_LOOKUP_CAP,
+                        "hint": "External CR API lookups are capped per turn. Summarize with what you already have.",
+                    }
+                )
             else:
-                side_effect = TOOL_DEFINITIONS_BY_NAME.get(fn_name, {}).get("side_effect", "read")
+                side_effect = TOOL_DEFINITIONS_BY_NAME.get(fn_name, {}).get(
+                    "side_effect", "read"
+                )
                 is_awareness_write = (
                     is_awareness_write_ok and fn_name in AWARENESS_WRITE_TOOL_NAMES
                 )
                 write_allowed = (
-                    side_effect != "write"
-                    or is_clanops_write_ok
-                    or is_awareness_write
+                    side_effect != "write" or is_clanops_write_ok or is_awareness_write
                 )
                 if not write_allowed:
                     denied_tool_count += 1
                     log.warning(
                         "tool_denied workflow=%s tool=%s reason=write_policy_disabled",
-                        workflow, fn_name,
+                        workflow,
+                        fn_name,
                     )
-                    result = json.dumps({
-                        "error": "tool_write_disabled",
-                        "tool": fn_name,
-                        "workflow": workflow,
-                    })
-                elif is_awareness_write and tool_stats["write_calls_issued"] >= AWARENESS_WRITE_BUDGET_PER_TICK:
+                    result = json.dumps(
+                        {
+                            "error": "tool_write_disabled",
+                            "tool": fn_name,
+                            "workflow": workflow,
+                        }
+                    )
+                elif (
+                    is_awareness_write
+                    and tool_stats["write_calls_issued"]
+                    >= AWARENESS_WRITE_BUDGET_PER_TICK
+                ):
                     tool_stats["write_calls_denied"] += 1
                     denied_tool_count += 1
                     log.warning(
                         "tool_denied workflow=%s tool=%s reason=awareness_write_budget issued=%d cap=%d",
-                        workflow, fn_name, tool_stats["write_calls_issued"], AWARENESS_WRITE_BUDGET_PER_TICK,
+                        workflow,
+                        fn_name,
+                        tool_stats["write_calls_issued"],
+                        AWARENESS_WRITE_BUDGET_PER_TICK,
                     )
-                    result = json.dumps({
-                        "error": "awareness_write_budget_reached",
-                        "tool": fn_name,
-                        "cap": AWARENESS_WRITE_BUDGET_PER_TICK,
-                        "hint": (
-                            "You have already used your write budget for this tick. "
-                            "Skip further writes and finalize your post plan."
-                        ),
-                    })
+                    result = json.dumps(
+                        {
+                            "error": "awareness_write_budget_reached",
+                            "tool": fn_name,
+                            "cap": AWARENESS_WRITE_BUDGET_PER_TICK,
+                            "hint": (
+                                "You have already used your write budget for this tick. "
+                                "Skip further writes and finalize your post plan."
+                            ),
+                        }
+                    )
                 else:
-                    log.info("Tool call workflow=%s: %s(%s)", workflow, fn_name, fn_args)
+                    log.info(
+                        "Tool call workflow=%s: %s(%s)", workflow, fn_name, fn_args
+                    )
                     tools_called.append(fn_name)
                     if fn_name in EXTERNAL_LOOKUP_TOOL_NAMES:
                         external_lookup_calls += 1
@@ -631,22 +734,26 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             }
             tool_stats.setdefault("tool_trace", []).append(trace_entry)
             _emit({"type": "tool", **trace_entry})
-            tool_result_blocks.append({
-                "type": "tool_result",
-                "tool_use_id": tool_use.id,
-                "content": result,
-            })
+            tool_result_blocks.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use.id,
+                    "content": result,
+                }
+            )
         messages.append({"role": "user", "content": tool_result_blocks})
 
     # If we hit max rounds, nudge the model to produce a final JSON answer with no more tools
     log.warning("Hit max tool rounds (%d), requesting final answer", max_tool_rounds)
-    messages.append({
-        "role": "user",
-        "content": (
-            "You have used all available tool rounds. Do not request any more tools. "
-            "Reply now with the final JSON response that satisfies the required schema."
-        ),
-    })
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                "You have used all available tool rounds. Do not request any more tools. "
+                "Reply now with the final JSON response that satisfies the required schema."
+            ),
+        }
+    )
     try:
         resp = _create_completion(messages, allow_tools=False)
         final_content = response_text(resp) or ""
@@ -655,7 +762,11 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             _log_agent_loop(max_tool_rounds)
             return _truncation_failure("final_response", final_content)
         if not final_content.strip():
-            log.warning("empty_final_response workflow=%s tools_called=%s", workflow, tools_called)
+            log.warning(
+                "empty_final_response workflow=%s tools_called=%s",
+                workflow,
+                tools_called,
+            )
             _log_agent_loop(max_tool_rounds)
             if return_errors:
                 return _failure_payload(
@@ -665,7 +776,9 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                     phase="final_response",
                 )
             return None
-        parsed = _parse_and_validate(final_content, repair_allowed=False, phase="final_response")
+        parsed = _parse_and_validate(
+            final_content, repair_allowed=False, phase="final_response"
+        )
         _log_agent_loop(max_tool_rounds)
         return parsed
     except (APIError, APIConnectionError) as e:
@@ -675,8 +788,13 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         return None
 
 
-def _clan_context(clan_data, war_data, roster_data=None, max_members=MAX_CONTEXT_MEMBERS_DEFAULT,
-                   include_war=True):
+def _clan_context(
+    clan_data,
+    war_data,
+    roster_data=None,
+    max_members=MAX_CONTEXT_MEMBERS_DEFAULT,
+    include_war=True,
+):
     """Format clan data into a concise context string for the LLM.
 
     roster_data: optional enriched roster dict (from build_roster_data with
@@ -693,29 +811,37 @@ def _clan_context(clan_data, war_data, roster_data=None, max_members=MAX_CONTEXT
 
     members = clan_data.get("memberList", clan_data.get("members", []))
     member_summary = []
-    sorted_members = sorted(members, key=lambda x: x.get("clanRank", x.get("clan_rank", 99)))
+    sorted_members = sorted(
+        members, key=lambda x: x.get("clanRank", x.get("clan_rank", 99))
+    )
     limited_members = sorted_members[:max_members]
     for m in limited_members:
         arena = m.get("arena", {})
-        arena_name = arena.get("name", str(arena)) if isinstance(arena, dict) else str(arena)
+        arena_name = (
+            arena.get("name", str(arena)) if isinstance(arena, dict) else str(arena)
+        )
         line = (
-            f"  {m.get('name','?')} ({m.get('tag','?')}) | rank #{m.get('clanRank', m.get('clan_rank','?'))} | "
-            f"{m.get('trophies',0):,} trophies | {m.get('donations',0)} donations | "
-            f"role: {m.get('role','member')} | arena: {arena_name} | "
-            f"last_seen: {m.get('lastSeen', m.get('last_seen','?'))}"
+            f"  {m.get('name', '?')} ({m.get('tag', '?')}) | rank #{m.get('clanRank', m.get('clan_rank', '?'))} | "
+            f"{m.get('trophies', 0):,} trophies | {m.get('donations', 0)} donations | "
+            f"role: {m.get('role', 'member')} | arena: {arena_name} | "
+            f"last_seen: {m.get('lastSeen', m.get('last_seen', '?'))}"
         )
         # Append card data from enriched roster if available
         tag = m.get("tag", "")
         enriched = roster_by_tag.get(tag, {})
         fav_cards = enriched.get("favorite_cards", [])
         if fav_cards:
-            card_str = ", ".join(f"{c['name']} ({c['usage_pct']}%)" for c in fav_cards[:5])
+            card_str = ", ".join(
+                f"{c['name']} ({c['usage_pct']}%)" for c in fav_cards[:5]
+            )
             line += f" | top cards: {card_str}"
         member_summary.append(line)
 
     omitted_count = max(0, len(sorted_members) - len(limited_members))
     if omitted_count:
-        member_summary.append(f"  ... {omitted_count} more members omitted for context budget")
+        member_summary.append(
+            f"  ... {omitted_count} more members omitted for context budget"
+        )
 
     result = "=== CLAN ROSTER ===\n" + "\n".join(member_summary)
 
@@ -796,7 +922,6 @@ def _format_memory_context(memory_context):
             sections.append("=== DURABLE MEMORY ===\n" + "\n".join(lines))
 
     return ("\n\n" + "\n\n".join(sections)) if sections else ""
-
 
 
 __all__ = [

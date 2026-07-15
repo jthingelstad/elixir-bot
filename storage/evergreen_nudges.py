@@ -5,13 +5,17 @@ period, infrequently and rotated, so these fill lulls instead of adding noise.
 Inventory content and per-item send-state live together in `evergreen_nudges`.
 See runtime/jobs/_core.py::_evergreen_nudge for the emitter.
 """
+
 from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
 
 __all__ = [
-    "ensure_schema", "is_quiet_period", "due_nudge", "mark_nudge_sent",
+    "ensure_schema",
+    "is_quiet_period",
+    "due_nudge",
+    "mark_nudge_sent",
     "SEED_NUDGES",
 ]
 
@@ -22,7 +26,9 @@ _ISO = "%Y-%m-%dT%H:%M:%SZ"
 # "Discord" is kept out of the invite copy (Clash filters the word).
 SEED_NUDGES = [
     {
-        "nudge_key": "discord_invite", "topic": "Discord invite", "cooldown_days": 30,
+        "nudge_key": "discord_invite",
+        "topic": "Discord invite",
+        "cooldown_days": 30,
         "forbidden_terms": ["Discord", "http://", "https://", "www."],
         "context": (
             "Nudge clanmates to join our community hub for chat, deck tips, and clan "
@@ -31,7 +37,9 @@ SEED_NUDGES = [
         ),
     },
     {
-        "nudge_key": "poap_faq", "topic": "POAP KINGS FAQ", "cooldown_days": 30,
+        "nudge_key": "poap_faq",
+        "topic": "POAP KINGS FAQ",
+        "cooldown_days": 30,
         "forbidden_terms": ["http://", "https://", "www."],
         "context": (
             "Point clanmates to the POAP KINGS FAQ for common questions about war, "
@@ -40,7 +48,9 @@ SEED_NUDGES = [
         ),
     },
     {
-        "nudge_key": "website_home", "topic": "POAPKINGS.COM", "cooldown_days": 45,
+        "nudge_key": "website_home",
+        "topic": "POAPKINGS.COM",
+        "cooldown_days": 45,
         "forbidden_terms": ["http://", "https://", "www."],
         "context": (
             "Remind clanmates that POAPKINGS.COM is the home base for clan info, "
@@ -57,7 +67,9 @@ def _now(now):
 
 def _parse(ts):
     try:
-        return datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+        return datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S").replace(
+            tzinfo=timezone.utc
+        )
     except (TypeError, ValueError):
         return None
 
@@ -74,9 +86,14 @@ def ensure_schema(conn) -> None:
                 "INSERT OR IGNORE INTO evergreen_nudges (nudge_key, topic, context, "
                 "forbidden_terms_json, cooldown_days, enabled, created_at) "
                 "VALUES (?, ?, ?, ?, ?, 1, ?)",
-                (item["nudge_key"], item["topic"], item["context"],
-                 json.dumps(item.get("forbidden_terms") or []),
-                 item.get("cooldown_days", 30), now),
+                (
+                    item["nudge_key"],
+                    item["topic"],
+                    item["context"],
+                    json.dumps(item.get("forbidden_terms") or []),
+                    item.get("cooldown_days", 30),
+                    now,
+                ),
             )
 
 
@@ -95,10 +112,13 @@ def is_quiet_period(conn, now=None, *, quiet_days: int = 3) -> bool:
 
 
 def _has_pending_nudge_card(conn) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM leader_action_recommendations "
-        "WHERE source_signal_type = 'evergreen_nudge' AND status = 'proposed' LIMIT 1"
-    ).fetchone() is not None
+    return (
+        conn.execute(
+            "SELECT 1 FROM leader_action_recommendations "
+            "WHERE source_signal_type = 'evergreen_nudge' AND status = 'proposed' LIMIT 1"
+        ).fetchone()
+        is not None
+    )
 
 
 def due_nudge(conn, now=None, *, global_cap_days: int = 7) -> dict | None:
@@ -117,7 +137,9 @@ def due_nudge(conn, now=None, *, global_cap_days: int = 7) -> dict | None:
         return None
 
     eligible = []
-    for r in conn.execute("SELECT * FROM evergreen_nudges WHERE enabled = 1").fetchall():
+    for r in conn.execute(
+        "SELECT * FROM evergreen_nudges WHERE enabled = 1"
+    ).fetchall():
         d = dict(r)
         ls = _parse(d.get("last_sent_at")) if d.get("last_sent_at") else None
         if ls is not None and (now - ls) < timedelta(days=d.get("cooldown_days") or 30):
@@ -125,7 +147,7 @@ def due_nudge(conn, now=None, *, global_cap_days: int = 7) -> dict | None:
         eligible.append(d)
     if not eligible:
         return None
-    eligible.sort(key=lambda d: (d.get("last_sent_at") or ""))
+    eligible.sort(key=lambda d: d.get("last_sent_at") or "")
     item = eligible[0]
     item["forbidden_terms"] = json.loads(item.get("forbidden_terms_json") or "[]")
     return item

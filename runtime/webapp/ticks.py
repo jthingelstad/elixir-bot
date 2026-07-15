@@ -73,5 +73,7 @@ def recent_ticks(limit: int = 100) -> list[dict]:
         finally:
             conn.close()
     except Exception:
-        log.debug("persisted tick history unavailable; using memory ring", exc_info=True)
+        log.debug(
+            "persisted tick history unavailable; using memory ring", exc_info=True
+        )
     return [dict(t) for t in list(_TICKS)[:limit]]

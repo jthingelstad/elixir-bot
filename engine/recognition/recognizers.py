@@ -13,8 +13,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from engine import delivery
-from engine.emitters.clan import HOME_CLAN
 from engine.db import cursor_get, cursor_set
+from engine.emitters.clan import HOME_CLAN
 from engine.recognition import compose, ledger
 from engine.recognition.scorer import (
     REASON_ACCRUING,
@@ -43,7 +43,6 @@ RANKED_MIN_WINS = 9
 RANKED_MIN_WIN_RATE = 0.70
 
 
-
 def _payload(row) -> dict:
     try:
         return json.loads(row["payload_json"]) if row["payload_json"] else {}
@@ -56,6 +55,7 @@ def _cr_compact(dt: datetime) -> str:
 
 
 # ------------------------------------------------------------- battle stream
+
 
 def _battle_id(row) -> str:
     return row["dedup_key"]
@@ -86,7 +86,7 @@ def _arena_up_candidates(conn, tags: set[str]) -> list[Candidate]:
                ORDER BY battle_time ASC""",
             (tag,),
         ).fetchall()
-        for prev, cur in zip(rows, rows[1:]):
+        for prev, cur in zip(rows, rows[1:], strict=False):
             if (
                 cur["arena_id"] > prev["arena_id"]
                 and cur["arena_id"] <= ARENA_UP_MAX_CANONICAL_ID
@@ -94,20 +94,25 @@ def _arena_up_candidates(conn, tags: set[str]) -> list[Candidate]:
                 and prev["outcome"] == "W"
                 and (prev["trophy_change"] or 0) > 0
             ):
-                out.append(Candidate(
-                    key=f"arena_up:{tag}:{cur['arena_id']}",
-                    event_type="arena_up",
-                    subject_tag=tag,
-                    occurred_at=prev["battle_time"],   # exact — the deciding battle
-                    payload={
-                        "subject_tag": tag, "event_type": "arena_up",
-                        "arena_id": cur["arena_id"], "arena_name": cur["arena_name"],
-                        "prev_arena_id": prev["arena_id"],
-                        "prev_arena_name": prev["arena_name"],
-                        "timing": "exact", "occurred_at": prev["battle_time"],
-                    },
-                    event_refs=[_battle_id(prev), _battle_id(cur)],
-                ))
+                out.append(
+                    Candidate(
+                        key=f"arena_up:{tag}:{cur['arena_id']}",
+                        event_type="arena_up",
+                        subject_tag=tag,
+                        occurred_at=prev["battle_time"],  # exact — the deciding battle
+                        payload={
+                            "subject_tag": tag,
+                            "event_type": "arena_up",
+                            "arena_id": cur["arena_id"],
+                            "arena_name": cur["arena_name"],
+                            "prev_arena_id": prev["arena_id"],
+                            "prev_arena_name": prev["arena_name"],
+                            "timing": "exact",
+                            "occurred_at": prev["battle_time"],
+                        },
+                        event_refs=[_battle_id(prev), _battle_id(cur)],
+                    )
+                )
     return out
 
 
@@ -136,11 +141,19 @@ def _ranked_pulse_candidate(conn, now: str) -> list[Candidate]:
     ).fetchall()
     candidates = []
     for row in rows:
-        battles, wins, losses = int(row["battles"]), int(row["wins"]), int(row["losses"])
+        battles, wins, losses = (
+            int(row["battles"]),
+            int(row["wins"]),
+            int(row["losses"]),
+        )
         decided = wins + losses
         win_rate = round(wins / decided, 3) if decided else 0.0
-        if (battles >= RANKED_MIN_BATTLES and decided >= RANKED_MIN_DECIDED
-                and wins >= RANKED_MIN_WINS and win_rate >= RANKED_MIN_WIN_RATE):
+        if (
+            battles >= RANKED_MIN_BATTLES
+            and decided >= RANKED_MIN_DECIDED
+            and wins >= RANKED_MIN_WINS
+            and win_rate >= RANKED_MIN_WIN_RATE
+        ):
             candidates.append((row, battles, wins, losses, win_rate))
     if not candidates:
         return []
@@ -149,19 +162,26 @@ def _ranked_pulse_candidate(conn, now: str) -> list[Candidate]:
         key=lambda i: (i[4], i[2], i[1], str(i[0]["last_battle_time"] or "")),
     )
     tag = row["tag"]
-    return [Candidate(
-        key=f"ranked_pulse:{tag}:{day_key}",
-        event_type="ranked_pulse",
-        subject_tag=tag,
-        occurred_at=row["last_battle_time"],
-        payload={
-            "subject_tag": tag, "event_type": "ranked_pulse",
-            "window_days": RANKED_WINDOW_DAYS, "battle_count": battles,
-            "wins": wins, "losses": losses, "win_rate": win_rate,
-            "timing": "exact", "occurred_at": row["last_battle_time"],
-        },
-        event_refs=[f"battle_events:{tag}:{row['last_battle_time']}"],
-    )]
+    return [
+        Candidate(
+            key=f"ranked_pulse:{tag}:{day_key}",
+            event_type="ranked_pulse",
+            subject_tag=tag,
+            occurred_at=row["last_battle_time"],
+            payload={
+                "subject_tag": tag,
+                "event_type": "ranked_pulse",
+                "window_days": RANKED_WINDOW_DAYS,
+                "battle_count": battles,
+                "wins": wins,
+                "losses": losses,
+                "win_rate": win_rate,
+                "timing": "exact",
+                "occurred_at": row["last_battle_time"],
+            },
+            event_refs=[f"battle_events:{tag}:{row['last_battle_time']}"],
+        )
+    ]
 
 
 def battle_candidates(conn, now: str) -> tuple[list[Candidate], int]:
@@ -187,6 +207,7 @@ def battle_candidates(conn, now: str) -> tuple[list[Candidate], int]:
 
 # ------------------------------------------------------------- player stream
 
+
 def player_candidates(conn) -> tuple[list[Candidate], int]:
     """Celebrate candidates from new player_events. arena_changed becomes an
     arena_up claim at 85 (recognition.md §4: it has no score of its own; it
@@ -203,35 +224,52 @@ def player_candidates(conn) -> tuple[list[Candidate], int]:
         payload = _payload(r)
         tag = r["player_tag"]
         et = r["event_type"]
-        base = {"subject_tag": tag, "event_type": et,
-                "timing": r["timing"], "occurred_at": r["observed_at"], **payload}
+        base = {
+            "subject_tag": tag,
+            "event_type": et,
+            "timing": r["timing"],
+            "occurred_at": r["observed_at"],
+            **payload,
+        }
         if et == "arena_changed":
             arena_id = payload.get("arena_id")
             if arena_id is None or arena_id > ARENA_UP_MAX_CANONICAL_ID:
                 continue  # seasonal-league zone: renames are not arena-ups
-            out.append(Candidate(
-                key=f"arena_up:{tag}:{arena_id}",
-                event_type="arena_up",
-                subject_tag=tag,
-                occurred_at=r["observed_at"],   # estimated — profile backstop
-                payload={**base, "event_type": "arena_up",
-                         "arena_name": payload.get("arena_name")},
-                event_refs=[r["dedup_key"]],
-                arrival=r["event_id"],
-            ))
+            out.append(
+                Candidate(
+                    key=f"arena_up:{tag}:{arena_id}",
+                    event_type="arena_up",
+                    subject_tag=tag,
+                    occurred_at=r["observed_at"],  # estimated — profile backstop
+                    payload={
+                        **base,
+                        "event_type": "arena_up",
+                        "arena_name": payload.get("arena_name"),
+                    },
+                    event_refs=[r["dedup_key"]],
+                    arrival=r["event_id"],
+                )
+            )
             continue
         score, _ = base_score(et, payload)
         if score <= 0:
             continue
-        out.append(Candidate(
-            key=r["dedup_key"], event_type=et, subject_tag=tag,
-            occurred_at=r["observed_at"], payload=base,
-            event_refs=[r["dedup_key"]], arrival=r["event_id"],
-        ))
+        out.append(
+            Candidate(
+                key=r["dedup_key"],
+                event_type=et,
+                subject_tag=tag,
+                occurred_at=r["observed_at"],
+                payload=base,
+                event_refs=[r["dedup_key"]],
+                arrival=r["event_id"],
+            )
+        )
     return out, rows[-1]["event_id"]
 
 
 # --------------------------------------------------------- celebrate pipeline
+
 
 def _candidate_from_player_event(row) -> Candidate | None:
     payload = _payload(row)
@@ -314,20 +352,26 @@ def _cohort_member_detail(event_type: str, payload: dict) -> str | None:
 
 def _mark_cohort_member(conn, candidate: Candidate, wave_key: str) -> None:
     if ledger.claim(conn, candidate.key, "player", candidate.event_refs, 0):
-        ledger.record_suppression(conn, candidate.key, REASON_COHORT,
-                                  {"wave_key": wave_key})
+        ledger.record_suppression(
+            conn, candidate.key, REASON_COHORT, {"wave_key": wave_key}
+        )
         return
     row = conn.execute(
         "SELECT intent_id FROM recognition_ledger WHERE recognition_key = ?",
         (candidate.key,),
     ).fetchone()
     if row is not None and row["intent_id"] is None:
-        ledger.record_suppression(conn, candidate.key, REASON_COHORT,
-                                  {"wave_key": wave_key})
+        ledger.record_suppression(
+            conn, candidate.key, REASON_COHORT, {"wave_key": wave_key}
+        )
 
 
 def _celebrate_stream(event_type: str) -> str:
-    return "battle" if event_type in ("arena_up", "trophy_push", "ranked_pulse") else "player"
+    return (
+        "battle"
+        if event_type in ("arena_up", "trophy_push", "ranked_pulse")
+        else "player"
+    )
 
 
 def _is_card_grind_background(event_type: str, payload: dict | None) -> bool:
@@ -338,6 +382,7 @@ def _is_card_grind_background(event_type: str, payload: dict | None) -> bool:
         return True
     if event_type == "badge_earned":
         from engine.normalize import mastery_card
+
         return mastery_card((payload or {}).get("badge_name")) is not None
     return False
 
@@ -371,14 +416,25 @@ def run_celebrate_pipeline(conn, candidates: list[Candidate], now: str) -> dict:
             event_type = wave_key.split(":")[1]
             names = []
             for m in wave_members:
-                names.append({"tag": m.subject_tag,
-                              "name": compose.resolve_name(conn, m.subject_tag),
-                              "detail": _cohort_member_detail(m.event_type, m.payload)})
+                names.append(
+                    {
+                        "tag": m.subject_tag,
+                        "name": compose.resolve_name(conn, m.subject_tag),
+                        "detail": _cohort_member_detail(m.event_type, m.payload),
+                    }
+                )
             intent_id = delivery.raise_intent(
-                conn, wave_key, "cohort:cohort_wave", compose.route("cohort:x", "public"),
+                conn,
+                wave_key,
+                "cohort:cohort_wave",
+                compose.route("cohort:x", "public"),
                 "public",
-                {"event_type": f"cohort_wave:{event_type}", "wave_type": event_type,
-                 "members": names, "member_count": len(names)},
+                {
+                    "event_type": f"cohort_wave:{event_type}",
+                    "wave_type": event_type,
+                    "members": names,
+                    "member_count": len(names),
+                },
                 now,
             )
             ledger.attach_intent(conn, wave_key, intent_id)
@@ -402,7 +458,9 @@ def run_celebrate_pipeline(conn, candidates: list[Candidate], now: str) -> dict:
         postable: list[Candidate] = []
         for c in group:
             if _is_card_grind_background(c.event_type, c.payload):
-                if ledger.claim(conn, c.key, _celebrate_stream(c.event_type), c.event_refs, 0):
+                if ledger.claim(
+                    conn, c.key, _celebrate_stream(c.event_type), c.event_refs, 0
+                ):
                     ledger.record_suppression(conn, c.key, REASON_BACKGROUND, {})
                     counters["celebrate_suppressed"] += 1
             else:
@@ -424,9 +482,16 @@ def run_celebrate_pipeline(conn, candidates: list[Candidate], now: str) -> dict:
         if post:
             name = compose.resolve_name(conn, subject)
             intent_id = delivery.raise_intent(
-                conn, selected.key, f"celebrate:{selected.event_type}",
-                compose.route("celebrate:x", "public"), "public",
-                {**selected.payload, **({"player_name": name} if name else {}), **trace},
+                conn,
+                selected.key,
+                f"celebrate:{selected.event_type}",
+                compose.route("celebrate:x", "public"),
+                "public",
+                {
+                    **selected.payload,
+                    **({"player_name": name} if name else {}),
+                    **trace,
+                },
                 now,
             )
             ledger.attach_intent(conn, selected.key, intent_id)
@@ -439,7 +504,9 @@ def run_celebrate_pipeline(conn, candidates: list[Candidate], now: str) -> dict:
                 continue
             if ledger.claim(conn, other.key, stream, other.event_refs, 0):
                 ledger.record_suppression(
-                    conn, other.key, REASON_COALESCED,
+                    conn,
+                    other.key,
+                    REASON_COALESCED,
                     {"selected_key": selected.key},
                 )
             counters["celebrate_suppressed"] += 1
@@ -447,6 +514,7 @@ def run_celebrate_pipeline(conn, candidates: list[Candidate], now: str) -> dict:
 
 
 # --------------------------------------------------------------- clan stream
+
 
 def _was_kicked(conn, tag: str, observed_at: str) -> bool:
     """C1 kick-suppression: a done kick_recommendation within 14 days means the
@@ -474,16 +542,21 @@ def clan_recognizer(conn, now: str) -> dict:
     for r in rows:
         et = r["event_type"]
         tag = r["subject_tag"]
-        payload = {"subject_tag": tag, "event_type": et, "clan_tag": r["clan_tag"],
-                   "timing": r["timing"], "occurred_at": r["observed_at"],
-                   **_payload(r)}
+        payload = {
+            "subject_tag": tag,
+            "event_type": et,
+            "clan_tag": r["clan_tag"],
+            "timing": r["timing"],
+            "occurred_at": r["observed_at"],
+            **_payload(r),
+        }
         if not ledger.claim(conn, r["dedup_key"], "clan", [r["dedup_key"]], 0):
             continue
         suppress = None
         if et == "member_left" and tag and _was_kicked(conn, tag, r["observed_at"]):
-            suppress = "kick_suppressed"          # the event exists; the post doesn't (C1)
+            suppress = "kick_suppressed"  # the event exists; the post doesn't (C1)
         elif et == "role_changed" and payload.get("direction") == "demoted":
-            suppress = "demotion_private"         # leadership reality, not celebration
+            suppress = "demotion_private"  # leadership reality, not celebration
         if suppress:
             ledger.record_suppression(conn, r["dedup_key"], suppress)
             counters["clan_suppressed"] += 1
@@ -496,16 +569,28 @@ def clan_recognizer(conn, now: str) -> dict:
         if et == "role_changed" and payload.get("direction") == "promoted" and tag:
             try:
                 from engine import management
+
                 ev = management.elder_evidence(conn, tag, now)
                 if ev:
                     payload["elder_evidence"] = ev
             except Exception as exc:
                 from storage.incidents import record_incident
-                record_incident("recognition.elder_evidence_enrich", exc,
-                                context={"tag": tag}, severity="warn", conn=conn)
+
+                record_incident(
+                    "recognition.elder_evidence_enrich",
+                    exc,
+                    context={"tag": tag},
+                    severity="warn",
+                    conn=conn,
+                )
         intent_id = delivery.raise_intent(
-            conn, r["dedup_key"], f"clan:{et}", compose.route("clan:x", r["scope"]),
-            r["scope"], payload, now,
+            conn,
+            r["dedup_key"],
+            f"clan:{et}",
+            compose.route("clan:x", r["scope"]),
+            r["scope"],
+            payload,
+            now,
         )
         ledger.attach_intent(conn, r["dedup_key"], intent_id)
         counters["clan_posted"] += 1
@@ -515,6 +600,7 @@ def clan_recognizer(conn, now: str) -> dict:
 
 
 # ---------------------------------------------------------------- war stream
+
 
 def war_recognizer(conn, clock: dict | None, now: str) -> dict:
     """Direct path, clock-gated (§16.2 phase-appropriate behavior)."""
@@ -526,18 +612,22 @@ def war_recognizer(conn, clock: dict | None, now: str) -> dict:
     ).fetchall()
     for r in rows:
         et = r["event_type"]
-        payload = {"event_type": et, "season_id": r["season_id"],
-                   "section_index": r["section_index"],
-                   "timing": r["timing"], "occurred_at": r["observed_at"],
-                   **_payload(r)}
+        payload = {
+            "event_type": et,
+            "season_id": r["season_id"],
+            "section_index": r["section_index"],
+            "timing": r["timing"],
+            "occurred_at": r["observed_at"],
+            **_payload(r),
+        }
         if not ledger.claim(conn, r["dedup_key"], "war", [r["dedup_key"]], 0):
             continue
         suppress = None
         if et == "colosseum_detected":
-            suppress = "clock_fact_no_post"       # feeds the clock; the war_day_opened
+            suppress = "clock_fact_no_post"  # feeds the clock; the war_day_opened
             #                                       events carry the colosseum framing
         elif et == "war_day_opened" and clock.get("race_finished"):
-            suppress = "race_already_won"         # §16.4: urgency drops once won
+            suppress = "race_already_won"  # §16.4: urgency drops once won
         if suppress:
             ledger.record_suppression(conn, r["dedup_key"], suppress)
             counters["war_suppressed"] += 1
@@ -545,8 +635,14 @@ def war_recognizer(conn, clock: dict | None, now: str) -> dict:
         if clock:
             payload["war_clock"] = {
                 k: clock.get(k)
-                for k in ("phase", "day_index", "is_colosseum_week", "pace_status",
-                          "hours_left_in_period", "race_finished")
+                for k in (
+                    "phase",
+                    "day_index",
+                    "is_colosseum_week",
+                    "pace_status",
+                    "hours_left_in_period",
+                    "race_finished",
+                )
                 if k in clock
             }
             # war_day_human now arrives in the event payload (set at EMIT
@@ -565,27 +661,44 @@ def war_recognizer(conn, clock: dict | None, now: str) -> dict:
                 # the race baseline feed a race_state the ask keys tone on.
                 try:
                     from engine import baselines as _bl
+
                     _row = _bl.get_baseline(conn, "riverrace", HOME_CLAN, "race")
                     if _row is not None:
                         _p = json.loads(_row["payload_json"])
                         _clans = sorted(
-                            ((c.get("fame") or 0, t) for t, c in (_p.get("clans") or {}).items()),
-                            reverse=True)
+                            (
+                                (c.get("fame") or 0, t)
+                                for t, c in (_p.get("clans") or {}).items()
+                            ),
+                            reverse=True,
+                        )
                         _ours = _p.get("our_fame") or 0
-                        _rival = next((f for f, t in _clans if t != _p.get("our_tag")), 0)
+                        _rival = next(
+                            (f for f, t in _clans if t != _p.get("our_tag")), 0
+                        )
                         payload["standings"] = {
-                            "our_fame": _ours, "nearest_rival_fame": _rival,
+                            "our_fame": _ours,
+                            "nearest_rival_fame": _rival,
                             "lead": _ours - _rival,
                             "race_state": (
-                                "runaway_lead" if _ours > 4 * max(_rival, 1) and _ours - _rival > 5000
-                                else "comfortable_lead" if _ours - _rival > 2000
-                                else "close_race" if abs(_ours - _rival) <= 2000
-                                else "behind"),
+                                "runaway_lead"
+                                if _ours > 4 * max(_rival, 1) and _ours - _rival > 5000
+                                else "comfortable_lead"
+                                if _ours - _rival > 2000
+                                else "close_race"
+                                if abs(_ours - _rival) <= 2000
+                                else "behind"
+                            ),
                         }
                 except Exception as exc:
                     from storage.incidents import record_incident
-                    record_incident("recognition.war_standings_enrich", exc,
-                                    severity="warn", conn=conn)
+
+                    record_incident(
+                        "recognition.war_standings_enrich",
+                        exc,
+                        severity="warn",
+                        conn=conn,
+                    )
         if et == "season_closed":
             champ, fp = payload.get("war_champ_tag"), payload.get("free_pass_tag")
             payload["war_champ_name"] = compose.resolve_name(conn, champ)
@@ -608,8 +721,13 @@ def war_recognizer(conn, clock: dict | None, now: str) -> dict:
         if et in ("week_finished", "season_closed") and week_thread:
             payload["week_thread_id"] = week_thread
         intent_id = delivery.raise_intent(
-            conn, r["dedup_key"], f"war:{et}", compose.route("war:x", r["scope"]),
-            r["scope"], payload, now,
+            conn,
+            r["dedup_key"],
+            f"war:{et}",
+            compose.route("war:x", r["scope"]),
+            r["scope"],
+            payload,
+            now,
             thread_id=week_thread if et == "war_day_opened" else None,
         )
         ledger.attach_intent(conn, r["dedup_key"], intent_id)
@@ -621,13 +739,17 @@ def war_recognizer(conn, clock: dict | None, now: str) -> dict:
 
 # --------------------------------------------------------------- game stream
 
+
 def _game_group_payload(change_key: str, members: list) -> dict:
     """One #announcements payload for a change. The head event carries the
     story; any same-change_key siblings ride along under `grouped`. Normalizes
     the image to `image_url` so delivery has one key regardless of source."""
     head = members[0]
-    payload = {"event_type": head["event_type"], "change_key": change_key,
-               **_payload(head)}
+    payload = {
+        "event_type": head["event_type"],
+        "change_key": change_key,
+        **_payload(head),
+    }
     if head["event_type"] == "card_added" and payload.get("icon_url"):
         payload.setdefault("image_url", payload["icon_url"])
     if len(members) > 1:
@@ -665,8 +787,13 @@ def game_recognizer(conn, now: str) -> dict:
             continue
         payload = _game_group_payload(ck, members)
         intent_id = delivery.raise_intent(
-            conn, f"game:{ck}", f"game:{payload['event_type']}",
-            compose.route("game:x", "public"), "public", payload, now,
+            conn,
+            f"game:{ck}",
+            f"game:{payload['event_type']}",
+            compose.route("game:x", "public"),
+            "public",
+            payload,
+            now,
         )
         ledger.attach_intent(conn, f"game:{ck}", intent_id)
         counters["game_posted"] += 1

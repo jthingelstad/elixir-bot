@@ -5,11 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import db
+
 # Trigger full runtime init before importing runtime.jobs (which depends on
 # the elixir_agent facade) to avoid circular-import surprises.
 import elixir  # noqa: F401
-
-import db
+import runtime.jobs._memory as memory_job
 from agent.tool_policy import (
     RESPONSE_SCHEMAS_BY_WORKFLOW,
     TOOLSETS_BY_WORKFLOW,
@@ -21,7 +22,6 @@ from runtime.jobs._memory import (
     _memory_synthesis_cycle,
     _reduce_memory_synthesis_context_for_retry,
 )
-import runtime.jobs._memory as memory_job
 
 
 @pytest.fixture
@@ -45,6 +45,7 @@ def memdb(tmp_path, monkeypatch):
 # source_type + tool policy
 # ---------------------------------------------------------------------------
 
+
 def test_elixir_synthesis_source_type_is_allowed():
     assert "elixir_synthesis" in SOURCE_TYPES
 
@@ -60,6 +61,7 @@ def test_memory_synthesis_workflow_has_empty_toolset_and_strict_schema():
 # ---------------------------------------------------------------------------
 # _apply_memory_synthesis_plan
 # ---------------------------------------------------------------------------
+
 
 def test_apply_plan_writes_arc_memories_with_elixir_synthesis_source(memdb):
     plan = {
@@ -198,6 +200,7 @@ def test_apply_plan_auto_expires_non_leader_contradictions(memdb):
 # Context builder
 # ---------------------------------------------------------------------------
 
+
 def test_build_context_returns_expected_keys(memdb):
     # Seed one recent memory so week_memories isn't empty.
     create_memory(
@@ -223,23 +226,41 @@ def test_build_context_returns_expected_keys(memdb):
 
 
 def test_build_context_includes_operations_context(memdb, monkeypatch):
-    monkeypatch.setattr(memory_job.event_facades, "summarize_event_windows", lambda **kwargs: {
-        "7d": {"total": 2, "by_type": {"member_join": 1}},
-    })
-    monkeypatch.setattr(memory_job.event_facades, "list_recent_events", lambda **kwargs: [
-        {
-            "event_key": "game_event:join",
-            "event_type": "member_join",
-            "scope": "public",
-            "subject_key": "#ABC",
-            "source_signal_key": "join:#ABC",
-            "observed_at": "2026-06-19T12:00:00",
-        }
-    ])
-    monkeypatch.setattr(memory_job.db, "get_war_season_snapshot", lambda: {
-        "season_id": 133,
-        "summary": "Season 133; rank 1",
-    })
+    monkeypatch.setattr(
+        memory_job.event_facades,
+        "summarize_event_windows",
+        lambda **kwargs: {
+            "windows": {
+                "7d": {
+                    "total_events": 2,
+                    "battles_mirrored": 0,
+                    "by_type": {"member_join": 1},
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        memory_job.event_facades,
+        "list_recent_events",
+        lambda **kwargs: [
+            {
+                "event_key": "game_event:join",
+                "event_type": "member_join",
+                "scope": "public",
+                "subject_key": "#ABC",
+                "source_signal_key": "join:#ABC",
+                "observed_at": "2026-06-19T12:00:00",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        memory_job.db,
+        "get_war_season_snapshot",
+        lambda: {
+            "season_id": 133,
+            "summary": "Season 133; rank 1",
+        },
+    )
     monkeypatch.setattr(
         memory_job.game_mode_capability,
         "get_clan_game_mode_windows",
@@ -249,35 +270,41 @@ def test_build_context_includes_operations_context(memdb, monkeypatch):
             "windows": {"7d": {"modes": {"ranked": {"battles": 12}}}},
         },
     )
-    monkeypatch.setattr(memory_job.db, "get_season_window", lambda: {
-        "season_id": 133, "weeks_recorded": 2,
-    })
-    monkeypatch.setattr(memory_job.db, "decision_case_snapshot", lambda **kwargs: {
-        "due": [{"case_id": 1, "case_type": "inactivity_review"}],
-        "open": [],
-    })
-    monkeypatch.setattr(memory_job.db, "list_recent_communication_intents", lambda **kwargs: [
-        {
-            "intent_id": 5,
-            "workflow": "arena-relay",
-            "intent_type": "action_card",
-            "status": "delivered",
-            "target_channel_key": "arena-relay",
-            "source_signal_key": "join:#ABC",
-            "updated_at": "2026-06-19T12:01:00",
-        }
-    ])
+    monkeypatch.setattr(
+        memory_job.db,
+        "get_season_window",
+        lambda: {
+            "season_id": 133,
+            "weeks_recorded": 2,
+        },
+    )
+    monkeypatch.setattr(
+        memory_job.db,
+        "decision_case_snapshot",
+        lambda **kwargs: {
+            "due": [{"case_id": 1, "case_type": "inactivity_review"}],
+            "open": [],
+        },
+    )
+    monkeypatch.setattr(
+        memory_job.db,
+        "get_awareness_activity",
+        lambda **kwargs: {
+            "thoughts": [{"loop_number": 5, "skipped_reason": None}],
+            "posts": [{"post_id": 7, "lane": "elixir"}],
+        },
+    )
 
     context = _build_memory_synthesis_context()
 
     operations = context["operations_context"]
-    assert operations["event_windows"]["7d"]["total"] == 2
+    assert operations["event_windows"]["windows"]["7d"]["total_events"] == 2
     assert operations["recent_events"][0]["event_key"] == "game_event:join"
     assert operations["war_season"]["season_id"] == 133
     assert operations["game_modes"]["windows"]["7d"]["modes"]["ranked"]["battles"] == 12
     assert operations["season_window"]["weeks_recorded"] == 2
     assert operations["decision_cases"]["due"][0]["case_id"] == 1
-    assert operations["recent_intents"][0]["intent_id"] == 5
+    assert operations["awareness_activity"]["thoughts"][0]["loop_number"] == 5
 
 
 def test_build_context_bounds_memory_count_and_text_size(memdb, monkeypatch):
@@ -324,14 +351,20 @@ def test_reduce_memory_synthesis_context_for_retry_bounds_large_payload():
         ],
         "week_posts": {
             "leader-lounge": [
-                {"content": "p" * 1000, "summary": "s" * 500, "created_at": "2026-06-20"}
+                {
+                    "content": "p" * 1000,
+                    "summary": "s" * 500,
+                    "created_at": "2026-06-20",
+                }
                 for _ in range(10)
             ]
         },
         "live_clan_state": {"roster": {"member_count": 50}},
         "operations_context": {
             "event_windows": {"7d": {"total": 5}},
-            "recent_events": [{"event_key": f"event:{idx}", "event_type": "join"} for idx in range(40)],
+            "recent_events": [
+                {"event_key": f"event:{idx}", "event_type": "join"} for idx in range(40)
+            ],
             "war_season": {
                 "season_id": 131,
                 "summary": "war " * 200,
@@ -365,8 +398,11 @@ def test_reduce_memory_synthesis_context_for_retry_bounds_large_payload():
                                 "label": "Ranked",
                                 "battles": 12,
                                 "top_members": [
-                                    {"member_ref": f"Player {idx}",
-                                     "player_tag": f"#{idx}", "battles": idx}
+                                    {
+                                        "member_ref": f"Player {idx}",
+                                        "player_tag": f"#{idx}",
+                                        "battles": idx,
+                                    }
                                     for idx in range(6)
                                 ],
                             }
@@ -379,29 +415,59 @@ def test_reduce_memory_synthesis_context_for_retry_bounds_large_payload():
                 "due": [{"case_id": idx, "summary": "d" * 500} for idx in range(12)],
                 "open": [{"case_id": idx, "reason": "r" * 500} for idx in range(12)],
             },
-            "recent_intents": [
-                {"intent_id": idx, "summary": "i" * 500, "skipped_reason": "r" * 500}
-                for idx in range(20)
-            ],
+            "awareness_activity": {
+                "thoughts": [
+                    {"loop_number": idx, "skipped_reason": "r" * 500}
+                    for idx in range(20)
+                ],
+                "posts": [
+                    {"post_id": idx, "content_preview": "i" * 500} for idx in range(20)
+                ],
+            },
         },
     }
 
     reduced = _reduce_memory_synthesis_context_for_retry(context)
 
     assert reduced["retry_context"]["reason"] == "initial_response_truncated"
-    assert len(reduced["week_memories"]) == memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT
-    assert len(reduced["prior_arcs"]) == memory_job.MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT
-    assert len(reduced["week_posts"]["leader-lounge"]) == memory_job.MEMORY_SYNTHESIS_RETRY_POSTS_PER_CHANNEL
-    assert len(reduced["week_memories"][0]["body"]) <= memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS
-    assert len(reduced["week_posts"]["leader-lounge"][0]["content"]) <= memory_job.MEMORY_SYNTHESIS_RETRY_POST_CHARS
+    assert (
+        len(reduced["week_memories"]) == memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT
+    )
+    assert (
+        len(reduced["prior_arcs"]) == memory_job.MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT
+    )
+    assert (
+        len(reduced["week_posts"]["leader-lounge"])
+        == memory_job.MEMORY_SYNTHESIS_RETRY_POSTS_PER_CHANNEL
+    )
+    assert (
+        len(reduced["week_memories"][0]["body"])
+        <= memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS
+    )
+    assert (
+        len(reduced["week_posts"]["leader-lounge"][0]["content"])
+        <= memory_job.MEMORY_SYNTHESIS_RETRY_POST_CHARS
+    )
     operations = reduced["operations_context"]
-    assert len(operations["recent_events"]) == memory_job.MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT
-    assert len(operations["recent_intents"]) == memory_job.MEMORY_SYNTHESIS_RETRY_RECENT_INTENTS_LIMIT
-    assert len(operations["decision_cases"]["due"]) == memory_job.MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT
+    assert (
+        len(operations["recent_events"])
+        == memory_job.MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT
+    )
+    assert len(operations["awareness_activity"]["thoughts"]) == (
+        memory_job.MEMORY_SYNTHESIS_RETRY_AWARENESS_LIMIT
+    )
+    assert len(operations["awareness_activity"]["posts"]) == (
+        memory_job.MEMORY_SYNTHESIS_RETRY_AWARENESS_LIMIT
+    )
+    assert (
+        len(operations["decision_cases"]["due"])
+        == memory_job.MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT
+    )
     assert len(operations["war_season"]["state"]["race"]["standings"]) == 5
-    assert len(
-        operations["game_modes"]["windows"]["7d"]["modes"]["ranked"]["top_members"]
-    ) == 3
+    assert (
+        len(operations["game_modes"]["windows"]["7d"]["modes"]["ranked"]["top_members"])
+        == 3
+    )
 
 
 def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
@@ -443,20 +509,44 @@ def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
 
     with (
         patch("runtime.jobs._memory.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._memory._build_memory_synthesis_context", return_value={"week_window": {"war_week_id": "131:2"}}),
-        patch("runtime.jobs._memory.elixir_agent.run_memory_synthesis", return_value=plan),
-        patch("runtime.jobs._memory._apply_memory_synthesis_plan", return_value={
-            "arcs_written": 0, "stale_expired": 1, "contradictions_flagged": 2,
-            "contradictions_auto_expired": 1, "contradictions_leader_review": 1,
-            "arcs_requested": 0, "stale_requested": 0, "dry_run": False,
-        }),
+        patch(
+            "runtime.jobs._memory._build_memory_synthesis_context",
+            return_value={"week_window": {"war_week_id": "131:2"}},
+        ),
+        patch(
+            "runtime.jobs._memory.elixir_agent.run_memory_synthesis", return_value=plan
+        ),
+        patch(
+            "runtime.jobs._memory._apply_memory_synthesis_plan",
+            return_value={
+                "arcs_written": 0,
+                "stale_expired": 1,
+                "contradictions_flagged": 2,
+                "contradictions_auto_expired": 1,
+                "contradictions_leader_review": 1,
+                "arcs_requested": 0,
+                "stale_requested": 0,
+                "dry_run": False,
+            },
+        ),
         patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
         patch("runtime.jobs._memory.upsert_weekly_summary_memory") as mock_memory,
-        patch("runtime.jobs._memory.elixir_log.post_event_async", new=AsyncMock()) as mock_elixir_log,
-        patch("runtime.jobs._memory.prompts.discord_singleton_lane", return_value={"id": 900, "name": "#leader-actions"}),
+        patch(
+            "runtime.jobs._memory.elixir_log.post_event_async", new=AsyncMock()
+        ) as mock_elixir_log,
+        patch(
+            "runtime.jobs._memory.prompts.discord_singleton_lane",
+            return_value={"id": 900, "name": "#leader-actions"},
+        ),
         patch("runtime.jobs._memory.bot.get_channel", return_value=channel),
-        patch("runtime.jobs._memory.db.create_leader_action_recommendation", return_value=created) as mock_create,
-        patch("runtime.jobs._memory.post_leader_action_card", new=AsyncMock(return_value=[SimpleNamespace(id=1)])) as mock_card,
+        patch(
+            "runtime.jobs._memory.db.create_leader_action_recommendation",
+            return_value=created,
+        ) as mock_create,
+        patch(
+            "runtime.jobs._memory.post_leader_action_card",
+            new=AsyncMock(return_value=[SimpleNamespace(id=1)]),
+        ) as mock_card,
         patch("runtime.jobs._memory.db.save_message") as mock_save,
         patch("runtime.jobs._memory.runtime_status.mark_job_start"),
         patch("runtime.jobs._memory.runtime_status.mark_job_success") as mock_success,
@@ -468,34 +558,60 @@ def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
     assert mock_memory.call_args.kwargs["event_type"] == "weekly_memory_synthesis"
     # One action card for the leader-judgment contradiction only.
     assert mock_create.call_args.kwargs["action_type"] == "memory_review"
-    assert mock_create.call_args.kwargs["source_signal_key"] == "memory_contradiction:42"
+    assert (
+        mock_create.call_args.kwargs["source_signal_key"] == "memory_contradiction:42"
+    )
     assert "Fullboat is a member camping" in mock_create.call_args.kwargs["prompt_text"]
     mock_card.assert_awaited_once()
     assert mock_save.call_args.kwargs["event_type"] == "memory_contradiction"
     mock_elixir_log.assert_awaited_once()
-    assert "Auto-expired metric/current-state memories: 1" in mock_elixir_log.call_args.args[0]
+    assert (
+        "Auto-expired metric/current-state memories: 1"
+        in mock_elixir_log.call_args.args[0]
+    )
     assert "contradiction_cards=1" in mock_success.call_args.args[1]
 
 
 def test_memory_synthesis_cycle_quiet_week_posts_nothing():
     """No contradictions → no Discord output at all."""
-    plan = {"digest": "", "arc_memories": [], "stale_memory_ids": [], "contradictions": []}
+    plan = {
+        "digest": "",
+        "arc_memories": [],
+        "stale_memory_ids": [],
+        "contradictions": [],
+    }
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
     with (
         patch("runtime.jobs._memory.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._memory._build_memory_synthesis_context", return_value={"week_window": {}}),
-        patch("runtime.jobs._memory.elixir_agent.run_memory_synthesis", return_value=plan),
-        patch("runtime.jobs._memory._apply_memory_synthesis_plan", return_value={
-            "arcs_written": 0, "stale_expired": 0, "contradictions_flagged": 0,
-            "arcs_requested": 0, "stale_requested": 0, "dry_run": False,
-        }),
+        patch(
+            "runtime.jobs._memory._build_memory_synthesis_context",
+            return_value={"week_window": {}},
+        ),
+        patch(
+            "runtime.jobs._memory.elixir_agent.run_memory_synthesis", return_value=plan
+        ),
+        patch(
+            "runtime.jobs._memory._apply_memory_synthesis_plan",
+            return_value={
+                "arcs_written": 0,
+                "stale_expired": 0,
+                "contradictions_flagged": 0,
+                "arcs_requested": 0,
+                "stale_requested": 0,
+                "dry_run": False,
+            },
+        ),
         patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
         patch("runtime.jobs._memory.upsert_weekly_summary_memory") as mock_memory,
-        patch("runtime.jobs._memory.elixir_log.post_event_async", new=AsyncMock()) as mock_elixir_log,
-        patch("runtime.jobs._memory.post_leader_action_card", new=AsyncMock()) as mock_card,
+        patch(
+            "runtime.jobs._memory.elixir_log.post_event_async", new=AsyncMock()
+        ) as mock_elixir_log,
+        patch(
+            "runtime.jobs._memory.post_leader_action_card", new=AsyncMock()
+        ) as mock_card,
         patch("runtime.jobs._memory.runtime_status.mark_job_start"),
         patch("runtime.jobs._memory.runtime_status.mark_job_success") as mock_success,
     ):
@@ -515,7 +631,12 @@ def test_memory_synthesis_cycle_retries_truncated_agent_with_reduced_context():
         "week_posts": {"leader-lounge": [{"content": "p" * 1000} for _ in range(10)]},
         "operations_context": {
             "recent_events": [{"event_key": f"event:{idx}"} for idx in range(40)],
-            "recent_intents": [{"intent_id": idx, "summary": "i" * 500} for idx in range(20)],
+            "awareness_activity": {
+                "thoughts": [{"loop_number": idx} for idx in range(20)],
+                "posts": [
+                    {"post_id": idx, "content_preview": "i" * 500} for idx in range(20)
+                ],
+            },
         },
     }
     truncation = {
@@ -525,22 +646,36 @@ def test_memory_synthesis_cycle_retries_truncated_agent_with_reduced_context():
             "detail": "LLM response truncated by max_tokens=3000",
         }
     }
-    plan = {"digest": "", "arc_memories": [], "stale_memory_ids": [], "contradictions": []}
+    plan = {
+        "digest": "",
+        "arc_memories": [],
+        "stale_memory_ids": [],
+        "contradictions": [],
+    }
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
     with (
         patch("runtime.jobs._memory.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._memory._build_memory_synthesis_context", return_value=context),
+        patch(
+            "runtime.jobs._memory._build_memory_synthesis_context", return_value=context
+        ),
         patch(
             "runtime.jobs._memory.elixir_agent.run_memory_synthesis",
             side_effect=[truncation, plan],
         ) as mock_agent,
-        patch("runtime.jobs._memory._apply_memory_synthesis_plan", return_value={
-            "arcs_written": 0, "stale_expired": 0, "contradictions_flagged": 0,
-            "arcs_requested": 0, "stale_requested": 0, "dry_run": False,
-        }) as mock_apply,
+        patch(
+            "runtime.jobs._memory._apply_memory_synthesis_plan",
+            return_value={
+                "arcs_written": 0,
+                "stale_expired": 0,
+                "contradictions_flagged": 0,
+                "arcs_requested": 0,
+                "stale_requested": 0,
+                "dry_run": False,
+            },
+        ) as mock_apply,
         patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
         patch("runtime.jobs._memory.runtime_status.mark_job_start"),
         patch("runtime.jobs._memory.runtime_status.mark_job_success") as mock_success,
@@ -551,8 +686,14 @@ def test_memory_synthesis_cycle_retries_truncated_agent_with_reduced_context():
     assert mock_agent.call_count == 2
     retry_context = mock_agent.call_args_list[1].args[0]
     assert retry_context["retry_context"]["reason"] == "initial_response_truncated"
-    assert len(retry_context["week_memories"]) == memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT
-    assert len(retry_context["week_memories"][0]["body"]) <= memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS
+    assert (
+        len(retry_context["week_memories"])
+        == memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT
+    )
+    assert (
+        len(retry_context["week_memories"][0]["body"])
+        <= memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS
+    )
     assert mock_apply.call_args.kwargs["week_id"] == "131:4"
     mock_failure.assert_not_called()
     mock_success.assert_called_once()
@@ -561,9 +702,15 @@ def test_memory_synthesis_cycle_retries_truncated_agent_with_reduced_context():
 def test_memory_synthesis_cycle_marks_structured_agent_error_as_failure():
     channel = MagicMock()
     with (
-        patch("runtime.jobs._memory.prompts.discord_channels_by_workflow", return_value=[{"id": 42}]),
+        patch(
+            "runtime.jobs._memory.prompts.discord_channels_by_workflow",
+            return_value=[{"id": 42}],
+        ),
         patch("runtime.jobs._memory.bot.get_channel", return_value=channel),
-        patch("runtime.jobs._memory._build_memory_synthesis_context", return_value={"week_window": {}}),
+        patch(
+            "runtime.jobs._memory._build_memory_synthesis_context",
+            return_value={"week_window": {}},
+        ),
         patch(
             "runtime.jobs._memory.elixir_agent.run_memory_synthesis",
             return_value={

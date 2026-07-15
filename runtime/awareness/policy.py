@@ -13,7 +13,6 @@ from collections import Counter
 from capabilities.game_truth import awareness_post_facts
 from engine.game_check import check_post
 
-
 _GENDERED_MEMBER_PRONOUN = re.compile(
     r"\b(?:he|him|his|himself|she|her|hers|herself)\b",
     re.IGNORECASE,
@@ -104,12 +103,14 @@ def apply_editorial_admission(read: dict, plan: dict) -> tuple[dict, list[dict]]
         if not is_routine_repeat:
             admitted.append(post)
             continue
-        suppressed.append({
-            "member_tag": tags[0],
-            "summary": post.get("summary"),
-            "covers_signal_keys": covers,
-            "prior_spotlight": recent[tags[0]],
-        })
+        suppressed.append(
+            {
+                "member_tag": tags[0],
+                "summary": post.get("summary"),
+                "covers_signal_keys": covers,
+                "prior_spotlight": recent[tags[0]],
+            }
+        )
 
     if not suppressed:
         return plan, []
@@ -169,7 +170,9 @@ def validate_repair(original: dict, repaired: dict) -> list[str]:
     for key in sorted((set(original) | set(repaired)) - {"posts"}):
         if original.get(key) != repaired.get(key):
             violations.append(f"repair.changed_{key}")
-    for index, (before, after) in enumerate(zip(original_posts, repaired_posts)):
+    for index, (before, after) in enumerate(
+        zip(original_posts, repaired_posts, strict=True)
+    ):
         if not isinstance(before, dict) or not isinstance(after, dict):
             violations.append(f"repair.post[{index}].invalid_shape")
             continue

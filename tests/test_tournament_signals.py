@@ -5,7 +5,11 @@ import asyncio
 import db
 from runtime.jobs import _tournament as tournament_jobs
 from runtime.jobs._tournament import _build_battle_played_signal
-from storage.tournament import poll_tournament, register_tournament, store_tournament_battle
+from storage.tournament import (
+    poll_tournament,
+    register_tournament,
+    store_tournament_battle,
+)
 
 
 def _api_payload(*, name="PK Clan Tourney", status="inPreparation", members):
@@ -53,12 +57,21 @@ def test_poll_tournament_emits_join_signal_for_each_new_participant():
         poll_tournament("#2QG9Y9UR", _api_payload(members=seed), conn=conn)
         # Second poll: two new joiners appear.
         expanded = seed + [
-            {"tag": "#DEF456", "name": "King Levy", "score": 0, "rank": 1,
-             "clan": {"tag": "#J2RGCRVG", "name": "POAP KINGS"}},
+            {
+                "tag": "#DEF456",
+                "name": "King Levy",
+                "score": 0,
+                "rank": 1,
+                "clan": {"tag": "#J2RGCRVG", "name": "POAP KINGS"},
+            },
             {"tag": "#GHI789", "name": "Ditika", "score": 0, "rank": 1},
         ]
         result = poll_tournament("#2QG9Y9UR", _api_payload(members=expanded), conn=conn)
-        join_signals = [s for s in result["live_signals"] if s["type"] == "tournament_participant_joined"]
+        join_signals = [
+            s
+            for s in result["live_signals"]
+            if s["type"] == "tournament_participant_joined"
+        ]
         assert len(join_signals) == 2
         by_tag = {s["player_tag"]: s for s in join_signals}
         assert by_tag["#DEF456"]["player_name"] == "King Levy"
@@ -66,7 +79,10 @@ def test_poll_tournament_emits_join_signal_for_each_new_participant():
         assert by_tag["#GHI789"]["player_name"] == "Ditika"
         # signal_key should dedupe per (tournament, player) so the awareness
         # pipeline never double-posts the same join.
-        assert by_tag["#DEF456"]["signal_key"] == "tournament_participant_joined|#2QG9Y9UR|#DEF456"
+        assert (
+            by_tag["#DEF456"]["signal_key"]
+            == "tournament_participant_joined|#2QG9Y9UR|#DEF456"
+        )
     finally:
         conn.close()
 
@@ -91,8 +107,15 @@ def test_poll_tournament_does_not_resignal_known_participants():
         conn.close()
 
 
-def _battle_payload(tournament_tag="#2QG9Y9UR", team_tag="#ABC123", opp_tag="#DEF456",
-                     team_crowns=3, opp_crowns=1, team_name="King Thing", opp_name="King Levy"):
+def _battle_payload(
+    tournament_tag="#2QG9Y9UR",
+    team_tag="#ABC123",
+    opp_tag="#DEF456",
+    team_crowns=3,
+    opp_crowns=1,
+    team_name="King Thing",
+    opp_name="King Levy",
+):
     return {
         "battleTime": "20260418T141500.000Z",
         "tournamentTag": tournament_tag,
@@ -100,26 +123,44 @@ def _battle_payload(tournament_tag="#2QG9Y9UR", team_tag="#ABC123", opp_tag="#DE
         "deckSelection": "draft",
         "gameMode": {"id": 72000001, "name": "CW_Duel_1v1"},
         "arena": {"name": "Legendary Arena"},
-        "team": [{
-            "tag": team_tag, "name": team_name, "crowns": team_crowns,
-            "cards": [{"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15},
-                       {"name": "Ice Spirit", "id": 2, "level": 14, "maxLevel": 15}],
-        }],
-        "opponent": [{
-            "tag": opp_tag, "name": opp_name, "crowns": opp_crowns,
-            "cards": [{"name": "Golem", "id": 3, "level": 14, "maxLevel": 15}],
-        }],
+        "team": [
+            {
+                "tag": team_tag,
+                "name": team_name,
+                "crowns": team_crowns,
+                "cards": [
+                    {"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15},
+                    {"name": "Ice Spirit", "id": 2, "level": 14, "maxLevel": 15},
+                ],
+            }
+        ],
+        "opponent": [
+            {
+                "tag": opp_tag,
+                "name": opp_name,
+                "crowns": opp_crowns,
+                "cards": [{"name": "Golem", "id": 3, "level": 14, "maxLevel": 15}],
+            }
+        ],
     }
 
 
 def test_store_tournament_battle_returns_signal_ready_dict_on_insert():
     conn = db.get_connection(":memory:")
     try:
-        register_tournament("#2QG9Y9UR", _api_payload(members=[
-            {"tag": "#ABC123", "name": "King Thing"},
-            {"tag": "#DEF456", "name": "King Levy"},
-        ]), conn=conn)
-        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()["tournament_id"]
+        register_tournament(
+            "#2QG9Y9UR",
+            _api_payload(
+                members=[
+                    {"tag": "#ABC123", "name": "King Thing"},
+                    {"tag": "#DEF456", "name": "King Levy"},
+                ]
+            ),
+            conn=conn,
+        )
+        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()[
+            "tournament_id"
+        ]
         info = store_tournament_battle(tid, _battle_payload(), conn=conn)
         assert info is not None
         # Canonical order is lex-smallest tag first: #ABC123 < #DEF456
@@ -150,11 +191,19 @@ def test_store_tournament_battle_enriches_deck_and_computes_shared_cards():
                 (cid, name, cost, rarity),
             )
         conn.commit()
-        register_tournament("#2QG9Y9UR", _api_payload(members=[
-            {"tag": "#ABC123", "name": "King Thing"},
-            {"tag": "#DEF456", "name": "King Levy"},
-        ]), conn=conn)
-        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()["tournament_id"]
+        register_tournament(
+            "#2QG9Y9UR",
+            _api_payload(
+                members=[
+                    {"tag": "#ABC123", "name": "King Thing"},
+                    {"tag": "#DEF456", "name": "King Levy"},
+                ]
+            ),
+            conn=conn,
+        )
+        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()[
+            "tournament_id"
+        ]
         # Both players share Hog Rider; p1 runs cheap cycle, p2 runs heavy.
         battle = {
             "battleTime": "20260418T150000.000Z",
@@ -163,12 +212,28 @@ def test_store_tournament_battle_enriches_deck_and_computes_shared_cards():
             "deckSelection": "draft",
             "gameMode": {"id": 72000001, "name": "CW_Duel_1v1"},
             "arena": {"name": "Legendary Arena"},
-            "team": [{"tag": "#ABC123", "name": "King Thing", "crowns": 2,
-                      "cards": [{"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15},
-                                {"name": "Ice Spirit", "id": 2, "level": 14, "maxLevel": 15}]}],
-            "opponent": [{"tag": "#DEF456", "name": "King Levy", "crowns": 1,
-                          "cards": [{"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15},
-                                    {"name": "Golem", "id": 3, "level": 14, "maxLevel": 15}]}],
+            "team": [
+                {
+                    "tag": "#ABC123",
+                    "name": "King Thing",
+                    "crowns": 2,
+                    "cards": [
+                        {"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15},
+                        {"name": "Ice Spirit", "id": 2, "level": 14, "maxLevel": 15},
+                    ],
+                }
+            ],
+            "opponent": [
+                {
+                    "tag": "#DEF456",
+                    "name": "King Levy",
+                    "crowns": 1,
+                    "cards": [
+                        {"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15},
+                        {"name": "Golem", "id": 3, "level": 14, "maxLevel": 15},
+                    ],
+                }
+            ],
         }
         info = store_tournament_battle(tid, battle, conn=conn)
         assert info is not None
@@ -188,11 +253,19 @@ def test_store_tournament_battle_enriches_deck_and_computes_shared_cards():
 def test_store_tournament_battle_returns_none_on_duplicate():
     conn = db.get_connection(":memory:")
     try:
-        register_tournament("#2QG9Y9UR", _api_payload(members=[
-            {"tag": "#ABC123", "name": "King Thing"},
-            {"tag": "#DEF456", "name": "King Levy"},
-        ]), conn=conn)
-        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()["tournament_id"]
+        register_tournament(
+            "#2QG9Y9UR",
+            _api_payload(
+                members=[
+                    {"tag": "#ABC123", "name": "King Thing"},
+                    {"tag": "#DEF456", "name": "King Levy"},
+                ]
+            ),
+            conn=conn,
+        )
+        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()[
+            "tournament_id"
+        ]
         first = store_tournament_battle(tid, _battle_payload(), conn=conn)
         assert first is not None
         # Same battle fetched from the other player's log — should dedup.
@@ -206,8 +279,9 @@ def test_generate_tournament_update_uses_dedicated_prompt_and_tools():
     """The tournament update path must use cr_api, the tournament schema, and
     feed only the signal list into the user message (no war state injection).
     """
-    import elixir_agent
     from unittest.mock import patch
+
+    import elixir_agent
 
     captured = {}
 
@@ -215,14 +289,20 @@ def test_generate_tournament_update_uses_dedicated_prompt_and_tools():
         captured["system_prompt"] = system_prompt
         captured["user_message"] = user_message
         captured["kwargs"] = kwargs
-        return {"event_type": "tournament_update", "summary": "test", "content": "A match played."}
+        return {
+            "event_type": "tournament_update",
+            "summary": "test",
+            "content": "A match played.",
+        }
 
-    signals = [{
-        "type": "tournament_battle_played",
-        "signal_key": "tournament_battle_played|#2QG9Y9UR|20260418T141500.000Z|#ABC|#DEF",
-        "tournament_tag": "#2QG9Y9UR",
-        "audience": "clan_internal",
-    }]
+    signals = [
+        {
+            "type": "tournament_battle_played",
+            "signal_key": "tournament_battle_played|#2QG9Y9UR|20260418T141500.000Z|#ABC|#DEF",
+            "tournament_tag": "#2QG9Y9UR",
+            "audience": "clan_internal",
+        }
+    ]
     with patch("agent.workflows._chat_with_tools", side_effect=fake_chat_with_tools):
         result = elixir_agent.generate_tournament_update(signals)
 
@@ -275,10 +355,27 @@ def test_build_tournament_recap_context_enriches_decks_and_audience():
                 (cid, name, cost, rarity),
             )
         # Both players are clan members → audience clan_internal
-        db.snapshot_members([
-            {"tag": "#ABC123", "name": "King Thing", "role": "leader", "expLevel": 66, "trophies": 11000, "clanRank": 1},
-            {"tag": "#DEF456", "name": "King Levy", "role": "member", "expLevel": 60, "trophies": 8000, "clanRank": 2},
-        ], conn=conn)
+        db.snapshot_members(
+            [
+                {
+                    "tag": "#ABC123",
+                    "name": "King Thing",
+                    "role": "leader",
+                    "expLevel": 66,
+                    "trophies": 11000,
+                    "clanRank": 1,
+                },
+                {
+                    "tag": "#DEF456",
+                    "name": "King Levy",
+                    "role": "member",
+                    "expLevel": 60,
+                    "trophies": 8000,
+                    "clanRank": 2,
+                },
+            ],
+            conn=conn,
+        )
         # The v5.1 roster projection is the current profile read model.
         for ptag, trophies in [("#ABC123", 11000), ("#DEF456", 8000)]:
             conn.execute(
@@ -288,11 +385,19 @@ def test_build_tournament_recap_context_enriches_decks_and_audience():
             )
         conn.commit()
 
-        register_tournament("#2QG9Y9UR", _api_payload(members=[
-            {"tag": "#ABC123", "name": "King Thing", "score": 0, "rank": 1},
-            {"tag": "#DEF456", "name": "King Levy", "score": 0, "rank": 1},
-        ]), conn=conn)
-        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()["tournament_id"]
+        register_tournament(
+            "#2QG9Y9UR",
+            _api_payload(
+                members=[
+                    {"tag": "#ABC123", "name": "King Thing", "score": 0, "rank": 1},
+                    {"tag": "#DEF456", "name": "King Levy", "score": 0, "rank": 1},
+                ]
+            ),
+            conn=conn,
+        )
+        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()[
+            "tournament_id"
+        ]
 
         battle = {
             "battleTime": "20260418T150000.000Z",
@@ -301,24 +406,44 @@ def test_build_tournament_recap_context_enriches_decks_and_audience():
             "deckSelection": "draftCompetitive",
             "gameMode": {"id": 72000001, "name": "CW_Duel_1v1"},
             "arena": {"name": "Legendary Arena"},
-            "team": [{"tag": "#ABC123", "name": "King Thing", "crowns": 3,
-                      "cards": [{"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15},
-                                {"name": "Ice Spirit", "id": 2, "level": 14, "maxLevel": 15}]}],
-            "opponent": [{"tag": "#DEF456", "name": "King Levy", "crowns": 0,
-                          "cards": [{"name": "Mega Knight", "id": 3, "level": 14, "maxLevel": 15},
-                                    {"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15}]}],
+            "team": [
+                {
+                    "tag": "#ABC123",
+                    "name": "King Thing",
+                    "crowns": 3,
+                    "cards": [
+                        {"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15},
+                        {"name": "Ice Spirit", "id": 2, "level": 14, "maxLevel": 15},
+                    ],
+                }
+            ],
+            "opponent": [
+                {
+                    "tag": "#DEF456",
+                    "name": "King Levy",
+                    "crowns": 0,
+                    "cards": [
+                        {"name": "Mega Knight", "id": 3, "level": 14, "maxLevel": 15},
+                        {"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15},
+                    ],
+                }
+            ],
         }
         store_tournament_battle(tid, battle, conn=conn)
 
         # Finalize so the recap sees ended state with final ranks
-        finalize_tournament("#2QG9Y9UR", {
-            "status": "ended",
-            "endedTime": "20260418T153000.000Z",
-            "membersList": [
-                {"tag": "#ABC123", "name": "King Thing", "score": 1, "rank": 1},
-                {"tag": "#DEF456", "name": "King Levy", "score": 0, "rank": 2},
-            ],
-        }, conn=conn)
+        finalize_tournament(
+            "#2QG9Y9UR",
+            {
+                "status": "ended",
+                "endedTime": "20260418T153000.000Z",
+                "membersList": [
+                    {"tag": "#ABC123", "name": "King Thing", "score": 1, "rank": 1},
+                    {"tag": "#DEF456", "name": "King Levy", "score": 0, "rank": 2},
+                ],
+            },
+            conn=conn,
+        )
 
         context = build_tournament_recap_context("#2QG9Y9UR", conn=conn)
 
@@ -395,16 +520,27 @@ def test_game_mode_label_translates_known_ids_and_falls_back():
 def test_build_battle_played_signal_match_shape():
     base = {
         "battle_time": "20260418T141500.000Z",
-        "player1_tag": "#ABC", "player1_name": "A", "player1_is_clan_member": True,
+        "player1_tag": "#ABC",
+        "player1_name": "A",
+        "player1_is_clan_member": True,
         "player1_deck": [],
-        "player2_tag": "#DEF", "player2_name": "B", "player2_is_clan_member": True,
+        "player2_tag": "#DEF",
+        "player2_name": "B",
+        "player2_is_clan_member": True,
         "player2_deck": [],
     }
 
     def sig(p1c, p2c, winner):
-        return _build_battle_played_signal("#T", "T", {
-            **base, "player1_crowns": p1c, "player2_crowns": p2c, "winner_tag": winner,
-        })
+        return _build_battle_played_signal(
+            "#T",
+            "T",
+            {
+                **base,
+                "player1_crowns": p1c,
+                "player2_crowns": p2c,
+                "winner_tag": winner,
+            },
+        )
 
     blowout = sig(3, 0, "#ABC")
     assert blowout["match_shape"] == "blowout"
@@ -435,9 +571,13 @@ def test_build_battle_played_signal_match_shape():
 def test_build_battle_played_signal_audience_classification():
     base_info = {
         "battle_time": "20260418T141500.000Z",
-        "player1_tag": "#ABC123", "player1_name": "King Thing", "player1_crowns": 3,
+        "player1_tag": "#ABC123",
+        "player1_name": "King Thing",
+        "player1_crowns": 3,
         "player1_deck": ["Hog Rider", "Ice Spirit"],
-        "player2_tag": "#DEF456", "player2_name": "Rival", "player2_crowns": 1,
+        "player2_tag": "#DEF456",
+        "player2_name": "Rival",
+        "player2_crowns": 1,
         "player2_deck": ["Golem"],
         "winner_tag": "#ABC123",
         "deck_selection": "draft",
@@ -445,19 +585,31 @@ def test_build_battle_played_signal_audience_classification():
         "arena_name": "Legendary Arena",
     }
 
-    both = _build_battle_played_signal("#2QG9Y9UR", "PK Cup",
-        {**base_info, "player1_is_clan_member": True, "player2_is_clan_member": True})
+    both = _build_battle_played_signal(
+        "#2QG9Y9UR",
+        "PK Cup",
+        {**base_info, "player1_is_clan_member": True, "player2_is_clan_member": True},
+    )
     assert both["audience"] == "clan_internal"
     assert both["winner_name"] == "King Thing"
     assert both["loser_name"] == "Rival"
-    assert both["signal_key"] == "tournament_battle_played|#2QG9Y9UR|20260418T141500.000Z|#ABC123|#DEF456"
+    assert (
+        both["signal_key"]
+        == "tournament_battle_played|#2QG9Y9UR|20260418T141500.000Z|#ABC123|#DEF456"
+    )
 
-    one = _build_battle_played_signal("#2QG9Y9UR", "PK Cup",
-        {**base_info, "player1_is_clan_member": True, "player2_is_clan_member": False})
+    one = _build_battle_played_signal(
+        "#2QG9Y9UR",
+        "PK Cup",
+        {**base_info, "player1_is_clan_member": True, "player2_is_clan_member": False},
+    )
     assert one["audience"] == "clan_one_side"
 
-    neither = _build_battle_played_signal("#2QG9Y9UR", "PK Cup",
-        {**base_info, "player1_is_clan_member": False, "player2_is_clan_member": False})
+    neither = _build_battle_played_signal(
+        "#2QG9Y9UR",
+        "PK Cup",
+        {**base_info, "player1_is_clan_member": False, "player2_is_clan_member": False},
+    )
     assert neither["audience"] == "external_observed"
 
 

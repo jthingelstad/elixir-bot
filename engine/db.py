@@ -57,13 +57,15 @@ def refresh_display_name(conn, player_tag: str, name: str | None = None) -> str:
     _ensure_display_name_column(conn)
     display = compute_display_name(conn, player_tag, name)
     conn.execute(
-        "UPDATE players SET display_name = ? WHERE player_tag = ?", (display, player_tag)
+        "UPDATE players SET display_name = ? WHERE player_tag = ?",
+        (display, player_tag),
     )
     return display
 
 
-def ensure_player(conn, player_tag: str, name: str | None = None,
-                  observed_at: str | None = None) -> None:
+def ensure_player(
+    conn, player_tag: str, name: str | None = None, observed_at: str | None = None
+) -> None:
     """§7: any tag the engine observes is a player — upsert its identity row,
     materializing the injection-safe players.display_name in the same write
     (normalize-at-source: nothing downstream ever sees the raw name).
@@ -88,8 +90,13 @@ def ensure_player(conn, player_tag: str, name: str | None = None,
     )
 
 
-def ensure_clan(conn, clan_tag: str, name: str | None = None,
-                observed_at: str | None = None, is_home: bool = False) -> None:
+def ensure_clan(
+    conn,
+    clan_tag: str,
+    name: str | None = None,
+    observed_at: str | None = None,
+    is_home: bool = False,
+) -> None:
     """clans-row upsert (clan_memberships FKs onto it). Live DBs carry
     migrated rows; a fresh DB (cold start, simulator) bootstraps here —
     without it the first roster diff dies on the membership FK and the
@@ -106,6 +113,7 @@ def ensure_clan(conn, clan_tag: str, name: str | None = None,
 
 
 # ---------------------------------------------------------------- cursors
+
 
 def cursor_get(conn, consumer_key: str, scope_key: str = "") -> int:
     row = conn.execute(
@@ -145,7 +153,11 @@ def cursor_note_failure(
         metadata = json.loads(row["metadata_json"] or "{}") if row else {}
     except (TypeError, ValueError):
         metadata = {}
-    poison = metadata.get("poison_event") if isinstance(metadata.get("poison_event"), dict) else {}
+    poison = (
+        metadata.get("poison_event")
+        if isinstance(metadata.get("poison_event"), dict)
+        else {}
+    )
     if int(poison.get("cursor_int") or -1) != int(failed_cursor):
         poison = {"cursor_int": int(failed_cursor), "count": 0}
     poison["count"] = int(poison.get("count") or 0) + 1

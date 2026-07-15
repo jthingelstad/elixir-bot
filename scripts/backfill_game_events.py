@@ -15,6 +15,7 @@ game_events head, emit:game → sentinel head) so the stream starts clean.
     ./venv/bin/python scripts/backfill_game_events.py --dry-run
     ./venv/bin/python scripts/backfill_game_events.py --apply
 """
+
 from __future__ import annotations
 
 import argparse
@@ -34,7 +35,8 @@ from storage._formatting import preferred_display_name  # noqa: E402
 def _sentinel_rows(conn, sentinel_type):
     return conn.execute(
         "SELECT * FROM api_sentinel_observations WHERE sentinel_type = ? "
-        "ORDER BY observation_id", (sentinel_type,)
+        "ORDER BY observation_id",
+        (sentinel_type,),
     ).fetchall()
 
 
@@ -60,44 +62,65 @@ def _plan(conn) -> list[dict]:
     for e in _sentinel_rows(conn, "event"):
         s = _sample(e)
         tag = e["name"]
-        plan.append({
-            "dedup_key": f"event_started:{tag}", "event_type": "event_started",
-            "change_key": f"event:{tag}", "observed_at": e["first_seen_at"],
-            "subject_tag": None,
-            "payload": {"event_type": "event_started", "event_tag": tag,
-                        "title": s.get("title") or tag, "description": s.get("description")},
-        })
+        plan.append(
+            {
+                "dedup_key": f"event_started:{tag}",
+                "event_type": "event_started",
+                "change_key": f"event:{tag}",
+                "observed_at": e["first_seen_at"],
+                "subject_tag": None,
+                "payload": {
+                    "event_type": "event_started",
+                    "event_tag": tag,
+                    "title": s.get("title") or tag,
+                    "description": s.get("description"),
+                },
+            }
+        )
     for b in _sentinel_rows(conn, "badge_name"):
         name = b["name"] or ""
         if not name or name.startswith("Mastery"):
             continue
         s = _sample(b)
         badge = s.get("badge") or {}
-        entity = (b["first_entity_key"] if "first_entity_key" in b.keys()
-                  and b["first_entity_key"] else b["entity_key"])
+        entity = (
+            b["first_entity_key"]
+            if "first_entity_key" in b.keys() and b["first_entity_key"]
+            else b["entity_key"]
+        )
         subject_tag = f"#{entity.lstrip('#')}" if entity else None
         member_name = preferred_display_name(conn, subject_tag) if subject_tag else None
         if member_name in (None, "", subject_tag):
             member_name = None
-        plan.append({
-            "dedup_key": f"event_badge_earned:{name}", "event_type": "event_badge_earned",
-            "change_key": f"badge:{name}", "observed_at": b["first_seen_at"],
-            "subject_tag": subject_tag,
-            "payload": {
-                "event_type": "event_badge_earned", "badge_name": name,
-                "badge_label": humanize_badge(name), "member_name": member_name,
-                "member_tag": subject_tag,
-                "image_url": (badge.get("iconUrls") or {}).get("large"),
-            },
-        })
+        plan.append(
+            {
+                "dedup_key": f"event_badge_earned:{name}",
+                "event_type": "event_badge_earned",
+                "change_key": f"badge:{name}",
+                "observed_at": b["first_seen_at"],
+                "subject_tag": subject_tag,
+                "payload": {
+                    "event_type": "event_badge_earned",
+                    "badge_name": name,
+                    "badge_label": humanize_badge(name),
+                    "member_name": member_name,
+                    "member_tag": subject_tag,
+                    "image_url": (badge.get("iconUrls") or {}).get("large"),
+                },
+            }
+        )
     return plan
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     g = ap.add_mutually_exclusive_group()
-    g.add_argument("--dry-run", action="store_true", help="print the plan, write nothing (default)")
-    g.add_argument("--apply", action="store_true", help="persist backfilled rows + seed cursors")
+    g.add_argument(
+        "--dry-run", action="store_true", help="print the plan, write nothing (default)"
+    )
+    g.add_argument(
+        "--apply", action="store_true", help="persist backfilled rows + seed cursors"
+    )
     args = ap.parse_args()
 
     conn = db.get_connection()
@@ -114,7 +137,9 @@ def main() -> int:
     for row in plan:
         if row["event_type"] == "event_badge_earned":
             p = row["payload"]
-            print(f"    badge {p['badge_label']!r} -> {p['member_name'] or '(unattributed)'}")
+            print(
+                f"    badge {p['badge_label']!r} -> {p['member_name'] or '(unattributed)'}"
+            )
 
     if not args.apply:
         print("\n(dry-run — nothing written; re-run with --apply)")
@@ -124,12 +149,19 @@ def main() -> int:
     written = 0
     for row in plan:
         written += ge.insert_game_event(
-            conn, dedup_key=row["dedup_key"], event_type=row["event_type"],
-            change_key=row["change_key"], observed_at=row["observed_at"],
-            payload=row["payload"], subject_tag=row["subject_tag"], backfilled=True,
+            conn,
+            dedup_key=row["dedup_key"],
+            event_type=row["event_type"],
+            change_key=row["change_key"],
+            observed_at=row["observed_at"],
+            payload=row["payload"],
+            subject_tag=row["subject_tag"],
+            backfilled=True,
         )
     # Seed the live cursors to the current tips so nothing pre-existing announces.
-    game_head = conn.execute("SELECT COALESCE(MAX(event_id), 0) FROM game_events").fetchone()[0]
+    game_head = conn.execute(
+        "SELECT COALESCE(MAX(event_id), 0) FROM game_events"
+    ).fetchone()[0]
     sentinel_head = conn.execute(
         "SELECT COALESCE(MAX(observation_id), 0) FROM api_sentinel_observations"
     ).fetchone()[0]
@@ -137,8 +169,10 @@ def main() -> int:
     cursor_set(conn, "emit:game", sentinel_head)
     conn.commit()
     conn.close()
-    print(f"\napplied: {written} new backfilled row(s); "
-          f"cursors seeded (recognize:game={game_head}, emit:game={sentinel_head})")
+    print(
+        f"\napplied: {written} new backfilled row(s); "
+        f"cursors seeded (recognize:game={game_head}, emit:game={sentinel_head})"
+    )
     return 0
 
 

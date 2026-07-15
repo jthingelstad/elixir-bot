@@ -93,7 +93,9 @@ def save_arena_relay_screenshot_observation(
 
 
 @managed_connection
-def list_arena_relay_screenshot_observations(*, limit: int = 25, screenshot_type: str | None = None, conn=None) -> list[dict]:
+def list_arena_relay_screenshot_observations(
+    *, limit: int = 25, screenshot_type: str | None = None, conn=None
+) -> list[dict]:
     args = []
     where = ""
     if screenshot_type:
@@ -108,7 +110,12 @@ def list_arena_relay_screenshot_observations(*, limit: int = 25, screenshot_type
 
 
 def _decode_observation(row: dict) -> dict:
-    for key in ("players_json", "actionable_facts_json", "image_metadata_json", "result_json"):
+    for key in (
+        "players_json",
+        "actionable_facts_json",
+        "image_metadata_json",
+        "result_json",
+    ):
         fallback = "{}" if key == "result_json" else "[]"
         try:
             row[key] = json.loads(row.get(key) or fallback)

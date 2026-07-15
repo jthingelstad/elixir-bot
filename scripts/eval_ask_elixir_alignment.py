@@ -28,7 +28,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import db
 
-
 ASK_ELIXIR_CHANNEL_ID = "1482368505058955467"
 DEFAULT_LOG_PATHS = ("elixir-v5.log", "elixir.log")
 LOG_TIMEZONE = ZoneInfo("America/Chicago")
@@ -99,7 +98,12 @@ def _parse_log_time(value: str) -> datetime | None:
 
 
 def _format_time(value: datetime) -> str:
-    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        value.astimezone(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def _open_db(path: str | os.PathLike[str]) -> sqlite3.Connection:
@@ -153,7 +157,9 @@ def _load_messages(
     return [dict(row) for row in rows]
 
 
-def _entry_from_match(path: str, line: str, match: re.Match[str], *, kind: str) -> dict[str, Any] | None:
+def _entry_from_match(
+    path: str, line: str, match: re.Match[str], *, kind: str
+) -> dict[str, Any] | None:
     ts_match = _LOG_TS_RE.search(line)
     if not ts_match:
         return None
@@ -161,7 +167,11 @@ def _entry_from_match(path: str, line: str, match: re.Match[str], *, kind: str) 
     if timestamp is None:
         return None
     try:
-        raw_question = _literal_field(line, "raw_question", before=" original=" if kind == "message_route" else None)
+        raw_question = _literal_field(
+            line,
+            "raw_question",
+            before=" original=" if kind == "message_route" else None,
+        )
     except (ValueError, SyntaxError):
         raw_question = None
     entry = {
@@ -238,25 +248,33 @@ def _blank_user_replies(
             row_time = _message_time(row)
             if row_time is None:
                 continue
-            for later in thread_rows[idx + 1:]:
+            for later in thread_rows[idx + 1 :]:
                 if later.get("author_type") != "assistant":
                     continue
                 later_time = _message_time(later)
                 if later_time is None:
                     continue
-                if 0 <= (later_time - row_time).total_seconds() <= followup_minutes * 60:
-                    findings.append({
-                        "user_message_id": row.get("message_id"),
-                        "user_discord_message_id": row.get("discord_message_id"),
-                        "assistant_message_id": later.get("message_id"),
-                        "assistant_discord_message_id": later.get("discord_message_id"),
-                        "thread_id": row.get("thread_id"),
-                        "workflow": later.get("workflow"),
-                        "event_type": later.get("event_type"),
-                        "created_at": row.get("created_at"),
-                        "assistant_created_at": later.get("created_at"),
-                        "assistant_preview": (later.get("content") or "")[:300],
-                    })
+                if (
+                    0
+                    <= (later_time - row_time).total_seconds()
+                    <= followup_minutes * 60
+                ):
+                    findings.append(
+                        {
+                            "user_message_id": row.get("message_id"),
+                            "user_discord_message_id": row.get("discord_message_id"),
+                            "assistant_message_id": later.get("message_id"),
+                            "assistant_discord_message_id": later.get(
+                                "discord_message_id"
+                            ),
+                            "thread_id": row.get("thread_id"),
+                            "workflow": later.get("workflow"),
+                            "event_type": later.get("event_type"),
+                            "created_at": row.get("created_at"),
+                            "assistant_created_at": later.get("created_at"),
+                            "assistant_preview": (later.get("content") or "")[:300],
+                        }
+                    )
                     break
     return findings
 
@@ -290,21 +308,25 @@ def _topic_mismatches(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             domain = _domain_for_question(question)
             if not domain:
                 continue
-            for later in thread_rows[idx + 1:]:
+            for later in thread_rows[idx + 1 :]:
                 if later.get("author_type") != "assistant":
                     continue
                 answer = later.get("content") or ""
                 if not _answer_matches_domain(answer, domain):
-                    findings.append({
-                        "domain": domain,
-                        "user_message_id": row.get("message_id"),
-                        "user_discord_message_id": row.get("discord_message_id"),
-                        "assistant_message_id": later.get("message_id"),
-                        "assistant_discord_message_id": later.get("discord_message_id"),
-                        "thread_id": row.get("thread_id"),
-                        "question": question,
-                        "assistant_preview": answer[:300],
-                    })
+                    findings.append(
+                        {
+                            "domain": domain,
+                            "user_message_id": row.get("message_id"),
+                            "user_discord_message_id": row.get("discord_message_id"),
+                            "assistant_message_id": later.get("message_id"),
+                            "assistant_discord_message_id": later.get(
+                                "discord_message_id"
+                            ),
+                            "thread_id": row.get("thread_id"),
+                            "question": question,
+                            "assistant_preview": answer[:300],
+                        }
+                    )
                 break
     return findings
 
@@ -322,8 +344,7 @@ def _not_for_bot_routes(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         entry
         for entry in entries
-        if entry["kind"] == "intent_router"
-        and entry["route"] == "not_for_bot"
+        if entry["kind"] == "intent_router" and entry["route"] == "not_for_bot"
     ]
 
 
@@ -341,26 +362,35 @@ def _ignored_question_blank_routes(
     findings: list[dict[str, Any]] = []
     for intent in intents:
         for route in routes:
-            if route["channel_id"] != intent["channel_id"] or route["author_id"] != intent["author_id"]:
+            if (
+                route["channel_id"] != intent["channel_id"]
+                or route["author_id"] != intent["author_id"]
+            ):
                 continue
             delta = (route["timestamp"] - intent["timestamp"]).total_seconds()
             if 0 < delta <= followup_minutes * 60:
-                findings.append({
-                    "ignored_at": intent["timestamp_text"],
-                    "ignored_question": intent.get("raw_question"),
-                    "ignored_route": intent.get("route"),
-                    "blank_route_at": route["timestamp_text"],
-                    "blank_route": route.get("route"),
-                    "blank_original": route.get("original"),
-                    "author_id": intent["author_id"],
-                    "channel_id": intent["channel_id"],
-                    "minutes_between": round(_minutes_between(route["timestamp"], intent["timestamp"]), 2),
-                })
+                findings.append(
+                    {
+                        "ignored_at": intent["timestamp_text"],
+                        "ignored_question": intent.get("raw_question"),
+                        "ignored_route": intent.get("route"),
+                        "blank_route_at": route["timestamp_text"],
+                        "blank_route": route.get("route"),
+                        "blank_original": route.get("original"),
+                        "author_id": intent["author_id"],
+                        "channel_id": intent["channel_id"],
+                        "minutes_between": round(
+                            _minutes_between(route["timestamp"], intent["timestamp"]), 2
+                        ),
+                    }
+                )
                 break
     return findings
 
 
-def _metric(value: Any, threshold: dict[str, Any], passed: bool, definition: str) -> dict[str, Any]:
+def _metric(
+    value: Any, threshold: dict[str, Any], passed: bool, definition: str
+) -> dict[str, Any]:
     return {
         "value": value,
         "threshold": threshold,
@@ -376,8 +406,9 @@ def evaluate(
     end: datetime,
     log_paths: list[str] | None = None,
     channel_id: str = ASK_ELIXIR_CHANNEL_ID,
-    thresholds: Thresholds = Thresholds(),
+    thresholds: Thresholds | None = None,
 ) -> dict[str, Any]:
+    thresholds = thresholds or Thresholds()
     conn = _open_db(db_path)
     try:
         messages = _load_messages(conn, since=since, end=end, channel_id=channel_id)
@@ -424,7 +455,8 @@ def evaluate(
         "ignored_question_blank_route_count": _metric(
             len(ignored_then_blank),
             {"<=": thresholds.max_ignored_question_blank_route_count},
-            len(ignored_then_blank) <= thresholds.max_ignored_question_blank_route_count,
+            len(ignored_then_blank)
+            <= thresholds.max_ignored_question_blank_route_count,
             "A nonempty #ask-elixir question classified not_for_bot followed by an empty routed reply from the same author/channel.",
         ),
         "topic_mismatch_count": _metric(
@@ -490,13 +522,25 @@ def _resolve_window(args: argparse.Namespace) -> tuple[datetime, datetime]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db", default=os.fspath(db.DB_PATH), help="SQLite DB path or file: URI")
-    parser.add_argument("--days", type=int, default=14, help="Lookback window when --since is omitted")
-    parser.add_argument("--since", help="Inclusive UTC start time, e.g. 2026-06-18T00:00:00Z")
+    parser.add_argument(
+        "--db", default=os.fspath(db.DB_PATH), help="SQLite DB path or file: URI"
+    )
+    parser.add_argument(
+        "--days", type=int, default=14, help="Lookback window when --since is omitted"
+    )
+    parser.add_argument(
+        "--since", help="Inclusive UTC start time, e.g. 2026-06-18T00:00:00Z"
+    )
     parser.add_argument("--end", help="Inclusive UTC end time; defaults to now")
-    parser.add_argument("--log", action="append", dest="logs", help="Log path to scan; repeatable")
-    parser.add_argument("--out", default="scripts/ask_elixir_alignment_eval_results.json")
-    parser.add_argument("--strict", action="store_true", help="Exit non-zero when thresholds fail")
+    parser.add_argument(
+        "--log", action="append", dest="logs", help="Log path to scan; repeatable"
+    )
+    parser.add_argument(
+        "--out", default="scripts/ask_elixir_alignment_eval_results.json"
+    )
+    parser.add_argument(
+        "--strict", action="store_true", help="Exit non-zero when thresholds fail"
+    )
     args = parser.parse_args()
 
     since, end = _resolve_window(args)

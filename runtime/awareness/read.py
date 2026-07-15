@@ -20,9 +20,9 @@ from datetime import datetime, timezone
 
 import db
 from capabilities import awards as awards_capability
-from capabilities import war as war_capability
 from capabilities import game_modes as game_mode_capability
 from capabilities import management as management_capability
+from capabilities import war as war_capability
 from storage import cases, events_read, leader_actions, revisits
 
 log = logging.getLogger("elixir")
@@ -31,27 +31,30 @@ log = logging.getLogger("elixir")
 # Signals the awareness loop is REQUIRED to address (awareness.md "Hard-Post
 # Floors"). Both the doc names and the concrete v5.1 event_types are listed so
 # the derivation works regardless of which vocabulary the stream carries.
-HARD_POST_EVENT_TYPES = frozenset({
-    "war_battle_rank_change",
-    "war_week_complete",
-    "war_season_complete",
-    "capability_unlock",
-    "member_join",
-    "member_leave",
-    # concrete v5.1 event_stream types
-    "member_joined",
-    # NB: raw "member_left" is deliberately NOT a hard-post — a departure's public
-    # goodbye is HELD until a leader verifies it was an organic leave (vs a kick).
-    # The verified-leave signal below is what earns a farewell; a kick earns none.
-    "member_left_verified",
-    "week_finished",
-    "season_closed",
-    # The clan's OWN founding anniversary is a can't-miss celebration (unlike
-    # member birthdays / join anniversaries, which stay discretionary). It fires
-    # once a year and ages out of the delta feed after one covered tick, so it
-    # won't repeat-fail; cake_days_today keeps it visible all day as backup.
-    "clan_birthday",
-})
+HARD_POST_EVENT_TYPES = frozenset(
+    {
+        "war_battle_rank_change",
+        "war_week_complete",
+        "war_season_complete",
+        "capability_unlock",
+        "member_join",
+        "member_leave",
+        # concrete v5.1 event_stream types
+        "member_joined",
+        # NB: raw "member_left" is deliberately NOT a hard-post — a departure's public
+        # goodbye is HELD until a leader verifies it was an organic leave (vs a kick).
+        # The verified-leave signal below is what earns a farewell; a kick earns none.
+        "member_left_verified",
+        "week_finished",
+        "season_closed",
+        "pol_season_podium",
+        # The clan's OWN founding anniversary is a can't-miss celebration (unlike
+        # member birthdays / join anniversaries, which stay discretionary). It fires
+        # once a year and ages out of the delta feed after one covered tick, so it
+        # won't repeat-fail; cake_days_today keeps it visible all day as backup.
+        "clan_birthday",
+    }
+)
 
 
 # event_type → lane. Player-stream events default to "milestone"; the streams
@@ -80,6 +83,7 @@ _LANE_BY_EVENT_TYPE: dict[str, str] = {
     # battle_mode
     "pol_promotion": "battle_mode",
     "pol_season_closed": "battle_mode",
+    "pol_season_podium": "battle_mode",
     # system
     "capability_unlock": "system",
 }
@@ -175,7 +179,10 @@ def _game_context(conn, pending_events: list[dict] | None = None) -> dict:
         if e.get("stream") == "game" and not e.get("backfilled")
     }
     rows = events_read.list_recent_events(
-        days=_GAME_CONTEXT_DAYS, streams=("game",), limit=40, conn=conn,
+        days=_GAME_CONTEXT_DAYS,
+        streams=("game",),
+        limit=40,
+        conn=conn,
     )
     known = {e.get("dedup_key") for e in rows}
     # A long outage may leave an unconsumed game event outside the 28-day
@@ -186,7 +193,9 @@ def _game_context(conn, pending_events: list[dict] | None = None) -> dict:
         payload = e.get("payload") or {}
         observed = e.get("observed_at") or ""
         return {
-            "name": payload.get("name") or payload.get("title") or payload.get("event_tag"),
+            "name": payload.get("name")
+            or payload.get("title")
+            or payload.get("event_tag"),
             "rarity": payload.get("rarity"),
             "elixir_cost": payload.get("elixir_cost"),
             "seen_at": observed[:10],
@@ -195,7 +204,11 @@ def _game_context(conn, pending_events: list[dict] | None = None) -> dict:
 
     cards = [_entry(e) for e in rows if e.get("event_type") == "card_added"]
     events = [_entry(e) for e in rows if e.get("event_type") == "event_started"]
-    return {"recent_cards": cards, "recent_events": events, "window_days": _GAME_CONTEXT_DAYS}
+    return {
+        "recent_cards": cards,
+        "recent_events": events,
+        "window_days": _GAME_CONTEXT_DAYS,
+    }
 
 
 _MODE_PULSE_DAYS = 7
@@ -241,7 +254,10 @@ def _mode_pulse(conn) -> dict:
 
 # Cake-day event types the calendar emitter writes (engine/emitters/clan.py).
 _CAKE_DAY_TYPES = (
-    "member_birthday", "clan_birthday", "join_anniversary", "cr_account_anniversary",
+    "member_birthday",
+    "clan_birthday",
+    "join_anniversary",
+    "cr_account_anniversary",
 )
 
 
@@ -300,9 +316,15 @@ def _signal_key(event: dict) -> str:
     key = event.get("dedup_key")
     if key:
         return str(key)
-    return ":".join(str(event.get(field) or "") for field in (
-        "stream", "event_type", "subject_tag", "observed_at",
-    ))
+    return ":".join(
+        str(event.get(field) or "")
+        for field in (
+            "stream",
+            "event_type",
+            "subject_tag",
+            "observed_at",
+        )
+    )
 
 
 def _lane_for(event: dict) -> str:
@@ -330,9 +352,14 @@ def _compact_signal(event: dict) -> dict:
     et = event.get("event_type")
     if et == "badge_earned":
         compact["badge_name"] = payload.get("badge_name") or payload.get("name")
-        compact["badge_tier"] = "legendary" if payload.get("level") is None else "routine"
+        compact["badge_tier"] = (
+            "legendary" if payload.get("level") is None else "routine"
+        )
     elif et in ("arena_changed", "arena_up"):
         compact["arena_name"] = payload.get("arena_name")
+    elif et == "pol_season_podium":
+        compact["pol_season_id"] = payload.get("pol_season_id")
+        compact["podium"] = payload.get("podium") or []
     elif et in _CAKE_DAY_TYPES:
         for key in ("years", "months", "is_annual"):
             if payload.get(key) is not None:
@@ -341,6 +368,7 @@ def _compact_signal(event: dict) -> dict:
 
 
 # --------------------------------------------------------------------- blocks
+
 
 def _war_clock_dict(conn) -> dict | None:
     """Live war clock rebuilt from the stored race projection — the same
@@ -431,10 +459,14 @@ def _standing_block(war: dict | None) -> dict | None:
             weekly = {
                 "race_ranked": race_ranked,
                 "rank": us.get("rank") if race_ranked else None,
-                "unranked_reason": None if race_ranked else "no clan has scored yet — the race is not ranked until the first battle day closes",
+                "unranked_reason": None
+                if race_ranked
+                else "no clan has scored yet — the race is not ranked until the first battle day closes",
                 "fame": our_fame,
                 "leader_fame": leader_fame,
-                "deficit_to_leader": (leader_fame - our_fame) if (race_ranked and us.get("rank") != 1) else 0,
+                "deficit_to_leader": (leader_fame - our_fame)
+                if (race_ranked and us.get("rank") != 1)
+                else 0,
                 "finish_line": war.get("finish_line"),
                 "boat_scored": bool(war.get("boat_scored")),
                 # Fame projected at today's close = placement + boat-defense fame
@@ -445,8 +477,11 @@ def _standing_block(war: dict | None) -> dict | None:
                 "defenses_remaining": war.get("defenses_remaining"),
                 "clinches_finish_today": bool(war.get("clinches_finish_today")),
                 "scoreboard": [
-                    {"name": s.get("clan_name"), "fame": s.get("fame") or 0,
-                     "rank": s.get("rank") if race_ranked else None}
+                    {
+                        "name": s.get("clan_name"),
+                        "fame": s.get("fame") or 0,
+                        "rank": s.get("rank") if race_ranked else None,
+                    }
                     for s in race
                 ],
             }
@@ -466,7 +501,11 @@ def _standing_block(war: dict | None) -> dict | None:
                 # defenses add more, unseen). Mirrors the in-game boat projection.
                 "projected_fame_if_held": war.get("projected_day_fame"),
                 "scoreboard": [
-                    {"name": s.get("clan_name"), "period_points": s.get("period_points") or 0, "rank": s.get("rank")}
+                    {
+                        "name": s.get("clan_name"),
+                        "period_points": s.get("period_points") or 0,
+                        "rank": s.get("rank"),
+                    }
                     for s in day
                 ],
             }
@@ -485,12 +524,15 @@ def _channel_memory(conn) -> dict:
     """Recent per-lane awareness posts, so the agent avoids repeating itself."""
     out: dict[str, dict] = {}
     for lane in _CHANNEL_LANES:
-        posts = [dict(r) for r in conn.execute(
-            "SELECT posted_at, discord_message_id, content_preview "
-            "FROM awareness_posts WHERE lane = ? "
-            "ORDER BY posted_at DESC LIMIT 5",
-            (lane,),
-        ).fetchall()]
+        posts = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT posted_at, discord_message_id, content_preview "
+                "FROM awareness_posts WHERE lane = ? "
+                "ORDER BY posted_at DESC LIMIT 5",
+                (lane,),
+            ).fetchall()
+        ]
         out[lane] = {
             "recent_posts": [
                 {
@@ -537,7 +579,7 @@ def _recent_member_spotlights(conn) -> list[dict]:
                 continue
             names = p.get("member_names") or []
             solo = len(names) == 1
-            for tag, name in zip(p.get("member_tags") or [], names):
+            for tag, name in zip(p.get("member_tags") or [], names, strict=False):
                 if not tag or tag in seen:
                     continue  # rows are DESC — first seen is the most recent
                 seen[tag] = {
@@ -598,13 +640,15 @@ def _recent_agent_writes(limit: int = 10) -> list[dict]:
     for m in memories:
         if m.get("source_type") not in {"elixir_inference", "elixir_synthesis"}:
             continue
-        out.append({
-            "memory_id": m.get("memory_id"),
-            "title": m.get("title"),
-            "tags": m.get("tags") or [],
-            "member_tag": m.get("member_tag"),
-            "created_at": m.get("created_at"),
-        })
+        out.append(
+            {
+                "memory_id": m.get("memory_id"),
+                "title": m.get("title"),
+                "tags": m.get("tags") or [],
+                "member_tag": m.get("member_tag"),
+                "created_at": m.get("created_at"),
+            }
+        )
         if len(out) >= limit:
             break
     return out
@@ -640,7 +684,9 @@ def _editorial_guidance(conn, limit: int = 12) -> list[dict]:
 
 def _leader_action_board(conn) -> dict:
     """Open #actions cards (undecided asks) + recent decisions."""
-    open_cards = leader_actions.list_leader_actions(status="proposed", limit=15, conn=conn)
+    open_cards = leader_actions.list_leader_actions(
+        status="proposed", limit=15, conn=conn
+    )
     recent = leader_actions.list_leader_actions(limit=15, conn=conn)
     decided = [a for a in recent if (a.get("status") or "proposed") != "proposed"]
 
@@ -668,16 +714,18 @@ def _decision_cases(conn) -> dict:
     """Compact due/open cases with no overlap — ``decision_case_snapshot``
     strips the internal ``state`` blob and dedupes ``open`` against ``due``
     ("due = needs attention now; open = already being monitored")."""
-    return cases.decision_case_snapshot(open_limit=25, due_limit=25, dedupe=True, conn=conn)
+    return cases.decision_case_snapshot(
+        open_limit=25, due_limit=25, dedupe=True, conn=conn
+    )
 
 
 def _management(conn) -> dict:
     """The engine's current promote/demote/kick verdicts — the authoritative
     source for management recommendations (see engine.management). Imported
     lazily to avoid a runtime->engine import at module load."""
-    return management_capability.get_management_decisions(
-        view="summary", conn=conn
-    )["data"]
+    return management_capability.get_management_decisions(view="summary", conn=conn)[
+        "data"
+    ]
 
 
 def _due_revisits(conn, limit: int = 20) -> list[dict]:
@@ -749,9 +797,9 @@ def build_read(conn=None) -> dict:
             "standing": _load("standing", lambda: _standing_block(war), None),
             "war_season": _load(
                 "war_season",
-                lambda: war_capability.get_war_season_view(
-                    view="snapshot", conn=conn
-                )["data"],
+                lambda: war_capability.get_war_season_view(view="snapshot", conn=conn)[
+                    "data"
+                ],
                 None,
             ),
             "award_races": _load(
@@ -774,31 +822,51 @@ def build_read(conn=None) -> dict:
             "signals_by_lane": signals_by_lane,
             "hard_post_signals": hard_post_signals,
             "game_context": _load(
-                "game_context", lambda: _game_context(conn, pending.get("events") or []),
-                {"recent_cards": [], "recent_events": [], "window_days": _GAME_CONTEXT_DAYS},
+                "game_context",
+                lambda: _game_context(conn, pending.get("events") or []),
+                {
+                    "recent_cards": [],
+                    "recent_events": [],
+                    "window_days": _GAME_CONTEXT_DAYS,
+                },
             ),
             "mode_pulse": _load(
-                "mode_pulse", lambda: _mode_pulse(conn),
+                "mode_pulse",
+                lambda: _mode_pulse(conn),
                 {"mode_mix": [], "top_by_mode": {}, "window_days": _MODE_PULSE_DAYS},
             ),
-            "cake_days_today": _load("cake_days_today", lambda: _cake_days_today(conn), []),
-            "decision_cases": _load("decision_cases", lambda: _decision_cases(conn), {"due": [], "open": []}),
-            "channel_memory": _load("channel_memory", lambda: _channel_memory(conn), {}),
+            "cake_days_today": _load(
+                "cake_days_today", lambda: _cake_days_today(conn), []
+            ),
+            "decision_cases": _load(
+                "decision_cases", lambda: _decision_cases(conn), {"due": [], "open": []}
+            ),
+            "channel_memory": _load(
+                "channel_memory", lambda: _channel_memory(conn), {}
+            ),
             "recent_member_spotlights": _load(
-                "recent_member_spotlights", lambda: _recent_member_spotlights(conn), []),
+                "recent_member_spotlights", lambda: _recent_member_spotlights(conn), []
+            ),
             "posting_pulse": _load("posting_pulse", lambda: _posting_pulse(conn), {}),
-            "recent_agent_writes": _load("recent_agent_writes", lambda: _recent_agent_writes(), []),
+            "recent_agent_writes": _load(
+                "recent_agent_writes", lambda: _recent_agent_writes(), []
+            ),
             "editorial_guidance": _load(
                 "editorial_guidance", lambda: _editorial_guidance(conn), []
             ),
             "leader_action_board": _load(
-                "leader_action_board", lambda: _leader_action_board(conn),
+                "leader_action_board",
+                lambda: _leader_action_board(conn),
                 {"open": [], "recent_decisions": []},
             ),
             "management": _load(
-                "management", lambda: _management(conn),
-                {"actionable": {"kick": [], "promote": [], "demote": []},
-                 "building_counts": {}, "members_evaluated": 0},
+                "management",
+                lambda: _management(conn),
+                {
+                    "actionable": {"kick": [], "promote": [], "demote": []},
+                    "building_counts": {},
+                    "members_evaluated": 0,
+                },
             ),
             "due_revisits": _load("due_revisits", lambda: _due_revisits(conn), []),
         }
@@ -815,7 +883,11 @@ def build_read(conn=None) -> dict:
         if own and pending.get("initialized"):
             conn.commit()
         if degraded:
-            log.info("build_read: %d block(s) degraded: %s", len(degraded), ", ".join(degraded))
+            log.info(
+                "build_read: %d block(s) degraded: %s",
+                len(degraded),
+                ", ".join(degraded),
+            )
         return read
     finally:
         if own:

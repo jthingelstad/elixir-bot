@@ -29,7 +29,11 @@ class _MemberSource:
         }
 
     def get_member_war_status(self, tag, season_id):
-        return {"player_tag": tag, "season_id": season_id, "observed_at": "2026-07-15T01:10:00Z"}
+        return {
+            "player_tag": tag,
+            "season_id": season_id,
+            "observed_at": "2026-07-15T01:10:00Z",
+        }
 
     def get_member_current_deck(self, tag):
         return {"player_tag": tag, "cards": [{"name": "Knight"}]}

@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 import elixir_agent
-
 from capabilities.decks import get_deck_intelligence
 from storage.cards import list_deck_battle_history
 
@@ -36,18 +35,42 @@ def _cards(names):
     ]
 
 
-HOG = _cards([
-    "Hog Rider", "Musketeer", "Cannon", "Fireball", "The Log", "Ice Golem",
-    "Skeletons", "Ice Spirit",
-])
-HOG_EQ = _cards([
-    "Hog Rider", "Musketeer", "Cannon", "Earthquake", "The Log", "Ice Golem",
-    "Skeletons", "Ice Spirit",
-])
-GOLEM = _cards([
-    "Golem", "Night Witch", "Baby Dragon", "Tornado", "Lightning", "Lumberjack",
-    "Mega Minion", "Skeletons",
-])
+HOG = _cards(
+    [
+        "Hog Rider",
+        "Musketeer",
+        "Cannon",
+        "Fireball",
+        "The Log",
+        "Ice Golem",
+        "Skeletons",
+        "Ice Spirit",
+    ]
+)
+HOG_EQ = _cards(
+    [
+        "Hog Rider",
+        "Musketeer",
+        "Cannon",
+        "Earthquake",
+        "The Log",
+        "Ice Golem",
+        "Skeletons",
+        "Ice Spirit",
+    ]
+)
+GOLEM = _cards(
+    [
+        "Golem",
+        "Night Witch",
+        "Baby Dragon",
+        "Tornado",
+        "Lightning",
+        "Lumberjack",
+        "Mega Minion",
+        "Skeletons",
+    ]
+)
 
 
 def _row(tag, at, cards, outcome="W"):
@@ -75,8 +98,18 @@ class _Source:
     def lookup_member_cards(self, _tag, **_kwargs):
         return {
             "cards": [
-                {"name": "Cannon", "level": 13, "king_tower_gap": 2, "levels_to_max": 3},
-                {"name": "Hog Rider", "level": 15, "king_tower_gap": 0, "levels_to_max": 1},
+                {
+                    "name": "Cannon",
+                    "level": 13,
+                    "king_tower_gap": 2,
+                    "levels_to_max": 3,
+                },
+                {
+                    "name": "Hog Rider",
+                    "level": 15,
+                    "king_tower_gap": 0,
+                    "levels_to_max": 1,
+                },
             ]
         }
 
@@ -98,7 +131,9 @@ def test_member_deck_intelligence_explains_primary_variant_and_limits():
     assert result["primary_deck"]["archetype"]["label"] == "cycle"
     assert result["primary_deck"]["archetype"]["win_conditions"] == ["Hog Rider"]
     assert result["stability"] == {
-        "label": "stable", "primary_deck_share": 0.75, "distinct_decks": 2,
+        "label": "stable",
+        "primary_deck_share": 0.75,
+        "distinct_decks": 2,
     }
     assert result["variants"][0]["added"] == ["Earthquake"]
     assert result["variants"][0]["removed"] == ["Fireball"]
@@ -126,9 +161,14 @@ def test_clan_and_card_impact_views_are_explicitly_local():
     source = _Source(rows)
 
     clan = get_deck_intelligence(view="clan", source=source)
-    impact = get_deck_intelligence(view="card_impact", cards=["Hog Rider"], source=source)
+    impact = get_deck_intelligence(
+        view="card_impact", cards=["Hog Rider"], source=source
+    )
 
-    assert {item["archetype"] for item in clan["archetype_spread"]} == {"cycle", "beatdown"}
+    assert {item["archetype"] for item in clan["archetype_spread"]} == {
+        "cycle",
+        "beatdown",
+    }
     assert clan["evidence_limits"]["opponent_decks_captured"] is False
     assert impact["affected_member_count"] == 1
     assert impact["affected_members"][0]["player_tag"] == "#GEM"
@@ -180,24 +220,28 @@ def test_balance_impact_preserves_sources_staleness_and_member_filter():
 def test_balance_impact_includes_current_profile_deck_without_battle_history():
     class CurrentDeckSource(_Source):
         def list_current_member_decks(self, tag=None, **_kwargs):
-            decks = [{
-                "player_tag": "#GEM",
-                "player_name": "Gem",
-                "observed_at": "2026-07-15T12:00:00Z",
-                "cards": HOG,
-            }]
+            decks = [
+                {
+                    "player_tag": "#GEM",
+                    "player_name": "Gem",
+                    "observed_at": "2026-07-15T12:00:00Z",
+                    "cards": HOG,
+                }
+            ]
             return [deck for deck in decks if tag is None or deck["player_tag"] == tag]
 
     result = get_deck_intelligence(
         view="card_impact",
         player_tag="#GEM",
-        changes=[{
-            "card": "Hog Rider",
-            "direction": "nerf",
-            "status": "wip",
-            "source_url": "https://royaleapi.com/hog-wip",
-            "published_at": "2026-07-10T00:00:00Z",
-        }],
+        changes=[
+            {
+                "card": "Hog Rider",
+                "direction": "nerf",
+                "status": "wip",
+                "source_url": "https://royaleapi.com/hog-wip",
+                "published_at": "2026-07-10T00:00:00Z",
+            }
+        ],
         source=CurrentDeckSource([]),
     )
 
@@ -219,10 +263,12 @@ def test_deck_tool_routes_through_shared_capability():
         ) as capability,
         patch("agent.tool_exec._annotate_roster_status"),
     ):
-        result = json.loads(elixir_agent._execute_tool(
-            "get_deck_intelligence",
-            {"view": "member", "member_tag": "#GEM", "scope": "ladder"},
-        ))
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "get_deck_intelligence",
+                {"view": "member", "member_tag": "#GEM", "scope": "ladder"},
+            )
+        )
 
     assert result["capability"] == "deck_intelligence"
     refresh.assert_called_once_with("#GEM", include_battles=True)
@@ -231,11 +277,13 @@ def test_deck_tool_routes_through_shared_capability():
 
 
 def test_balance_impact_tool_is_leadership_gated():
-    public = json.loads(elixir_agent._execute_tool(
-        "get_deck_intelligence",
-        {"view": "card_impact", "cards": ["Hog Rider"]},
-        workflow="interactive",
-    ))
+    public = json.loads(
+        elixir_agent._execute_tool(
+            "get_deck_intelligence",
+            {"view": "card_impact", "cards": ["Hog Rider"]},
+            workflow="interactive",
+        )
+    )
     assert "leadership channels" in public["error"]
 
     payload = {"capability": "deck_intelligence", "view": "card_impact"}
@@ -243,18 +291,24 @@ def test_balance_impact_tool_is_leadership_gated():
         "agent.tool_exec.deck_capability.get_deck_intelligence",
         return_value=payload,
     ) as capability:
-        result = json.loads(elixir_agent._execute_tool(
-            "get_deck_intelligence",
-            {
-                "view": "card_impact",
-                "changes": [{
-                    "card": "Hog Rider", "direction": "nerf", "status": "wip",
-                    "source_url": "https://royaleapi.com/hog",
-                    "published_at": "2026-07-10T00:00:00Z",
-                }],
-            },
-            workflow="clanops",
-        ))
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "get_deck_intelligence",
+                {
+                    "view": "card_impact",
+                    "changes": [
+                        {
+                            "card": "Hog Rider",
+                            "direction": "nerf",
+                            "status": "wip",
+                            "source_url": "https://royaleapi.com/hog",
+                            "published_at": "2026-07-10T00:00:00Z",
+                        }
+                    ],
+                },
+                workflow="clanops",
+            )
+        )
 
     assert result == payload
     assert capability.call_args.kwargs["changes"][0]["direction"] == "nerf"
@@ -308,8 +362,7 @@ def test_storage_splits_duel_decks_and_excludes_boat_defense_shape(engine_conn):
         (now, now),
     )
     duel = [
-        {"id": card["id"], "name": card["name"], "level": 15}
-        for card in [*HOG, *GOLEM]
+        {"id": card["id"], "name": card["name"], "level": 15} for card in [*HOG, *GOLEM]
     ]
     engine_conn.execute(
         "INSERT INTO battle_events "

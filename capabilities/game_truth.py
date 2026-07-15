@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from capabilities.contracts import GameTruthResult
 from engine.game_rules import river_race_mechanics
 
 CAPABILITY_ID = "game_truth"
@@ -18,14 +19,26 @@ CONTRACT_VERSION = 1
 def _live_period_type(live_war: dict | None) -> str | None:
     live = live_war or {}
     period = live.get("period") if isinstance(live.get("period"), dict) else {}
-    state = live.get("current_state") if isinstance(live.get("current_state"), dict) else {}
+    state = (
+        live.get("current_state") if isinstance(live.get("current_state"), dict) else {}
+    )
     clock = live.get("clock") if isinstance(live.get("clock"), dict) else {}
-    if period.get("is_colosseum_week") or state.get("colosseum_week") or clock.get("is_colosseum_week"):
+    if (
+        period.get("is_colosseum_week")
+        or state.get("colosseum_week")
+        or clock.get("is_colosseum_week")
+    ):
         return "colosseum"
-    return period.get("period_type") or state.get("period_type") or clock.get("period_type")
+    return (
+        period.get("period_type")
+        or state.get("period_type")
+        or clock.get("period_type")
+    )
 
 
-def get_game_truth(*, topic: str = "river_race", live_war: dict | None = None) -> dict:
+def get_game_truth(
+    *, topic: str = "river_race", live_war: dict | None = None
+) -> GameTruthResult:
     """Return one versioned mechanics contract.
 
     Unsupported topics fail explicitly rather than inviting a caller to infer
@@ -93,7 +106,11 @@ def _war_from_awareness_read(read: dict) -> dict:
     time = read.get("time") if isinstance(read.get("time"), dict) else {}
     standing = read.get("standing") if isinstance(read.get("standing"), dict) else {}
     season = read.get("war_season") if isinstance(read.get("war_season"), dict) else {}
-    race = ((season.get("state") or {}).get("race") or {}) if isinstance(season, dict) else {}
+    race = (
+        ((season.get("state") or {}).get("race") or {})
+        if isinstance(season, dict)
+        else {}
+    )
     colosseum = bool(
         time.get("is_colosseum_week")
         or race.get("colosseum_week")
@@ -117,14 +134,17 @@ def awareness_post_facts(read: dict, post: dict) -> dict:
         signal for signal in _signals(read or {}) if signal.get("signal_key") in covered
     ]
     for signal in covered_signals:
-        payload = signal.get("payload") if isinstance(signal.get("payload"), dict) else {}
+        payload = (
+            signal.get("payload") if isinstance(signal.get("payload"), dict) else {}
+        )
         for key, value in {**payload, **signal}.items():
             if key not in facts and value is not None:
                 facts[key] = value
     facts["covered_signals"] = covered_signals
     facts["notable_moment"] = any(
         str(signal.get("badge_tier") or "").lower() == "legendary"
-        or signal.get("event_type") in {
+        or signal.get("event_type")
+        in {
             "arena_changed",
             "arena_up",
             "pol_promotion",

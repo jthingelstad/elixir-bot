@@ -9,7 +9,7 @@ consumers one interpretation of the mixed war-season / Ranked-month period id.
 from __future__ import annotations
 
 import db as db_facade
-
+from capabilities.contracts import AwardsRecognitionResult
 from capabilities.war import get_war_season_view
 
 CAPABILITY_ID = "awards_recognition"
@@ -49,7 +49,7 @@ def get_awards_recognition(
     limit: int | None = None,
     source=None,
     conn=None,
-) -> dict:
+) -> AwardsRecognitionResult:
     """Return one awards facet with explicit provisional/durable state."""
     source = _source(source)
     target_season = int(season_id) if season_id is not None else None

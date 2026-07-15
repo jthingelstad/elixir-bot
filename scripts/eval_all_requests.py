@@ -22,7 +22,6 @@ import argparse
 import json
 import os
 import random
-import sqlite3
 import sys
 from collections import Counter
 from pathlib import Path
@@ -30,6 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
@@ -37,19 +37,19 @@ except ImportError:
 import db
 import elixir_agent
 from agent import tool_exec
-from agent.core import _create_chat_completion, _chat_model_name, response_text
+from agent.core import _chat_model_name, _create_chat_completion, response_text
 from agent.intent_router import classify_intent
+from cr_api import CLAN_TAG
 from runtime.helpers._members import (
     _build_member_deck_report,
     _build_member_war_decks_report,
 )
-from cr_api import CLAN_TAG
-
 
 # ── Real-data tag fixtures ────────────────────────────────────────────────
 
+
 def _connect_db():
-    return sqlite3.connect(os.fspath(db.DB_PATH))
+    return db.get_connection()
 
 
 def sample_real_tags() -> dict:
@@ -62,20 +62,21 @@ def sample_real_tags() -> dict:
     }
     """
     conn = _connect_db()
-    conn.row_factory = sqlite3.Row
     try:
         our_members = [
             (r["current_name"] or r["player_tag"], r["player_tag"])
             for r in conn.execute(
-                "SELECT current_name, player_tag FROM members "
-                "WHERE status='active' ORDER BY RANDOM() LIMIT 5"
+                "SELECT p.current_name, p.player_tag FROM players p "
+                "WHERE EXISTS (SELECT 1 FROM clan_memberships cm "
+                "WHERE cm.player_tag = p.player_tag AND cm.left_at IS NULL) "
+                "ORDER BY RANDOM() LIMIT 5"
             )
         ]
         our_tag_norm = CLAN_TAG.lstrip("#").upper()
         external_clans = [
             (r["clan_name"], r["clan_tag"])
             for r in conn.execute(
-                "SELECT DISTINCT clan_tag, clan_name FROM war_period_clan_status "
+                "SELECT DISTINCT clan_tag, name AS clan_name FROM clans "
                 "WHERE UPPER(REPLACE(clan_tag,'#','')) != ? "
                 "ORDER BY RANDOM() LIMIT 6",
                 (our_tag_norm,),
@@ -83,14 +84,11 @@ def sample_real_tags() -> dict:
             if r["clan_tag"]
         ]
         external_players = [
-            (r["opponent_name"], r["opponent_tag"])
+            (r["opponent_tag"], r["opponent_tag"])
             for r in conn.execute(
-                "SELECT DISTINCT opponent_tag, opponent_name "
-                "FROM member_battle_facts "
+                "SELECT DISTINCT opponent_tag FROM battle_events "
                 "WHERE opponent_tag IS NOT NULL AND opponent_tag != '' "
-                "AND (opponent_clan_tag IS NULL OR UPPER(REPLACE(opponent_clan_tag,'#','')) != ?) "
                 "ORDER BY RANDOM() LIMIT 8",
-                (our_tag_norm,),
             )
             if r["opponent_tag"]
         ]
@@ -130,7 +128,9 @@ CR_API_HINT = (
 )
 
 
-def generate_requests(bucket: str, count: int, fixtures: dict, round_idx: int) -> list[dict]:
+def generate_requests(
+    bucket: str, count: int, fixtures: dict, round_idx: int
+) -> list[dict]:
     """Ask the LLM for a batch of realistic questions for a bucket."""
     if bucket == "regular":
         hint = REGULAR_HINT
@@ -184,7 +184,11 @@ def generate_requests(bucket: str, count: int, fixtures: dict, round_idx: int) -
     except json.JSONDecodeError as exc:
         print(f"  !! {bucket} generation returned invalid JSON: {exc}")
         return []
-    return [{"bucket": bucket, "question": s} for s in items if isinstance(s, str) and s.strip()]
+    return [
+        {"bucket": bucket, "question": s}
+        for s in items
+        if isinstance(s, str) and s.strip()
+    ]
 
 
 # ── Tool-call capture ─────────────────────────────────────────────────────
@@ -200,6 +204,7 @@ def _capturing_execute_tool(name, arguments, *args, **kwargs):
 
 def install_tool_capture() -> None:
     from agent import chat as agent_chat
+
     tool_exec._execute_tool = _capturing_execute_tool
     agent_chat._execute_tool = _capturing_execute_tool
     if hasattr(elixir_agent, "_execute_tool"):
@@ -214,14 +219,19 @@ def reset_tool_capture() -> list[tuple[str, dict]]:
 
 # ── Pipeline execution ────────────────────────────────────────────────────
 
+
 def _fake_clan_ctx() -> tuple[dict, dict]:
     """Build a lightweight clan/war context snapshot from local DB."""
     conn = _connect_db()
-    conn.row_factory = sqlite3.Row
     try:
-        members = [dict(r) for r in conn.execute(
-            "SELECT player_tag AS tag, current_name AS name FROM members WHERE status='active'"
-        )]
+        members = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT p.player_tag AS tag, p.current_name AS name FROM players p "
+                "WHERE EXISTS (SELECT 1 FROM clan_memberships cm "
+                "WHERE cm.player_tag = p.player_tag AND cm.left_at IS NULL)"
+            )
+        ]
     finally:
         conn.close()
     clan = {
@@ -249,6 +259,7 @@ def _resolve_target_member(question: str, intent: dict) -> dict | None:
     if any(w in ql for w in (" my ", "my deck", "my war", "i have", "i'm", "i am")):
         # use a deterministic "self" stand-in — pick a regular-war member
         from storage.war_analytics import war_player_types_by_tag
+
         tags = [m["player_tag"] for m in members]
         conn = db.get_connection()
         try:
@@ -266,8 +277,11 @@ def run_request(req: dict, clan: dict, war: dict) -> dict:
     question = req["question"]
     reset_tool_capture()
     intent = classify_intent(
-        question, workflow="interactive", mentioned=True,
-        allows_open_channel_reply=False, conversation_history=[],
+        question,
+        workflow="interactive",
+        mentioned=True,
+        allows_open_channel_reply=False,
+        conversation_history=[],
     )
     route = intent.get("route")
     mode = intent.get("mode")
@@ -365,6 +379,7 @@ def run_request(req: dict, clan: dict, war: dict) -> dict:
 
 # ── Reporting ─────────────────────────────────────────────────────────────
 
+
 def print_round_summary(round_idx: int, rows: list[dict]) -> None:
     print(f"\n{'=' * 72}\nROUND {round_idx} SUMMARY\n{'=' * 72}")
     by_bucket = Counter(r["bucket"] for r in rows)
@@ -393,19 +408,31 @@ def print_round_summary(round_idx: int, rows: list[dict]) -> None:
 
     # cr_api bucket: did cr_api tool fire?
     cr_rows = [r for r in rows if r["bucket"] == "cr_api"]
-    cr_fired = [r for r in cr_rows if any(n == "cr_api" for n, _ in (r.get("tool_calls") or []))]
+    cr_fired = [
+        r for r in cr_rows if any(n == "cr_api" for n, _ in (r.get("tool_calls") or []))
+    ]
     if cr_rows:
-        print(f"\ncr_api bucket: {len(cr_fired)}/{len(cr_rows)} prompts actually triggered cr_api tool")
+        print(
+            f"\ncr_api bucket: {len(cr_fired)}/{len(cr_rows)} prompts actually triggered cr_api tool"
+        )
         for r in cr_rows:
             tool_names = {n for n, _ in (r.get("tool_calls") or [])}
             mark = "OK" if "cr_api" in tool_names else "MISS"
-            print(f"  [{mark}] route={r.get('route'):12s} tools={sorted(tool_names) or '-'}  Q: {r['question'][:80]}")
+            print(
+                f"  [{mark}] route={r.get('route'):12s} tools={sorted(tool_names) or '-'}  Q: {r['question'][:80]}"
+            )
 
     # deck bucket: did deck route fire?
     deck_rows = [r for r in rows if r["bucket"] == "deck"]
     if deck_rows:
-        deck_routed = sum(1 for r in deck_rows if r.get("route") in {"deck_display", "deck_review", "deck_suggest"})
-        print(f"\ndeck bucket: {deck_routed}/{len(deck_rows)} prompts routed to a deck_* intent")
+        deck_routed = sum(
+            1
+            for r in deck_rows
+            if r.get("route") in {"deck_display", "deck_review", "deck_suggest"}
+        )
+        print(
+            f"\ndeck bucket: {deck_routed}/{len(deck_rows)} prompts routed to a deck_* intent"
+        )
 
     if errors:
         print("\nErrors:")
@@ -417,20 +444,25 @@ def print_round_summary(round_idx: int, rows: list[dict]) -> None:
     print("\nPreviews:")
     for r in rows:
         flag = "!" if r.get("error") else ("·" if r.get("skipped") else " ")
-        preview = (r.get("content") or r.get("error") or r.get("skipped") or "")
+        preview = r.get("content") or r.get("error") or r.get("skipped") or ""
         preview = preview[:160].replace("\n", " ")
         tool_list = ",".join(n for n, _ in r.get("tool_calls") or []) or "-"
-        print(f"  [{r['bucket']:7s}]{flag} route={r.get('route'):12s} tools={tool_list}")
+        print(
+            f"  [{r['bucket']:7s}]{flag} route={r.get('route'):12s} tools={tool_list}"
+        )
         print(f"       Q: {r['question'][:110]}")
         print(f"       A: {preview}")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
 
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rounds", type=int, default=1)
-    parser.add_argument("--per-bucket", type=int, default=4, help="Questions per bucket per round")
+    parser.add_argument(
+        "--per-bucket", type=int, default=4, help="Questions per bucket per round"
+    )
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--out", default="scripts/eval_all_requests_results.json")
     args = parser.parse_args()

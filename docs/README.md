@@ -3,6 +3,7 @@
 | Path | Purpose | Lifecycle |
 |---|---|---|
 | `data-model-erd.md` | Current logical map of the v5.1 database. | Living reference. |
+| `reference/current-architecture.md` | Concise map of the live data and capability flow. | Living reference. |
 | `reference/` | Enduring system design and operational contracts. | Keep current or label historical sections clearly. |
 | `reference/v5.1/` | The locked v5.1 build specification plus post-cut design addenda. | Preserve the original rationale; `AGENTS.md` wins when later production decisions supersede it. |
 | `tasks/` | Active long-form designs and product-team reports only. | Move completed work to `archive/`. |
@@ -20,7 +21,7 @@
 
 The v5.1 specification describes the clean-break migration and the system that
 shipped on 2026-07-03/04. Later changes made the awareness loop the sole
-proactive owner and moved deterministic recognition/delivery to offline-only
-compatibility seams. Current runtime behavior is therefore defined by
+proactive owner and moved deterministic recognition/delivery to an explicit
+offline comparison seam whose queue is a connection-local TEMP table. Current runtime behavior is therefore defined by
 `AGENTS.md`, `engine/tick.py`, and `runtime/activities.py`, even where an older
 section of the locked build spec narrates the original seven-step design.

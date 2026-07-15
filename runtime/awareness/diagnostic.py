@@ -23,7 +23,9 @@ log = logging.getLogger("elixir")
 # lands on the LLM view filtered to this tick's workflow — every awareness API
 # round (the loop's rounds at the top) is drillable there for the full
 # prompt/response. Overridable for a different tailnet host / port.
-OBSERVATORY_URL = os.getenv("ELIXIR_OBSERVATORY_URL", "https://otto.tail09aaf9.ts.net:8444")
+OBSERVATORY_URL = os.getenv(
+    "ELIXIR_OBSERVATORY_URL", "https://otto.tail09aaf9.ts.net:8444"
+)
 
 _HEADER = "AWARENESS (live)"
 _MAX_LEN = 1900
@@ -37,9 +39,10 @@ _OUTCOME_LABEL = {"posted": "posted", "silence": "silence", "failed": "TICK FAIL
 def _summarize_read(read: dict) -> str:
     read = read or {}
     lanes = read.get("signals_by_lane") or {}
-    lane_counts = ", ".join(
-        f"{lane} {len(sigs)}" for lane, sigs in lanes.items() if sigs
-    ) or "no signals"
+    lane_counts = (
+        ", ".join(f"{lane} {len(sigs)}" for lane, sigs in lanes.items() if sigs)
+        or "no signals"
+    )
 
     time_block = read.get("time") or {}
     if time_block:
@@ -134,7 +137,7 @@ def _chunk(body: str, limit: int = _MAX_LEN) -> list[str]:
     current = ""
     for line in body.split("\n"):
         if len(line) > limit:  # a single oversized line — hard-split it
-            line = line[:limit - 1] + "…"
+            line = line[: limit - 1] + "…"
         if current and len(current) + 1 + len(line) > limit:
             chunks.append(current)
             current = line
@@ -173,16 +176,24 @@ def format_live_event(event: dict) -> str:
             head += f"({args})"
         return f"{head}\n   → {res}"
     if etype == "truncation":
-        return (f"⚠️ **Response truncated** at max_tokens={event.get('max_tokens')} "
-                f"(phase: {event.get('phase')})")
+        return (
+            f"⚠️ **Response truncated** at max_tokens={event.get('max_tokens')} "
+            f"(phase: {event.get('phase')})"
+        )
     if etype == "retry":
-        return (f"🔁 **Retrying** with {event.get('max_tokens')} tokens of headroom "
-                f"({event.get('reason') or 'truncation'})")
+        return (
+            f"🔁 **Retrying** with {event.get('max_tokens')} tokens of headroom "
+            f"({event.get('reason') or 'truncation'})"
+        )
     return f"· {etype}"
 
 
 def build_diagnostic_render(
-    read: dict, plan: dict, *, tool_trace: list | None = None, loop_number=None,
+    read: dict,
+    plan: dict,
+    *,
+    tool_trace: list | None = None,
+    loop_number=None,
 ) -> dict:
     """Turn (read, plan, tool_trace) into a structured render for #thinking.
 
@@ -222,4 +233,9 @@ def build_diagnostic_render(
     }
 
 
-__all__ = ["build_diagnostic_render", "read_summary", "format_live_event", "observatory_url"]
+__all__ = [
+    "build_diagnostic_render",
+    "read_summary",
+    "format_live_event",
+    "observatory_url",
+]

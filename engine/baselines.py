@@ -23,7 +23,12 @@ def get_baseline(
 
 
 def set_baseline(
-    conn, entity_kind: str, entity_tag: str, aspect: str, payload: dict, observed_at: str
+    conn,
+    entity_kind: str,
+    entity_tag: str,
+    aspect: str,
+    payload: dict,
+    observed_at: str,
 ) -> None:
     """Upsert the baseline, rolling the previous observed_at into
     prev_observed_at — the (prev, now] window for timing honesty (§8)."""
@@ -48,7 +53,9 @@ def set_baseline(
     )
 
 
-def payload_changed(conn, entity_kind: str, entity_tag: str, aspect: str, payload: dict) -> bool:
+def payload_changed(
+    conn, entity_kind: str, entity_tag: str, aspect: str, payload: dict
+) -> bool:
     """Cheap no-change check: hash compare against the stored baseline."""
     row = get_baseline(conn, entity_kind, entity_tag, aspect)
     if row is None:

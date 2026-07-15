@@ -19,126 +19,16 @@ from db import (
 )
 from storage.identity import save_memory_episode, upsert_discord_user
 
-# -- Signal and announcement logs ------------------------------------------
-
-@managed_connection
-def was_signal_completed(signal_type: str, date_str: str, conn: Optional[sqlite3.Connection] = None) -> bool:
-    """v5.1: signal_log retired with Gen B — the recognition ledger owns
-    delivery dedup. Reads the ledger so legacy callers keep working."""
-    del date_str
-    return conn.execute(
-        "SELECT 1 FROM recognition_ledger WHERE recognition_key = ?", (signal_type,)
-    ).fetchone() is not None
+# -- System-signal and conversation logs ----------------------------------
 
 
 @managed_connection
-def was_signal_completed_any_date(signal_type: str, conn: Optional[sqlite3.Connection] = None) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM recognition_ledger WHERE recognition_key = ?", (signal_type,)
-    ).fetchone() is not None
-
-
-@managed_connection
-def mark_signal_completed(signal_type: str, date_str: str, conn: Optional[sqlite3.Connection] = None) -> None:
-    """v5.1: records a ledger claim (stream 'legacy-signal')."""
-    conn.execute(
-        "INSERT OR IGNORE INTO recognition_ledger (recognition_key, stream, event_refs_json, score, claimed_at) "
-        "VALUES (?, 'legacy-signal', '[]', 0, ?)",
-        (signal_type, date_str),
-    )
-    conn.commit()
-
-
-def was_signal_sent(signal_type: str, date_str: str, conn: Optional[sqlite3.Connection] = None) -> bool:
-    """Compatibility alias for ``was_signal_completed``."""
-    return was_signal_completed(signal_type, date_str, conn=conn)
-
-
-def was_signal_sent_any_date(signal_type: str, conn: Optional[sqlite3.Connection] = None) -> bool:
-    """Compatibility alias for ``was_signal_completed_any_date``."""
-    return was_signal_completed_any_date(signal_type, conn=conn)
-
-
-def mark_signal_sent(signal_type: str, date_str: str, conn: Optional[sqlite3.Connection] = None) -> None:
-    """Compatibility alias for ``mark_signal_completed``."""
-    mark_signal_completed(signal_type, date_str, conn=conn)
-
-
-@managed_connection
-def get_signal_detector_cursor(detector_key: str, scope_key: str = "", conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
-    row = conn.execute(
-        """
-        SELECT detector_key, scope_key, cursor_text, cursor_int, updated_at, metadata_json
-        FROM signal_detector_cursors
-        WHERE detector_key = ? AND scope_key = ?
-        """,
-        ((detector_key or "").strip(), (scope_key or "").strip()),
-    ).fetchone()
-    if not row:
-        return None
-    item = dict(row)
-    item["metadata_json"] = json.loads(item["metadata_json"] or "{}")
-    return item
-
-
-@managed_connection
-def upsert_signal_detector_cursor(
-    detector_key: str,
-    scope_key: str = "",
-    *,
-    cursor_text: Optional[str] = None,
-    cursor_int: Optional[int] = None,
-    metadata: Optional[dict] = None,
+def queue_system_signal(
+    signal_key: str,
+    signal_type: str,
+    payload: Optional[dict],
     conn: Optional[sqlite3.Connection] = None,
 ) -> None:
-    now = _utcnow()
-    conn.execute(
-        """
-        INSERT INTO signal_detector_cursors (
-            detector_key, scope_key, cursor_text, cursor_int, updated_at, metadata_json
-        ) VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(detector_key, scope_key) DO UPDATE SET
-            cursor_text = excluded.cursor_text,
-            cursor_int = excluded.cursor_int,
-            updated_at = excluded.updated_at,
-            metadata_json = excluded.metadata_json
-        """,
-        (
-            (detector_key or "").strip(),
-            (scope_key or "").strip(),
-            cursor_text,
-            cursor_int,
-            now,
-            _json_or_none(metadata),
-        ),
-    )
-    conn.commit()
-
-
-@managed_connection
-def list_signal_detector_cursors(detector_key: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    where = []
-    params = []
-    if detector_key:
-        where.append("detector_key = ?")
-        params.append((detector_key or "").strip())
-    rows = conn.execute(
-        "SELECT detector_key, scope_key, cursor_text, cursor_int, updated_at, metadata_json "
-        f"FROM signal_detector_cursors {'WHERE ' + ' AND '.join(where) if where else ''} "
-        "ORDER BY detector_key ASC, scope_key ASC"
-        ,
-        tuple(params),
-    ).fetchall()
-    result = []
-    for row in rows:
-        item = dict(row)
-        item["metadata_json"] = json.loads(item["metadata_json"] or "{}")
-        result.append(item)
-    return result
-
-
-@managed_connection
-def queue_system_signal(signal_key: str, signal_type: str, payload: Optional[dict], conn: Optional[sqlite3.Connection] = None) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO system_signals (signal_key, signal_type, created_at, payload_json) VALUES (?, ?, ?, ?)",
         (signal_key, signal_type, _utcnow(), _json_or_none(payload) or "{}"),
@@ -147,7 +37,9 @@ def queue_system_signal(signal_key: str, signal_type: str, payload: Optional[dic
 
 
 @managed_connection
-def list_pending_system_signals(conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def list_pending_system_signals(
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     rows = conn.execute(
         "SELECT signal_key, signal_type, created_at, payload_json "
         "FROM system_signals WHERE announced_at IS NULL "
@@ -172,24 +64,46 @@ def list_pending_system_signals(conn: Optional[sqlite3.Connection] = None) -> li
 
 
 @managed_connection
-def mark_system_signal_announced(signal_key: str, conn: Optional[sqlite3.Connection] = None) -> None:
+def mark_system_signal_announced(
+    signal_key: str, conn: Optional[sqlite3.Connection] = None
+) -> None:
     conn.execute(
         "UPDATE system_signals SET announced_at = ? WHERE signal_key = ? AND announced_at IS NULL",
         (_utcnow(), signal_key),
     )
     conn.commit()
+
+
 # -- Messaging --------------------------------------------------------------
 
+
 @managed_connection
-def save_message(scope: str, author_type: str, content: str, summary: Optional[str] = None, channel_id: Optional[str | int] = None, channel_name: Optional[str] = None,
-                 channel_kind: Optional[str] = None, discord_user_id: Optional[str | int] = None, username: Optional[str] = None, display_name: Optional[str] = None,
-                 member_tag: Optional[str] = None, workflow: Optional[str] = None, event_type: Optional[str] = None, discord_message_id: Optional[str | int] = None,
-                 raw_json: Optional[dict] = None, intent_id: Optional[int] = None, conn: Optional[sqlite3.Connection] = None) -> int:
+def save_message(
+    scope: str,
+    author_type: str,
+    content: str,
+    summary: Optional[str] = None,
+    channel_id: Optional[str | int] = None,
+    channel_name: Optional[str] = None,
+    channel_kind: Optional[str] = None,
+    discord_user_id: Optional[str | int] = None,
+    username: Optional[str] = None,
+    display_name: Optional[str] = None,
+    member_tag: Optional[str] = None,
+    workflow: Optional[str] = None,
+    event_type: Optional[str] = None,
+    discord_message_id: Optional[str | int] = None,
+    raw_json: Optional[dict] = None,
+    intent_id: Optional[int] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
     member_id = None
     if member_tag:
         member_id = _ensure_member(conn, member_tag)
     if discord_user_id is not None:
-        upsert_discord_user(discord_user_id, username=username, display_name=display_name, conn=conn)
+        upsert_discord_user(
+            discord_user_id, username=username, display_name=display_name, conn=conn
+        )
         if member_id is None:
             link = conn.execute(
                 "SELECT player_tag AS member_id FROM discord_links WHERE discord_user_id = ? AND is_primary = 1",
@@ -197,7 +111,9 @@ def save_message(scope: str, author_type: str, content: str, summary: Optional[s
             ).fetchone()
             if link:
                 member_id = link["member_id"]
-    _ensure_channel(conn, channel_id, channel_name=channel_name, channel_kind=channel_kind)
+    _ensure_channel(
+        conn, channel_id, channel_name=channel_name, channel_kind=channel_kind
+    )
     thread_id = _ensure_thread(
         conn,
         scope,
@@ -288,7 +204,9 @@ def save_message(scope: str, author_type: str, content: str, summary: Optional[s
 
 
 @managed_connection
-def update_message_summary(message_id: int, summary: str, conn: Optional[sqlite3.Connection] = None) -> None:
+def update_message_summary(
+    message_id: int, summary: str, conn: Optional[sqlite3.Connection] = None
+) -> None:
     """Retroactively update a message's summary and propagate to memory stores."""
     row = conn.execute(
         "SELECT message_id, author_type, discord_user_id, channel_id "
@@ -329,7 +247,9 @@ def update_message_summary(message_id: int, summary: str, conn: Optional[sqlite3
 
 
 @managed_connection
-def get_message_by_discord_message_id(discord_message_id: str | int, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_message_by_discord_message_id(
+    discord_message_id: str | int, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     row = conn.execute(
         "SELECT message_id, discord_message_id, thread_id, channel_id, discord_user_id, member_id, "
         "author_type, workflow, event_type, content, summary, created_at, intent_id "
@@ -371,20 +291,29 @@ def _response_preview(content) -> str:
 
 
 @managed_connection
-def upsert_prompt_feedback(*, assistant_discord_message_id: str | int, discord_user_id: str | int, original_asker_discord_user_id: Optional[str | int] = None,
-                           workflow: Optional[str] = None, channel_id: Optional[str | int] = None, channel_name: Optional[str] = None, feedback_value: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> dict:
+def upsert_prompt_feedback(
+    *,
+    assistant_discord_message_id: str | int,
+    discord_user_id: str | int,
+    original_asker_discord_user_id: Optional[str | int] = None,
+    workflow: Optional[str] = None,
+    channel_id: Optional[str | int] = None,
+    channel_name: Optional[str] = None,
+    feedback_value: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
     feedback_value = (feedback_value or "").strip().lower()
     if feedback_value not in {"up", "down"}:
         raise ValueError(f"invalid feedback value: {feedback_value}")
-    assistant = get_message_by_discord_message_id(assistant_discord_message_id, conn=conn)
+    assistant = get_message_by_discord_message_id(
+        assistant_discord_message_id, conn=conn
+    )
     if not assistant:
-        raise ValueError(f"assistant message not found for discord id {assistant_discord_message_id}")
+        raise ValueError(
+            f"assistant message not found for discord id {assistant_discord_message_id}"
+        )
     previous_question = _previous_user_message_for_assistant(conn, assistant)
-    question = (
-        previous_question.get("content")
-        if previous_question
-        else ""
-    ) or ""
+    question = (previous_question.get("content") if previous_question else "") or ""
     existing = conn.execute(
         "SELECT prompt_feedback_id, feedback_value, removed_at FROM prompt_feedback "
         "WHERE assistant_discord_message_id = ? AND discord_user_id = ?",
@@ -400,9 +329,13 @@ def upsert_prompt_feedback(*, assistant_discord_message_id: str | int, discord_u
             (
                 assistant.get("message_id"),
                 workflow or assistant.get("workflow"),
-                str(channel_id) if channel_id is not None else assistant.get("channel_id"),
+                str(channel_id)
+                if channel_id is not None
+                else assistant.get("channel_id"),
                 channel_name,
-                str(original_asker_discord_user_id) if original_asker_discord_user_id is not None else assistant.get("discord_user_id"),
+                str(original_asker_discord_user_id)
+                if original_asker_discord_user_id is not None
+                else assistant.get("discord_user_id"),
                 feedback_value,
                 question,
                 _response_preview(assistant.get("content") or ""),
@@ -422,10 +355,14 @@ def upsert_prompt_feedback(*, assistant_discord_message_id: str | int, discord_u
                 assistant.get("message_id"),
                 str(assistant_discord_message_id),
                 workflow or assistant.get("workflow"),
-                str(channel_id) if channel_id is not None else assistant.get("channel_id"),
+                str(channel_id)
+                if channel_id is not None
+                else assistant.get("channel_id"),
                 channel_name,
                 str(discord_user_id),
-                str(original_asker_discord_user_id) if original_asker_discord_user_id is not None else assistant.get("discord_user_id"),
+                str(original_asker_discord_user_id)
+                if original_asker_discord_user_id is not None
+                else assistant.get("discord_user_id"),
                 feedback_value,
                 question,
                 _response_preview(assistant.get("content") or ""),
@@ -437,7 +374,9 @@ def upsert_prompt_feedback(*, assistant_discord_message_id: str | int, discord_u
         previous_value = None
         was_removed = False
     conn.commit()
-    became_active_down = feedback_value == "down" and (previous_value != "down" or was_removed)
+    became_active_down = feedback_value == "down" and (
+        previous_value != "down" or was_removed
+    )
     return {
         "prompt_feedback_id": prompt_feedback_id,
         "feedback_value": feedback_value,
@@ -447,7 +386,13 @@ def upsert_prompt_feedback(*, assistant_discord_message_id: str | int, discord_u
 
 
 @managed_connection
-def clear_prompt_feedback(*, assistant_discord_message_id: str | int, discord_user_id: str | int, feedback_value: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> int:
+def clear_prompt_feedback(
+    *,
+    assistant_discord_message_id: str | int,
+    discord_user_id: str | int,
+    feedback_value: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
     now = _utcnow()
     params = [now, now, str(assistant_discord_message_id), str(discord_user_id)]
     sql = (
@@ -463,16 +408,32 @@ def clear_prompt_feedback(*, assistant_discord_message_id: str | int, discord_us
 
 
 @managed_connection
-def mark_prompt_feedback_retry_invited(prompt_feedback_id: int, *, retry_message_id: Optional[str | int] = None, conn: Optional[sqlite3.Connection] = None) -> None:
+def mark_prompt_feedback_retry_invited(
+    prompt_feedback_id: int,
+    *,
+    retry_message_id: Optional[str | int] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
     conn.execute(
         "UPDATE prompt_feedback SET retry_invited_at = ?, retry_invite_message_id = ? WHERE prompt_feedback_id = ?",
-        (_utcnow(), str(retry_message_id) if retry_message_id is not None else None, int(prompt_feedback_id)),
+        (
+            _utcnow(),
+            str(retry_message_id) if retry_message_id is not None else None,
+            int(prompt_feedback_id),
+        ),
     )
     conn.commit()
 
 
 @managed_connection
-def list_prompt_feedback(limit: int = 20, workflow: Optional[str] = None, *, include_positive: bool = False, active_only: bool = True, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def list_prompt_feedback(
+    limit: int = 20,
+    workflow: Optional[str] = None,
+    *,
+    include_positive: bool = False,
+    active_only: bool = True,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     where = []
     params = []
     if workflow:
@@ -495,8 +456,16 @@ def list_prompt_feedback(limit: int = 20, workflow: Optional[str] = None, *, inc
 
 
 @managed_connection
-def list_prompt_review_items(limit: int = 20, workflow: Optional[str] = None, *, include_positive: bool = False, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    failures = list_prompt_failures(limit=max(1, int(limit or 20)), workflow=workflow, conn=conn)
+def list_prompt_review_items(
+    limit: int = 20,
+    workflow: Optional[str] = None,
+    *,
+    include_positive: bool = False,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    failures = list_prompt_failures(
+        limit=max(1, int(limit or 20)), workflow=workflow, conn=conn
+    )
     feedback = list_prompt_feedback(
         limit=max(1, int(limit or 20)),
         workflow=workflow,
@@ -523,7 +492,9 @@ def list_prompt_review_items(limit: int = 20, workflow: Optional[str] = None, *,
             "discord_user_id": row.get("discord_user_id"),
             "discord_message_id": row.get("assistant_discord_message_id"),
             "question": row.get("question") or "",
-            "detail": "Original asker reacted with thumbs down." if row.get("feedback_value") == "down" else "Original asker reacted with thumbs up.",
+            "detail": "Original asker reacted with thumbs down."
+            if row.get("feedback_value") == "down"
+            else "Original asker reacted with thumbs up.",
             "result_preview": row.get("response_preview"),
             "feedback_value": row.get("feedback_value"),
             "original_asker_discord_user_id": row.get("original_asker_discord_user_id"),
@@ -539,11 +510,13 @@ def list_prompt_review_items(limit: int = 20, workflow: Optional[str] = None, *,
         ),
         reverse=True,
     )
-    return items[:max(1, int(limit or 20))]
+    return items[: max(1, int(limit or 20))]
 
 
 @managed_connection
-def list_thread_messages(scope: str, limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def list_thread_messages(
+    scope: str, limit: int = 10, conn: Optional[sqlite3.Connection] = None
+) -> list[dict]:
     scope_type, scope_key = _normalize_scope(scope)
     row = conn.execute(
         "SELECT thread_id FROM conversation_threads WHERE scope_type = ? AND scope_key = ?",
@@ -560,17 +533,24 @@ def list_thread_messages(scope: str, limit: int = 10, conn: Optional[sqlite3.Con
     out = []
     for msg in reversed(rows):
         role = "assistant" if msg["author_type"] == "assistant" else "user"
-        out.append({
-            "role": role,
-            "content": msg["content"],
-            "author_name": None,
-            "recorded_at": msg["created_at"],
-        })
+        out.append(
+            {
+                "role": role,
+                "content": msg["content"],
+                "author_name": None,
+                "recorded_at": msg["created_at"],
+            }
+        )
     return out
 
 
 @managed_connection
-def list_channel_messages(channel_id: str | int, limit: int = 10, author_type: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def list_channel_messages(
+    channel_id: str | int,
+    limit: int = 10,
+    author_type: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     where = ["channel_id = ?"]
     params = [str(channel_id)]
     if author_type:
@@ -587,21 +567,36 @@ def list_channel_messages(channel_id: str | int, limit: int = 10, author_type: O
     out = []
     for msg in reversed(rows):
         role = "assistant" if msg["author_type"] == "assistant" else "user"
-        out.append({
-            "role": role,
-            "content": msg["content"],
-            "author_name": None,
-            "recorded_at": msg["created_at"],
-        })
+        out.append(
+            {
+                "role": role,
+                "content": msg["content"],
+                "author_name": None,
+                "recorded_at": msg["created_at"],
+            }
+        )
     return out
 
 
 @managed_connection
-def record_prompt_failure(question: str, failure_type: str, failure_stage: str, *, workflow: Optional[str] = None, channel_id: Optional[str | int] = None,
-                          channel_name: Optional[str] = None, discord_user_id: Optional[str | int] = None, discord_message_id: Optional[str | int] = None,
-                          detail: Optional[str] = None, result_preview: Optional[str] = None, llm_last_error: Optional[str] = None,
-                          llm_last_model: Optional[str] = None, llm_last_call_at: Optional[str] = None, raw_json: Optional[dict] = None,
-                          conn: Optional[sqlite3.Connection] = None) -> int:
+def record_prompt_failure(
+    question: str,
+    failure_type: str,
+    failure_stage: str,
+    *,
+    workflow: Optional[str] = None,
+    channel_id: Optional[str | int] = None,
+    channel_name: Optional[str] = None,
+    discord_user_id: Optional[str | int] = None,
+    discord_message_id: Optional[str | int] = None,
+    detail: Optional[str] = None,
+    result_preview: Optional[str] = None,
+    llm_last_error: Optional[str] = None,
+    llm_last_model: Optional[str] = None,
+    llm_last_call_at: Optional[str] = None,
+    raw_json: Optional[dict] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
     cur = conn.execute(
         "INSERT INTO prompt_failures (recorded_at, workflow, failure_type, failure_stage, channel_id, channel_name, discord_user_id, discord_message_id, question, detail, result_preview, llm_last_error, llm_last_model, llm_last_call_at, raw_json) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -628,7 +623,11 @@ def record_prompt_failure(question: str, failure_type: str, failure_stage: str, 
 
 
 @managed_connection
-def list_prompt_failures(limit: int = 20, workflow: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def list_prompt_failures(
+    limit: int = 20,
+    workflow: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     if workflow:
         rows = conn.execute(
             "SELECT failure_id, recorded_at, workflow, failure_type, failure_stage, channel_id, channel_name, discord_user_id, discord_message_id, question, detail, result_preview, llm_last_error, llm_last_model, llm_last_call_at, raw_json "
@@ -652,11 +651,22 @@ def _ensure_llm_blob_columns(conn: sqlite3.Connection) -> None:
 
 
 @managed_connection
-def record_llm_call(workflow: str, model: str, *, ok: bool = True, error: Optional[str] = None, duration_ms: Optional[int] = None,
-                    prompt_tokens: Optional[int] = None, completion_tokens: Optional[int] = None, total_tokens: Optional[int] = None,
-                    cache_creation_tokens: Optional[int] = None, cache_read_tokens: Optional[int] = None,
-                    prompt_json: Optional[str] = None, response_json: Optional[str] = None,
-                    conn: Optional[sqlite3.Connection] = None) -> None:
+def record_llm_call(
+    workflow: str,
+    model: str,
+    *,
+    ok: bool = True,
+    error: Optional[str] = None,
+    duration_ms: Optional[int] = None,
+    prompt_tokens: Optional[int] = None,
+    completion_tokens: Optional[int] = None,
+    total_tokens: Optional[int] = None,
+    cache_creation_tokens: Optional[int] = None,
+    cache_read_tokens: Optional[int] = None,
+    prompt_json: Optional[str] = None,
+    response_json: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
     _ensure_llm_blob_columns(conn)
     conn.execute(
         "INSERT INTO llm_calls (recorded_at, workflow, model, ok, error, duration_ms, "
@@ -683,12 +693,16 @@ def record_llm_call(workflow: str, model: str, *, ok: bool = True, error: Option
 
 
 @managed_connection
-def get_llm_call(call_id: int, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_llm_call(
+    call_id: int, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     """Full detail for one LLM call — metadata + the captured prompt/response
     blobs, JSON-decoded. Powers the Observatory per-call drill-down. None when
     the call doesn't exist; blobs are None once pruned (LLM_PROMPT_RETENTION_DAYS)."""
     _ensure_llm_blob_columns(conn)
-    row = conn.execute("SELECT * FROM llm_calls WHERE call_id = ?", (int(call_id),)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM llm_calls WHERE call_id = ?", (int(call_id),)
+    ).fetchone()
     if row is None:
         return None
     out = dict(row)
@@ -701,7 +715,12 @@ def get_llm_call(call_id: int, conn: Optional[sqlite3.Connection] = None) -> Opt
 
 
 @managed_connection
-def list_llm_calls(limit: int = 100, workflow: Optional[str] = None, model: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def list_llm_calls(
+    limit: int = 100,
+    workflow: Optional[str] = None,
+    model: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     clauses = []
     params = []
     if workflow:
@@ -721,6 +740,9 @@ def list_llm_calls(limit: int = 100, workflow: Optional[str] = None, model: Opti
 
 @managed_connection
 def purge_old_conversations(conn: Optional[sqlite3.Connection] = None) -> None:
-    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=CONVERSATION_RETENTION_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff = (
+        datetime.now(timezone.utc).replace(tzinfo=None)
+        - timedelta(days=CONVERSATION_RETENTION_DAYS)
+    ).strftime("%Y-%m-%dT%H:%M:%S")
     conn.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
     conn.commit()

@@ -26,8 +26,8 @@ from __future__ import annotations
 import gzip
 import logging
 import os
-import shutil
 import re
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -54,7 +54,9 @@ def _filename_re(prefix: str) -> re.Pattern:
     """Match `<prefix>-<timestamp>.db.gz`. Anchored so prefixes don't collide:
     the literal `-` before the 4-digit year stops "elixir" matching
     "elixir-v5-…" files (and "elixir-v5" matching "elixir-v5-events-…")."""
-    return re.compile(rf"^{re.escape(prefix)}-(\d{{4}}-\d{{2}}-\d{{2}}-\d{{6}})\.db\.gz$")
+    return re.compile(
+        rf"^{re.escape(prefix)}-(\d{{4}}-\d{{2}}-\d{{2}}-\d{{6}})\.db\.gz$"
+    )
 
 
 def _databases() -> list[tuple[str, Path, bool]]:
@@ -62,6 +64,7 @@ def _databases() -> list[tuple[str, Path, bool]]:
     covers. v5.1 has one operational database; pre-cut stores are immutable
     archives and need no recurring backup."""
     return [("elixir-v51", _db_path(), True)]
+
 
 # Retention thresholds in days.
 _KEEP_ALL_DAYS = 28
@@ -82,7 +85,9 @@ def _timestamp_from_name(name: str, prefix: str = _DEFAULT_PREFIX) -> datetime |
     if not m:
         return None
     try:
-        return datetime.strptime(m.group(1), _TIMESTAMP_FMT).replace(tzinfo=timezone.utc)
+        return datetime.strptime(m.group(1), _TIMESTAMP_FMT).replace(
+            tzinfo=timezone.utc
+        )
     except ValueError:
         return None
 
@@ -110,7 +115,13 @@ def create_backup(
     filename = f"{prefix}-{now.strftime(_TIMESTAMP_FMT)}.db.gz"
     dest = dest_dir / filename
 
-    result: dict = {"path": str(dest), "size_original": 0, "size_compressed": 0, "ok": False, "error": None}
+    result: dict = {
+        "path": str(dest),
+        "size_original": 0,
+        "size_compressed": 0,
+        "ok": False,
+        "error": None,
+    }
 
     try:
         # Stage EVERYTHING in a LOCAL temp dir, then atomically move the final
@@ -137,7 +148,9 @@ def create_backup(
                 # Integrity check on the backup copy.
                 check_conn = sqlite3.connect(tmp_path)
                 try:
-                    check_result = check_conn.execute("PRAGMA integrity_check").fetchone()[0]
+                    check_result = check_conn.execute(
+                        "PRAGMA integrity_check"
+                    ).fetchone()[0]
                     if check_result != "ok":
                         result["error"] = f"integrity check failed: {check_result}"
                         return result
@@ -145,13 +158,18 @@ def create_backup(
                     check_conn.close()
 
                 # Compress locally, then atomically publish to the backup dir.
-                with open(tmp_path, "rb") as f_in, gzip.open(stage_gz, "wb", compresslevel=6) as f_out:
+                with (
+                    open(tmp_path, "rb") as f_in,
+                    gzip.open(stage_gz, "wb", compresslevel=6) as f_out,
+                ):
                     while True:
                         chunk = f_in.read(1_048_576)  # 1 MB
                         if not chunk:
                             break
                         f_out.write(chunk)
-                os.replace(stage_gz, dest)  # atomic move into (possibly iCloud) dest_dir
+                os.replace(
+                    stage_gz, dest
+                )  # atomic move into (possibly iCloud) dest_dir
 
                 result["size_compressed"] = os.path.getsize(dest)
                 result["ok"] = True
@@ -166,6 +184,7 @@ def create_backup(
         # for weeks — make it visible in the ledger, not just the return value.
         try:
             from storage.incidents import record_incident
+
             record_incident("backup.create", exc, context={"dest": str(dest)})
         except Exception:
             pass
@@ -185,7 +204,9 @@ def _quarter(dt: datetime) -> tuple[int, int]:
     return dt.year, (dt.month - 1) // 3
 
 
-def prune_backups(backup_dir: Path | None = None, prefix: str = _DEFAULT_PREFIX) -> list[str]:
+def prune_backups(
+    backup_dir: Path | None = None, prefix: str = _DEFAULT_PREFIX
+) -> list[str]:
     """Delete backups of one prefix family that exceed the retention policy.
 
     Only files matching `<prefix>-<timestamp>.db.gz` are considered, so each
@@ -272,7 +293,11 @@ def main() -> int:
             failed = True
             continue
 
-        ratio = result["size_compressed"] / result["size_original"] * 100 if result["size_original"] else 0
+        ratio = (
+            result["size_compressed"] / result["size_original"] * 100
+            if result["size_original"]
+            else 0
+        )
         log.info(
             "Backup complete: %s (%.1f MB -> %.1f MB, %.0f%%)",
             result["path"],
@@ -283,7 +308,12 @@ def main() -> int:
 
         removed = prune_backups(prefix=prefix)
         if removed:
-            log.info("Pruned %d old %s backup(s): %s", len(removed), prefix, ", ".join(removed))
+            log.info(
+                "Pruned %d old %s backup(s): %s",
+                len(removed),
+                prefix,
+                ", ".join(removed),
+            )
 
     if failed:
         log.error("One or more backups failed.")

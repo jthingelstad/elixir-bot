@@ -28,5 +28,9 @@ jobs:
         run: python scripts/check_exception_hygiene.py
       - name: Lint
         run: ruff check .
+      - name: Format
+        run: ruff format --check .
+      - name: Capability contracts
+        run: mypy capabilities/contracts.py
       - name: Tests
-        run: pytest tests/ -q
+        run: pytest tests/ -q --cov=capabilities --cov-report=term-missing --cov-fail-under=80

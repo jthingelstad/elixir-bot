@@ -34,13 +34,20 @@ from engine.normalize import (
 )
 
 RANKED_LEAGUE_NAMES = {
-    "master 1", "master 2", "master 3", "champion", "grand champion",
-    "royal champion", "ultimate champion",
+    "master 1",
+    "master 2",
+    "master 3",
+    "champion",
+    "grand champion",
+    "royal champion",
+    "ultimate champion",
 }
 _LEVEL_RE = re.compile(r"\blevel\s+(\d{1,2})\b", re.IGNORECASE)
 _DAY_OF_RE = re.compile(r"\bday\s+(\d+)\s+of\s+(\d+)\b", re.IGNORECASE)
-_ARENA_UP_RE = re.compile(r"arena[- ]?up|moved up|climbed (?:up |into )|punched into|broke into",
-                          re.IGNORECASE)
+_ARENA_UP_RE = re.compile(
+    r"arena[- ]?up|moved up|climbed (?:up |into )|punched into|broke into",
+    re.IGNORECASE,
+)
 _FINISH_LINE_RE = re.compile(r"\bfinish\s+line\b", re.IGNORECASE)
 _NO_FINISH_LINE_RE = re.compile(
     r"\b(?:no|without)\s+(?:a\s+|the\s+)?finish\s+line\b|"
@@ -80,14 +87,23 @@ def _check_card(copy, facts, conn, out):
 
     # Facts-only checks (no catalog needed) — run always.
     if isinstance(milestone, int) and milestone > 16:
-        out.append(_finding(f"{name} level {milestone}",
-                            f"level {milestone} is impossible — cards top out at display 16",
-                            "error"))
+        out.append(
+            _finding(
+                f"{name} level {milestone}",
+                f"level {milestone} is impossible — cards top out at display 16",
+                "error",
+            )
+        )
     if isinstance(milestone, int):
         m = _LEVEL_RE.search(copy or "")
         if m and int(m.group(1)) != milestone:
-            out.append(_finding(f"copy says level {m.group(1)}",
-                                f"the facts say {name} reached level {milestone}", "error"))
+            out.append(
+                _finding(
+                    f"copy says level {m.group(1)}",
+                    f"the facts say {name} reached level {milestone}",
+                    "error",
+                )
+            )
 
     # Catalog cross-checks — only when the catalog is available.
     card = _card(name, conn)
@@ -97,9 +113,18 @@ def _check_card(copy, facts, conn, out):
         out.append(_finding(name, f"'{name}' is not a card in the catalog", "error"))
         return
     display_max = card_display_max_level(card.get("max_level"))
-    if isinstance(milestone, int) and isinstance(display_max, int) and milestone > display_max:
-        out.append(_finding(f"{name} level {milestone}",
-                            f"{name} maxes at display level {display_max}", "error"))
+    if (
+        isinstance(milestone, int)
+        and isinstance(display_max, int)
+        and milestone > display_max
+    ):
+        out.append(
+            _finding(
+                f"{name} level {milestone}",
+                f"{name} maxes at display level {display_max}",
+                "error",
+            )
+        )
 
 
 def _check_arena(copy, facts, out):
@@ -108,13 +133,20 @@ def _check_arena(copy, facts, out):
         return
     if arena_kind(arena_id) == "seasonal" and _ARENA_UP_RE.search(copy or ""):
         name = facts.get("arena_name") or f"arena {arena_id}"
-        out.append(_finding(name,
-                            f"{name} is a SEASONAL-league arena (id {arena_id}) — "
-                            "not a Trophy-Road arena-up", "error"))
+        out.append(
+            _finding(
+                name,
+                f"{name} is a SEASONAL-league arena (id {arena_id}) — "
+                "not a Trophy-Road arena-up",
+                "error",
+            )
+        )
 
 
 def _check_league(copy, facts, out):
-    league = facts.get("ranked_league") or facts.get("league") or facts.get("new_league")
+    league = (
+        facts.get("ranked_league") or facts.get("league") or facts.get("new_league")
+    )
     if not isinstance(league, int):
         return
     correct = ranked_league_name(league)
@@ -124,8 +156,13 @@ def _check_league(copy, facts, out):
     # only flag if the copy names a DIFFERENT current-scheme league than the facts
     for other in RANKED_LEAGUE_NAMES:
         if other in low and other != correct.lower() and correct.lower() not in low:
-            out.append(_finding(f"copy names '{other}'",
-                                f"the facts say league {league} = {correct}", "error"))
+            out.append(
+                _finding(
+                    f"copy names '{other}'",
+                    f"the facts say league {league} = {correct}",
+                    "error",
+                )
+            )
             break
 
 
@@ -135,16 +172,26 @@ def _check_war_day(copy, facts, out):
         return
     day, total = int(m.group(1)), int(m.group(2))
     if day > total or day < 1 or total not in (3, 4):
-        out.append(_finding(f"'day {day} of {total}'",
-                            "impossible war day — training is 3 days, battle is 4", "error"))
+        out.append(
+            _finding(
+                f"'day {day} of {total}'",
+                "impossible war day — training is 3 days, battle is 4",
+                "error",
+            )
+        )
         return
     # cross-check against the facts' own human label if present
     human = facts.get("war_day_human")
     if isinstance(human, str):
         hm = _DAY_OF_RE.search(human)
         if hm and (int(hm.group(1)), int(hm.group(2))) != (day, total):
-            out.append(_finding(f"copy says 'day {day} of {total}'",
-                                f"the facts say '{human}'", "warn"))
+            out.append(
+                _finding(
+                    f"copy says 'day {day} of {total}'",
+                    f"the facts say '{human}'",
+                    "warn",
+                )
+            )
 
 
 def _check_colosseum(copy, facts, out):
@@ -162,7 +209,7 @@ def _check_colosseum(copy, facts, out):
     for pattern in _BATTLES_DO_NOT_COUNT_RE:
         match = pattern.search(text)
         if match:
-            prefix = text[max(0, match.start() - 16):match.start()].lower()
+            prefix = text[max(0, match.start() - 16) : match.start()].lower()
             if re.search(r"(?:not|n't)\s+$", prefix):
                 continue
             out.append(

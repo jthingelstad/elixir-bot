@@ -77,12 +77,19 @@ def test_improvement_radar_uses_leader_action_notes_edits_and_channel_comments()
         )
 
         specs = radar.collect_improvement_specs(days=30, conn=conn)
-        leader_spec = next(spec for spec in specs if spec["suggestion_key"].startswith("routing_quality:fold-leader-action"))
+        leader_spec = next(
+            spec
+            for spec in specs
+            if spec["suggestion_key"].startswith("routing_quality:fold-leader-action")
+        )
 
         assert leader_spec["evidence"]["metrics"]["decision_notes"] == 1
         assert leader_spec["evidence"]["metrics"]["copy_edits"] == 1
         assert leader_spec["evidence"]["metrics"]["leader_action_channel_comments"] == 1
-        assert any("deferral is fresh" in sample["detail"] for sample in leader_spec["evidence"]["samples"])
+        assert any(
+            "deferral is fresh" in sample["detail"]
+            for sample in leader_spec["evidence"]["samples"]
+        )
 
         stored = radar.store_improvement_specs([leader_spec], conn=conn)
         assert stored[0]["category"] == "routing_quality"
@@ -114,15 +121,28 @@ def test_github_promotion_dry_run_does_not_call_runner():
             conn=conn,
         )
 
-        assert results == [{
-            "suggestion_key": "data_health:test",
-            "action": "create",
-            "dry_run": True,
-            "title": "Inspect API drift",
-            "labels": ["data-health", "elixir-improvement", "enhancement", "generated", "needs-human-triage"],
-            "github_issue_number": None,
-        }]
-        assert db.get_improvement_suggestion("data_health:test", conn=conn)["github_issue_number"] is None
+        assert results == [
+            {
+                "suggestion_key": "data_health:test",
+                "action": "create",
+                "dry_run": True,
+                "title": "Inspect API drift",
+                "labels": [
+                    "data-health",
+                    "elixir-improvement",
+                    "enhancement",
+                    "generated",
+                    "needs-human-triage",
+                ],
+                "github_issue_number": None,
+            }
+        ]
+        assert (
+            db.get_improvement_suggestion("data_health:test", conn=conn)[
+                "github_issue_number"
+            ]
+            is None
+        )
     finally:
         conn.close()
 
@@ -203,13 +223,15 @@ def test_github_promotion_skips_closed_existing_issue():
         )
 
         assert len(calls) == 1
-        assert results == [{
-            "suggestion_key": "cost_reliability:closed",
-            "action": "skip",
-            "reason": "github_issue_closed:NOT_PLANNED",
-            "github_issue_number": 84,
-            "github_issue_url": "https://github.com/jthingelstad/elixir-bot/issues/84",
-        }]
+        assert results == [
+            {
+                "suggestion_key": "cost_reliability:closed",
+                "action": "skip",
+                "reason": "github_issue_closed:NOT_PLANNED",
+                "github_issue_number": 84,
+                "github_issue_url": "https://github.com/jthingelstad/elixir-bot/issues/84",
+            }
+        ]
     finally:
         conn.close()
 
@@ -278,13 +300,17 @@ def test_github_promotion_skips_low_confidence_suggestions():
             conn=conn,
         )
 
-        results = radar.promote_suggestions_to_github([suggestion], min_confidence=0.8, conn=conn)
+        results = radar.promote_suggestions_to_github(
+            [suggestion], min_confidence=0.8, conn=conn
+        )
 
-        assert results == [{
-            "suggestion_key": "data_health:low",
-            "action": "skip",
-            "reason": "below_confidence_threshold",
-        }]
+        assert results == [
+            {
+                "suggestion_key": "data_health:low",
+                "action": "skip",
+                "reason": "below_confidence_threshold",
+            }
+        ]
     finally:
         conn.close()
 

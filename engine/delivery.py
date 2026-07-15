@@ -28,23 +28,42 @@ from engine.recognition.scorer import parse_utc
 
 log = logging.getLogger("elixir.engine.delivery")
 
-MAX_INTENT_AGE_HOURS = 6   # carried from discord_consumer.py:36
+MAX_INTENT_AGE_HOURS = 6  # carried from discord_consumer.py:36
 
 
-def raise_intent(conn, recognition_key: str | None, intent_type: str, lane: str,
-                 scope: str, payload: dict, now: str, *, thread_id: int | None = None) -> int:
+def raise_intent(
+    conn,
+    recognition_key: str | None,
+    intent_type: str,
+    lane: str,
+    scope: str,
+    payload: dict,
+    now: str,
+    *,
+    thread_id: int | None = None,
+) -> int:
     """Insert a pending intent; expires 6h from raise (runtime.md §5).
     thread_id (channels.md §2) is a delivery ADDRESS, not a lane — when set,
     the send targets that thread; the lane still owns permissions/voice."""
     anchor = parse_utc(now)
-    expires = (anchor + timedelta(hours=MAX_INTENT_AGE_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    expires = (anchor + timedelta(hours=MAX_INTENT_AGE_HOURS)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     cur = conn.execute(
         """INSERT INTO communication_intents
                (recognition_key, intent_type, lane, scope, payload_json,
                 status, created_at, expires_at, thread_id)
            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)""",
-        (recognition_key, intent_type, lane, scope,
-         json.dumps(payload, default=str), now, expires, thread_id),
+        (
+            recognition_key,
+            intent_type,
+            lane,
+            scope,
+            json.dumps(payload, default=str),
+            now,
+            expires,
+            thread_id,
+        ),
     )
     return cur.lastrowid
 
@@ -123,17 +142,25 @@ def consume(conn, send_fn, compose_fn, now: str, *, editor_gate=None) -> dict:
             try:
                 copy = compose_fn(intent)
             except Exception:
-                log.exception("compose failed for intent %s; using fallback", intent["intent_id"])
+                log.exception(
+                    "compose failed for intent %s; using fallback", intent["intent_id"]
+                )
             if not copy or _compose.looks_like_meta(copy):
-                copy = _compose.render_intent(intent)   # deterministic fallback (§7 guard)
+                copy = _compose.render_intent(
+                    intent
+                )  # deterministic fallback (§7 guard)
             elif editor_gate is not None:
                 try:
                     copy = editor_gate(conn, intent, copy, compose_fn, now)
                 except Exception:  # belt over the gate's own fail-open braces
-                    log.exception("editor gate raised for intent %s; sending original",
-                                  intent["intent_id"])
+                    log.exception(
+                        "editor gate raised for intent %s; sending original",
+                        intent["intent_id"],
+                    )
             try:
-                thread_id = intent["thread_id"] if "thread_id" in intent.keys() else None
+                thread_id = (
+                    intent["thread_id"] if "thread_id" in intent.keys() else None
+                )
                 kwargs = {}
                 if thread_id is not None and _accepts_thread(send_fn):
                     kwargs["thread_id"] = thread_id
@@ -152,15 +179,23 @@ def consume(conn, send_fn, compose_fn, now: str, *, editor_gate=None) -> dict:
                 )
                 conn.commit()
                 counters["failed"] += 1
-                log.warning("send failed for intent %s; stopping lane %r: %s",
-                            intent["intent_id"], lane, exc)
+                log.warning(
+                    "send failed for intent %s; stopping lane %r: %s",
+                    intent["intent_id"],
+                    lane,
+                    exc,
+                )
                 break
             conn.execute(
                 """UPDATE communication_intents
                    SET status = 'fulfilled', fulfilled_at = ?, discord_message_id = ?,
                        attempts = attempts + 1
                    WHERE intent_id = ?""",
-                (now, str(message_id) if message_id is not None else None, intent["intent_id"]),
+                (
+                    now,
+                    str(message_id) if message_id is not None else None,
+                    intent["intent_id"],
+                ),
             )
             # Commit the fulfilled mark IMMEDIATELY: the message is live on
             # Discord; a later rollback would re-send it (cold review #1).

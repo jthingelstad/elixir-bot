@@ -34,7 +34,23 @@ def is_war_battle_day(weekday):
 # stable across the lifetime of a level cap.
 # verified: 2026-04-25
 CARDS_REQUIRED_BY_RARITY = {
-    "common": [2, 4, 10, 20, 50, 100, 200, 400, 800, 1000, 2000, 5000, 5000, 5000, 5000],
+    "common": [
+        2,
+        4,
+        10,
+        20,
+        50,
+        100,
+        200,
+        400,
+        800,
+        1000,
+        2000,
+        5000,
+        5000,
+        5000,
+        5000,
+    ],
     "rare": [2, 4, 10, 20, 50, 100, 200, 400, 800, 1000, 1500, 2000, 2000],
     "epic": [4, 10, 20, 50, 100, 200, 400, 800, 1000, 1250, 1500],
     "legendary": [2, 4, 10, 20, 40, 80, 100, 100],
@@ -79,26 +95,28 @@ def is_ready_to_upgrade(rarity, current_level, count):
 # Source: prompts/agents/tournament.md plus the deck-review prompt's
 # tournament-style language. Encoded as a constant so signal enrichment, deck
 # review, and tournament commentary all read from the same list.
-WIN_CONDITION_CARDS = frozenset({
-    "Hog Rider",
-    "Giant",
-    "Royal Giant",
-    "Golem",
-    "Elixir Golem",
-    "Ram Rider",
-    "Battle Ram",
-    "Graveyard",
-    "X-Bow",
-    "Mortar",
-    "Miner",
-    "Balloon",
-    "Goblin Drill",
-    "Three Musketeers",
-    "Wall Breakers",
-    "Royal Hogs",
-    "Skeleton Barrel",
-    "Lava Hound",
-})
+WIN_CONDITION_CARDS = frozenset(
+    {
+        "Hog Rider",
+        "Giant",
+        "Royal Giant",
+        "Golem",
+        "Elixir Golem",
+        "Ram Rider",
+        "Battle Ram",
+        "Graveyard",
+        "X-Bow",
+        "Mortar",
+        "Miner",
+        "Balloon",
+        "Goblin Drill",
+        "Three Musketeers",
+        "Wall Breakers",
+        "Royal Hogs",
+        "Skeleton Barrel",
+        "Lava Hound",
+    }
+)
 
 
 def filter_win_condition_cards(card_names):

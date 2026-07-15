@@ -1,5 +1,6 @@
 """Member email: verified-contact identity (storage.identity) + the 6-digit
 verification loop (runtime.email_verification)."""
+
 from __future__ import annotations
 
 import re
@@ -15,13 +16,18 @@ TAG = "#EMAILME1"
 def test_is_valid_email():
     assert db.is_valid_email("player@example.com")
     assert not db.is_valid_email("nope")
-    assert not db.is_valid_email("a@b")          # no TLD
+    assert not db.is_valid_email("a@b")  # no TLD
     assert not db.is_valid_email("")
 
 
 def test_admin_set_shows_verified(engine_conn):
-    db.set_member_email(TAG, "admin@set.com", source="admin_set",
-                        verified_at="2026-07-08T00:00:00Z", conn=engine_conn)
+    db.set_member_email(
+        TAG,
+        "admin@set.com",
+        source="admin_set",
+        verified_at="2026-07-08T00:00:00Z",
+        conn=engine_conn,
+    )
     ident = db.get_member_identity(TAG, conn=engine_conn)
     assert ident["email"] == "admin@set.com"
     assert ident["email_source"] == "admin_set"
@@ -86,7 +92,7 @@ def test_verification_too_many_attempts(engine_conn, _stub_mail):
     ev.start_verification(TAG, "me@example.com")
     for _ in range(ev.MAX_ATTEMPTS):
         ev.check_code(TAG, "999999")
-    r = ev.check_code(TAG, "123456")   # correct, but attempts exhausted
+    r = ev.check_code(TAG, "123456")  # correct, but attempts exhausted
     assert not r["ok"]
     assert "too many" in r["error"].lower()
 
@@ -94,9 +100,12 @@ def test_verification_too_many_attempts(engine_conn, _stub_mail):
 def test_verification_expired(engine_conn, _stub_mail):
     ev.start_verification(TAG, "me@example.com")
     # force the challenge into the past
-    db.upsert_email_challenge(TAG, pending_email="me@example.com",
-                              code_hash=ev._hash_code("123456", TAG),
-                              expires_at="2000-01-01T00:00:00Z")
+    db.upsert_email_challenge(
+        TAG,
+        pending_email="me@example.com",
+        code_hash=ev._hash_code("123456", TAG),
+        expires_at="2000-01-01T00:00:00Z",
+    )
     r = ev.check_code(TAG, "123456")
     assert not r["ok"] and "expired" in r["error"]
 
@@ -114,27 +123,42 @@ def test_start_requires_mail_configured(engine_conn, monkeypatch):
 
 
 def _add_membership(conn, tag, *, left_at=None):
-    conn.execute("INSERT OR IGNORE INTO clans (clan_tag, first_seen_at, last_seen_at) "
-                 "VALUES ('#J2RGCRVG','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')")
-    conn.execute("INSERT INTO clan_memberships (player_tag, joined_at, join_source, left_at) "
-                 "VALUES (?, '2026-01-01T00:00:00Z', 'test', ?)", (tag, left_at))
+    conn.execute(
+        "INSERT OR IGNORE INTO clans (clan_tag, first_seen_at, last_seen_at) "
+        "VALUES ('#J2RGCRVG','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')"
+    )
+    conn.execute(
+        "INSERT INTO clan_memberships (player_tag, joined_at, join_source, left_at) "
+        "VALUES (?, '2026-01-01T00:00:00Z', 'test', ?)",
+        (tag, left_at),
+    )
 
 
 def test_list_member_emails_only_verified_and_current(engine_conn):
     # current member, verified → included
-    db.set_member_email("#CUR1", "cur@x.com", source="self_service",
-                        verified_at="2026-07-08T00:00:00Z", conn=engine_conn)
+    db.set_member_email(
+        "#CUR1",
+        "cur@x.com",
+        source="self_service",
+        verified_at="2026-07-08T00:00:00Z",
+        conn=engine_conn,
+    )
     _add_membership(engine_conn, "#CUR1")
     # current member, unverified → excluded
     db.set_member_email("#UNV1", "unv@x.com", source="self_service", conn=engine_conn)
     _add_membership(engine_conn, "#UNV1")
     # verified but LEFT the clan → excluded
-    db.set_member_email("#LEFT1", "left@x.com", source="admin_set",
-                        verified_at="2026-07-08T00:00:00Z", conn=engine_conn)
+    db.set_member_email(
+        "#LEFT1",
+        "left@x.com",
+        source="admin_set",
+        verified_at="2026-07-08T00:00:00Z",
+        conn=engine_conn,
+    )
     _add_membership(engine_conn, "#LEFT1", left_at="2026-02-01T00:00:00Z")
     engine_conn.commit()
 
     emails = {m["email"] for m in db.list_member_emails(conn=engine_conn)}
     assert "cur@x.com" in emails
-    assert "unv@x.com" not in emails      # unverified
-    assert "left@x.com" not in emails     # no longer in the clan
+    assert "unv@x.com" not in emails  # unverified
+    assert "left@x.com" not in emails  # no longer in the clan

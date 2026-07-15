@@ -14,7 +14,6 @@ from typing import Optional
 
 from db import managed_connection
 
-
 __all__ = [
     "ELDER_ELIGIBILITY_DEFAULTS",
     "evaluate_elder_eligibility",
@@ -63,9 +62,12 @@ def evaluate_elder_eligibility(
     Donation volume is intentionally not an absolute check here. Elder
     recommendations are relative to the smoothed donation leaderboard.
     """
-    activity_days = days_since_battle if days_since_battle is not None else days_inactive
+    activity_days = (
+        days_since_battle if days_since_battle is not None else days_inactive
+    )
     checks = {
-        "tenure": min_tenure_days <= 0 or (tenure_days is not None and tenure_days >= min_tenure_days),
+        "tenure": min_tenure_days <= 0
+        or (tenure_days is not None and tenure_days >= min_tenure_days),
         "activity": activity_days is not None and activity_days <= active_within_days,
         "war": season_id is None or (war_races_played or 0) >= min_war_races,
     }
@@ -113,6 +115,7 @@ def compute_member_ranks(conn: Optional[sqlite3.Connection] = None) -> dict[int,
 
 # -- per-rank populators ----------------------------------------------------
 
+
 def _populate_donation_rank_week(conn, ranks):
     """1-indexed rank by ``member_current_state.donations_week`` DESC.
 
@@ -142,6 +145,7 @@ def _populate_donation_rank_season(conn, ranks, season_id):
     if season_id is None:
         return
     from storage.awards import _season_donation_rows
+
     rows = _season_donation_rows(conn, season_id)
     for i, row in enumerate(rows):
         if row["member_id"] in ranks:

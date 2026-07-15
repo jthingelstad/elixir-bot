@@ -16,7 +16,7 @@ Close sequence (first observation wins):
    because a not-yet-diffed baseline's `current` IS the end-of-season state,
    and the observing player's authoritative values arrive in `new["last"]`.
 3. pol_champ awards (ranks 1–3, league then rating) + ONE podium summary
-   intent to clan-events (`clan:` prefix routing) + the ranked chronicle.
+   event for the awareness loop + the ranked chronicle.
 4. Later rollover observations upsert their own result row (same values by
    construction) and emit their per-player event; the season work dedups.
 """
@@ -34,6 +34,7 @@ PODIUM = 3
 
 # ------------------------------------------------------------- season id math
 
+
 def first_monday(year: int, month: int) -> date:
     d = date(year, month, 1)
     return d + timedelta(days=(7 - d.weekday()) % 7)
@@ -45,7 +46,9 @@ def season_id_for(on: date) -> str:
     fm = first_monday(on.year, on.month)
     if on >= fm:
         return f"{on.year:04d}-{on.month:02d}"
-    prev_year, prev_month = (on.year, on.month - 1) if on.month > 1 else (on.year - 1, 12)
+    prev_year, prev_month = (
+        (on.year, on.month - 1) if on.month > 1 else (on.year - 1, 12)
+    )
     return f"{prev_year:04d}-{prev_month:02d}"
 
 
@@ -59,6 +62,7 @@ def _obs_date(observed_at: str) -> date:
 
 
 # ------------------------------------------------------------------ lifecycle
+
 
 def _ensure_schema(conn) -> None:
     """Compatibility assertion; db.schema owns ranked-season creation."""
@@ -127,14 +131,24 @@ def _snapshot_results(conn, season_id: str, observed_at: str) -> int:
                    (pol_season_id, player_tag, league, rating, global_rank,
                     battles, wins, observed_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (season_id, r["entity_tag"], league, rating, rank, battles, wins,
-             observed_at),
+            (
+                season_id,
+                r["entity_tag"],
+                league,
+                rating,
+                rank,
+                battles,
+                wins,
+                observed_at,
+            ),
         )
         n += 1
     return n
 
 
-def _upsert_own_result(conn, season_id: str, tag: str, last: dict, observed_at: str) -> None:
+def _upsert_own_result(
+    conn, season_id: str, tag: str, last: dict, observed_at: str
+) -> None:
     """The player's own rollover observation carries authoritative season-end
     values in `last` — overwrite the snapshot row."""
     battles, wins = _season_window_battles(conn, tag, season_id)
@@ -147,8 +161,16 @@ def _upsert_own_result(conn, season_id: str, tag: str, last: dict, observed_at: 
                league = excluded.league, rating = excluded.rating,
                global_rank = excluded.global_rank, battles = excluded.battles,
                wins = excluded.wins, observed_at = excluded.observed_at""",
-        (season_id, tag, last.get("league"), last.get("trophies"),
-         last.get("rank"), battles, wins, observed_at),
+        (
+            season_id,
+            tag,
+            last.get("league"),
+            last.get("trophies"),
+            last.get("rank"),
+            battles,
+            wins,
+            observed_at,
+        ),
     )
 
 
@@ -170,17 +192,24 @@ def podium(conn, season_id: str) -> list[dict]:
         (season_id, PODIUM),
     ).fetchall()
     return [
-        {"rank": i + 1, "tag": r["player_tag"], "name": r["current_name"],
-         "league": r["league"], "league_name": ranked_league_name(r["league"]),
-         "rating": r["rating"], "global_rank": r["global_rank"],
-         "battles": r["battles"], "wins": r["wins"]}
+        {
+            "rank": i + 1,
+            "tag": r["player_tag"],
+            "name": r["current_name"],
+            "league": r["league"],
+            "league_name": ranked_league_name(r["league"]),
+            "rating": r["rating"],
+            "global_rank": r["global_rank"],
+            "battles": r["battles"],
+            "wins": r["wins"],
+        }
         for i, r in enumerate(rows)
     ]
 
 
 def _close_season_once(conn, season_id: str, observed_at: str) -> None:
     """Season-level close work — runs exactly once (guarded by the closed
-    flag flip). Awards + podium intent + chronicle, each unable to lose the
+    flag flip). Awards + podium event + chronicle, each unable to lose the
     close itself."""
     cur = conn.execute(
         "UPDATE pol_seasons SET closed = 1, ended_at = ? "
@@ -192,7 +221,7 @@ def _close_season_once(conn, season_id: str, observed_at: str) -> None:
     snapshot = _snapshot_results(conn, season_id, observed_at)
     log.info("ranked season %s closed; %s results snapshotted", season_id, snapshot)
     try:
-        from engine import delivery
+        from engine.emitters import insert_stream_event
         from engine.recognition import ledger
 
         pod = podium(conn, season_id)
@@ -205,29 +234,42 @@ def _close_season_once(conn, season_id: str, observed_at: str) -> None:
                 # awards.season_id is INTEGER (war); ranked ids are 'YYYY-MM' —
                 # store as the sortable integer YYYYMM, keep the text id in
                 # metadata (the awards UNIQUE constraint still dedups).
-                (int(season_id.replace("-", "")), entry["tag"], entry["rank"],
-                 entry["rating"],
-                 json.dumps({"pol_season_id": season_id,
-                             "league": entry["league"],
-                             "league_name": entry["league_name"],
-                             "battles": entry["battles"], "wins": entry["wins"]}),
-                 observed_at),
+                (
+                    int(season_id.replace("-", "")),
+                    entry["tag"],
+                    entry["rank"],
+                    entry["rating"],
+                    json.dumps(
+                        {
+                            "pol_season_id": season_id,
+                            "league": entry["league"],
+                            "league_name": entry["league_name"],
+                            "battles": entry["battles"],
+                            "wins": entry["wins"],
+                        }
+                    ),
+                    observed_at,
+                ),
             ).rowcount:
                 ledger.claim(
-                    conn, f"award:pol_champ:{season_id}:{entry['tag']}", "player",
-                    [f"pol_season_closed:{season_id}"], 0,
+                    conn,
+                    f"award:pol_champ:{season_id}:{entry['tag']}",
+                    "player",
+                    [f"pol_season_closed:{season_id}"],
+                    0,
                 )
-        if pod and ledger.claim(
-            conn, f"pol_season:{season_id}", "player",
-            [f"pol_season_closed:{season_id}"], 0,
-        ):
-            intent_id = delivery.raise_intent(
-                conn, f"pol_season:{season_id}", "clan:pol_season_podium",
-                "clan-events", "public",
-                {"event_type": "pol_season_podium", "pol_season_id": season_id,
-                 "podium": pod}, observed_at,
+        if pod:
+            insert_stream_event(
+                conn,
+                "clan_events",
+                dedup_key=f"pol_season_podium:{season_id}",
+                event_type="pol_season_podium",
+                subject_cols={"clan_tag": "#J2RGCRVG"},
+                observed_at=observed_at,
+                window_start=None,
+                payload={"pol_season_id": season_id, "podium": pod},
+                timing="exact",
             )
-            ledger.attach_intent(conn, f"pol_season:{season_id}", intent_id)
     except Exception:
         log.exception("ranked podium/awards failed for %s", season_id)
     try:
@@ -269,6 +311,10 @@ def observe_rollover(conn, tag: str, old: dict, new: dict, observed_at: str) -> 
         subject_cols={"player_tag": tag},
         observed_at=observed_at,
         window_start=None,
-        payload={"pol_season_id": closing, "league": last.get("league"),
-                 "rating": last.get("trophies"), "global_rank": last.get("rank")},
+        payload={
+            "pol_season_id": closing,
+            "league": last.get("league"),
+            "rating": last.get("trophies"),
+            "global_rank": last.get("rank"),
+        },
     )

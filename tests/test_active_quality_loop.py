@@ -16,12 +16,14 @@ def _now(offset_hours=0):
 
 def test_active_sampler_reads_awareness_and_assistant_messages(engine_conn):
     plan = {
-        "posts": [{
-            "channel": "elixir",
-            "leads_with": "war",
-            "content": "Colosseum has no finish line; every battle counts.",
-            "covers_signal_keys": ["war:1"],
-        }]
+        "posts": [
+            {
+                "channel": "elixir",
+                "leads_with": "war",
+                "content": "Colosseum has no finish line; every battle counts.",
+                "covers_signal_keys": ["war:1"],
+            }
+        ]
     }
     read = {"time": {"is_colosseum_week": True}}
     engine_conn.execute(
@@ -106,7 +108,11 @@ def test_active_repetition_writes_editorial_memory(engine_conn):
         "VALUES ('prior', 1, ?, ?, 0, 1)",
         (_now(-1), json.dumps({"posts": [prior]})),
     )
-    current = {**prior, "summary": "Gem leveled a card", "content": "Gem leveled another card."}
+    current = {
+        **prior,
+        "summary": "Gem leveled a card",
+        "content": "Gem leveled another card.",
+    }
 
     record_awareness_post(
         lane="elixir",
@@ -143,10 +149,18 @@ def test_editorial_memories_are_retrieved_as_actionable_guidance(engine_conn):
 
 def test_repetition_eval_compares_active_copy_within_lane():
     posts = [
-        {"message_id": "1", "lane": "elixir", "at": "2026-07-15T01:00:00Z",
-         "copy": "Gem pushed another trophy peak today with the same deck and the same result."},
-        {"message_id": "2", "lane": "elixir", "at": "2026-07-15T02:00:00Z",
-         "copy": "Gem pushed another trophy peak today with the same deck and the same result!"},
+        {
+            "message_id": "1",
+            "lane": "elixir",
+            "at": "2026-07-15T01:00:00Z",
+            "copy": "Gem pushed another trophy peak today with the same deck and the same result.",
+        },
+        {
+            "message_id": "2",
+            "lane": "elixir",
+            "at": "2026-07-15T02:00:00Z",
+            "copy": "Gem pushed another trophy peak today with the same deck and the same result!",
+        },
     ]
 
     findings = _repetition_findings(posts)
@@ -164,17 +178,29 @@ def test_editorial_admission_suppresses_only_routine_solo_repeat():
     read = {
         "signals_by_lane": {"milestone": [signal]},
         "hard_post_signals": [],
-        "recent_member_spotlights": [{
-            "member_tag": "#GEM", "member_ref": "Gem", "solo": True,
-            "at": _now(-4), "summary": "Gem trophy peak",
-        }],
+        "recent_member_spotlights": [
+            {
+                "member_tag": "#GEM",
+                "member_ref": "Gem",
+                "solo": True,
+                "at": _now(-4),
+                "summary": "Gem trophy peak",
+            }
+        ],
     }
-    plan = {"posts": [{
-        "channel": "elixir", "leads_with": "milestone",
-        "member_tags": ["#GEM"], "member_names": ["Gem"],
-        "summary": "Gem card level", "content": "Gem reached card level 16.",
-        "covers_signal_keys": [signal["signal_key"]],
-    }]}
+    plan = {
+        "posts": [
+            {
+                "channel": "elixir",
+                "leads_with": "milestone",
+                "member_tags": ["#GEM"],
+                "member_names": ["Gem"],
+                "summary": "Gem card level",
+                "content": "Gem reached card level 16.",
+                "covers_signal_keys": [signal["signal_key"]],
+            }
+        ]
+    }
 
     admitted, suppressed = apply_editorial_admission(read, plan)
 
@@ -193,19 +219,27 @@ def test_editorial_admission_keeps_notable_repeat_and_roundup():
     read = {
         "signals_by_lane": {"milestone": [notable]},
         "hard_post_signals": [],
-        "recent_member_spotlights": [{
-            "member_tag": "#GEM", "member_ref": "Gem", "solo": True,
-        }],
+        "recent_member_spotlights": [
+            {
+                "member_tag": "#GEM",
+                "member_ref": "Gem",
+                "solo": True,
+            }
+        ],
     }
     notable_post = {
-        "channel": "elixir", "leads_with": "milestone",
-        "member_tags": ["#GEM"], "member_names": ["Gem"],
+        "channel": "elixir",
+        "leads_with": "milestone",
+        "member_tags": ["#GEM"],
+        "member_names": ["Gem"],
         "content": "Gem earned a Legendary badge.",
         "covers_signal_keys": [notable["signal_key"]],
     }
     roundup = {
-        "channel": "elixir", "leads_with": "milestone",
-        "member_tags": ["#GEM", "#STONE"], "member_names": ["Gem", "Stone"],
+        "channel": "elixir",
+        "leads_with": "milestone",
+        "member_tags": ["#GEM", "#STONE"],
+        "member_names": ["Gem", "Stone"],
         "content": "Gem and Stone had a week.",
         "covers_signal_keys": ["one", "two"],
     }

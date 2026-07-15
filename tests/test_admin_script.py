@@ -5,7 +5,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -29,7 +28,9 @@ def _admin_script_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
     admin_script = scripts_dir / "admin.sh"
     shutil.copy(PROJECT_ROOT / "scripts" / "admin.sh", admin_script)
     admin_script.chmod(0o755)
-    (scripts_dir / "backup_db.py").write_text("# fake backup entrypoint\n", encoding="utf-8")
+    (scripts_dir / "backup_db.py").write_text(
+        "# fake backup entrypoint\n", encoding="utf-8"
+    )
 
     (venv_bin / "activate").write_text(
         'export PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd):$PATH"\n',
@@ -46,9 +47,7 @@ def _admin_script_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
 
     launchctl_stub = tools_dir / "launchctl"
     launchctl_stub.write_text(
-        "#!/bin/bash\n"
-        'echo "launchctl $*" >> "$ADMIN_TEST_LOG"\n'
-        "exit 0\n",
+        '#!/bin/bash\necho "launchctl $*" >> "$ADMIN_TEST_LOG"\nexit 0\n',
         encoding="utf-8",
     )
     launchctl_stub.chmod(0o755)
@@ -106,7 +105,7 @@ def test_activity_run_uses_registered_activity_runner(tmp_path):
     admin_script, env, log_path = _admin_script_fixture(tmp_path)
 
     result = subprocess.run(
-        ["bash", str(admin_script), "activity", "run", "v5-reactive-tick"],
+        ["bash", str(admin_script), "activity", "run", "engine-tick"],
         check=False,
         env=env,
         text=True,
@@ -115,4 +114,4 @@ def test_activity_run_uses_registered_activity_runner(tmp_path):
 
     assert result.returncode == 0, result.stderr
     calls = log_path.read_text(encoding="utf-8").splitlines()
-    assert calls == ["python -m runtime.activity_runner run v5-reactive-tick"]
+    assert calls == ["python -m runtime.activity_runner run engine-tick"]

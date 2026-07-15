@@ -1,4 +1,11 @@
-# Elixir Memory System
+# Elixir Memory System — Original Design Brief
+
+> Historical artifact. The shipped/current memory contract is
+> [`docs/reference/v5.1/memory.md`](../reference/v5.1/memory.md), and
+> `AGENTS.md` remains the current architecture source of truth. This brief is
+> preserved to explain the original requirements; references to a separate
+> database, vector search, or future implementation are not current runtime
+> guidance.
 
 ## Overview
 

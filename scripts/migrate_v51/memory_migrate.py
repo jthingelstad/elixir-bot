@@ -18,7 +18,9 @@ import os
 import sqlite3
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 KIND_MAP = {
     "leader_note": "leader_note",
@@ -65,12 +67,19 @@ def run(db_path: str, memory_db_path: str) -> int:
                    created_by, created_at, updated_at, expires_at, retired_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                r["memory_id"], kind,
+                r["memory_id"],
+                kind,
                 r["title"] or (r["body"] or "")[:80] or "(untitled)",
-                r["body"], r["summary"], scope,
+                r["body"],
+                r["summary"],
+                scope,
                 float(r["confidence"] or 0.9),
-                r["member_tag"], r["channel_id"], ek,
-                r["created_by"], r["created_at"], r["updated_at"],
+                r["member_tag"],
+                r["channel_id"],
+                ek,
+                r["created_by"],
+                r["created_at"],
+                r["updated_at"],
                 r["expires_at"],
                 r["updated_at"] if r["status"] in ("archived", "deleted") else None,
             ),
@@ -91,12 +100,16 @@ def run(db_path: str, memory_db_path: str) -> int:
     # M2 re-key — member episodes carried Gen-A integer member_id keys
     # (found live 2026-07-04: tag lookups returned nothing since the cut).
     # Map via the archive's members table; idempotent (skips '#'-keyed rows).
-    archive = os.path.join(os.path.dirname(db_path) or ".", "elixir-v5-archive-2026H2.db")
+    archive = os.path.join(
+        os.path.dirname(db_path) or ".", "elixir-v5-archive-2026H2.db"
+    )
     rekeyed = 0
     if os.path.exists(archive):
         arch = sqlite3.connect(f"file:{archive}?immutable=1", uri=True)
-        id_to_tag = {str(r[0]): r[1] for r in arch.execute(
-            "SELECT member_id, player_tag FROM members")}
+        id_to_tag = {
+            str(r[0]): r[1]
+            for r in arch.execute("SELECT member_id, player_tag FROM members")
+        }
         arch.close()
         for r in new.execute(
             "SELECT DISTINCT subject_key FROM memory_episodes "
@@ -112,12 +125,16 @@ def run(db_path: str, memory_db_path: str) -> int:
                 rekeyed += 1
 
     # M3 — memory_facts (engine DB, dead since 06-16) → one legacy system memory
-    facts = new.execute(
-        "SELECT subject_type, subject_key, fact_type, fact_value, updated_at "
-        "FROM memory_facts ORDER BY subject_type, subject_key"
-    ).fetchall() if new.execute(
-        "SELECT 1 FROM sqlite_master WHERE name='memory_facts'"
-    ).fetchone() else []
+    facts = (
+        new.execute(
+            "SELECT subject_type, subject_key, fact_type, fact_value, updated_at "
+            "FROM memory_facts ORDER BY subject_type, subject_key"
+        ).fetchall()
+        if new.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='memory_facts'"
+        ).fetchone()
+        else []
+    )
     legacy_added = 0
     if facts:
         body = "\n".join(
@@ -147,10 +164,14 @@ def run(db_path: str, memory_db_path: str) -> int:
     total = new.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
     print(f"memories: {total} (source {migrated} + legacy rollup {legacy_added})")
     print("per kind (new):")
-    for r in new.execute("SELECT kind, COUNT(*) FROM memories WHERE created_by != 'migration:memory_migrate' GROUP BY 1 ORDER BY 2 DESC"):
+    for r in new.execute(
+        "SELECT kind, COUNT(*) FROM memories WHERE created_by != 'migration:memory_migrate' GROUP BY 1 ORDER BY 2 DESC"
+    ):
         print(f"  {r[0]}: {r[1]}")
     print("per source_type (old):")
-    for r in old.execute("SELECT source_type, COUNT(*) FROM clan_memories GROUP BY 1 ORDER BY 2 DESC"):
+    for r in old.execute(
+        "SELECT source_type, COUNT(*) FROM clan_memories GROUP BY 1 ORDER BY 2 DESC"
+    ):
         print(f"  {r[0]}: {r[1]}")
     new_tags = new.execute("SELECT COUNT(*) FROM memory_tags").fetchone()[0]
     old_tags = old.execute("SELECT COUNT(*) FROM clan_memory_tag_links").fetchone()[0]
@@ -160,11 +181,18 @@ def run(db_path: str, memory_db_path: str) -> int:
         "SELECT COUNT(*) FROM memory_episodes "
         "WHERE subject_type='member' AND subject_key NOT LIKE '#%'"
     ).fetchone()[0]
-    print(f"episodes (in place, M2 verify): {episodes}; member keys re-keyed: "
-          f"{rekeyed} subjects ({unrekeyed} unmappable remain)")
+    print(
+        f"episodes (in place, M2 verify): {episodes}; member keys re-keyed: "
+        f"{rekeyed} subjects ({unrekeyed} unmappable remain)"
+    )
     fts = new.execute("SELECT COUNT(*) FROM memories_fts").fetchone()[0]
     print(f"FTS index rows: {fts} (must equal memories: {total})")
-    ok = (total == migrated + legacy_added) and (new_tags <= old_tags) and episodes > 0 and fts == total
+    ok = (
+        (total == migrated + legacy_added)
+        and (new_tags <= old_tags)
+        and episodes > 0
+        and fts == total
+    )
     print("PARITY:", "PASS" if ok else "FAIL")
     old.close()
     new.close()

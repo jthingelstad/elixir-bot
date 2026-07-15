@@ -23,11 +23,6 @@ def conn():
             status_json TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
-        CREATE TABLE communication_intents (
-            intent_id INTEGER PRIMARY KEY,
-            status TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
         CREATE TABLE recognition_ledger (
             ledger_id INTEGER PRIMARY KEY,
             recognition_key TEXT NOT NULL
@@ -48,7 +43,8 @@ def conn():
             created_at TEXT NOT NULL
         );
     """)
-    return c
+    yield c
+    c.close()
 
 
 def _now(c, offset="0 hours"):
@@ -62,7 +58,9 @@ def test_tick_errors_flags_error_counters(conn):
         "INSERT INTO tick_history (recorded_at, counters_json) VALUES (?, ?)",
         (_now(conn), json.dumps({"poll_error": 1, "battles_ingested": 0})),
     )
-    assert health.check_tick_errors(conn) == ["1 tick(s) with step errors in the last 24h"]
+    assert health.check_tick_errors(conn) == [
+        "1 tick(s) with step errors in the last 24h"
+    ]
 
 
 def test_tick_errors_clean_when_counters_healthy(conn):
@@ -97,7 +95,9 @@ def test_ledger_duplicates(conn):
 
 def test_poll_starvation_null_counts_as_starved(conn):
     conn.execute("INSERT INTO players VALUES ('#AAA')")
-    conn.execute("INSERT INTO clan_memberships (player_tag, left_at) VALUES ('#AAA', NULL)")
+    conn.execute(
+        "INSERT INTO clan_memberships (player_tag, left_at) VALUES ('#AAA', NULL)"
+    )
     conn.execute(
         "INSERT INTO poll_state (player_tag, last_battlelog_poll, last_profile_poll) VALUES ('#AAA', NULL, NULL)"
     )
@@ -118,9 +118,13 @@ def test_poll_starvation_ignores_departed_members(conn):
 
 
 def test_memory_writes_flags_stale_and_accepts_fresh(conn):
-    conn.execute("INSERT INTO memories (created_at) VALUES (?)", (_now(conn, "-3 days"),))
+    conn.execute(
+        "INSERT INTO memories (created_at) VALUES (?)", (_now(conn, "-3 days"),)
+    )
     assert len(health.check_memory_writes(conn)) == 1
-    conn.execute("INSERT INTO memories (created_at) VALUES (?)", (_now(conn, "-1 hours"),))
+    conn.execute(
+        "INSERT INTO memories (created_at) VALUES (?)", (_now(conn, "-1 hours"),)
+    )
     assert health.check_memory_writes(conn) == []
 
 
@@ -157,9 +161,12 @@ def test_data_integrity_flags_relational_and_projection_drift():
         CREATE TABLE war_week_clans (observed_at TEXT);
         CREATE TABLE war_attendance_days (observed_at TEXT);
     """)
-    problems = health.check_data_integrity(c)
-    assert any("foreign-key" in problem for problem in problems)
-    assert any("overlapping membership" in problem for problem in problems)
-    assert any("projection mismatch" in problem for problem in problems)
-    assert any("null regression" in problem for problem in problems)
-    assert any("war timestamp" in problem for problem in problems)
+    try:
+        problems = health.check_data_integrity(c)
+        assert any("foreign-key" in problem for problem in problems)
+        assert any("overlapping membership" in problem for problem in problems)
+        assert any("projection mismatch" in problem for problem in problems)
+        assert any("null regression" in problem for problem in problems)
+        assert any("war timestamp" in problem for problem in problems)
+    finally:
+        c.close()

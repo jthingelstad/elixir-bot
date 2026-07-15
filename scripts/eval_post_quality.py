@@ -21,11 +21,11 @@ tick, records a summary row in post_quality_runs (trend), and exposes
 from __future__ import annotations
 
 import argparse
-from difflib import SequenceMatcher
 import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -34,28 +34,15 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv()
 
 import db  # noqa: E402
-from engine import game_check  # noqa: E402
 from capabilities.game_truth import awareness_post_facts  # noqa: E402
-
-_RUNS_DDL = """
-CREATE TABLE IF NOT EXISTS post_quality_runs (
-    run_id INTEGER PRIMARY KEY,
-    run_at TEXT NOT NULL,
-    days INTEGER NOT NULL,
-    sampled INTEGER NOT NULL,
-    game_accuracy_rate REAL,
-    avg_depth REAL,
-    flagged_count INTEGER NOT NULL,
-    detail_json TEXT
-)
-"""
+from engine import game_check  # noqa: E402
 
 _DEPTH_SYSTEM = (
     "You grade a Discord clan bot's post for DEPTH and quality (not correctness "
     "— assume the facts are right). Score 1-5: 5 = clearly looked at this "
     "specific member/moment and said something a clanmate would care about; "
     "1 = a generic template that could be about anyone. Reply ONLY compact JSON: "
-    '{\"score\": <1-5>, \"reason\": \"<one short clause>\"}'
+    '{"score": <1-5>, "reason": "<one short clause>"}'
 )
 
 
@@ -68,11 +55,13 @@ def _depth_judge(copy, intent_type):
             workflow="post_quality_eval",
             system=_DEPTH_SYSTEM,
             messages=[{"role": "user", "content": f"[{intent_type}] {copy}"}],
-            temperature=0.2, max_tokens=120, timeout=30,
+            temperature=0.2,
+            max_tokens=120,
+            timeout=30,
         )
         text = (response_text(resp) or "").strip()
         start, end = text.find("{"), text.rfind("}")
-        obj = json.loads(text[start:end + 1])
+        obj = json.loads(text[start : end + 1])
         score = int(obj.get("score"))
         return (score if 1 <= score <= 5 else None), str(obj.get("reason", ""))[:120]
     except Exception as exc:  # headless / no key / parse — skip, never fail the run
@@ -135,7 +124,9 @@ def _historical_thought_match(thoughts: list[dict], posted_at, covers, preview):
 
 
 def _sample(conn, *, days, lane):
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     awareness_rows = conn.execute(
         """SELECT ap.post_id, ap.lane, ap.content_preview, ap.covers_json,
                   ap.posted_at, ap.discord_message_id, at.read_json, at.plan_json
@@ -175,16 +166,18 @@ def _sample(conn, *, days, lane):
         facts = awareness_post_facts(read, post) if post else {}
         message_id = str(r["discord_message_id"] or f"awareness:{r['post_id']}")
         awareness_ids.add(str(r["discord_message_id"] or ""))
-        out.append({
-            "copy": r["content_preview"],
-            "intent_type": f"awareness:{post.get('leads_with') or 'post'}",
-            "lane": r["lane"],
-            "facts": facts,
-            "message_id": message_id,
-            "at": r["posted_at"],
-            "source": "awareness",
-            "member_tags": post.get("member_tags") or [],
-        })
+        out.append(
+            {
+                "copy": r["content_preview"],
+                "intent_type": f"awareness:{post.get('leads_with') or 'post'}",
+                "lane": r["lane"],
+                "facts": facts,
+                "message_id": message_id,
+                "at": r["posted_at"],
+                "source": "awareness",
+                "member_tags": post.get("member_tags") or [],
+            }
+        )
 
     message_rows = conn.execute(
         """SELECT discord_message_id, workflow, event_type, channel_id, content, created_at
@@ -201,21 +194,25 @@ def _sample(conn, *, days, lane):
         output_lane = str(r["workflow"] or r["channel_id"] or "assistant")
         if lane and output_lane != lane:
             continue
-        out.append({
-            "copy": r["content"],
-            "intent_type": r["event_type"] or r["workflow"] or "assistant_message",
-            "lane": output_lane,
-            "facts": {},
-            "message_id": message_id,
-            "at": r["created_at"],
-            "source": "messages",
-            "member_tags": [],
-        })
+        out.append(
+            {
+                "copy": r["content"],
+                "intent_type": r["event_type"] or r["workflow"] or "assistant_message",
+                "lane": output_lane,
+                "facts": {},
+                "message_id": message_id,
+                "at": r["created_at"],
+                "source": "messages",
+                "member_tags": [],
+            }
+        )
     return out
 
 
 def _normalized(value: str) -> str:
-    return " ".join("".join(ch if ch.isalnum() else " " for ch in (value or "").lower()).split())
+    return " ".join(
+        "".join(ch if ch.isalnum() else " " for ch in (value or "").lower()).split()
+    )
 
 
 def _repetition_findings(posts: list[dict]) -> dict[str, dict]:
@@ -252,20 +249,30 @@ def run_eval(
     """Grade recent posts and optionally persist idempotent editorial lessons."""
     conn = db.get_connection()
     try:
-        conn.execute(_RUNS_DDL)
         posts = _sample(conn, days=days, lane=lane)
         repetitions = _repetition_findings(posts)
+        game_findings = {
+            str(post["message_id"]): game_check.check_post(
+                post["copy"], post["facts"], conn
+            )
+            for post in posts
+        }
+        # No SQLite connection or transaction spans an LLM/network call.
+        conn.close()
+        conn = None
         by_lane: dict[str, dict] = {}
         flagged: list[dict] = []
         depths: list[int] = []
         game_ok = 0
-        feedback_written = 0
+        feedback_requests: list[dict] = []
         for p in posts:
-            findings = game_check.check_post(p["copy"], p["facts"], conn)
+            findings = game_findings[str(p["message_id"])]
             repetition = repetitions.get(str(p["message_id"]))
             clean = not findings
             game_ok += 1 if clean else 0
-            lane_stat = by_lane.setdefault(p["lane"], {"count": 0, "game_ok": 0, "depths": []})
+            lane_stat = by_lane.setdefault(
+                p["lane"], {"count": 0, "game_ok": 0, "depths": []}
+            )
             lane_stat["count"] += 1
             lane_stat["game_ok"] += 1 if clean else 0
             depth = reason = None
@@ -275,69 +282,110 @@ def run_eval(
                     depths.append(depth)
                     lane_stat["depths"].append(depth)
             if findings or (depth is not None and depth <= 2) or repetition:
-                flagged.append({"message_id": p["message_id"], "lane": p["lane"],
-                                "source": p["source"],
-                                "intent_type": p["intent_type"], "copy": p["copy"][:200],
-                                "findings": findings,
-                                "depth": depth, "depth_reason": reason,
-                                "repetition": repetition})
+                flagged.append(
+                    {
+                        "message_id": p["message_id"],
+                        "lane": p["lane"],
+                        "source": p["source"],
+                        "intent_type": p["intent_type"],
+                        "copy": p["copy"][:200],
+                        "findings": findings,
+                        "depth": depth,
+                        "depth_reason": reason,
+                        "repetition": repetition,
+                    }
+                )
                 if record_feedback:
-                    from engine.editor import record_post_quality_feedback
-
-                    mid = record_post_quality_feedback(
-                        conn,
-                        message_id=str(p["message_id"]),
-                        lane=p["lane"],
-                        source=p["source"],
-                        copy=p["copy"],
-                        findings=findings,
-                        depth=depth,
-                        depth_reason=reason,
-                        repetition=repetition,
+                    feedback_requests.append(
+                        {
+                            "message_id": str(p["message_id"]),
+                            "lane": p["lane"],
+                            "source": p["source"],
+                            "copy": p["copy"],
+                            "findings": findings,
+                            "depth": depth,
+                            "depth_reason": reason,
+                            "repetition": repetition,
+                        }
                     )
-                    feedback_written += 1 if mid is not None else 0
 
         n = len(posts)
         result = {
             "run_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "days": days, "sampled": n,
+            "days": days,
+            "sampled": n,
             "game_accuracy_rate": round(game_ok / n, 3) if n else None,
             "avg_depth": round(sum(depths) / len(depths), 2) if depths else None,
             "flagged_count": len(flagged),
-            "feedback_memories_written": feedback_written,
+            "feedback_memories_written": 0,
             "by_source": {
                 source: sum(1 for post in posts if post["source"] == source)
                 for source in sorted({post["source"] for post in posts})
             },
             "by_lane": {
-                ln: {"count": s["count"],
-                     "game_accuracy": round(s["game_ok"] / s["count"], 3) if s["count"] else None,
-                     "avg_depth": round(sum(s["depths"]) / len(s["depths"]), 2) if s["depths"] else None}
+                ln: {
+                    "count": s["count"],
+                    "game_accuracy": round(s["game_ok"] / s["count"], 3)
+                    if s["count"]
+                    else None,
+                    "avg_depth": round(sum(s["depths"]) / len(s["depths"]), 2)
+                    if s["depths"]
+                    else None,
+                }
                 for ln, s in sorted(by_lane.items())
             },
             "flagged": flagged,
         }
-        conn.execute(
-            "INSERT INTO post_quality_runs (run_at, days, sampled, game_accuracy_rate, "
-            "avg_depth, flagged_count, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (result["run_at"], days, n, result["game_accuracy_rate"], result["avg_depth"],
-             len(flagged), json.dumps(result, default=str)),
-        )
-        conn.commit()
+        write_conn = db.get_connection()
+        try:
+            if feedback_requests:
+                from engine.editor import record_post_quality_feedback
+
+                result["feedback_memories_written"] = sum(
+                    record_post_quality_feedback(write_conn, **request) is not None
+                    for request in feedback_requests
+                )
+            write_conn.execute(
+                "INSERT INTO post_quality_runs (run_at, days, sampled, game_accuracy_rate, "
+                "avg_depth, flagged_count, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    result["run_at"],
+                    days,
+                    n,
+                    result["game_accuracy_rate"],
+                    result["avg_depth"],
+                    len(flagged),
+                    json.dumps(result, default=str),
+                ),
+            )
+            write_conn.commit()
+        finally:
+            write_conn.close()
         return result
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 def _print_scorecard(r):
-    print(f"\n=== Post-quality scorecard — last {r['days']}d, {r['sampled']} posts "
-          f"({r['run_at']}) ===")
+    print(
+        f"\n=== Post-quality scorecard — last {r['days']}d, {r['sampled']} posts "
+        f"({r['run_at']}) ==="
+    )
     ga = r["game_accuracy_rate"]
-    print(f"game accuracy: {ga*100:.0f}%" if ga is not None else "game accuracy: (no posts)")
+    print(
+        f"game accuracy: {ga * 100:.0f}%"
+        if ga is not None
+        else "game accuracy: (no posts)"
+    )
     if r["avg_depth"] is not None:
         print(f"avg depth: {r['avg_depth']}/5")
     for ln, s in r["by_lane"].items():
-        acc = f"{s['game_accuracy']*100:.0f}%" if s["game_accuracy"] is not None else "-"
+        acc = (
+            f"{s['game_accuracy'] * 100:.0f}%"
+            if s["game_accuracy"] is not None
+            else "-"
+        )
         dep = f"{s['avg_depth']}/5" if s["avg_depth"] is not None else "-"
         print(f"  {ln:20} n={s['count']:<3} accuracy={acc:<5} depth={dep}")
     if r["flagged"]:
@@ -363,7 +411,9 @@ def main() -> int:
     ap.add_argument("--lane", default=None)
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--no-llm", action="store_true", help="game-check only (headless)")
-    ap.add_argument("--no-feedback", action="store_true", help="do not write editorial memories")
+    ap.add_argument(
+        "--no-feedback", action="store_true", help="do not write editorial memories"
+    )
     args = ap.parse_args()
     r = run_eval(
         args.days,

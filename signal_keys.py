@@ -17,7 +17,10 @@ def _clean_text(value) -> str | None:
 
 
 def signal_type(signal: dict | None) -> str:
-    return _clean_text((signal or {}).get("type") or (signal or {}).get("signal_type")) or "signal"
+    return (
+        _clean_text((signal or {}).get("type") or (signal or {}).get("signal_type"))
+        or "signal"
+    )
 
 
 def signal_source_key(signal: dict | None) -> str:
@@ -31,11 +34,22 @@ def signal_source_key(signal: dict | None) -> str:
     parts = [
         signal_type(signal),
         _clean_text(signal.get("signal_date")) or "",
-        _clean_text(signal.get("tag") or signal.get("player_tag") or signal.get("member_tag") or signal.get("target_player_tag")) or "",
+        _clean_text(
+            signal.get("tag")
+            or signal.get("player_tag")
+            or signal.get("member_tag")
+            or signal.get("target_player_tag")
+        )
+        or "",
         _clean_text(signal.get("season_id")) or "",
         _clean_text(signal.get("week") or signal.get("section_index")) or "",
         _clean_text(signal.get("day_number") or signal.get("period_index")) or "",
-        _clean_text(signal.get("milestone") or signal.get("card_name") or signal.get("award_type")) or "",
+        _clean_text(
+            signal.get("milestone")
+            or signal.get("card_name")
+            or signal.get("award_type")
+        )
+        or "",
     ]
     basis = "|".join(parts).strip("|")
     if basis:

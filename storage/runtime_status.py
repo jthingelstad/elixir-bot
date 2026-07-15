@@ -91,8 +91,33 @@ def get_awareness_loop_by_number(loop_number, *, conn=None) -> dict | None:
     }
 
 
+@managed_connection
+def get_awareness_activity(*, limit: int = 20, conn=None) -> dict:
+    """Current proactive decisions and confirmed deliveries.
+
+    This is the production replacement for the retired communication-intent
+    queue: thoughts explain post-vs-silence, posts are send-confirmed receipts.
+    """
+    cap = max(1, min(int(limit or 20), 100))
+    thoughts = conn.execute(
+        "SELECT loop_number, at, chose_silence, post_count, skipped_reason, model "
+        "FROM awareness_thoughts ORDER BY loop_number DESC LIMIT ?",
+        (cap,),
+    ).fetchall()
+    posts = conn.execute(
+        "SELECT post_id, lane, content_preview, covers_json, loop_number, posted_at, "
+        "discord_message_id FROM awareness_posts ORDER BY posted_at DESC, post_id DESC LIMIT ?",
+        (cap,),
+    ).fetchall()
+    return {
+        "thoughts": [dict(row) for row in thoughts],
+        "posts": [dict(row) for row in posts],
+    }
+
+
 __all__ = [
     "save_runtime_job_status",
     "list_runtime_job_status",
     "get_awareness_loop_by_number",
+    "get_awareness_activity",
 ]

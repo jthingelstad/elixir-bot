@@ -27,11 +27,14 @@ every advertised tool has an executor.
 
 from __future__ import annotations
 
+import ast
 import builtins
 import dis
 import importlib
+import inspect
 import json
 import pkgutil
+import textwrap
 import types
 
 import pytest
@@ -44,6 +47,7 @@ _SCAN_PACKAGES = ("runtime", "engine", "agent", "storage")
 
 
 # ------------------------------------------------------------ static analysis
+
 
 def _iter_code_objects(code):
     """A code object and every nested code object (closures, comprehensions)."""
@@ -90,7 +94,9 @@ def _discover_modules():
         pkg = importlib.import_module(pkg_name)
         names.append(pkg_name)
         for info in pkgutil.walk_packages(pkg.__path__, prefix=pkg_name + "."):
-            if info.name.rsplit(".", 1)[-1].startswith("_") and info.name.endswith("__main__"):
+            if info.name.rsplit(".", 1)[-1].startswith("_") and info.name.endswith(
+                "__main__"
+            ):
                 continue
             names.append(info.name)
     return sorted(set(names))
@@ -129,6 +135,7 @@ def test_no_unresolved_global_names():
 
 # --------------------------------------------------------- registry integrity
 
+
 def test_registered_job_functions_resolve():
     """Every scheduled activity's job_function is a real callable on the runtime
     module (the getattr the scheduler does at register time)."""
@@ -140,30 +147,38 @@ def test_registered_job_functions_resolve():
         fn = getattr(app, activity.job_function, None)
         if not callable(fn):
             missing.append(f"{activity.activity_key} -> {activity.job_function}")
-    assert not missing, "job_function not a callable on runtime.app:\n" + "\n".join(missing)
+    assert not missing, "job_function not a callable on runtime.app:\n" + "\n".join(
+        missing
+    )
 
 
 def test_every_advertised_tool_has_an_executor():
     """Every tool exposed to any workflow can actually be executed — no
     advertised-but-unroutable tool (they'd fail only when the LLM calls them)."""
-    from agent.workflow_registry import ALL_TOOLS
     from agent import tool_exec
+    from agent.workflow_registry import ALL_TOOLS
 
-    unroutable = []
-    for tool in ALL_TOOLS:
-        name = tool["name"]
-        try:
-            tool_exec._execute_tool(name, {})
-        except Exception as exc:  # noqa: BLE001
-            # A tool with no executor raises "unknown tool"; a routed tool may
-            # raise a DATA error on empty args — only the former is a bug.
-            msg = str(exc).lower()
-            if "unknown" in msg or "no such tool" in msg or "not implemented" in msg:
-                unroutable.append(f"{name}: {exc}")
-    assert not unroutable, "advertised tools with no executor:\n" + "\n".join(unroutable)
+    advertised = {tool["name"] for tool in ALL_TOOLS}
+    dispatch_tree = ast.parse(
+        textwrap.dedent(inspect.getsource(tool_exec._execute_tool))
+    )
+    dispatched = {
+        node.comparators[0].value
+        for node in ast.walk(dispatch_tree)
+        if isinstance(node, ast.Compare)
+        and isinstance(node.left, ast.Name)
+        and node.left.id == "name"
+        and len(node.ops) == 1
+        and isinstance(node.ops[0], ast.Eq)
+        and len(node.comparators) == 1
+        and isinstance(node.comparators[0], ast.Constant)
+        and isinstance(node.comparators[0].value, str)
+    }
+    assert advertised == tool_exec.TOOL_EXECUTOR_NAMES == dispatched
 
 
 # ------------------------------------------------- dynamic invocation (lazy imports)
+
 
 def _make_intent(conn, intent_type, payload, scope="public"):
     """Insert a minimal intent row and return it as a dict (compose reads
@@ -181,48 +196,73 @@ def _make_intent(conn, intent_type, payload, scope="public"):
         (f"k:{intent_type}", intent_type, scope, json.dumps(payload)),
     )
     conn.commit()
-    return {"intent_type": intent_type, "scope": scope, "payload_json": json.dumps(payload)}
+    return {
+        "intent_type": intent_type,
+        "scope": scope,
+        "payload_json": json.dumps(payload),
+    }
 
 
 # Representative intent per compose branch — every prefix + the specific typed
 # payloads whose enrichment paths have bitten us (role_changed, season_closed).
 _INTENT_CASES = [
-    ("war:war_day_opened", {"subject_tag": "#A", "war_clock": {}, "war_day_human": "battle day 1 of 4"}),
+    (
+        "war:war_day_opened",
+        {"subject_tag": "#A", "war_clock": {}, "war_day_human": "battle day 1 of 4"},
+    ),
     ("war:week_finished", {"our_rank": 1, "our_fame": 10000}),
     ("war:season_closed", {"war_champ_tag": "#A", "free_pass_tag": "#A"}),
-    ("pulse:player_stream", {"battles_total": 10, "quiet_window": False, "standouts": []}),
-    ("celebrate:collection_level_milestone", {"subject_tag": "#A", "milestone": 1700, "collection_level": 1712}),
-    ("celebrate:card_level_milestone", {"subject_tag": "#A", "card_name": "Balloon", "milestone": 16}),
+    (
+        "pulse:player_stream",
+        {"battles_total": 10, "quiet_window": False, "standouts": []},
+    ),
+    (
+        "celebrate:collection_level_milestone",
+        {"subject_tag": "#A", "milestone": 1700, "collection_level": 1712},
+    ),
+    (
+        "celebrate:card_level_milestone",
+        {"subject_tag": "#A", "card_name": "Balloon", "milestone": 16},
+    ),
     ("cohort:arena_wave", {"members": [{"name": "A"}]}),
     ("clan:member_joined", {"subject_tag": "#A", "name": "A", "trophies": 5000}),
     ("clan:member_left", {"subject_tag": "#A", "name": "A", "tenure_days": 30}),
-    ("clan:role_changed", {"subject_tag": "#A", "new_role": "elder", "direction": "promoted"}),
+    (
+        "clan:role_changed",
+        {"subject_tag": "#A", "new_role": "elder", "direction": "promoted"},
+    ),
     ("clan:season_awards", {"season_id": 133}),
     ("clan:clan_score_milestone", {"clan_tag": "#J", "milestone": 90000}),
 ]
 
 
-@pytest.mark.parametrize("intent_type,payload", _INTENT_CASES,
-                         ids=[c[0] for c in _INTENT_CASES])
-def test_compose_ask_builds_for_every_intent_type(engine_conn, intent_type, payload):
+@pytest.mark.parametrize(
+    "intent_type,payload", _INTENT_CASES, ids=[c[0] for c in _INTENT_CASES]
+)
+def test_compose_ask_builds_for_every_intent_type(
+    legacy_engine_conn, intent_type, payload
+):
     """intent_context builds a non-empty ask for every intent branch — exercises
     each branch's lazy imports / enrichment (the CLASH_COPY_MAX_LENGTH class
     lived in exactly this kind of path)."""
     from engine.recognition import compose
 
-    row = _make_intent(engine_conn, intent_type, payload)
-    ask = compose.intent_context(engine_conn, row)
+    row = _make_intent(legacy_engine_conn, intent_type, payload)
+    ask = compose.intent_context(legacy_engine_conn, row)
     assert isinstance(ask, str) and ask.strip(), f"empty ask for {intent_type}"
 
 
-@pytest.mark.parametrize("intent_type,payload", _INTENT_CASES,
-                         ids=[c[0] for c in _INTENT_CASES])
-def test_render_intent_fallback_for_every_intent_type(engine_conn, intent_type, payload):
+@pytest.mark.parametrize(
+    "intent_type,payload", _INTENT_CASES, ids=[c[0] for c in _INTENT_CASES]
+)
+def test_render_intent_fallback_for_every_intent_type(
+    legacy_engine_conn, intent_type, payload
+):
     """The deterministic fallback copy renders for every branch (delivery falls
     back to this when compose/gate fail — it must never itself raise)."""
     from engine.recognition import compose
 
-    row = _make_intent(engine_conn, intent_type, payload)
+    row = _make_intent(legacy_engine_conn, intent_type, payload)
     copy = compose.render_intent(row)
     assert isinstance(copy, str) and copy.strip(), f"empty fallback for {intent_type}"
 
@@ -238,26 +278,38 @@ def test_leader_action_card_builds_for_every_type(engine_conn):
 
     for action_type in ui.ACTION_SPECS:
         action = {
-            "action_id": 1, "action_type": action_type, "objective": "x",
-            "prompt_text": "do the thing", "rationale": "because reasons",
-            "target_player_tag": "#A", "target_player_name": "Alice",
+            "action_id": 1,
+            "action_type": action_type,
+            "objective": "x",
+            "prompt_text": "do the thing",
+            "rationale": "because reasons",
+            "target_player_tag": "#A",
+            "target_player_name": "Alice",
             "status": "proposed",
         }
-        ui.build_leader_action_embed(action)          # embed build
-        ui.leader_action_view_for(action)             # interactive view build
+        ui.build_leader_action_embed(action)  # embed build
+        ui.leader_action_view_for(action)  # interactive view build
         if action_type in ROLE_ACTION_TYPES:
             # deterministic clan-chat copy (the fallback the gate falls back to)
             assert role_action_clan_chat_copy(
-                action_type=action_type, target_player_name="Alice",
+                action_type=action_type,
+                target_player_name="Alice",
                 rationale="because reasons",
             )
 
     # the runtime enrichment path itself (async, deterministic fallback)
     import runtime.app as app
+
     action = {
-        "action_id": 1, "action_type": "promotion_recommendation", "objective": "x",
-        "prompt_text": "x", "rationale": "Ultimate Champion.", "target_player_tag": "#A",
-        "target_player_name": "Alice", "status": "proposed", "copy_current_text": None,
+        "action_id": 1,
+        "action_type": "promotion_recommendation",
+        "objective": "x",
+        "prompt_text": "x",
+        "rationale": "Ultimate Champion.",
+        "target_player_tag": "#A",
+        "target_player_name": "Alice",
+        "status": "proposed",
+        "copy_current_text": None,
         "copy_original_text": None,
     }
 
@@ -265,6 +317,7 @@ def test_leader_action_card_builds_for_every_type(engine_conn):
         raise RuntimeError("no LLM in tests")
 
     import runtime.clan_chat_copy as ccc
+
     orig = ccc.generate_clan_chat_copy
     ccc.generate_clan_chat_copy = _boom
     try:

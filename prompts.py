@@ -97,8 +97,8 @@ LANE_ALIASES = {
     "recruiting_camp": "promote-the-clan",
     "recruiting-camp": "promote-the-clan",
     "arena_relay": "arena-relay",
-    "actions": "arena-relay",           # channel renamed #leader-actions → #actions (2026-07-12)
-    "leader_actions": "arena-relay",    # kept: back-compat aliases for the old name
+    "actions": "arena-relay",  # channel renamed #leader-actions → #actions (2026-07-12)
+    "leader_actions": "arena-relay",  # kept: back-compat aliases for the old name
     "leader-actions": "arena-relay",
     "clanops": "leader-lounge",
     "leaders": "leader-lounge",
@@ -108,6 +108,7 @@ LANE_ALIASES = {
     "clan-chat": "general",
     "ask_elixir": "ask-elixir",
 }
+
 
 def _normalize_lane_name(value: str | None) -> str:
     key = (value or "").strip().lower()
@@ -183,10 +184,14 @@ def validate_discord_channel_config():
             errors.append(f"invalid tool policy '{tool_policy}' for {channel['name']}")
         reply_policy = channel.get("reply_policy")
         if reply_policy not in VALID_REPLY_POLICIES:
-            errors.append(f"invalid reply policy '{reply_policy}' for {channel['name']}")
+            errors.append(
+                f"invalid reply policy '{reply_policy}' for {channel['name']}"
+            )
         memory_scope = channel.get("memory_scope")
         if memory_scope not in VALID_MEMORY_SCOPES:
-            errors.append(f"invalid memory scope '{memory_scope}' for {channel['name']}")
+            errors.append(
+                f"invalid memory scope '{memory_scope}' for {channel['name']}"
+            )
         if channel["id"] in seen_ids:
             errors.append(
                 f"duplicate channel id {channel['id']} for {seen_ids[channel['id']]} and {channel['name']}"
@@ -260,10 +265,8 @@ def clan(today: date | None = None) -> str:
     """
     raw = _clan_raw()
     phase = clan_phase(today=today)
-    return (
-        raw
-        .replace("<<CLAN_AGE_TEXT>>", phase["phase_text"])
-        .replace("<<CLAN_PHASE_BEAT>>", phase["phase_beat"])
+    return raw.replace("<<CLAN_AGE_TEXT>>", phase["phase_text"]).replace(
+        "<<CLAN_PHASE_BEAT>>", phase["phase_beat"]
     )
 
 
@@ -336,7 +339,11 @@ def discord_channel_configs():
         if heading == "Config":
             continue
         start = match.start()
-        end = heading_matches[i + 1].start() if i + 1 < len(heading_matches) else len(text)
+        end = (
+            heading_matches[i + 1].start()
+            if i + 1 < len(heading_matches)
+            else len(text)
+        )
         section = text[start:end].strip()
 
         id_match = re.search(r"^ID:\s*(\d+)\s*$", section, re.MULTILINE)
@@ -395,7 +402,11 @@ def discord_channels_for_lane(lane):
 def discord_channels_by_workflow(workflow):
     """Return parsed Discord channel configs for a workflow family."""
     workflow = (workflow or "").strip().lower()
-    return [channel for channel in discord_channel_configs() if (channel.get("workflow") or "").lower() == workflow]
+    return [
+        channel
+        for channel in discord_channel_configs()
+        if (channel.get("workflow") or "").lower() == workflow
+    ]
 
 
 def discord_channels_by_lane():
@@ -413,16 +424,6 @@ def discord_singleton_lane(lane):
     if len(channels) != 1:
         raise ValueError(f"expected exactly one {lane} channel, found {len(channels)}")
     return channels[0]
-
-
-def discord_channels_by_role(role):
-    """Backward-compatible alias for discord_channels_for_lane()."""
-    return discord_channels_for_lane(role)
-
-
-def discord_singleton_channel(role):
-    """Backward-compatible alias for discord_singleton_lane()."""
-    return discord_singleton_lane(role)
 
 
 def resolve_channel_reference(value):
@@ -467,12 +468,12 @@ _NAME_SAFETY_RULE = (
 
 _PRONOUN_RULE = (
     "Pronouns: I do not know any member's gender, and a name, avatar, or playstyle "
-    "is never evidence of it — guessing (\"she just hit 6,000\", \"his win streak\") "
+    'is never evidence of it — guessing ("she just hit 6,000", "his win streak") '
     "will often be wrong and makes a member feel unseen. Refer to every member with "
     "gender-neutral they/them by default, no matter how their name reads. The only "
     "exception is when a member's own stated pronouns are explicitly present in the "
     "data I'm given — then honor those. When they/them would be awkward, rewrite "
-    "around it (use the member's name, or \"this member\") rather than reaching for "
+    'around it (use the member\'s name, or "this member") rather than reaching for '
     "he or she."
 )
 
@@ -524,9 +525,9 @@ def thresholds():
 # length, so day↔month conversion stays close to a calendar reading.
 _DAYS_PER_MONTH = 30.4375
 _PHASE_BOUNDARIES_DAYS = {
-    "founding": 92,         # < 3 months
-    "establishing": 274,    # < 9 months
-    "established": 731,     # < 2 years
+    "founding": 92,  # < 3 months
+    "establishing": 274,  # < 9 months
+    "established": 731,  # < 2 years
 }
 
 _PHASE_TEXTS = {
@@ -544,9 +545,18 @@ _PHASE_BEATS = {
 }
 
 _NUMBER_WORDS = {
-    1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
-    6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten",
-    11: "eleven", 12: "twelve",
+    1: "one",
+    2: "two",
+    3: "three",
+    4: "four",
+    5: "five",
+    6: "six",
+    7: "seven",
+    8: "eight",
+    9: "nine",
+    10: "ten",
+    11: "eleven",
+    12: "twelve",
 }
 
 
@@ -596,7 +606,9 @@ def clan_phase(today: date | None = None) -> dict:
     if today is None:
         today = date.today()
     founded_str = thresholds().get("clan_founded")
-    founded = datetime.strptime(founded_str, "%Y-%m-%d").date() if founded_str else today
+    founded = (
+        datetime.strptime(founded_str, "%Y-%m-%d").date() if founded_str else today
+    )
     days = max(0, (today - founded).days)
     months = round(days / _DAYS_PER_MONTH, 1)
     phase = _phase_for_days(days)

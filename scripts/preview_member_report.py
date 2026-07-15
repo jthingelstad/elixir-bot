@@ -26,31 +26,45 @@ from runtime import member_report  # noqa: E402
 
 
 def _member_name(tag: str) -> str:
-    row = db.get_connection().execute(
-        "SELECT current_name FROM players WHERE player_tag = ?", (tag,)).fetchone()
-    return (row["current_name"] if row else None) or tag
+    conn = db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT current_name FROM players WHERE player_tag = ?", (tag,)
+        ).fetchone()
+        return (row["current_name"] if row else None) or tag
+    finally:
+        conn.close()
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--tag", required=True, help="player tag, e.g. '#20JJJ2CCRU'")
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--now", default=None, help="pin window end (ISO) for determinism")
-    ap.add_argument("--facts", action="store_true", help="print only the model facts brief")
+    ap.add_argument(
+        "--facts", action="store_true", help="print only the model facts brief"
+    )
     ap.add_argument("--html", metavar="PATH", help="write the rendered HTML email here")
-    ap.add_argument("--to", metavar="ADDR", help="send a single test email to this address")
+    ap.add_argument(
+        "--to", metavar="ADDR", help="send a single test email to this address"
+    )
     args = ap.parse_args()
 
     tag = args.tag if args.tag.startswith("#") else f"#{args.tag}"
     name = _member_name(tag)
-    ctx = member_report.build_member_report_context(tag, name, days=args.days, now=args.now)
+    ctx = member_report.build_member_report_context(
+        tag, name, days=args.days, now=args.now
+    )
 
     print(f"=== FACTS BRIEF — {ctx['name']} ({tag}) ===")
     print(member_report.facts_for_model(ctx))
-    print(f"\ncounts: battles={ctx['battles']['tally']['battles']} "
-          f"badges={len(ctx['badges'])} cards={len(ctx['cards'])} "
-          f"ranked={len(ctx['ranked'])} new_cards={len(ctx['game_stream']['new_cards'])}")
+    print(
+        f"\ncounts: battles={ctx['battles']['tally']['battles']} "
+        f"badges={len(ctx['badges'])} cards={len(ctx['cards'])} "
+        f"ranked={len(ctx['ranked'])} new_cards={len(ctx['game_stream']['new_cards'])}"
+    )
     if args.facts:
         return 0
 
@@ -68,10 +82,12 @@ def main() -> int:
     print(f"\n=== SUBJECT ===\n{subject}")
     if args.html:
         from agent.mail import email_render
+
         open(args.html, "w").write(email_render.text_to_html(body))
         print(f"\n[wrote HTML → {args.html}]")
     elif args.to:
         from agent.mail import outbound
+
         res = outbound.send(to=args.to, subject=subject, body=body)
         print(f"\n[sent to {res['to']} — emailId {res.get('emailId')}]")
     else:

@@ -126,7 +126,9 @@ def leader_action_spec(action_type: str | None) -> LeaderActionTypeSpec:
     clean = (action_type or "").strip()
     return ACTION_SPECS.get(
         clean,
-        LeaderActionTypeSpec(clean or "leader_action", "Leader Action", "⚡", 0x95A5A6, "Done"),
+        LeaderActionTypeSpec(
+            clean or "leader_action", "Leader Action", "⚡", 0x95A5A6, "Done"
+        ),
     )
 
 
@@ -148,10 +150,14 @@ def _split_copy_messages(copy_text: str | None) -> list[str]:
     return lines[:5]
 
 
-def action_copy_messages(action: dict, copy_messages: list[str] | None = None) -> list[str]:
+def action_copy_messages(
+    action: dict, copy_messages: list[str] | None = None
+) -> list[str]:
     if copy_messages is not None:
         return [str(item).strip() for item in copy_messages if str(item).strip()]
-    return _split_copy_messages(action.get("copy_current_text") or action.get("copy_original_text"))
+    return _split_copy_messages(
+        action.get("copy_current_text") or action.get("copy_original_text")
+    )
 
 
 def _status_label(action: dict) -> str:
@@ -175,7 +181,9 @@ def _format_target(action: dict) -> str:
     return name or (f"`{tag}`" if tag else "Clan")
 
 
-def build_leader_action_embed(action: dict, *, copy_messages: list[str] | None = None) -> discord.Embed:
+def build_leader_action_embed(
+    action: dict, *, copy_messages: list[str] | None = None
+) -> discord.Embed:
     spec = leader_action_spec(action.get("action_type"))
     prefix = "TEST " if action.get("is_test") else ""
     title = f"{prefix}R{action.get('action_id')} {spec.emoji} {spec.label}"
@@ -184,20 +192,29 @@ def build_leader_action_embed(action: dict, *, copy_messages: list[str] | None =
         description=f"**Target:** {_format_target(action)}\n**Status:** {_status_label(action)}",
         color=spec.color,
     )
-    embed.add_field(name="Decision", value=_clip(action.get("prompt_text"), 900), inline=False)
+    embed.add_field(
+        name="Decision", value=_clip(action.get("prompt_text"), 900), inline=False
+    )
     if action.get("rationale"):
-        embed.add_field(name="Why", value=_clip(action.get("rationale"), 900), inline=False)
+        embed.add_field(
+            name="Why", value=_clip(action.get("rationale"), 900), inline=False
+        )
     copies = action_copy_messages(action, copy_messages)
     if copies:
         if len(copies) == 1:
             value = f"```text\n{_clip(copies[0], CLASH_COPY_MAX_LENGTH)}\n```"
         else:
-            value = "\n".join(f"`{idx}.` {_clip(item, CLASH_COPY_MAX_LENGTH)}" for idx, item in enumerate(copies, 1))
+            value = "\n".join(
+                f"`{idx}.` {_clip(item, CLASH_COPY_MAX_LENGTH)}"
+                for idx, item in enumerate(copies, 1)
+            )
         embed.add_field(name=spec.copy_field_label, value=value[:1024], inline=False)
     note = action.get("decision_note")
     if note:
         embed.add_field(name="Leader Note", value=_clip(note, 700), inline=False)
-    footer = f"{action.get('action_type') or 'leader_action'} | {LEADER_ACTION_UI_VERSION}"
+    footer = (
+        f"{action.get('action_type') or 'leader_action'} | {LEADER_ACTION_UI_VERSION}"
+    )
     if action.get("is_test"):
         footer += " | test card"
     embed.set_footer(text=footer)
@@ -252,7 +269,11 @@ async def _refresh_card_message(interaction: discord.Interaction, action: dict) 
             view=leader_action_view_for(action),
         )
     except Exception:
-        log.warning("leader action card refresh failed action_id=%s", action.get("action_id"), exc_info=True)
+        log.warning(
+            "leader action card refresh failed action_id=%s",
+            action.get("action_id"),
+            exc_info=True,
+        )
 
 
 async def _apply_card_update(interaction: discord.Interaction, action: dict) -> None:
@@ -280,7 +301,9 @@ async def _apply_card_update(interaction: discord.Interaction, action: dict) -> 
             )
 
 
-async def _edit_copy_messages(interaction: discord.Interaction, action: dict, copies: list[str]) -> None:
+async def _edit_copy_messages(
+    interaction: discord.Interaction, action: dict, copies: list[str]
+) -> None:
     ids = [str(item) for item in (action.get("copy_message_ids") or []) if item]
     if not ids and action.get("copy_message_id"):
         ids = [str(action["copy_message_id"])]
@@ -330,7 +353,11 @@ class CopyEditModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not await _ensure_leader(interaction):
             return
-        copies = [str(item.value or "").strip() for item in self.inputs if str(item.value or "").strip()]
+        copies = [
+            str(item.value or "").strip()
+            for item in self.inputs
+            if str(item.value or "").strip()
+        ]
         if not copies:
             await _send_ephemeral(interaction, "No copy text submitted.")
             return
@@ -344,7 +371,10 @@ class CopyEditModal(discord.ui.Modal):
             await _send_ephemeral(interaction, "Action not found.")
             return
         await _edit_copy_messages(interaction, action, copies)
-        action = await asyncio.to_thread(db.get_leader_action_by_id, self.action_id) or action
+        action = (
+            await asyncio.to_thread(db.get_leader_action_by_id, self.action_id)
+            or action
+        )
         queue_leader_action_feedback_refresh(action.get("action_type"))
         await _apply_card_update(interaction, action)
 
@@ -401,7 +431,9 @@ class NoteModal(discord.ui.Modal):
         if not action:
             await _send_ephemeral(interaction, "Action not found.")
             return
-        source_id = action.get("source_message_id") or getattr(getattr(interaction, "message", None), "id", None)
+        source_id = action.get("source_message_id") or getattr(
+            getattr(interaction, "message", None), "id", None
+        )
         if source_id is None:
             await _send_ephemeral(interaction, "Action message not available.")
             return
@@ -424,7 +456,9 @@ class DepartureClassifyModal(discord.ui.Modal):
 
     def __init__(self, action: dict, classification: str):
         verb = "kick" if classification == "kick" else "leave"
-        super().__init__(title=f"Confirm {verb}: {action.get('target_player_name') or 'member'}"[:45])
+        super().__init__(
+            title=f"Confirm {verb}: {action.get('target_player_name') or 'member'}"[:45]
+        )
         self.action_id = int(action["action_id"])
         self.classification = classification
         self.comment = discord.ui.TextInput(
@@ -455,7 +489,17 @@ class DepartureClassifyModal(discord.ui.Modal):
 
 
 class LeaderActionButton(discord.ui.Button):
-    def __init__(self, action: dict, *, kind: str, label: str, style: discord.ButtonStyle, row: int, emoji: str | None = None, disabled: bool = False):
+    def __init__(
+        self,
+        action: dict,
+        *,
+        kind: str,
+        label: str,
+        style: discord.ButtonStyle,
+        row: int,
+        emoji: str | None = None,
+        disabled: bool = False,
+    ):
         self.action_id = int(action["action_id"])
         self.kind = kind
         super().__init__(
@@ -517,61 +561,73 @@ class LeaderActionView(discord.ui.View):
             # Two-way classification card (e.g. departure_verification): render the
             # choice buttons instead of done/decline. Both resolve the card.
             for kind, label, emoji in spec.classify_choices:
-                self.add_item(LeaderActionButton(
+                self.add_item(
+                    LeaderActionButton(
+                        action,
+                        kind=kind,
+                        label=label,
+                        emoji=emoji,
+                        style=discord.ButtonStyle.primary,
+                        row=0,
+                        disabled=not proposed,
+                    )
+                )
+            self.add_item(
+                LeaderActionButton(
                     action,
-                    kind=kind,
-                    label=label,
-                    emoji=emoji,
+                    kind="note",
+                    label="Add Note",
+                    emoji="📝",
+                    style=discord.ButtonStyle.secondary,
+                    row=2,
+                )
+            )
+            return
+
+        self.add_item(
+            LeaderActionButton(
+                action,
+                kind="done",
+                label=spec.done_label,
+                emoji="✅",
+                style=discord.ButtonStyle.success,
+                row=0,
+                disabled=not proposed,
+            )
+        )
+        self.add_item(
+            LeaderActionButton(
+                action,
+                kind="decline",
+                label=spec.decline_label,
+                emoji="❌",
+                style=discord.ButtonStyle.danger,
+                row=0,
+                disabled=not proposed,
+            )
+        )
+        if spec.allow_copy_edit and copies:
+            self.add_item(
+                LeaderActionButton(
+                    action,
+                    kind="edit_copy",
+                    label="Edit Copy",
+                    emoji="✏️",
                     style=discord.ButtonStyle.primary,
-                    row=0,
+                    row=1,
                     disabled=not proposed,
-                ))
-            self.add_item(LeaderActionButton(
+                )
+            )
+        self.add_item(
+            LeaderActionButton(
                 action,
                 kind="note",
                 label="Add Note",
                 emoji="📝",
                 style=discord.ButtonStyle.secondary,
                 row=2,
-            ))
-            return
-
-        self.add_item(LeaderActionButton(
-            action,
-            kind="done",
-            label=spec.done_label,
-            emoji="✅",
-            style=discord.ButtonStyle.success,
-            row=0,
-            disabled=not proposed,
-        ))
-        self.add_item(LeaderActionButton(
-            action,
-            kind="decline",
-            label=spec.decline_label,
-            emoji="❌",
-            style=discord.ButtonStyle.danger,
-            row=0,
-            disabled=not proposed,
-        ))
-        if spec.allow_copy_edit and copies:
-            self.add_item(LeaderActionButton(
-                action,
-                kind="edit_copy",
-                label="Edit Copy",
-                emoji="✏️",
-                style=discord.ButtonStyle.primary,
-                row=1,
-                disabled=not proposed,
-            ))
-        self.add_item(LeaderActionButton(
-            action,
-            kind="note",
-            label="Add Note",
-            emoji="📝",
-            style=discord.ButtonStyle.secondary,
-            row=2,
-        ))
+            )
+        )
 
 
 def leader_action_view_for(action: dict) -> LeaderActionView | None:
@@ -602,7 +658,7 @@ async def post_leader_action_card(
         message = await channel.send(copy)
         sent.append(message)
         if getattr(message, "id", None) is not None:
-            copy_ids.append(getattr(message, "id"))
+            copy_ids.append(message.id)
     if copy_ids:
         await asyncio.to_thread(
             db.update_leader_action_copy_messages,
@@ -618,7 +674,9 @@ async def restore_leader_action_views(
     limit: int = 50,
     terminal_cleanup_limit: int = 3,
 ) -> int:
-    open_actions = await asyncio.to_thread(db.list_leader_actions, status=db.ACTION_PROPOSED, limit=limit)
+    open_actions = await asyncio.to_thread(
+        db.list_leader_actions, status=db.ACTION_PROPOSED, limit=limit
+    )
     recent_actions = await asyncio.to_thread(
         db.list_leader_actions,
         limit=max(0, min(int(terminal_cleanup_limit or 0), int(limit or 0))),
@@ -643,9 +701,17 @@ async def restore_leader_action_views(
             if await refresh_leader_action_card(bot, action):
                 refreshed += 1
         except Exception:
-            log.warning("leader action view restore failed action_id=%s", action.get("action_id"), exc_info=True)
+            log.warning(
+                "leader action view restore failed action_id=%s",
+                action.get("action_id"),
+                exc_info=True,
+            )
     if restored or refreshed:
-        log.info("Restored %s leader action view(s); refreshed %s card(s)", restored, refreshed)
+        log.info(
+            "Restored %s leader action view(s); refreshed %s card(s)",
+            restored,
+            refreshed,
+        )
     return restored
 
 
@@ -682,7 +748,9 @@ async def refresh_leader_action_card(bot: discord.Client, action: dict) -> bool:
 
     try:
         message = await channel.fetch_message(message_id_int)
-        await message.edit(embed=build_leader_action_embed(action), view=leader_action_view_for(action))
+        await message.edit(
+            embed=build_leader_action_embed(action), view=leader_action_view_for(action)
+        )
         return True
     except Exception:
         log.warning(
@@ -701,7 +769,9 @@ def default_test_copy(action_type: str) -> list[str]:
             "TEST ONLY: Discord invite relay interaction check.",
             "TEST ONLY: Do not paste this into Clash Royale.",
         ]
-    return [f"TEST ONLY: {spec.label} interaction check. Do not paste this into Clash Royale."]
+    return [
+        f"TEST ONLY: {spec.label} interaction check. Do not paste this into Clash Royale."
+    ]
 
 
 def default_test_prompt(action_type: str, target_name: str | None = None) -> str:
@@ -721,7 +791,9 @@ def default_test_prompt(action_type: str, target_name: str | None = None) -> str
     return "Share this in-game relay with the clan."
 
 
-async def post_test_leader_action_card(channel, *, action_type: str, target_name: str | None = None) -> dict:
+async def post_test_leader_action_card(
+    channel, *, action_type: str, target_name: str | None = None
+) -> dict:
     clean_type = (action_type or "").strip()
     if clean_type not in ACTION_SPECS:
         raise ValueError(f"unsupported leader action type: {action_type}")
@@ -744,12 +816,19 @@ async def post_test_leader_action_card(channel, *, action_type: str, target_name
         is_test=True,
         ui_version=LEADER_ACTION_UI_VERSION,
         baseline={
-            "member": {"name": target_name or "Test Player", "role": "member", "status": "test"},
+            "member": {
+                "name": target_name or "Test Player",
+                "role": "member",
+                "status": "test",
+            },
             "war_day": {"phase": "test", "untouched_count": 0},
         },
     )
     await post_leader_action_card(channel, action, copy_messages=copies)
-    return await asyncio.to_thread(db.get_leader_action_by_id, action["action_id"]) or action
+    return (
+        await asyncio.to_thread(db.get_leader_action_by_id, action["action_id"])
+        or action
+    )
 
 
 __all__ = [

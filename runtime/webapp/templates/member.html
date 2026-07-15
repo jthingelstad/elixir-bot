@@ -80,7 +80,7 @@
         <td class="num">{{ c.score }}</td>
         <td>
           {% if c.suppressed_reason %}<span class="badge bad">{{ c.suppressed_reason | truncate(36) }}</span>
-          {% elif c.intent_status %}<span class="badge {{ 'good' if c.intent_status == 'fulfilled' else '' }}">{{ c.intent_status }} → {{ c.lane }}</span>
+          {% elif c.intent_id is not none %}<span class="muted">legacy post #{{ c.intent_id }} (archived)</span>
           {% else %}<span class="muted">claimed</span>{% endif %}
         </td>
       </tr>

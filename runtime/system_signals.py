@@ -33,7 +33,7 @@ STARTUP_SYSTEM_SIGNALS = [
                 "- Elixir's voice may feel slightly different as the new models settle in. Same soul, new neurons.\n"
                 "- Responses should be more consistent with Elixir's personality across channels.\n"
                 "- Structured answers (war status, member lookups, roster data) should have fewer formatting hiccups.\n\n"
-                "This is **Elixir v4.0 \"New Brain\"** — same Elixir, sharper mind."
+                'This is **Elixir v4.0 "New Brain"** — same Elixir, sharper mind.'
             ),
             "details": [
                 "Full migration from OpenAI GPT to Anthropic Claude models.",
@@ -66,7 +66,7 @@ STARTUP_SYSTEM_SIGNALS = [
                 "and the four war decks Elixir reconstructs from your river-race battles.\n\n"
                 "**In #ask-elixir:**\n"
                 "- `review my deck` — Elixir cites the specific cards in your recent losses "
-                "(e.g. \"Mega Knight has been in 6 of your last 9 losses\") and proposes swaps you can actually run.\n"
+                '(e.g. "Mega Knight has been in 6 of your last 9 losses") and proposes swaps you can actually run.\n'
                 "- `review my war decks` — reconstructs your four war decks from battle history "
                 "(the Clash Royale API does not show them directly), then reviews each one with the "
                 "no-overlap rule enforced on every swap suggestion.\n"
@@ -79,7 +79,7 @@ STARTUP_SYSTEM_SIGNALS = [
                 "decks from your collection so you can stop staring at the deck-builder screen.\n"
                 "- Building four non-overlapping decks is the most common blocker keeping members out of war. "
                 "Elixir can hand you a kit. Reply `build my war decks` and you are in.\n\n"
-                "This is **Elixir v4.3 \"Deck Review\"** — your decks, your data, your call."
+                'This is **Elixir v4.3 "Deck Review"** — your decks, your data, your call.'
             ),
             "details": [
                 "Deck advice is now grounded in real opponent cards from your recent losses, not generic meta knowledge.",
@@ -119,7 +119,7 @@ STARTUP_SYSTEM_SIGNALS = [
                 "**Under the hood:**\n"
                 "- Elixir's tool layer was consolidated from 51 tools into domain-aligned tools — "
                 "cleaner, faster, and easier to reason about.\n\n"
-                "This is **Elixir v4.2 \"Race Command\"** — sharper eyes on the river."
+                'This is **Elixir v4.2 "Race Command"** — sharper eyes on the river.'
             ),
             "details": [
                 "River Race updates now reference competing clans by name with fame-gap framing.",
@@ -150,10 +150,10 @@ STARTUP_SYSTEM_SIGNALS = [
                 "- `pull up top members of #XYZ` — ranked roster with roles, trophies, and last-seen.\n\n"
                 "**Chaining works:**\n"
                 "- When you ask about a clanmate's recent losses, I can now chain straight into scouting the opponents who beat them — "
-                "their deck, their level, their clan. The data was always close, but the bridge between \"who beat me\" and \"who are they\" was missing. It is there now.\n\n"
+                'their deck, their level, their clan. The data was always close, but the bridge between "who beat me" and "who are they" was missing. It is there now.\n\n'
                 "**Clan Wars Intel Report:**\n"
                 "- The scheduled intel report in #river-race is fully rewired. Same threat ratings and roster analysis, but now driven by the same tool plumbing I use for conversational scouting — one brain, two surfaces.\n\n"
-                "This is **Elixir v4.4 \"Omnipresent\"** — wherever the tag is, I can be there too."
+                'This is **Elixir v4.4 "Omnipresent"** — wherever the tag is, I can be there too.'
             ),
             "details": [
                 "New unified cr_api tool reaches any player, clan, or tournament on the live Clash Royale API by tag.",
@@ -186,7 +186,7 @@ STARTUP_SYSTEM_SIGNALS = [
                 "**Member highlights are consolidated**\n"
                 "- Volatile non-war battle activity and durable progression now land together in **#player-highlights**.\n"
                 "- I still distinguish a live push from a permanent milestone; the difference is in the framing, not another channel to watch.\n\n"
-                "This is **Elixir v4.5 \"Coherent\"** — one mind per tick, watching the whole situation, deciding what's worth your attention."
+                'This is **Elixir v4.5 "Coherent"** — one mind per tick, watching the whole situation, deciding what\'s worth your attention.'
             ),
             "details": [
                 "New per-tick awareness loop replaces per-signal LLM calls — one agent turn sees all signals together and emits a structured post plan.",
@@ -222,11 +222,11 @@ STARTUP_SYSTEM_SIGNALS = [
                 "- **I schedule revisits.** Mid-arc situations — a win streak during battle day, a silent member before Friday — "
                 "I can tell my future self to check back. The revisit surfaces in a later tick and I decide then whether to act.\n"
                 "- **I synthesize the week.** Every Sunday night I read back through the week's signals, posts, and memories, "
-                "write canonical arc memories (\"Week 5 colosseum: the Gareth push\"), retire entries that no longer match "
+                'write canonical arc memories ("Week 5 colosseum: the Gareth push"), retire entries that no longer match '
                 "reality, and flag contradictions for leadership.\n\n"
                 "All writes are leadership-scoped and budget-capped at 3 per tick. The weekly synthesis digest lands in "
                 "#leaders.\n\n"
-                "This is **Elixir v4.6 \"Clan Keep\"** — the keep at the center of the castle, holding what matters."
+                'This is **Elixir v4.6 "Clan Keep"** — the keep at the center of the castle, holding what matters.'
             ),
             "details": [
                 "Awareness write surface: save_clan_memory, flag_member_watch, record_leadership_followup — all leadership-scoped, capped at 3 per tick.",
@@ -265,7 +265,7 @@ STARTUP_SYSTEM_SIGNALS = [
                 "- Every member card now shows a **trophy case** — inline, newest first.\n"
                 "- A new **`/members/trophy/<season>`** page collects every award from every season, with tabs.\n\n"
                 "**In Discord:** each grant fires a fresh `award_earned` signal into #clan-events. Live, durable, and something I'll remember forever.\n\n"
-                "This is **Elixir v4.8 \"Trophy Hall\"** — earn it once, it's yours for good."
+                'This is **Elixir v4.8 "Trophy Hall"** — earn it once, it\'s yours for good.'
             ),
             "details": [
                 "New awards table (migration 30) with UNIQUE(award_type, season_id, section_index, member_id) for idempotent grants.",

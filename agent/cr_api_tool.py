@@ -12,7 +12,6 @@ import cr_api
 from storage._formatting import external_safe_name as _ext
 from storage.game_modes import battle_matches_mode
 
-
 _CR_BATTLES_DEFAULT_LIMIT = 15
 _CR_BATTLES_MAX_LIMIT = 25
 _CR_MEMBERS_DEFAULT_LIMIT = 15
@@ -53,7 +52,9 @@ def _filter_cr_player(payload):
         "donations": payload.get("donations"),
         "donationsReceived": payload.get("donationsReceived"),
         "role": payload.get("role"),
-        "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))} if clan else None,
+        "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))}
+        if clan
+        else None,
         "arena": {"name": arena.get("name")} if arena else None,
         "currentFavouriteCard": fav.get("name") if fav else None,
         "currentDeck": [
@@ -65,9 +66,7 @@ def _filter_cr_player(payload):
             }
             for card in current_deck
         ],
-        "achievements": [
-            a.get("name") for a in achievements if a.get("name")
-        ],
+        "achievements": [a.get("name") for a in achievements if a.get("name")],
     }
 
 
@@ -93,18 +92,25 @@ def _filter_cr_player_battles(payload, *, limit, mode):
             opponent_size=len(battle.get("opponent") or []),
         ):
             continue
-        trimmed.append({
-            "battleTime": battle.get("battleTime"),
-            "type": battle_type,
-            "gameMode": game_mode,
-            "gameModeId": game_mode_id,
-            "deckSelection": battle.get("deckSelection"),
-            "eventTag": battle.get("eventTag"),
-            "tournamentTag": battle.get("tournamentTag"),
-            "arena": (battle.get("arena") or {}).get("name"),
-            "team": [_filter_cr_battle_participant(p) for p in (battle.get("team") or [])],
-            "opponent": [_filter_cr_battle_participant(p) for p in (battle.get("opponent") or [])],
-        })
+        trimmed.append(
+            {
+                "battleTime": battle.get("battleTime"),
+                "type": battle_type,
+                "gameMode": game_mode,
+                "gameModeId": game_mode_id,
+                "deckSelection": battle.get("deckSelection"),
+                "eventTag": battle.get("eventTag"),
+                "tournamentTag": battle.get("tournamentTag"),
+                "arena": (battle.get("arena") or {}).get("name"),
+                "team": [
+                    _filter_cr_battle_participant(p) for p in (battle.get("team") or [])
+                ],
+                "opponent": [
+                    _filter_cr_battle_participant(p)
+                    for p in (battle.get("opponent") or [])
+                ],
+            }
+        )
         if len(trimmed) >= limit:
             break
     return {"battles": trimmed, "count": len(trimmed)}
@@ -117,13 +123,18 @@ def _filter_cr_battle_participant(p):
         "name": _ext(p.get("name")),
         "crowns": p.get("crowns"),
         "trophyChange": p.get("trophyChange"),
-        "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))} if clan else None,
+        "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))}
+        if clan
+        else None,
     }
 
 
 def _filter_cr_player_chests(items):
     names = [chest.get("name") for chest in (items or []) if isinstance(chest, dict)]
-    return {"upcoming": names[:_CR_CHESTS_LIMIT], "count": min(len(names), _CR_CHESTS_LIMIT)}
+    return {
+        "upcoming": names[:_CR_CHESTS_LIMIT],
+        "count": min(len(names), _CR_CHESTS_LIMIT),
+    }
 
 
 def _clan_member_summary(member_list):
@@ -193,7 +204,7 @@ def _filter_cr_clan_members(payload, *, limit):
             "name": _ext(member.get("name")),
             "role": member.get("role"),
             "trophies": member.get("trophies"),
-                "donations": member.get("donations"),
+            "donations": member.get("donations"),
             "donationsReceived": member.get("donationsReceived"),
             "lastSeen": member.get("lastSeen"),
             "clanRank": member.get("clanRank"),
@@ -215,27 +226,33 @@ def _filter_cr_clan_war(payload):
     race_top_participants = []
     for clan in clans:
         participants = clan.get("participants") or []
-        clan_summaries.append({
-            "tag": clan.get("tag"),
-            "name": _ext(clan.get("name")),
-            # QA H18: fame is week-cumulative (the boat); periodPoints is TODAY's
-            # race (what players drive, resets daily) and is the ONLY meaningful
-            # metric on a Colosseum week — the bridge previously dropped it.
-            "fame": clan.get("fame"),
-            "periodPoints": clan.get("periodPoints"),
-            "repairPoints": clan.get("repairPoints"),
-            "participants_count": len(participants),
-        })
+        clan_summaries.append(
+            {
+                "tag": clan.get("tag"),
+                "name": _ext(clan.get("name")),
+                # QA H18: fame is week-cumulative (the boat); periodPoints is TODAY's
+                # race (what players drive, resets daily) and is the ONLY meaningful
+                # metric on a Colosseum week — the bridge previously dropped it.
+                "fame": clan.get("fame"),
+                "periodPoints": clan.get("periodPoints"),
+                "repairPoints": clan.get("repairPoints"),
+                "participants_count": len(participants),
+            }
+        )
         for participant in participants:
-            race_top_participants.append({
-                "tag": participant.get("tag"),
-                "name": _ext(participant.get("name")),
-                "clan_tag": clan.get("tag"),
-                "fame": participant.get("fame"),
-                "decksUsed": participant.get("decksUsed"),
-                "decksUsedToday": participant.get("decksUsedToday"),
-            })
-    race_top_participants.sort(key=lambda participant: participant.get("fame") or 0, reverse=True)
+            race_top_participants.append(
+                {
+                    "tag": participant.get("tag"),
+                    "name": _ext(participant.get("name")),
+                    "clan_tag": clan.get("tag"),
+                    "fame": participant.get("fame"),
+                    "decksUsed": participant.get("decksUsed"),
+                    "decksUsedToday": participant.get("decksUsedToday"),
+                }
+            )
+    race_top_participants.sort(
+        key=lambda participant: participant.get("fame") or 0, reverse=True
+    )
     return {
         "state": payload.get("state"),
         "sectionIndex": payload.get("sectionIndex"),
@@ -265,13 +282,15 @@ def _filter_cr_clan_war_log(payload, *, focal_tag):
                 focal_rank = standing.get("rank")
                 focal_fame = clan.get("fame")
                 break
-        log.append({
-            "seasonId": entry.get("seasonId"),
-            "sectionIndex": entry.get("sectionIndex"),
-            "createdDate": entry.get("createdDate"),
-            "finishRank": focal_rank,
-            "fame": focal_fame,
-        })
+        log.append(
+            {
+                "seasonId": entry.get("seasonId"),
+                "sectionIndex": entry.get("sectionIndex"),
+                "createdDate": entry.get("createdDate"),
+                "finishRank": focal_rank,
+                "fame": focal_fame,
+            }
+        )
     return {"clan_tag": focal_tag_hash, "races": log, "count": len(log)}
 
 
@@ -289,7 +308,9 @@ def _filter_cr_tournament(payload, *, limit):
             "clan": {
                 "tag": (member.get("clan") or {}).get("tag"),
                 "name": _ext((member.get("clan") or {}).get("name")),
-            } if member.get("clan") else None,
+            }
+            if member.get("clan")
+            else None,
         }
         for member in members[:limit]
     ]
@@ -323,11 +344,13 @@ def _filter_cr_events(payload):
     for event in payload or []:
         if not isinstance(event, dict):
             continue
-        events.append({
-            "eventTag": event.get("eventTag"),
-            "title": event.get("title"),
-            "description": event.get("description"),
-        })
+        events.append(
+            {
+                "eventTag": event.get("eventTag"),
+                "title": event.get("title"),
+                "description": event.get("description"),
+            }
+        )
     return {"events": events, "count": len(events)}
 
 
@@ -339,13 +362,17 @@ def _filter_cr_ranking_list(payload, *, limit, score_field="eloRating"):
         if not isinstance(item, dict):
             continue
         clan = item.get("clan") or {}
-        rows.append({
-            "rank": item.get("rank"),
-            "tag": item.get("tag"),
-            "name": item.get("name"),
+        rows.append(
+            {
+                "rank": item.get("rank"),
+                "tag": item.get("tag"),
+                "name": item.get("name"),
                 score_field: item.get(score_field),
-            "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))} if clan else None,
-        })
+                "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))}
+                if clan
+                else None,
+            }
+        )
         if len(rows) >= limit:
             break
     return {"items": rows, "count": len(rows)}
@@ -369,13 +396,17 @@ def _filter_cr_leaderboard(payload, *, limit):
         if not isinstance(item, dict):
             continue
         clan = item.get("clan") or {}
-        rows.append({
-            "rank": item.get("rank"),
-            "score": item.get("score"),
-            "tag": item.get("tag"),
-            "name": _ext(item.get("name")),
-            "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))} if clan else None,
-        })
+        rows.append(
+            {
+                "rank": item.get("rank"),
+                "score": item.get("score"),
+                "tag": item.get("tag"),
+                "name": _ext(item.get("name")),
+                "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))}
+                if clan
+                else None,
+            }
+        )
         if len(rows) >= limit:
             break
     return {"items": rows, "count": len(rows)}
@@ -391,8 +422,13 @@ def _execute_cr_api(arguments):
     # QA L23: every aspect is TTL-cached (up to 600s for the river-race log) but
     # carried no fetch timestamp — stamp when the bridge returned so the brain
     # can age external data. Only on successful dict payloads (not error dicts).
-    if isinstance(result, dict) and "error" not in result and "observed_at" not in result:
+    if (
+        isinstance(result, dict)
+        and "error" not in result
+        and "observed_at" not in result
+    ):
         from datetime import datetime, timezone
+
         result["observed_at"] = datetime.now(timezone.utc).isoformat()
     try:
         from engine.normalize import annotate
@@ -410,22 +446,42 @@ def _execute_cr_api_inner(arguments):
     limit = arguments.get("limit")
     if aspect == "events":
         payload = cr_api.get_events()
-        return _filter_cr_events(payload) if payload is not None else {"error": "not_found_or_unavailable"}
+        return (
+            _filter_cr_events(payload)
+            if payload is not None
+            else {"error": "not_found_or_unavailable"}
+        )
     if aspect == "pathoflegend_location_rankings":
-        payload = cr_api.get_pathoflegend_location_rankings(arguments.get("location_id") or "global", limit=limit or 20)
-        return _filter_cr_ranking_list(payload, limit=limit) if payload is not None else {"error": "not_found_or_unavailable"}
+        payload = cr_api.get_pathoflegend_location_rankings(
+            arguments.get("location_id") or "global", limit=limit or 20
+        )
+        return (
+            _filter_cr_ranking_list(payload, limit=limit)
+            if payload is not None
+            else {"error": "not_found_or_unavailable"}
+        )
     if aspect == "pathoflegend_season_rankings":
         season_id = arguments.get("season_id")
         if not season_id:
             return {"error": "season_id is required"}
         try:
-            payload = cr_api.get_pathoflegend_season_rankings(season_id, limit=limit or 20)
+            payload = cr_api.get_pathoflegend_season_rankings(
+                season_id, limit=limit or 20
+            )
         except cr_api.InvalidTagError as exc:
             return {"error": "invalid_season_id", "detail": str(exc)}
-        return _filter_cr_ranking_list(payload, limit=limit) if payload is not None else {"error": "not_found_or_unavailable"}
+        return (
+            _filter_cr_ranking_list(payload, limit=limit)
+            if payload is not None
+            else {"error": "not_found_or_unavailable"}
+        )
     if aspect == "leaderboards":
         payload = cr_api.get_leaderboards()
-        return _filter_cr_leaderboards(payload) if payload is not None else {"error": "not_found_or_unavailable"}
+        return (
+            _filter_cr_leaderboards(payload)
+            if payload is not None
+            else {"error": "not_found_or_unavailable"}
+        )
     if aspect == "leaderboard":
         leaderboard_id = arguments.get("leaderboard_id")
         if leaderboard_id is None:
@@ -434,7 +490,11 @@ def _execute_cr_api_inner(arguments):
             payload = cr_api.get_leaderboard(leaderboard_id, limit=limit or 20)
         except cr_api.InvalidTagError as exc:
             return {"error": "invalid_leaderboard_id", "detail": str(exc)}
-        return _filter_cr_leaderboard(payload, limit=limit) if payload is not None else {"error": "not_found_or_unavailable"}
+        return (
+            _filter_cr_leaderboard(payload, limit=limit)
+            if payload is not None
+            else {"error": "not_found_or_unavailable"}
+        )
 
     raw_tag = arguments.get("tag")
     try:
@@ -452,28 +512,60 @@ def _execute_cr_api_inner(arguments):
 
     if aspect == "player":
         payload = cr_api.get_player(normalized_tag)
-        return _filter_cr_player(payload) if payload else {"error": "not_found_or_unavailable"}
+        return (
+            _filter_cr_player(payload)
+            if payload
+            else {"error": "not_found_or_unavailable"}
+        )
     if aspect == "player_battles":
         payload = cr_api.get_player_battle_log(normalized_tag)
-        return _filter_cr_player_battles(payload, limit=limit, mode=mode) if payload is not None else {"error": "not_found_or_unavailable"}
+        return (
+            _filter_cr_player_battles(payload, limit=limit, mode=mode)
+            if payload is not None
+            else {"error": "not_found_or_unavailable"}
+        )
     if aspect == "player_chests":
         payload = cr_api.get_player_chests(normalized_tag)
-        return _filter_cr_player_chests(payload) if payload is not None else {"error": "not_found_or_unavailable"}
+        return (
+            _filter_cr_player_chests(payload)
+            if payload is not None
+            else {"error": "not_found_or_unavailable"}
+        )
     if aspect == "clan":
         payload = cr_api.get_clan_by_tag(normalized_tag)
-        return _filter_cr_clan(payload) if payload else {"error": "not_found_or_unavailable"}
+        return (
+            _filter_cr_clan(payload)
+            if payload
+            else {"error": "not_found_or_unavailable"}
+        )
     if aspect == "clan_members":
         payload = cr_api.get_clan_by_tag(normalized_tag)
-        return _filter_cr_clan_members(payload, limit=limit) if payload else {"error": "not_found_or_unavailable"}
+        return (
+            _filter_cr_clan_members(payload, limit=limit)
+            if payload
+            else {"error": "not_found_or_unavailable"}
+        )
     if aspect == "clan_war":
         payload = cr_api.get_current_war(normalized_tag)
-        return _filter_cr_clan_war(payload) if payload else {"error": "not_found_or_unavailable"}
+        return (
+            _filter_cr_clan_war(payload)
+            if payload
+            else {"error": "not_found_or_unavailable"}
+        )
     if aspect == "clan_war_log":
         payload = cr_api.get_river_race_log(normalized_tag)
-        return _filter_cr_clan_war_log(payload, focal_tag=normalized_tag) if payload else {"error": "not_found_or_unavailable"}
+        return (
+            _filter_cr_clan_war_log(payload, focal_tag=normalized_tag)
+            if payload
+            else {"error": "not_found_or_unavailable"}
+        )
     if aspect == "tournament":
         payload = cr_api.get_tournament(normalized_tag)
-        return _filter_cr_tournament(payload, limit=limit) if payload else {"error": "not_found_or_unavailable"}
+        return (
+            _filter_cr_tournament(payload, limit=limit)
+            if payload
+            else {"error": "not_found_or_unavailable"}
+        )
 
     return {"error": f"Unknown aspect: {aspect}"}
 

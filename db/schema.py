@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 
 _V1_STATEMENTS = (
@@ -26,8 +26,7 @@ _V1_STATEMENTS = (
         chose_silence INTEGER NOT NULL DEFAULT 0,
         post_count INTEGER NOT NULL DEFAULT 0,
         skipped_reason TEXT,
-        model TEXT,
-        shadow INTEGER NOT NULL DEFAULT 0
+        model TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS idx_awareness_thoughts_at ON awareness_thoughts(at DESC)",
     """CREATE TABLE IF NOT EXISTS watches (
@@ -49,8 +48,7 @@ _V1_STATEMENTS = (
         covers_json TEXT NOT NULL DEFAULT '[]',
         loop_number INTEGER,
         posted_at TEXT NOT NULL,
-        discord_message_id TEXT UNIQUE,
-        legacy_intent_id INTEGER UNIQUE
+        discord_message_id TEXT UNIQUE
     )""",
     "CREATE INDEX IF NOT EXISTS idx_awareness_posts_lane ON awareness_posts(lane, posted_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_awareness_posts_at ON awareness_posts(posted_at DESC)",
@@ -104,16 +102,6 @@ _V1_STATEMENTS = (
         recorded_at TEXT NOT NULL,
         counters_json TEXT NOT NULL
     )""",
-    """CREATE TABLE IF NOT EXISTS editor_verdicts (
-        verdict_id INTEGER PRIMARY KEY,
-        intent_id INTEGER NOT NULL,
-        verdict TEXT NOT NULL CHECK (verdict IN ('pass','revise','fallback','error')),
-        dimensions_json TEXT,
-        original_copy TEXT,
-        final_copy TEXT,
-        at TEXT NOT NULL
-    )""",
-    "CREATE INDEX IF NOT EXISTS idx_editor_verdicts_intent ON editor_verdicts(intent_id)",
     """CREATE TABLE IF NOT EXISTS pol_seasons (
         pol_season_id TEXT PRIMARY KEY,
         started_at TEXT,
@@ -212,7 +200,10 @@ REQUIRED_SCHEMA = {
     "watches": {"watch_id", "status"},
     "players": {"player_tag", "display_name"},
     "player_metadata": {
-        "player_tag", "email", "email_verified_at", "email_source",
+        "player_tag",
+        "email",
+        "email_verified_at",
+        "email_source",
         "cr_years_celebrated",
     },
     "player_current_state": {"player_tag", "last_seen_api"},
@@ -225,7 +216,6 @@ REQUIRED_SCHEMA = {
     "evergreen_nudges": {"nudge_key", "last_sent_at"},
     "email_verifications": {"player_tag", "code_hash", "expires_at"},
     "tick_history": {"tick_id", "counters_json"},
-    "editor_verdicts": {"verdict_id", "intent_id"},
     "pol_seasons": {"pol_season_id", "closed"},
     "pol_season_results": {"pol_season_id", "player_tag"},
     "memories": {"memory_id", "kind", "scope"},
@@ -255,9 +245,7 @@ def _add_v1_columns(conn: sqlite3.Connection) -> None:
         columns = _columns(conn, table)
         for column, declaration in additions:
             if column not in columns:
-                conn.execute(
-                    f"ALTER TABLE {table} ADD COLUMN {column} {declaration}"
-                )
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
                 columns.add(column)
 
 
@@ -300,7 +288,7 @@ def _backfill_v1(conn: sqlite3.Connection) -> None:
         conn.execute(
             "INSERT OR IGNORE INTO awareness_posts "
             "(lane, content_preview, covers_json, loop_number, posted_at, "
-            "discord_message_id, legacy_intent_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "discord_message_id) VALUES (?, ?, ?, ?, ?, ?)",
             (
                 row[1],
                 str(payload.get("content") or "")[:800],
@@ -308,8 +296,61 @@ def _backfill_v1(conn: sqlite3.Connection) -> None:
                 payload.get("loop_number"),
                 row[4] or row[3],
                 row[5],
-                row[0],
             ),
+        )
+
+
+def _apply_v2(conn: sqlite3.Connection) -> None:
+    """Remove retired proactive-delivery storage from the live schema.
+
+    The deterministic recognizer remains available to explicit offline
+    rehearsals, which create a connection-local TEMP queue. Production keeps
+    only the durable recognition ledger (including intentless award claims)
+    and the awareness-native thought/post history.
+    """
+    tables = _tables(conn)
+    conn.execute("DROP TABLE IF EXISTS editor_verdicts")
+    conn.execute("DROP TABLE IF EXISTS communication_intents")
+
+    if "awareness_thoughts" in tables and "shadow" in _columns(
+        conn, "awareness_thoughts"
+    ):
+        conn.execute("ALTER TABLE awareness_thoughts DROP COLUMN shadow")
+
+    if "awareness_posts" in tables and "legacy_intent_id" in _columns(
+        conn, "awareness_posts"
+    ):
+        # SQLite cannot DROP a column carrying a UNIQUE constraint. Rebuild
+        # this small history table while preserving its stable post ids.
+        conn.execute("DROP INDEX IF EXISTS idx_awareness_posts_lane")
+        conn.execute("DROP INDEX IF EXISTS idx_awareness_posts_at")
+        conn.execute("ALTER TABLE awareness_posts RENAME TO awareness_posts_v1")
+        conn.execute(
+            """CREATE TABLE awareness_posts (
+                post_id INTEGER PRIMARY KEY,
+                lane TEXT NOT NULL,
+                content_preview TEXT NOT NULL,
+                covers_json TEXT NOT NULL DEFAULT '[]',
+                loop_number INTEGER,
+                posted_at TEXT NOT NULL,
+                discord_message_id TEXT UNIQUE
+            )"""
+        )
+        conn.execute(
+            """INSERT INTO awareness_posts
+                   (post_id, lane, content_preview, covers_json, loop_number,
+                    posted_at, discord_message_id)
+               SELECT post_id, lane, content_preview, covers_json, loop_number,
+                      posted_at, discord_message_id
+               FROM awareness_posts_v1"""
+        )
+        conn.execute("DROP TABLE awareness_posts_v1")
+        conn.execute(
+            "CREATE INDEX idx_awareness_posts_lane "
+            "ON awareness_posts(lane, posted_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX idx_awareness_posts_at ON awareness_posts(posted_at DESC)"
         )
 
 
@@ -331,14 +372,21 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
                 "ON awareness_thoughts(loop_number DESC)"
             )
             _backfill_v1(conn)
-            conn.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
-            assert_current_schema(conn)
+            conn.execute("PRAGMA user_version = 1")
             conn.commit()
         except Exception:
             conn.rollback()
             raise
-    else:
-        assert_current_schema(conn)
+        version = 1
+    if version < 2:
+        try:
+            _apply_v2(conn)
+            conn.execute("PRAGMA user_version = 2")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    assert_current_schema(conn)
 
 
 def assert_current_schema(conn: sqlite3.Connection) -> None:
@@ -365,7 +413,9 @@ def assert_current_schema(conn: sqlite3.Connection) -> None:
 
 
 def require_columns(
-    conn: sqlite3.Connection, table: str, columns: set[str] | tuple[str, ...],
+    conn: sqlite3.Connection,
+    table: str,
+    columns: set[str] | tuple[str, ...],
 ) -> None:
     """Cheap domain-boundary assertion for compatibility ``ensure_*`` calls."""
     missing = set(columns) - _columns(conn, table)
@@ -394,7 +444,9 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "d1082f3d0bf73307a384ff9c1fb6d6e7bd439a67a34ea8f4ae2ef640f008cf86"
+CURRENT_SCHEMA_FINGERPRINT = (
+    "a359f4eae62a8aba4a6bba6c0bef3e7341d9260369fb6f3c9298c18c453745a4"
+)
 
 
 __all__ = [

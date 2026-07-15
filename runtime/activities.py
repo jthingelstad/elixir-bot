@@ -24,7 +24,6 @@ class ActivityDefinition:
     manual_trigger_allowed: bool = True
     enabled_by_default: bool = True
     active_window: dict[str, Any] | None = None
-    legacy_commands: tuple[str, ...] = ()
 
 
 def _attr(name: str, default: Any = None) -> RuntimeAttrRef:
@@ -52,7 +51,6 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "action cards only when management transitions require them",
         ),
         activity_role="observer",
-        legacy_commands=("v5-reactive-tick",),
     ),
     ActivityDefinition(
         activity_key="weekly-leadership-review",
@@ -65,18 +63,15 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         job_function="_weekly_leadership_review",
         schedule_kind="cron",
         schedule_config={
-            "day_of_week": _attr("WEEKLY_REVIEW_DAY", "tue"),
+            "day_of_week": _attr("WEEKLY_REVIEW_DAY", "mon"),
             "hour": _attr("WEEKLY_REVIEW_HOUR", 7),
             "minute": _attr("WEEKLY_REVIEW_MINUTE", 0),
             "timezone": "America/Chicago",
             "max_instances": 1,
             "coalesce": True,
         },
-        delivery_targets=(
-            "Discord: #actions weekly review + recommendation cards",
-        ),
+        delivery_targets=("Discord: #actions weekly review + recommendation cards",),
         activity_role="observer+communicator",
-        legacy_commands=("leadership-actions",),
     ),
     ActivityDefinition(
         activity_key="war-attendance-snapshot",
@@ -94,9 +89,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "max_instances": 1,
             "coalesce": True,
         },
-        delivery_targets=(
-            "Storage: finalized war_attendance_days rows",
-        ),
+        delivery_targets=("Storage: finalized war_attendance_days rows",),
         activity_role="observer",
         manual_trigger_allowed=False,
     ),
@@ -115,9 +108,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "max_instances": 1,
             "coalesce": True,
         },
-        delivery_targets=(
-            "Storage: leader-action outcome/feedback rows",
-        ),
+        delivery_targets=("Storage: leader-action outcome/feedback rows",),
         activity_role="observer",
     ),
     ActivityDefinition(
@@ -131,9 +122,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "hour": _attr("ASK_ELIXIR_DAILY_INSIGHT_HOUR", 12),
             "minute": _attr("ASK_ELIXIR_DAILY_INSIGHT_MINUTE", 0),
         },
-        delivery_targets=(
-            "Discord: #ask-elixir",
-        ),
+        delivery_targets=("Discord: #ask-elixir",),
         activity_role="communicator",
     ),
     ActivityDefinition(
@@ -156,7 +145,6 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "Discord: #actions in-game-relay nudge card (quiet periods only)",
         ),
         activity_role="communicator",
-        legacy_commands=("discord-invite-relay",),
     ),
     ActivityDefinition(
         activity_key="memory-synthesis",
@@ -170,9 +158,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "hour": _attr("MEMORY_SYNTHESIS_HOUR", 22),
             "minute": 0,
         },
-        delivery_targets=(
-            "Discord: #leaders",
-        ),
+        delivery_targets=("Discord: #leaders",),
         activity_role="observer+communicator",
     ),
     ActivityDefinition(
@@ -187,9 +173,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "hour": _attr("WEEKLY_RECAP_HOUR", 9),
             "minute": 0,
         },
-        delivery_targets=(
-            "Discord: #announcements",
-        ),
+        delivery_targets=("Discord: #announcements",),
         activity_role="communicator",
     ),
     ActivityDefinition(
@@ -206,9 +190,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "hour": _attr("WEEKLY_MEMBER_REPORT_HOUR", 10),
             "minute": 0,
         },
-        delivery_targets=(
-            "Email: each member (To:, individual)",
-        ),
+        delivery_targets=("Email: each member (To:, individual)",),
         activity_role="communicator",
     ),
     ActivityDefinition(
@@ -226,9 +208,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "hour": _attr("WEEKLY_ELDER_STANDING_HOUR", 12),
             "minute": 0,
         },
-        delivery_targets=(
-            "Discord: #announcements",
-        ),
+        delivery_targets=("Discord: #announcements",),
         activity_role="communicator",
     ),
     # site-content (POAP KINGS website publishing) was removed entirely 2026-06-21
@@ -245,11 +225,8 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "hour": _attr("PROMOTION_CONTENT_HOUR", 9),
             "minute": 0,
         },
-        delivery_targets=(
-            "Discord: #recruiting",
-        ),
+        delivery_targets=("Discord: #recruiting",),
         activity_role="communicator",
-        legacy_commands=("promotion",),
     ),
     ActivityDefinition(
         activity_key="card-catalog-sync",
@@ -262,9 +239,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "hour": _attr("CARD_CATALOG_SYNC_HOUR", 4),
             "minute": 0,
         },
-        delivery_targets=(
-            "Storage: card_catalog table",
-        ),
+        delivery_targets=("Storage: card_catalog table",),
         activity_role="observer",
     ),
     ActivityDefinition(
@@ -316,9 +291,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "hour": 8,
             "minute": 23,
         },
-        delivery_targets=(
-            "Discord: #elixir-log on failed checks only",
-        ),
+        delivery_targets=("Discord: #elixir-log on failed checks only",),
         activity_role="observer",
     ),
     # editorial-sweep + editorial-review retired 2026-07-10 with the Editor: the
@@ -336,9 +309,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "hour": _attr("DB_MAINTENANCE_HOUR", 2),
             "minute": 0,
         },
-        delivery_targets=(
-            "Discord webhook: #elixir-log",
-        ),
+        delivery_targets=("Discord webhook: #elixir-log",),
         activity_role="observer+communicator",
     ),
     ActivityDefinition(
@@ -354,13 +325,10 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "hour": 12,
             "minute": 0,
         },
-        delivery_targets=(
-            "Discord: #elixir",
-        ),
+        delivery_targets=("Discord: #elixir",),
         activity_role="communicator",
         manual_trigger_allowed=True,
         enabled_by_default=False,
-        legacy_commands=("intel-report",),
     ),
     ActivityDefinition(
         activity_key="awareness-loop",
@@ -404,8 +372,6 @@ def _activity_aliases() -> dict[str, str]:
         aliases[activity.activity_key] = activity.activity_key
         aliases[activity.job_id] = activity.activity_key
         aliases[activity.job_function] = activity.activity_key
-        for alias in activity.legacy_commands:
-            aliases[alias] = activity.activity_key
     return aliases
 
 
@@ -431,7 +397,9 @@ def _resolve_runtime_value(value: Any, runtime_module: Any) -> Any:
     return value
 
 
-def _resolve_mapping(values: dict[str, Any] | None, runtime_module: Any) -> dict[str, Any]:
+def _resolve_mapping(
+    values: dict[str, Any] | None, runtime_module: Any
+) -> dict[str, Any]:
     resolved: dict[str, Any] = {}
     for key, value in (values or {}).items():
         resolved[key] = _resolve_runtime_value(value, runtime_module)
@@ -453,7 +421,9 @@ def resolve_activity(activity_key: str, runtime_module: Any) -> dict[str, Any]:
         "job_callable": getattr(runtime_module, activity.job_function),
         "schedule_kind": activity.schedule_kind,
         "schedule_config": _resolve_mapping(activity.schedule_config, runtime_module),
-        "active_window": _resolve_mapping(activity.active_window, runtime_module) if activity.active_window else None,
+        "active_window": _resolve_mapping(activity.active_window, runtime_module)
+        if activity.active_window
+        else None,
         "delivery_targets": list(activity.delivery_targets),
         "manual_trigger_allowed": activity.manual_trigger_allowed,
         "enabled_by_default": activity.enabled_by_default,
@@ -518,7 +488,11 @@ def schedule_specs_from_registry(runtime_module: Any) -> list[dict[str, Any]]:
 
 
 def manual_activity_commands() -> list[str]:
-    return [activity.activity_key for activity in _ACTIVITIES if activity.manual_trigger_allowed]
+    return [
+        activity.activity_key
+        for activity in _ACTIVITIES
+        if activity.manual_trigger_allowed
+    ]
 
 
 def manual_activity_choices() -> list[tuple[str, str]]:
@@ -526,12 +500,13 @@ def manual_activity_choices() -> list[tuple[str, str]]:
     for activity in _ACTIVITIES:
         if not activity.manual_trigger_allowed:
             continue
-        legacy = f" [{activity.legacy_commands[0]}]" if activity.legacy_commands else ""
-        labels.append((f"{activity.activity_key}{legacy}", activity.activity_key))
+        labels.append((activity.activity_key, activity.activity_key))
     return labels
 
 
-def register_scheduled_activities(*, scheduler: Any, runtime_module: Any, create_task: Any) -> list[dict[str, Any]]:
+def register_scheduled_activities(
+    *, scheduler: Any, runtime_module: Any, create_task: Any
+) -> list[dict[str, Any]]:
     registered: list[dict[str, Any]] = []
     for activity in _ACTIVITIES:
         if not activity.enabled_by_default:

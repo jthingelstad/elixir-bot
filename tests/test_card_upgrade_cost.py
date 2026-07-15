@@ -6,6 +6,7 @@ per-rarity upgrade tables; using the display level indexed the wrong row (or
 past the table end -> a spurious None), mispricing ~75% of cards and hiding
 ready-to-upgrade cards clan-wide.
 """
+
 from __future__ import annotations
 
 from cr_knowledge import cards_required_to_upgrade
@@ -26,6 +27,12 @@ def test_ready_required_falls_back_to_level_when_api_level_absent():
 
 
 def test_ready_required_none_when_maxed():
-    card = {"rarity": "common", "level": 16, "api_level": 14, "maxLevel": 16,
-            "api_max_level": 14, "count": 0}
+    card = {
+        "rarity": "common",
+        "level": 16,
+        "api_level": 14,
+        "maxLevel": 16,
+        "api_max_level": 14,
+        "count": 0,
+    }
     assert _ready_required(card) is None

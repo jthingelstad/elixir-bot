@@ -58,8 +58,11 @@ def _render():
         "header": "🧠 AWARENESS (SHADOW — nothing posted) · Loop #7",
         "outcome": "posted",
         "color": 0x2ECC71,
-        "fields": {"Read": "lanes: war 1", "Thinking": "1 tool call(s)",
-                   "Decision": "1 intended post(s): #river-race"},
+        "fields": {
+            "Read": "lanes: war 1",
+            "Thinking": "1 tool call(s)",
+            "Decision": "1 intended post(s): #river-race",
+        },
         "thread_name": "Loop #7 · posted",
         "thread_chunks": ["decision chunk one", "decision chunk two"],
     }
@@ -74,13 +77,22 @@ def _run_stream(channel, monkeypatch, events):
 
 def test_stream_opens_thread_appends_live_then_finalizes(monkeypatch):
     channel = _FakeChannel()
-    _run_stream(channel, monkeypatch, [
-        {"type": "start", "read_summary": "lanes: war 1"},
-        {"type": "tool", "tool": "get_member", "args": "#ABC", "result": "ok · 5 keys"},
-        {"type": "truncation", "phase": "initial_response", "max_tokens": 8192},
-        {"type": "retry", "reason": "truncation", "max_tokens": 16384},
-        {"type": "end", "render": _render(), "loop_number": 7},
-    ])
+    _run_stream(
+        channel,
+        monkeypatch,
+        [
+            {"type": "start", "read_summary": "lanes: war 1"},
+            {
+                "type": "tool",
+                "tool": "get_member",
+                "args": "#ABC",
+                "result": "ok · 5 keys",
+            },
+            {"type": "truncation", "phase": "initial_response", "max_tokens": 8192},
+            {"type": "retry", "reason": "truncation", "max_tokens": 16384},
+            {"type": "end", "render": _render(), "loop_number": 7},
+        ],
+    )
 
     # One header message with a thread.
     assert len(channel.messages) == 1
@@ -111,7 +123,9 @@ def test_stream_missing_channel_is_safe_noop(monkeypatch):
     app._thinking_session.clear()
     # Must not raise even with no channel.
     asyncio.run(app._awareness_event({"type": "start", "read_summary": "x"}))
-    asyncio.run(app._awareness_event({"type": "end", "render": _render(), "loop_number": 7}))
+    asyncio.run(
+        app._awareness_event({"type": "end", "render": _render(), "loop_number": 7})
+    )
 
 
 def test_tool_event_before_start_is_ignored(monkeypatch):

@@ -82,7 +82,10 @@ def _guild(*emojis):
 
 def test_resolve_custom_emoji_rewrites_known_shortcodes():
     guild = _guild(("elixir_trophy", 1001))
-    assert _resolve_custom_emoji(":elixir_trophy: win", guild) == "<:elixir_trophy:1001> win"
+    assert (
+        _resolve_custom_emoji(":elixir_trophy: win", guild)
+        == "<:elixir_trophy:1001> win"
+    )
 
 
 def test_resolve_custom_emoji_strips_hallucinated_names():

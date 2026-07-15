@@ -20,6 +20,7 @@ def _awareness_max_rounds() -> int:
     except ValueError:
         return 6
 
+
 ModelFamily = Literal["chat", "promotion", "lightweight", "intensive"]
 
 
@@ -58,40 +59,65 @@ TOOL_DEFINITIONS = []
 for _tool in TOOLS:
     _name = _tool["name"]
     _side_effect = "write" if _name in _WRITE_TOOL_NAMES else "read"
-    TOOL_DEFINITIONS.append({
-        "tool": _tool,
-        "name": _name,
-        "side_effect": _side_effect,
-    })
+    TOOL_DEFINITIONS.append(
+        {
+            "tool": _tool,
+            "name": _name,
+            "side_effect": _side_effect,
+        }
+    )
 
 TOOL_DEFINITIONS_BY_NAME = {d["name"]: d for d in TOOL_DEFINITIONS}
 
 READ_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "read"]
 WRITE_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "write"]
 ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
-READ_TOOLS_NO_EXTERNAL = [t for t in READ_TOOLS if t["name"] not in EXTERNAL_LOOKUP_TOOL_NAMES]
+READ_TOOLS_NO_EXTERNAL = [
+    t for t in READ_TOOLS if t["name"] not in EXTERNAL_LOOKUP_TOOL_NAMES
+]
 
 _INTEL_REPORT_TOOL_NAMES = {"cr_api", "get_clan_intel_report"}
 INTEL_REPORT_TOOLS = [t for t in READ_TOOLS if t["name"] in _INTEL_REPORT_TOOL_NAMES]
 
 _TOURNAMENT_RECAP_TOOL_NAMES = {"cr_api"}
-TOURNAMENT_RECAP_TOOLS = [t for t in READ_TOOLS if t["name"] in _TOURNAMENT_RECAP_TOOL_NAMES]
+TOURNAMENT_RECAP_TOOLS = [
+    t for t in READ_TOOLS if t["name"] in _TOURNAMENT_RECAP_TOOL_NAMES
+]
 
 _TOURNAMENT_UPDATE_TOOL_NAMES = {"cr_api"}
-TOURNAMENT_UPDATE_TOOLS = [t for t in READ_TOOLS if t["name"] in _TOURNAMENT_UPDATE_TOOL_NAMES]
+TOURNAMENT_UPDATE_TOOLS = [
+    t for t in READ_TOOLS if t["name"] in _TOURNAMENT_UPDATE_TOOL_NAMES
+]
 
 INTERACTIVE_READ_TOOLS = READ_TOOLS
 AWARENESS_TOOLS = READ_TOOLS + [
-    d["tool"] for d in TOOL_DEFINITIONS
-    if d["name"] in AWARENESS_WRITE_TOOL_NAMES
+    d["tool"] for d in TOOL_DEFINITIONS if d["name"] in AWARENESS_WRITE_TOOL_NAMES
 ]
 
 _CHANNEL_SCHEMA = {"required": ["event_type", "summary", "content"]}
 
 _WORKFLOW_SPECS = (
-    WorkflowSpec("channel_update", response_schema=_CHANNEL_SCHEMA, tools=READ_TOOLS, max_tool_rounds=6, model_family="chat"),
-    WorkflowSpec("channel_update_leadership", response_schema=_CHANNEL_SCHEMA, tools=READ_TOOLS, max_tool_rounds=6, model_family="chat"),
-    WorkflowSpec("interactive", response_schema=_CHANNEL_SCHEMA, tools=INTERACTIVE_READ_TOOLS, max_tool_rounds=4, model_family="chat"),
+    WorkflowSpec(
+        "channel_update",
+        response_schema=_CHANNEL_SCHEMA,
+        tools=READ_TOOLS,
+        max_tool_rounds=6,
+        model_family="chat",
+    ),
+    WorkflowSpec(
+        "channel_update_leadership",
+        response_schema=_CHANNEL_SCHEMA,
+        tools=READ_TOOLS,
+        max_tool_rounds=6,
+        model_family="chat",
+    ),
+    WorkflowSpec(
+        "interactive",
+        response_schema=_CHANNEL_SCHEMA,
+        tools=INTERACTIVE_READ_TOOLS,
+        max_tool_rounds=4,
+        model_family="chat",
+    ),
     WorkflowSpec(
         "clanops",
         response_schema=_CHANNEL_SCHEMA,
@@ -114,11 +140,39 @@ _WORKFLOW_SPECS = (
         tools=READ_TOOLS_NO_EXTERNAL,
         max_tool_rounds=3,
     ),
-    WorkflowSpec("deck_review", response_schema=_CHANNEL_SCHEMA, tools=INTERACTIVE_READ_TOOLS, max_tool_rounds=10, model_family="chat"),
-    WorkflowSpec("arena_relay_observation", response_schema=_CHANNEL_SCHEMA, tools=READ_TOOLS, max_tool_rounds=4),
-    WorkflowSpec("intel_report", response_schema=_CHANNEL_SCHEMA, tools=INTEL_REPORT_TOOLS, max_tool_rounds=15, model_family="intensive"),
-    WorkflowSpec("tournament_recap", response_schema={"required": ["content"]}, tools=TOURNAMENT_RECAP_TOOLS, max_tool_rounds=8, model_family="intensive"),
-    WorkflowSpec("tournament_update", response_schema=_CHANNEL_SCHEMA, tools=TOURNAMENT_UPDATE_TOOLS, max_tool_rounds=4),
+    WorkflowSpec(
+        "deck_review",
+        response_schema=_CHANNEL_SCHEMA,
+        tools=INTERACTIVE_READ_TOOLS,
+        max_tool_rounds=10,
+        model_family="chat",
+    ),
+    WorkflowSpec(
+        "arena_relay_observation",
+        response_schema=_CHANNEL_SCHEMA,
+        tools=READ_TOOLS,
+        max_tool_rounds=4,
+    ),
+    WorkflowSpec(
+        "intel_report",
+        response_schema=_CHANNEL_SCHEMA,
+        tools=INTEL_REPORT_TOOLS,
+        max_tool_rounds=15,
+        model_family="intensive",
+    ),
+    WorkflowSpec(
+        "tournament_recap",
+        response_schema={"required": ["content"]},
+        tools=TOURNAMENT_RECAP_TOOLS,
+        max_tool_rounds=8,
+        model_family="intensive",
+    ),
+    WorkflowSpec(
+        "tournament_update",
+        response_schema=_CHANNEL_SCHEMA,
+        tools=TOURNAMENT_UPDATE_TOOLS,
+        max_tool_rounds=4,
+    ),
     WorkflowSpec(
         "awareness",
         response_schema={"required": ["posts"]},
@@ -152,7 +206,9 @@ _WORKFLOW_SPECS = (
     ),
     WorkflowSpec(
         "memory_synthesis",
-        response_schema={"required": ["arc_memories", "stale_memory_ids", "contradictions", "digest"]},
+        response_schema={
+            "required": ["arc_memories", "stale_memory_ids", "contradictions", "digest"]
+        },
         tools=[],
         max_tool_rounds=2,
         model_family="intensive",
@@ -160,7 +216,15 @@ _WORKFLOW_SPECS = (
     ),
     WorkflowSpec(
         "leader_action_feedback",
-        response_schema={"required": ["action_type", "sample_count", "summary", "guidance", "evidence"]},
+        response_schema={
+            "required": [
+                "action_type",
+                "sample_count",
+                "summary",
+                "guidance",
+                "evidence",
+            ]
+        },
         tools=[],
         max_tool_rounds=1,
         model_family="intensive",
@@ -179,33 +243,46 @@ _WORKFLOW_SPECS = (
     # weekly_digest: brain-powered Weekly Clan Recap (rebuilt 2026-07-11 to
     # compose from the awareness read via tools, like ask_elixir_daily). The
     # workflow key stays "weekly_digest" for lane-routing stability.
-    WorkflowSpec("weekly_digest", response_schema={"required": ["recap"]},
-                 tools=INTERACTIVE_READ_TOOLS, max_tool_rounds=6, model_family="intensive"),
+    WorkflowSpec(
+        "weekly_digest",
+        response_schema={"required": ["recap"]},
+        tools=INTERACTIVE_READ_TOOLS,
+        max_tool_rounds=6,
+        model_family="intensive",
+    ),
     WorkflowSpec("member_report", model_family="intensive"),
     # Weekly public Elder Standing report — standalone, no tools, composed from a
     # pre-materialized facts brief (runtime.elder_standing), grounding-guarded.
-    WorkflowSpec("elder_standing", tools=[], tools_allowed=False, model_family="intensive"),
+    WorkflowSpec(
+        "elder_standing", tools=[], tools_allowed=False, model_family="intensive"
+    ),
     # Awareness cost gate (runtime.awareness.gate): a lightweight (Haiku) binary
     # post-vs-silence triage that runs before the expensive Sonnet brain on
     # soft-signal ticks. No tools, tiny prompt — it only gates, never posts.
-    WorkflowSpec("awareness_triage", tools=[], tools_allowed=False, max_tool_rounds=1,
-                 model_family="lightweight"),
+    WorkflowSpec(
+        "awareness_triage",
+        tools=[],
+        tools_allowed=False,
+        max_tool_rounds=1,
+        model_family="lightweight",
+    ),
     WorkflowSpec("site_promote_content", model_family="promotion"),
     # Release-notes announcement (agent/release_notes.py, ported from Oliver):
     # Elixir's first-person "what I can do now" post — chat-tier, no tools.
-    WorkflowSpec("release_notes", tools=[], max_tool_rounds=1, tools_allowed=False,
-                 model_family="intensive"),
+    WorkflowSpec(
+        "release_notes",
+        tools=[],
+        max_tool_rounds=1,
+        tools_allowed=False,
+        model_family="intensive",
+    ),
 )
 
 WORKFLOW_SPECS = {spec.name: spec for spec in _WORKFLOW_SPECS}
 SONNET_RETAINED_WORKFLOWS = frozenset(
     spec.name for spec in _WORKFLOW_SPECS if spec.model_family == "chat"
 )
-_ALIASES = {
-    alias: spec.name
-    for spec in _WORKFLOW_SPECS
-    for alias in spec.aliases
-}
+_ALIASES = {alias: spec.name for spec in _WORKFLOW_SPECS for alias in spec.aliases}
 
 
 def canonical_workflow_name(name: str | None) -> str:

@@ -17,13 +17,21 @@ from engine.db import utcnow
 log = logging.getLogger("elixir.engine.recognition")
 
 
-def claim(conn, recognition_key: str, stream: str, event_refs: list, score: int) -> bool:
+def claim(
+    conn, recognition_key: str, stream: str, event_refs: list, score: int
+) -> bool:
     """Claim a moment. Returns True iff WE claimed it (first claimant wins)."""
     cur = conn.execute(
         """INSERT OR IGNORE INTO recognition_ledger
                (recognition_key, stream, event_refs_json, score, claimed_at)
            VALUES (?, ?, ?, ?, ?)""",
-        (recognition_key, stream, json.dumps({"refs": list(event_refs)}), score, utcnow()),
+        (
+            recognition_key,
+            stream,
+            json.dumps({"refs": list(event_refs)}),
+            score,
+            utcnow(),
+        ),
     )
     return cur.rowcount == 1
 
@@ -35,7 +43,9 @@ def attach_intent(conn, recognition_key: str, intent_id: int) -> None:
     )
 
 
-def record_suppression(conn, recognition_key: str, reason: str, trace: dict | None = None) -> None:
+def record_suppression(
+    conn, recognition_key: str, reason: str, trace: dict | None = None
+) -> None:
     """Record why a claimed moment did NOT post (recognition.md §1: the engine
     can always answer "why didn't you post X?"). The reason + scoring trace
     live inside the claim row's event_refs_json."""

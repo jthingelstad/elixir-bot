@@ -10,22 +10,30 @@ from capabilities import awards as awards_capability
 from capabilities import game_modes as game_mode_capability
 from capabilities import management as management_capability
 from capabilities import war as war_capability
-from runtime.helpers import _stream_facades as event_facades
 from memory_store import list_memories
 from runtime import status as runtime_status
+from storage import events_read as event_facades
 
 _WEEKLY_RECAP_HEADER_RE = re.compile(r"^\s*[*#_`\s]*weekly recap\b", re.IGNORECASE)
 
 __all__ = [
-    "_build_roster_join_dates_report", "_build_kick_risk_report",
-    "_build_top_war_contributors_report", "_build_status_report",
-    "_build_schedule_report", "_DB_STATUS_MEMORY_TABLES",
-    "_db_status_group_for_table", "_db_status_group_label",
-    "_build_db_status_report", "_build_clan_status_report",
-    "_build_war_status_report", "_build_clan_status_short_report",
+    "_build_roster_join_dates_report",
+    "_build_kick_risk_report",
+    "_build_top_war_contributors_report",
+    "_build_status_report",
+    "_build_schedule_report",
+    "_DB_STATUS_MEMORY_TABLES",
+    "_db_status_group_for_table",
+    "_db_status_group_label",
+    "_build_db_status_report",
+    "_build_clan_status_report",
+    "_build_war_status_report",
+    "_build_clan_status_short_report",
     "_build_help_report",
-    "_build_weekly_clan_recap_context", "_load_live_clan_context",
-    "_WEEKLY_RECAP_HEADER_RE", "_strip_weekly_recap_header",
+    "_build_weekly_clan_recap_context",
+    "_load_live_clan_context",
+    "_WEEKLY_RECAP_HEADER_RE",
+    "_strip_weekly_recap_header",
     "_format_weekly_recap_post",
     "build_lane_memory_context",
 ]
@@ -54,7 +62,12 @@ def _build_roster_join_dates_report():
     members = db.list_members()
     lines = ["**Clan Roster + Join Dates**"]
     for index, member in enumerate(members, start=1):
-        name = member.get("current_name") or member.get("member_name") or member.get("player_tag") or "Unknown"
+        name = (
+            member.get("current_name")
+            or member.get("member_name")
+            or member.get("player_tag")
+            or "Unknown"
+        )
         role = member.get("role") or "member"
         joined = member.get("joined_date")
         suffix = f"joined {joined}" if joined else "join date not tracked yet"
@@ -75,16 +88,24 @@ def _build_kick_risk_report():
     members = (risk or {}).get("members") or []
     lines = ["**Kick Risk (Inactive 7+ Days)**"]
     if not members:
-        lines.append("No active members are currently over the 7-day inactivity threshold.")
+        lines.append(
+            "No active members are currently over the 7-day inactivity threshold."
+        )
         return "\n".join(lines)
 
     for member in members:
         name = _member_label(member)
         inactive_reason = next(
-            (reason for reason in (member.get("reasons") or []) if reason.get("type") == "inactive"),
+            (
+                reason
+                for reason in (member.get("reasons") or [])
+                if reason.get("type") == "inactive"
+            ),
             None,
         )
-        detail = inactive_reason.get("detail") if inactive_reason else "inactive 7+ days"
+        detail = (
+            inactive_reason.get("detail") if inactive_reason else "inactive 7+ days"
+        )
         lines.append(f"- {name} — {detail}")
     return "\n".join(lines)
 
@@ -131,7 +152,6 @@ def _build_status_report():
     memory = data.get("contextual_memory") or {}
     llm_cost = data.get("llm_cost_7d") or {}
     awareness = data.get("awareness_7d") or {}
-    vec_badge = "🟢" if memory.get("sqlite_vec_enabled") else "🟡"
     llm_cost_7d = float(llm_cost.get("cost_usd") or 0)
     llm_monthly = llm_cost_7d / 7 * 30 if llm_cost_7d else 0
     lines = [
@@ -145,7 +165,7 @@ def _build_status_report():
         f"📊 Data counts: raw payloads {data.get('counts', {}).get('raw_payload_count', 0)}, battle facts {data.get('counts', {}).get('battle_fact_count', 0)}, messages {data.get('counts', {}).get('message_count', 0)}, discord links {data.get('counts', {}).get('discord_links', 0)}",
         f"📥 Raw ingest: latest {((data.get('latest_raw_payload') or {}).get('endpoint') or 'n/a')} @ {_fmt_relative((data.get('latest_raw_payload') or {}).get('fetched_at'))}; endpoints {endpoint_summary}",
         f"🎯 Player intel backlog: {data.get('stale_player_intel_targets', 0)} stale target(s)",
-        f"🧠 Context memory: {memory.get('total', 0)} total ({memory.get('leader_notes', 0)} leader / {memory.get('inferences', 0)} inference / {memory.get('system_notes', 0)} system) | latest {_fmt_relative(memory.get('latest_memory_at'))} | vec {vec_badge}",
+        f"🧠 Context memory: {memory.get('total', 0)} total ({memory.get('leader_notes', 0)} leader / {memory.get('inferences', 0)} inference / {memory.get('system_notes', 0)} system) | latest {_fmt_relative(memory.get('latest_memory_at'))} | FTS search",
         f"{_status_badge(api.get('last_ok'))} CR API: last {(api.get('last_endpoint') or 'n/a')} ({api.get('last_entity_key') or '-'}) {_fmt_relative(api.get('last_call_at'))}; status {api.get('last_status_code') or 'n/a'}; {'ok' if api.get('last_ok') else 'error' if api.get('last_ok') is not None else 'n/a'}; {api.get('last_duration_ms') or 'n/a'}ms; total {api.get('call_count', 0)} calls / {api.get('error_count', 0)} errors / {api.get('consecutive_error_count', 0)} consecutive failures",
         f"{_status_badge(llm.get('last_ok'))} Claude: last {(llm.get('last_workflow') or 'n/a')} via {(llm.get('last_model') or 'n/a')} {_fmt_relative(llm.get('last_call_at'))}; {'ok' if llm.get('last_ok') else 'error' if llm.get('last_ok') is not None else 'n/a'}; {llm.get('last_duration_ms') or 'n/a'}ms; tokens p/c/t {llm.get('last_prompt_tokens') or 'n/a'}/{llm.get('last_completion_tokens') or 'n/a'}/{llm.get('last_total_tokens') or 'n/a'}; cache w/r {llm.get('last_cache_creation_tokens') or 'n/a'}/{llm.get('last_cache_read_tokens') or 'n/a'}; total {llm.get('call_count', 0)} calls / {llm.get('error_count', 0)} errors",
         f"💸 Claude spend: 7d ${llm_cost_7d:.2f} across {llm_cost.get('calls', 0)} call(s), projected ${llm_monthly:.2f}/mo; failures {llm_cost.get('failures', 0)}",
@@ -160,10 +180,6 @@ def _build_status_report():
             f"(bot top {role_status.get('bot_top_role_position') if role_status.get('bot_top_role_position') is not None else 'n/a'} / "
             f"member {role_status.get('member_role_position') if role_status.get('member_role_position') is not None else 'n/a'} / "
             f"manage_roles {role_status.get('manage_roles')})"
-        )
-    if data.get("latest_signal"):
-        lines.append(
-            f"📣 Latest signal log: {data['latest_signal']['signal_type']} on {data['latest_signal']['signal_date']}"
         )
     if data.get("current_season_id") is not None:
         lines.append(f"🏁 Current war season id: {data['current_season_id']}")
@@ -244,7 +260,11 @@ def _build_db_status_report(group: str | None = None):
     ]
 
     if requested_group:
-        group_tables = [table for table in tables if _db_status_group_for_table(table.get("name") or "") == requested_group]
+        group_tables = [
+            table
+            for table in tables
+            if _db_status_group_for_table(table.get("name") or "") == requested_group
+        ]
         group_rows = sum(int(table.get("row_count") or 0) for table in group_tables)
         group_bytes = sum(int(table.get("approx_bytes") or 0) for table in group_tables)
         lines[0] = f"**Elixir DB Status | {_db_status_group_label(requested_group)}**"
@@ -262,7 +282,9 @@ def _build_db_status_report(group: str | None = None):
     grouped_tables = {}
     for table in tables:
         table_group = _db_status_group_for_table(table.get("name") or "")
-        bucket = group_totals.setdefault(table_group, {"tables": 0, "rows": 0, "bytes": 0})
+        bucket = group_totals.setdefault(
+            table_group, {"tables": 0, "rows": 0, "bytes": 0}
+        )
         bucket["tables"] += 1
         bucket["rows"] += int(table.get("row_count") or 0)
         bucket["bytes"] += int(table.get("approx_bytes") or 0)
@@ -276,7 +298,10 @@ def _build_db_status_report(group: str | None = None):
         )
         tables_for_group = sorted(
             grouped_tables.get(table_group, []),
-            key=lambda table: (-(int(table.get("approx_bytes") or 0)), table.get("name") or ""),
+            key=lambda table: (
+                -(int(table.get("approx_bytes") or 0)),
+                table.get("name") or "",
+            ),
         )
         if not tables_for_group:
             continue
@@ -307,9 +332,16 @@ def _build_clan_status_report(clan=None, war=None):
     recent_joins, recent_join_count = _recent_join_display_rows(clan)
     deck_status = war_read.get("day_state") or {}
 
-    clan_name = clan.get("name") or (war_status.get("clan_name") if war_status else None)
+    clan_name = clan.get("name") or (
+        war_status.get("clan_name") if war_status else None
+    )
     clan_name = clan_name or "Clan"
-    member_count = clan.get("members") or clan.get("memberCount") or roster.get("active_members") or 0
+    member_count = (
+        clan.get("members")
+        or clan.get("memberCount")
+        or roster.get("active_members")
+        or 0
+    )
     open_slots = max(0, 50 - member_count)
     clan_score = clan.get("clanScore")
     war_trophies = clan.get("clanWarTrophies")
@@ -320,11 +352,18 @@ def _build_clan_status_report(clan=None, war=None):
 
     top_donors = sorted(
         members,
-        key=lambda member: (member.get("donations_week") or 0, -(member.get("clan_rank") or 999)),
+        key=lambda member: (
+            member.get("donations_week") or 0,
+            -(member.get("clan_rank") or 999),
+        ),
         reverse=True,
     )
-    top_donors = [member for member in top_donors if (member.get("donations_week") or 0) > 0][:3]
-    top_trophy_member = max(members, key=lambda member: member.get("trophies") or 0, default=None)
+    top_donors = [
+        member for member in top_donors if (member.get("donations_week") or 0) > 0
+    ][:3]
+    top_trophy_member = max(
+        members, key=lambda member: member.get("trophies") or 0, default=None
+    )
 
     lines = [
         f"**{clan_name} Status**",
@@ -341,22 +380,35 @@ def _build_clan_status_report(clan=None, war=None):
     if top_trophy_member or top_donors:
         top_trophy_text = (
             f"{_member_label(top_trophy_member)} {_fmt_num(top_trophy_member.get('trophies'))}"
-            if top_trophy_member else "n/a"
+            if top_trophy_member
+            else "n/a"
         )
         donor_text = _join_member_bits(
             top_donors,
-            lambda member: f"{_member_label(member)} {_fmt_num(member.get('donations_week') or 0)}",
+            lambda member: (
+                f"{_member_label(member)} {_fmt_num(member.get('donations_week') or 0)}"
+            ),
         )
-        lines.append(f"- Standouts: top trophies {top_trophy_text} | top donors {donor_text}")
+        lines.append(
+            f"- Standouts: top trophies {top_trophy_text} | top donors {donor_text}"
+        )
 
     if war_status:
         war_bits = [
-            f"season {war_status.get('season_id')}" if war_status.get("season_id") is not None else None,
-            f"week {war_status.get('week')}" if war_status.get("week") is not None else None,
+            f"season {war_status.get('season_id')}"
+            if war_status.get("season_id") is not None
+            else None,
+            f"week {war_status.get('week')}"
+            if war_status.get("week") is not None
+            else None,
             f"state {war_status.get('war_state') or 'n/a'}",
-            f"boat-rank {war_status.get('race_rank')}" if war_status.get("race_rank") is not None else None,
+            f"boat-rank {war_status.get('race_rank')}"
+            if war_status.get("race_rank") is not None
+            else None,
             f"boat-fame {_fmt_num(war_status.get('fame'))} (weekly)",
-            f"today-points {_fmt_num(war_status.get('period_points'))}" if war_status.get("period_points") is not None else None,
+            f"today-points {_fmt_num(war_status.get('period_points'))}"
+            if war_status.get("period_points") is not None
+            else None,
             f"repair {_fmt_num(war_status.get('repair_points'))}",
             f"score {_fmt_num(war_status.get('war_league_score'))}",
         ]
@@ -365,7 +417,9 @@ def _build_clan_status_report(clan=None, war=None):
     if season_summary:
         top_contributors = _join_member_bits(
             season_summary.get("top_contributors") or [],
-            lambda member: f"{_member_label(member)} {_fmt_num(member.get('total_points') or 0)}",
+            lambda member: (
+                f"{_member_label(member)} {_fmt_num(member.get('total_points') or 0)}"
+            ),
         )
         lines.append(
             f"- War season: {season_summary.get('races', 0)} races | total fame {_fmt_num(season_summary.get('total_clan_fame'))} "
@@ -387,21 +441,21 @@ def _build_clan_status_report(clan=None, war=None):
     if recent_joins:
         recent_joins_text = _join_member_bits(
             recent_joins,
-            lambda member: f"{_member_label(member)} ({_format_relative_join_age(member.get('joined_date'))})",
+            lambda member: (
+                f"{_member_label(member)} ({_format_relative_join_age(member.get('joined_date'))})"
+            ),
             limit=5,
         )
-        lines.append(
-            f"- Recent joins: {recent_joins_text}"
-        )
+        lines.append(f"- Recent joins: {recent_joins_text}")
 
     if slumping:
         slumping_text = _join_member_bits(
             slumping,
-            lambda member: f"{_member_label(member)} lost {member.get('current_streak')} straight",
+            lambda member: (
+                f"{_member_label(member)} lost {member.get('current_streak')} straight"
+            ),
         )
-        lines.append(
-            f"- Cold streaks: {slumping_text}"
-        )
+        lines.append(f"- Cold streaks: {slumping_text}")
 
     if at_risk and at_risk.get("members"):
         lines.append(
@@ -409,7 +463,9 @@ def _build_clan_status_report(clan=None, war=None):
         )
 
     if war and war.get("clans"):
-        lines.append(f"- Live war feed: {len(war.get('clans') or [])} clans in current river race")
+        lines.append(
+            f"- Live war feed: {len(war.get('clans') or [])} clans in current river race"
+        )
 
     return "\n".join(lines)
 
@@ -420,9 +476,17 @@ def _build_war_status_report(clan=None, war=None):
     war_read = war_capability.get_war_intelligence(source=db)
     war_status = war_read.get("current_state") if war_read.get("available") else {}
     current_day = war_read.get("day_state") or {}
-    season_id = current_day.get("season_id") if current_day else war_status.get("season_id")
-    section_index = current_day.get("section_index") if current_day else war_status.get("section_index")
-    week_summary = db.get_war_week_summary(season_id=season_id, section_index=section_index)
+    season_id = (
+        current_day.get("season_id") if current_day else war_status.get("season_id")
+    )
+    section_index = (
+        current_day.get("section_index")
+        if current_day
+        else war_status.get("section_index")
+    )
+    week_summary = db.get_war_week_summary(
+        season_id=season_id, section_index=section_index
+    )
     season_summary = war_capability.get_war_season_view(
         view="summary", season_id=season_id, limit=3, source=db
     )["data"]
@@ -444,18 +508,33 @@ def _build_war_status_report(clan=None, war=None):
     if war_status:
         live_bits = [
             f"state {war_status.get('war_state') or 'n/a'}",
-            f"season {war_status.get('season_id')}" if war_status.get("season_id") is not None else None,
-            f"week {war_status.get('week')}" if war_status.get("week") is not None else None,
+            f"season {war_status.get('season_id')}"
+            if war_status.get("season_id") is not None
+            else None,
+            f"week {war_status.get('week')}"
+            if war_status.get("week") is not None
+            else None,
             war_status.get("phase_display"),
-            f"boat-rank {war_status.get('race_rank')}" if war_status.get("race_rank") is not None else None,
+            f"boat-rank {war_status.get('race_rank')}"
+            if war_status.get("race_rank") is not None
+            else None,
             f"boat-fame {_fmt_num(war_status.get('fame'))} (weekly)",
             f"score {_fmt_num(war_status.get('war_league_score'))}",
-            f"today-rank {war_status.get('day_rank')}" if war_status.get("day_scored") and war_status.get("day_rank") is not None else None,
-            f"today-points {_fmt_num(war_status.get('period_points'))}" if war_status.get("period_points") is not None else None,
+            f"today-rank {war_status.get('day_rank')}"
+            if war_status.get("day_scored") and war_status.get("day_rank") is not None
+            else None,
+            f"today-points {_fmt_num(war_status.get('period_points'))}"
+            if war_status.get("period_points") is not None
+            else None,
             "finished yes" if war_status.get("race_completed") else None,
-            f"finish {war_status.get('finish_time')}" if war_status.get("finish_time") else None,
+            f"finish {war_status.get('finish_time')}"
+            if war_status.get("finish_time")
+            else None,
             "completed early" if war_status.get("race_completed_early") else None,
-            f"stakes {war_status.get('trophy_stakes_text')}" if war_status.get("trophy_stakes_known") and war_status.get("trophy_stakes_text") else None,
+            f"stakes {war_status.get('trophy_stakes_text')}"
+            if war_status.get("trophy_stakes_known")
+            and war_status.get("trophy_stakes_text")
+            else None,
         ]
         lines.append(f"- Live: {' | '.join(bit for bit in live_bits if bit)}")
     else:
@@ -486,14 +565,24 @@ def _build_war_status_report(clan=None, war=None):
             defense_bits = []
             if defense_status:
                 if defense_status.get("num_defenses_remaining") is not None:
-                    defense_bits.append(f"defenses remaining {_fmt_num(defense_status.get('num_defenses_remaining'))}")
+                    defense_bits.append(
+                        f"defenses remaining {_fmt_num(defense_status.get('num_defenses_remaining'))}"
+                    )
                 if defense_status.get("progress_earned_from_defenses") is not None:
-                    defense_bits.append(f"defense points {_fmt_num(defense_status.get('progress_earned_from_defenses'))}")
+                    defense_bits.append(
+                        f"defense points {_fmt_num(defense_status.get('progress_earned_from_defenses'))}"
+                    )
                 if defense_status.get("phase_display"):
-                    defense_bits.append(f"latest logged {defense_status.get('phase_display')}")
+                    defense_bits.append(
+                        f"latest logged {defense_status.get('phase_display')}"
+                    )
             lines.append(
                 "- Practice focus: boat defenses matter before battle days."
-                + (f" Latest defense log: {' | '.join(defense_bits)}" if defense_bits else "")
+                + (
+                    f" Latest defense log: {' | '.join(defense_bits)}"
+                    if defense_bits
+                    else ""
+                )
             )
 
     if week_summary:
@@ -538,7 +627,9 @@ def _build_war_status_report(clan=None, war=None):
         )
 
     if war and war.get("clans"):
-        lines.append(f"- Live feed: {len(war.get('clans') or [])} clan(s) in the current river race")
+        lines.append(
+            f"- Live feed: {len(war.get('clans') or [])} clan(s) in the current river race"
+        )
 
     return "\n".join(lines)
 
@@ -558,8 +649,17 @@ def _build_clan_status_short_report(clan=None, war=None):
     )["data"]
     slumping = db.get_members_on_losing_streak(min_streak=3)
 
-    clan_name = clan.get("name") or (war_status.get("clan_name") if war_status else None) or "Clan"
-    member_count = clan.get("members") or clan.get("memberCount") or roster.get("active_members") or 0
+    clan_name = (
+        clan.get("name")
+        or (war_status.get("clan_name") if war_status else None)
+        or "Clan"
+    )
+    member_count = (
+        clan.get("members")
+        or clan.get("memberCount")
+        or roster.get("active_members")
+        or 0
+    )
     open_slots = max(0, 50 - member_count)
     lines = [
         f"**{clan_name} Status (Short)**",
@@ -579,7 +679,9 @@ def _build_clan_status_short_report(clan=None, war=None):
     if season_summary:
         top_contributors = _join_member_bits(
             season_summary.get("top_contributors") or [],
-            lambda member: f"{_member_label(member)} {_fmt_num(member.get('total_points') or 0)}",
+            lambda member: (
+                f"{_member_label(member)} {_fmt_num(member.get('total_points') or 0)}"
+            ),
             limit=2,
         )
         lines.append(
@@ -605,7 +707,9 @@ def _build_help_report(role: str) -> str:
     for r in routes:
         examples = r.get("examples") or []
         example_hint = f' — try "{examples[0]}"' if examples else ""
-        capability_lines.append(f"- **{r['label']}**: {r['help_summary']}{example_hint}")
+        capability_lines.append(
+            f"- **{r['label']}**: {r['help_summary']}{example_hint}"
+        )
 
     if role == "clanops":
         operator_section = [
@@ -654,7 +758,9 @@ def _public_story_arc_lines(*, days: int = 8, limit: int = 8) -> list[str]:
     try:
         from memory_store import list_memories
 
-        created_after = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+        created_after = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+            "%Y-%m-%dT%H:%M:%S"
+        )
         arcs = list_memories(
             viewer_scope="public",
             filters={"source_type": "elixir_synthesis", "created_after": created_after},
@@ -697,10 +803,13 @@ def _playstyle_identity_lines(limit: int = 10) -> list[str]:
 
     conn = db.get_connection()
     try:
-        tags = [r["player_tag"] for r in conn.execute(
-            """SELECT cm.player_tag FROM clan_memberships cm
+        tags = [
+            r["player_tag"]
+            for r in conn.execute(
+                """SELECT cm.player_tag FROM clan_memberships cm
                WHERE cm.left_at IS NULL"""
-        ).fetchall()]
+            ).fetchall()
+        ]
         profiles = []
         for tag in tags:
             p = player_mode_profile(conn, tag)
@@ -731,15 +840,19 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
         _log().warning("Weekly recap clan trend summary unavailable: %s", exc)
         clan_trend_summary = ""
     try:
-        war_project = war_capability.get_war_season_view(
-            view="snapshot", source=db
-        )["data"]
+        war_project = war_capability.get_war_season_view(view="snapshot", source=db)[
+            "data"
+        ]
     except Exception as exc:
         _log().warning("Weekly recap war season context unavailable: %s", exc)
         war_project = None
     try:
-        event_windows = event_facades.summarize_event_windows(windows=(7, 28), scope="public")
-        recent_events = event_facades.list_recent_events(days=7, scope="public", limit=12)
+        event_windows = event_facades.summarize_event_windows(
+            windows=(7, 28), scope="public"
+        )
+        recent_events = event_facades.list_recent_events(
+            days=7, scope="public", limit=12
+        )
     except Exception as exc:
         _log().warning("Weekly recap event stream context unavailable: %s", exc)
         event_windows = {}
@@ -783,7 +896,9 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
     arc_lines = _public_story_arc_lines()
     if arc_lines:
         lines.append("")
-        lines.append("=== THIS WEEK'S STORY ARCS (from Elixir's memory — lead with these) ===")
+        lines.append(
+            "=== THIS WEEK'S STORY ARCS (from Elixir's memory — lead with these) ==="
+        )
         lines.append(
             "These are the week's member stories as I recorded them. Prefer these over raw stats: "
             "name the members, and when an arc continues something from a prior week, say so — "
@@ -796,7 +911,6 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
 
     lines.append("")
     lines.append("=== STORY BEATS (the week's narrative — lead with this) ===")
-
 
     if war_project:
         lines.append(
@@ -824,18 +938,23 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
         )
         by_type = seven_day.get("by_type") or {}
         if by_type:
-            top_types = sorted(by_type.items(), key=lambda item: (-item[1], item[0]))[:5]
+            top_types = sorted(by_type.items(), key=lambda item: (-item[1], item[0]))[
+                :5
+            ]
             lines.append(
                 "top 7d event types: "
                 + ", ".join(f"{event_type}={count}" for event_type, count in top_types)
             )
     modes = ((mode_pulse.get("windows") or {}).get("7d") or {}).get("modes") or {}
     notable_modes = [
-        (mode, info) for mode, info in modes.items()
+        (mode, info)
+        for mode, info in modes.items()
         if mode != "ladder" and (info.get("battles") or 0) >= 10
     ]
     if notable_modes:
-        lines.append("game-mode activity beyond Trophy Road (7d) — material for non-war stories:")
+        lines.append(
+            "game-mode activity beyond Trophy Road (7d) — material for non-war stories:"
+        )
         for _mode, info in notable_modes[:4]:
             top = [
                 t.get("member_ref") or t.get("name") or t.get("tag")
@@ -843,7 +962,9 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
                 if (t.get("member_ref") or t.get("name") or t.get("tag"))
             ]
             win_rate = info.get("win_rate")
-            wr_text = f", {int(win_rate * 100)}% win rate" if win_rate is not None else ""
+            wr_text = (
+                f", {int(win_rate * 100)}% win rate" if win_rate is not None else ""
+            )
             top_text = f" | most active: {', '.join(top)}" if top else ""
             lines.append(
                 f"- {info.get('label')}: {info.get('battles')} battles across "
@@ -886,7 +1007,9 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
             "war momentum leaders: "
             + _join_member_bits(
                 trending_war,
-                lambda member: f"{_member_label(member)} trend {_fmt_num(member.get('fame_delta') or 0)} fame",
+                lambda member: (
+                    f"{_member_label(member)} trend {_fmt_num(member.get('fame_delta') or 0)} fame"
+                ),
                 limit=5,
             )
         )
@@ -925,7 +1048,9 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
             "battle pulse heaters: "
             + _join_member_bits(
                 hot_streaks,
-                lambda member: f"{_member_label(member)} won {member.get('current_streak')} straight ({member.get('summary')})",
+                lambda member: (
+                    f"{_member_label(member)} won {member.get('current_streak')} straight ({member.get('summary')})"
+                ),
                 limit=5,
             )
         )
@@ -954,7 +1079,9 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
             "recent joins this week: "
             + _join_member_bits(
                 recent_joins,
-                lambda member: f"{_member_label(member)} ({_format_relative_join_age(member.get('joined_date'))})",
+                lambda member: (
+                    f"{_member_label(member)} ({_format_relative_join_age(member.get('joined_date'))})"
+                ),
                 limit=5,
             )
         )
@@ -971,7 +1098,9 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
                     f"{t['participant_count']} participants | {t['battles_captured']} battles"
                 ]
                 if t.get("winner_name"):
-                    t_lines[0] += f" | Winner: {t['winner_name']} ({t['winner_score']} wins)"
+                    t_lines[0] += (
+                        f" | Winner: {t['winner_name']} ({t['winner_score']} wins)"
+                    )
                 if t.get("top_cards"):
                     t_lines.append(f"  top cards: {t['top_cards']}")
                 lines.extend(t_lines)
@@ -992,7 +1121,9 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
     if season_summary:
         top_contributors = _join_member_bits(
             season_summary.get("top_contributors") or [],
-            lambda member: f"{_member_label(member)} {_fmt_num(member.get('total_points') or 0)} points",
+            lambda member: (
+                f"{_member_label(member)} {_fmt_num(member.get('total_points') or 0)} points"
+            ),
             limit=5,
         )
         lines.append(
@@ -1003,7 +1134,10 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
             f"top_contributors {top_contributors or 'n/a'}"
         )
 
-    if any(season_awards.get(k) for k in ("war_champ", "iron_kings", "donation_champs", "rookie_mvps")):
+    if any(
+        season_awards.get(k)
+        for k in ("war_champ", "iron_kings", "donation_champs", "rookie_mvps")
+    ):
         lines.append("")
         lines.append("=== SEASON AWARDS STANDINGS (current — not yet final) ===")
         for entry in season_awards.get("war_champ") or []:
@@ -1043,7 +1177,9 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
                     "  top participants: "
                     + _join_member_bits(
                         top_participants,
-                        lambda member: f"{_member_label(member)} {_fmt_num(member.get('points') or 0)} points / {member.get('decks_used') or 0} decks",
+                        lambda member: (
+                            f"{_member_label(member)} {_fmt_num(member.get('points') or 0)} points / {member.get('decks_used') or 0} decks"
+                        ),
                         limit=3,
                     )
                 )
@@ -1053,7 +1189,8 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
                     "  podium snapshot: "
                     + ", ".join(
                         f"#{item.get('rank')} {item.get('name')} ({_fmt_num(item.get('fame'))} fame)"
-                        for item in standings if item.get("name")
+                        for item in standings
+                        if item.get("name")
                     )
                 )
 
@@ -1067,13 +1204,15 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
             "top donors right now: "
             + _join_member_bits(
                 top_donors,
-                lambda member: f"{_member_label(member)} {_fmt_num(member.get('donations_week') or 0)}",
+                lambda member: (
+                    f"{_member_label(member)} {_fmt_num(member.get('donations_week') or 0)}"
+                ),
                 limit=5,
             )
         )
 
     if war:
-        clan_war = (war.get("clan") or {})
+        clan_war = war.get("clan") or {}
         if clan_war:
             lines.append(
                 "live war snapshot now: "
@@ -1102,20 +1241,24 @@ async def _load_live_clan_context():
                 tag = _bare_tag(member.get("tag"))
                 if not tag or tag in previous_tags:
                     continue
-                live_recent_joins.append({
-                    "player_tag": tag,
-                    "tag": tag,
-                    "current_name": member.get("name") or tag,
-                    "name": member.get("name") or tag,
-                    "member_ref": member.get("name") or tag,
-                    "joined_date": today,
-                })
+                live_recent_joins.append(
+                    {
+                        "player_tag": tag,
+                        "tag": tag,
+                        "current_name": member.get("name") or tag,
+                        "name": member.get("name") or tag,
+                        "member_ref": member.get("name") or tag,
+                        "joined_date": today,
+                    }
+                )
             if live_recent_joins:
                 clan["_elixir_recent_joins"] = sorted(
                     live_recent_joins,
                     key=lambda item: (item.get("current_name") or "").lower(),
                 )
-        await asyncio.to_thread(db.snapshot_members, member_list, create_if_missing=False)
+        await asyncio.to_thread(
+            db.snapshot_members, member_list, create_if_missing=False
+        )
         await asyncio.to_thread(db.snapshot_clan_daily_metrics, clan)
     try:
         war = await asyncio.to_thread(cr_api.get_current_war)
@@ -1157,7 +1300,9 @@ def _member_tag_from_signals(signals: list[dict]) -> str | None:
     return None
 
 
-def build_lane_memory_context(channel_config: dict, *, discord_user_id=None, signals=None):
+def build_lane_memory_context(
+    channel_config: dict, *, discord_user_id=None, signals=None
+):
     member_tag = _member_tag_from_signals(signals or [])
     context = db.build_memory_context(
         discord_user_id=discord_user_id,
@@ -1171,14 +1316,20 @@ def build_lane_memory_context(channel_config: dict, *, discord_user_id=None, sig
     filters = {}
     if member_tag:
         filters["member_tag"] = member_tag
-    elif any(signal.get("week") is not None and signal.get("season_id") is not None for signal in (signals or [])):
+    elif any(
+        signal.get("week") is not None and signal.get("season_id") is not None
+        for signal in (signals or [])
+    ):
         signal = next(
-            signal for signal in signals
+            signal
+            for signal in signals
             if signal.get("week") is not None and signal.get("season_id") is not None
         )
         filters["war_week_id"] = f"{signal.get('season_id')}:{signal.get('week')}"
     elif any(signal.get("season_id") is not None for signal in (signals or [])):
-        signal = next(signal for signal in signals if signal.get("season_id") is not None)
+        signal = next(
+            signal for signal in signals if signal.get("season_id") is not None
+        )
         filters["war_season_id"] = str(signal.get("season_id"))
     else:
         return context

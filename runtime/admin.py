@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import re
 from contextlib import ExitStack, asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
-import re
 
 from runtime.activities import (
     normalize_activity_key,
@@ -19,7 +19,11 @@ from runtime.activity_runner import (
     UnknownActivityError,
     run_activity_once,
 )
-from storage.contextual_memory import archive_member_note_memory, upsert_member_note_memory
+from storage.contextual_memory import (
+    archive_member_note_memory,
+    upsert_member_note_memory,
+)
+
 
 @dataclass(frozen=True)
 class AdminCommandSpec:
@@ -34,27 +38,137 @@ class AdminCommandSpec:
 RELAY_STATUS_VIEWS = {"all", "pending", "decided"}
 
 COMMAND_SPECS = {
-    "help": AdminCommandSpec("help", ("help",), "Show the Elixir operator help page.", event_type="help"),
+    "help": AdminCommandSpec(
+        "help", ("help",), "Show the Elixir operator help page.", event_type="help"
+    ),
     # system.* / memory.show / signal.publish-pending were removed from Discord —
     # the Observatory web app owns that telemetry/management (co-leaders don't need it).
-    "clan.status": AdminCommandSpec("clan.status", ("clan", "status"), "Show the operational clan status report.", event_type="clan_status_report"),
-    "clan.war": AdminCommandSpec("clan.war", ("clan", "war"), "Show the live war-awareness report.", event_type="war_status_report"),
-    "clan.members": AdminCommandSpec("clan.members", ("clan", "members"), "List active clan members.", event_type="clan_members_report"),
-    "member.show": AdminCommandSpec("member.show", ("member", "show"), "Show the stored member profile and metadata for one member.", event_type="member_profile_report"),
-    "member.verify-discord": AdminCommandSpec("member.verify-discord", ("member", "verify-discord"), "Verify a member's Discord link and Member role.", leader_only=True, write=True, event_type="member_verify_discord"),
-    "member.audit-discord": AdminCommandSpec("member.audit-discord", ("member", "audit-discord"), "Audit Discord ↔ clan member linkage and surface gaps.", leader_only=True, event_type="member_audit_discord"),
-    "member.set": AdminCommandSpec("member.set", ("member", "set"), "Set one member field.", leader_only=True, write=True, event_type="member_set"),
-    "member.clear": AdminCommandSpec("member.clear", ("member", "clear"), "Clear one member field.", leader_only=True, write=True, event_type="member_clear"),
-    "relay.status": AdminCommandSpec("relay.status", ("relay", "status"), "Show leader action recommendations and reaction decisions.", leader_only=True, event_type="relay_status_report"),
-    "relay.test-card": AdminCommandSpec("relay.test-card", ("relay", "test-card"), "Post a test #actions leader action card for a real action type.", leader_only=True, write=True, event_type="relay_test_card"),
-    "activity.list": AdminCommandSpec("activity.list", ("activity", "list"), "List registered recurring activities.", event_type="activity_list"),
-    "activity.show": AdminCommandSpec("activity.show", ("activity", "show"), "Show one recurring activity in detail.", event_type="activity_show"),
-    "activity.run": AdminCommandSpec("activity.run", ("activity", "run"), "Run one registered activity now.", leader_only=True, write=True, event_type="activity_run"),
-    "tournament.watch": AdminCommandSpec("tournament.watch", ("tournament", "watch"), "Start watching a tournament by tag.", leader_only=True, write=True, event_type="tournament_watch"),
-    "tournament.status": AdminCommandSpec("tournament.status", ("tournament", "status"), "Show active tournament tracking status.", event_type="tournament_status"),
-    "tournament.stop": AdminCommandSpec("tournament.stop", ("tournament", "stop"), "Stop watching the active tournament.", leader_only=True, write=True, event_type="tournament_stop"),
-    "tournament.recap": AdminCommandSpec("tournament.recap", ("tournament", "recap"), "Generate or regenerate a tournament recap.", leader_only=True, write=True, event_type="tournament_recap"),
-    "tournament.history": AdminCommandSpec("tournament.history", ("tournament", "history"), "List past tournaments.", event_type="tournament_history"),
+    "clan.status": AdminCommandSpec(
+        "clan.status",
+        ("clan", "status"),
+        "Show the operational clan status report.",
+        event_type="clan_status_report",
+    ),
+    "clan.war": AdminCommandSpec(
+        "clan.war",
+        ("clan", "war"),
+        "Show the live war-awareness report.",
+        event_type="war_status_report",
+    ),
+    "clan.members": AdminCommandSpec(
+        "clan.members",
+        ("clan", "members"),
+        "List active clan members.",
+        event_type="clan_members_report",
+    ),
+    "member.show": AdminCommandSpec(
+        "member.show",
+        ("member", "show"),
+        "Show the stored member profile and metadata for one member.",
+        event_type="member_profile_report",
+    ),
+    "member.verify-discord": AdminCommandSpec(
+        "member.verify-discord",
+        ("member", "verify-discord"),
+        "Verify a member's Discord link and Member role.",
+        leader_only=True,
+        write=True,
+        event_type="member_verify_discord",
+    ),
+    "member.audit-discord": AdminCommandSpec(
+        "member.audit-discord",
+        ("member", "audit-discord"),
+        "Audit Discord ↔ clan member linkage and surface gaps.",
+        leader_only=True,
+        event_type="member_audit_discord",
+    ),
+    "member.set": AdminCommandSpec(
+        "member.set",
+        ("member", "set"),
+        "Set one member field.",
+        leader_only=True,
+        write=True,
+        event_type="member_set",
+    ),
+    "member.clear": AdminCommandSpec(
+        "member.clear",
+        ("member", "clear"),
+        "Clear one member field.",
+        leader_only=True,
+        write=True,
+        event_type="member_clear",
+    ),
+    "relay.status": AdminCommandSpec(
+        "relay.status",
+        ("relay", "status"),
+        "Show leader action recommendations and reaction decisions.",
+        leader_only=True,
+        event_type="relay_status_report",
+    ),
+    "relay.test-card": AdminCommandSpec(
+        "relay.test-card",
+        ("relay", "test-card"),
+        "Post a test #actions leader action card for a real action type.",
+        leader_only=True,
+        write=True,
+        event_type="relay_test_card",
+    ),
+    "activity.list": AdminCommandSpec(
+        "activity.list",
+        ("activity", "list"),
+        "List registered recurring activities.",
+        event_type="activity_list",
+    ),
+    "activity.show": AdminCommandSpec(
+        "activity.show",
+        ("activity", "show"),
+        "Show one recurring activity in detail.",
+        event_type="activity_show",
+    ),
+    "activity.run": AdminCommandSpec(
+        "activity.run",
+        ("activity", "run"),
+        "Run one registered activity now.",
+        leader_only=True,
+        write=True,
+        event_type="activity_run",
+    ),
+    "tournament.watch": AdminCommandSpec(
+        "tournament.watch",
+        ("tournament", "watch"),
+        "Start watching a tournament by tag.",
+        leader_only=True,
+        write=True,
+        event_type="tournament_watch",
+    ),
+    "tournament.status": AdminCommandSpec(
+        "tournament.status",
+        ("tournament", "status"),
+        "Show active tournament tracking status.",
+        event_type="tournament_status",
+    ),
+    "tournament.stop": AdminCommandSpec(
+        "tournament.stop",
+        ("tournament", "stop"),
+        "Stop watching the active tournament.",
+        leader_only=True,
+        write=True,
+        event_type="tournament_stop",
+    ),
+    "tournament.recap": AdminCommandSpec(
+        "tournament.recap",
+        ("tournament", "recap"),
+        "Generate or regenerate a tournament recap.",
+        leader_only=True,
+        write=True,
+        event_type="tournament_recap",
+    ),
+    "tournament.history": AdminCommandSpec(
+        "tournament.history",
+        ("tournament", "history"),
+        "List past tournaments.",
+        event_type="tournament_history",
+    ),
 }
 
 COMMAND_GROUP_ORDER = [
@@ -138,7 +252,7 @@ def render_admin_help(*, slash_prefix: str = "/clanops") -> str:
             f"- `{slash_prefix} member show member:Ditika`",
             f"- `{slash_prefix} member set member:Ditika field:join-date value:2026-03-07`",
             f"- `{slash_prefix} relay status view:pending`",
-            f"- `{slash_prefix} activity run activity:player-progression preview:true`",
+            f"- `{slash_prefix} activity run activity:engine-tick preview:true`",
         ]
     )
     return "\n".join(lines)
@@ -152,7 +266,9 @@ def _parse_birthday_value(value: str) -> tuple[str, str] | None:
 
 
 class _PreviewChannel:
-    def __init__(self, channel_id: int, name: str, captured_posts: list[tuple[str, str]]):
+    def __init__(
+        self, channel_id: int, name: str, captured_posts: list[tuple[str, str]]
+    ):
         self.id = channel_id
         self.name = name.lstrip("#")
         self.type = "text"
@@ -199,17 +315,22 @@ def _build_clan_list_report(*, full: bool = False) -> str:
         lines.append("_No active members found._")
         return "\n".join(lines)
     for member in members:
-        name = member.get("current_name") or member.get("member_name") or member.get("player_tag")
+        name = (
+            member.get("current_name")
+            or member.get("member_name")
+            or member.get("player_tag")
+        )
         if full:
             joined_date = member.get("joined_date") or "n/a"
             if member.get("birth_month") and member.get("birth_day"):
-                birthday = f"{int(member['birth_month']):02d}-{int(member['birth_day']):02d}"
+                birthday = (
+                    f"{int(member['birth_month']):02d}-{int(member['birth_day']):02d}"
+                )
             else:
                 birthday = "n/a"
             profile_flag = "yes" if member.get("profile_url") else "no"
-            poap_flag = "yes" if member.get("poap_address") else "no"
             lines.append(
-                f"- {name} — joined {joined_date} — birthday {birthday} — profile {profile_flag} — POAP {poap_flag}"
+                f"- {name} — joined {joined_date} — birthday {birthday} — profile {profile_flag}"
             )
             continue
 
@@ -238,8 +359,14 @@ def _build_member_profile_report(member_query: str, *, conn=None) -> str:
     birthday = None
     if profile.get("birth_month") and profile.get("birth_day"):
         birthday = f"{int(profile['birth_month']):02d}-{int(profile['birth_day']):02d}"
-    trophies = f"{profile['trophies']:,}" if isinstance(profile.get("trophies"), int) else None
-    best_trophies = f"{profile['best_trophies']:,}" if isinstance(profile.get("best_trophies"), int) else None
+    trophies = (
+        f"{profile['trophies']:,}" if isinstance(profile.get("trophies"), int) else None
+    )
+    best_trophies = (
+        f"{profile['best_trophies']:,}"
+        if isinstance(profile.get("best_trophies"), int)
+        else None
+    )
     streak = None
     if profile.get("recent_form"):
         streak = f"{profile['recent_form'].get('current_streak')}{profile['recent_form'].get('current_streak_type') or ''}"
@@ -250,7 +377,7 @@ def _build_member_profile_report(member_query: str, *, conn=None) -> str:
     lines.append(
         f"- Join + metadata: joined {_fmt_optional(profile.get('joined_date'))} | birthday "
         f"{_fmt_optional(birthday)} | "
-        f"profile {_fmt_optional(profile.get('profile_url'))} | POAP {_fmt_optional(profile.get('poap_address'))}"
+        f"profile {_fmt_optional(profile.get('profile_url'))}"
     )
     lines.append(
         f"- Clan state: Collection Level {_fmt_optional(profile.get('cr_collection_level'))} | trophies {_fmt_optional(trophies)} | "
@@ -310,10 +437,17 @@ def _format_leader_action_outcome(action: dict) -> str:
                 sign = "+" if value > 0 else ""
                 bits.append(f"{label} {sign}{value}")
         return " | ".join(bits) if bits else "outcome pending more data"
-    if action.get("action_type") in {"promotion_recommendation", "kick_recommendation", "demotion_recommendation"}:
+    if action.get("action_type") in {
+        "promotion_recommendation",
+        "kick_recommendation",
+        "demotion_recommendation",
+    }:
         changed = outcome.get("changed") or {}
         if changed:
-            return " | ".join(f"{key} changed {'yes' if value else 'no'}" for key, value in changed.items())
+            return " | ".join(
+                f"{key} changed {'yes' if value else 'no'}"
+                for key, value in changed.items()
+            )
     return "outcome pending"
 
 
@@ -349,10 +483,13 @@ def _build_relay_status_report(*, view: str = "all", limit: int = 10, conn=None)
         limit = max(1, min(int(limit or 10), 25))
 
         if view == "pending":
-            actions = db.list_leader_actions(status=db.ACTION_PROPOSED, limit=limit, conn=conn)
+            actions = db.list_leader_actions(
+                status=db.ACTION_PROPOSED, limit=limit, conn=conn
+            )
         elif view == "decided":
             actions = [
-                action for action in db.list_leader_actions(limit=limit * 3, conn=conn)
+                action
+                for action in db.list_leader_actions(limit=limit * 3, conn=conn)
                 if action.get("status") in {db.ACTION_DONE, db.ACTION_REJECTED}
             ][:limit]
         else:
@@ -361,14 +498,21 @@ def _build_relay_status_report(*, view: str = "all", limit: int = 10, conn=None)
         refreshed = []
         for action in actions:
             if action.get("status") == db.ACTION_DONE:
-                refreshed.append(db.refresh_leader_action_outcome(action["action_id"], conn=conn) or action)
+                refreshed.append(
+                    db.refresh_leader_action_outcome(action["action_id"], conn=conn)
+                    or action
+                )
             else:
                 refreshed.append(action)
 
-        pending_count = len(db.list_leader_actions(status=db.ACTION_PROPOSED, limit=50, conn=conn))
+        pending_count = len(
+            db.list_leader_actions(status=db.ACTION_PROPOSED, limit=50, conn=conn)
+        )
         lines = ["**Arena Relay Leader Actions**"]
         lines.append(f"- Pending: {pending_count}")
-        lines.append("- Feedback: ✅/☑️ means done, ❌ means declined (engine re-nominates on sustained evidence)")
+        lines.append(
+            "- Feedback: ✅/☑️ means done, ❌ means declined (engine re-nominates on sustained evidence)"
+        )
         lines.append("")
         if not refreshed:
             lines.append("_No leader actions recorded yet._")
@@ -390,9 +534,7 @@ def _build_activity_list_report() -> str:
         lines.append(
             f"- `{spec['activity_key']}` — {spec['owner_lane']} — {spec['activity_role']} — {spec['schedule']}"
         )
-        lines.append(
-            f"  {spec['purpose']}"
-        )
+        lines.append(f"  {spec['purpose']}")
     return "\n".join(lines)
 
 
@@ -405,8 +547,12 @@ def _build_activity_show_report(activity_key: str) -> str:
     lines.append(f"- Role: {resolved['activity_role']}")
     lines.append(f"- Purpose: {resolved['purpose']}")
     lines.append(f"- Job: `{resolved['job_function']}`")
-    lines.append(f"- Schedule: {next(spec['schedule'] for spec in schedule_specs_from_registry(elixir) if spec['activity_key'] == resolved['activity_key'])}")
-    lines.append(f"- Manual trigger: {'yes' if resolved['manual_trigger_allowed'] else 'no'}")
+    lines.append(
+        f"- Schedule: {next(spec['schedule'] for spec in schedule_specs_from_registry(elixir) if spec['activity_key'] == resolved['activity_key'])}"
+    )
+    lines.append(
+        f"- Manual trigger: {'yes' if resolved['manual_trigger_allowed'] else 'no'}"
+    )
     lines.append("- Delivery targets:")
     for target in resolved["delivery_targets"]:
         lines.append(f"  - {target}")
@@ -422,7 +568,9 @@ def _format_contextual_memory_item(memory: dict) -> str:
     else:
         source_label = "system"
     created_at = memory.get("created_at") or "n/a"
-    summary = _truncate_for_report(memory.get("summary") or memory.get("title") or memory.get("body") or "")
+    summary = _truncate_for_report(
+        memory.get("summary") or memory.get("title") or memory.get("body") or ""
+    )
     tags = memory.get("tags") or []
     tag_text = f" | tags {', '.join(tags[:3])}" if tags else ""
     return (
@@ -444,7 +592,9 @@ def _format_conversation_facts(title: str, facts: list[dict], limit: int) -> lis
     return lines
 
 
-def _format_conversation_episodes(title: str, episodes: list[dict], limit: int) -> list[str]:
+def _format_conversation_episodes(
+    title: str, episodes: list[dict], limit: int
+) -> list[str]:
     if not episodes:
         return [f"- {title}: none"]
     lines = [f"- {title}: {len(episodes)}"]
@@ -475,8 +625,14 @@ def _list_recent_conversation_episodes(limit: int, *, conn) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def _build_memory_report(*, member_query: str | None = None, query: str | None = None, limit: int = 5,
-                         include_system_internal: bool = False, conn=None) -> str:
+def _build_memory_report(
+    *,
+    member_query: str | None = None,
+    query: str | None = None,
+    limit: int = 5,
+    include_system_internal: bool = False,
+    conn=None,
+) -> str:
     import db
     from memory_store import list_memories, search_memories
 
@@ -500,8 +656,7 @@ def _build_memory_report(*, member_query: str | None = None, query: str | None =
             f"{memory_status.get('total', 0)} total | "
             f"{memory_status.get('leader_notes', 0)} leader | "
             f"{memory_status.get('inferences', 0)} inference | "
-            f"{memory_status.get('system_notes', 0)} system | "
-            f"sqlite-vec {'on' if memory_status.get('sqlite_vec_enabled') else 'off'}"
+            f"{memory_status.get('system_notes', 0)} system | FTS search"
         )
         lines.append(f"- View: `{viewer_scope}`")
 
@@ -524,10 +679,26 @@ def _build_memory_report(*, member_query: str | None = None, query: str | None =
             lines.append("Conversation memory:")
             user_ctx = memory_context.get("discord_user") or {}
             member_ctx = memory_context.get("member") or {}
-            lines.extend(_format_conversation_facts("User facts", user_ctx.get("facts") or [], limit))
-            lines.extend(_format_conversation_episodes("User episodes", user_ctx.get("episodes") or [], limit))
-            lines.extend(_format_conversation_facts("Member facts", member_ctx.get("facts") or [], limit))
-            lines.extend(_format_conversation_episodes("Member episodes", member_ctx.get("episodes") or [], limit))
+            lines.extend(
+                _format_conversation_facts(
+                    "User facts", user_ctx.get("facts") or [], limit
+                )
+            )
+            lines.extend(
+                _format_conversation_episodes(
+                    "User episodes", user_ctx.get("episodes") or [], limit
+                )
+            )
+            lines.extend(
+                _format_conversation_facts(
+                    "Member facts", member_ctx.get("facts") or [], limit
+                )
+            )
+            lines.extend(
+                _format_conversation_episodes(
+                    "Member episodes", member_ctx.get("episodes") or [], limit
+                )
+            )
         else:
             recent_episodes = _list_recent_conversation_episodes(limit, conn=conn)
             lines.append("")
@@ -609,6 +780,7 @@ async def _preview_job_runtime():
 
 async def _run_runtime_job(job_name: str, preview: bool) -> str:
     import elixir
+
     activity_key = normalize_activity_key(job_name)
     if not activity_key:
         return f"Unknown job: {job_name}"
@@ -638,14 +810,18 @@ async def _run_system_signals(preview: bool) -> str:
     if preview:
         async with _preview_job_runtime() as captured_posts:
             try:
-                count = await elixir._publish_pending_system_signal_updates(seed_startup_signals=True)
+                count = await elixir._publish_pending_system_signal_updates(
+                    seed_startup_signals=True
+                )
             except Exception as exc:
                 return f"`signal.publish-pending` failed in preview mode: {exc}"
             summary = f"Published {count} pending system signal(s) in preview mode."
             return f"{summary}\n\n{_format_preview_posts(captured_posts)}"
 
     try:
-        count = await elixir._publish_pending_system_signal_updates(seed_startup_signals=True)
+        count = await elixir._publish_pending_system_signal_updates(
+            seed_startup_signals=True
+        )
     except Exception as exc:
         return f"`signal.publish-pending` failed: {exc}"
     return f"Published {count} pending system signal(s)."
@@ -675,14 +851,20 @@ def _resolve_member_tag(member_query: str, *, conn=None) -> tuple[str, str]:
     best = pick_best_match(matches)
     if best is None:
         choices = ", ".join(
-            item.get("member_ref_with_handle") or item.get("current_name") or item.get("player_tag")
+            item.get("member_ref_with_handle")
+            or item.get("current_name")
+            or item.get("player_tag")
             for item in matches[:3]
         )
         raise ValueError(f"Ambiguous member {member_query!r}. Top matches: {choices}")
-    return best["player_tag"], best.get("member_ref_with_handle") or best.get("current_name") or best["player_tag"]
+    return best["player_tag"], best.get("member_ref_with_handle") or best.get(
+        "current_name"
+    ) or best["player_tag"]
 
 
-async def _run_member_metadata_command(command: str, *, preview: bool, args: dict) -> str:
+async def _run_member_metadata_command(
+    command: str, *, preview: bool, args: dict
+) -> str:
     import db
     import runtime.onboarding as onboarding
 
@@ -737,23 +919,15 @@ async def _run_member_metadata_command(command: str, *, preview: bool, args: dic
     if command == "set-profile-url":
         if preview:
             return f"Preview: would set profile URL for {label} to {args['url']}."
-        await asyncio.to_thread(db.set_member_profile_url, member_tag, None, args["url"])
+        await asyncio.to_thread(
+            db.set_member_profile_url, member_tag, None, args["url"]
+        )
         return f"Set profile URL for {label}."
     if command == "clear-profile-url":
         if preview:
             return f"Preview: would clear profile URL for {label}."
         await asyncio.to_thread(db.clear_member_profile_url, member_tag, None)
         return f"Cleared profile URL for {label}."
-    if command == "set-poap-address":
-        if preview:
-            return f"Preview: would set POAP address for {label} to {args['poap_address']}."
-        await asyncio.to_thread(db.set_member_poap_address, member_tag, None, args["poap_address"])
-        return f"Set POAP address for {label}."
-    if command == "clear-poap-address":
-        if preview:
-            return f"Preview: would clear POAP address for {label}."
-        await asyncio.to_thread(db.clear_member_poap_address, member_tag, None)
-        return f"Cleared POAP address for {label}."
     if command == "set-note":
         if preview:
             return f"Preview: would set note for {label} to: {args['note']}"
@@ -791,6 +965,7 @@ async def _run_verify_discord(*, preview: bool, args: dict) -> str:
 
 def _suggest_clan_member_for_discord_user(display_values: list[str]) -> str | None:
     import db as _db
+
     for value in display_values:
         if not value:
             continue
@@ -798,9 +973,20 @@ def _suggest_clan_member_for_discord_user(display_values: list[str]) -> str | No
         if not matches:
             continue
         top = matches[0]
-        exactish = top.get("match_source") in {"current_name_exact", "alias_exact", "player_tag_exact"}
-        if exactish and (len(matches) == 1 or top.get("match_score", 0) - matches[1].get("match_score", 0) >= 100):
-            name = top.get("current_name") or top.get("member_name") or top.get("player_tag")
+        exactish = top.get("match_source") in {
+            "current_name_exact",
+            "alias_exact",
+            "player_tag_exact",
+        }
+        if exactish and (
+            len(matches) == 1
+            or top.get("match_score", 0) - matches[1].get("match_score", 0) >= 100
+        ):
+            name = (
+                top.get("current_name")
+                or top.get("member_name")
+                or top.get("player_tag")
+            )
             return f"{name} (`{top['player_tag']}`)"
     return None
 
@@ -823,7 +1009,9 @@ async def _run_member_audit_discord() -> str:
     for guild_member in guild.members:
         if guild_member.bot:
             continue
-        link = await asyncio.to_thread(db.get_linked_member_for_discord_user, guild_member.id)
+        link = await asyncio.to_thread(
+            db.get_linked_member_for_discord_user, guild_member.id
+        )
         if link:
             if member_role and member_role not in guild_member.roles:
                 role_missing.append(guild_member)
@@ -862,9 +1050,13 @@ async def _run_member_audit_discord() -> str:
         for guild_member, suggestion in unlinked_discord[:25]:
             label = f"{guild_member.display_name} (<@{guild_member.id}>)"
             if suggestion:
-                lines.append(f"- {label} → likely **{suggestion}**. Run `/clanops member verify-discord member:{suggestion.split(' (`')[0]}`.")
+                lines.append(
+                    f"- {label} → likely **{suggestion}**. Run `/clanops member verify-discord member:{suggestion.split(' (`')[0]}`."
+                )
             else:
-                lines.append(f"- {label} → no confident match. Use `/clanops member set` to link manually.")
+                lines.append(
+                    f"- {label} → no confident match. Use `/clanops member set` to link manually."
+                )
         if len(unlinked_discord) > 25:
             lines.append(f"- …and {len(unlinked_discord) - 25} more")
         lines.append("")
@@ -872,7 +1064,9 @@ async def _run_member_audit_discord() -> str:
     if role_missing:
         lines.append("**Linked users missing the Member role**")
         for guild_member in role_missing[:25]:
-            lines.append(f"- {guild_member.display_name} (<@{guild_member.id}>) — run `/clanops member verify-discord` to reapply")
+            lines.append(
+                f"- {guild_member.display_name} (<@{guild_member.id}>) — run `/clanops member verify-discord` to reapply"
+            )
         if len(role_missing) > 25:
             lines.append(f"- …and {len(role_missing) - 25} more")
         lines.append("")
@@ -883,7 +1077,9 @@ async def _run_member_audit_discord() -> str:
     return "\n".join(lines).rstrip()
 
 
-def _translate_member_field_command(action: str, field: str, value: str | None = None) -> tuple[str, dict]:
+def _translate_member_field_command(
+    action: str, field: str, value: str | None = None
+) -> tuple[str, dict]:
     field = normalize_admin_command(field)
     if action == "set":
         if field == "discord":
@@ -898,8 +1094,6 @@ def _translate_member_field_command(action: str, field: str, value: str | None =
             return "set-birthday", {"month": month, "day": day}
         if field == "profile-url":
             return "set-profile-url", {"url": value}
-        if field == "poap-address":
-            return "set-poap-address", {"poap_address": value}
         if field == "note":
             return "set-note", {"note": value}
     if action == "clear":
@@ -909,18 +1103,33 @@ def _translate_member_field_command(action: str, field: str, value: str | None =
 
 async def _run_member_field_command(action: str, *, preview: bool, args: dict) -> str:
     member_args = {"member": args["member"]}
-    command, extra_args = _translate_member_field_command(action, args["field"], args.get("value"))
+    command, extra_args = _translate_member_field_command(
+        action, args["field"], args.get("value")
+    )
     member_args.update(extra_args)
-    return await _run_member_metadata_command(command, preview=preview, args=member_args)
+    return await _run_member_metadata_command(
+        command, preview=preview, args=member_args
+    )
 
 
-async def dispatch_admin_command(command: str | dict, *, preview: bool = False, short: bool = False, args: dict | None = None) -> str:
+async def dispatch_admin_command(
+    command: str | dict,
+    *,
+    preview: bool = False,
+    short: bool = False,
+    args: dict | None = None,
+) -> str:
     import elixir
 
     if isinstance(command, dict):
         request = dict(command)
     else:
-        request = _command_request(normalize_admin_command(str(command)), args=args or {}, preview=preview, short=short)
+        request = _command_request(
+            normalize_admin_command(str(command)),
+            args=args or {},
+            preview=preview,
+            short=short,
+        )
 
     args = request.get("args") or {}
     preview = bool(request.get("preview", False))

@@ -17,6 +17,7 @@ CACHE_DIR_NAMES = {
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
+    "htmlcov",
 }
 SKIP_ROOT_DIRS = {
     ".git",
@@ -39,8 +40,12 @@ def _remove_path(path: Path) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Remove local caches and optional runtime artifacts.")
-    parser.add_argument("--db", action="store_true", help="Also remove local SQLite and PID files.")
+    parser = argparse.ArgumentParser(
+        description="Remove local caches and optional runtime artifacts."
+    )
+    parser.add_argument(
+        "--db", action="store_true", help="Also remove local SQLite and PID files."
+    )
     args = parser.parse_args()
 
     removed: list[str] = []
@@ -49,6 +54,10 @@ def main() -> None:
             continue
         if path.name in CACHE_DIR_NAMES and _remove_path(path):
             removed.append(str(path.relative_to(ROOT)))
+
+    for path in sorted(ROOT.glob(".coverage*")):
+        if _remove_path(path):
+            removed.append(path.name)
 
     if args.db:
         for path in sorted(OPTIONAL_FILES):

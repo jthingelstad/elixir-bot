@@ -8,6 +8,7 @@ MANAGE step must close those cases keyed off current membership — and a KICK
 (fulfilled kick action) is meaningfully different from an organic leave: a kick
 RESOLVES the review (action enacted), a leave DISMISSES it (moot).
 """
+
 from __future__ import annotations
 
 import db
@@ -48,13 +49,26 @@ def _action(player_tag, *, action_type, status, decided_at, conn=None):
         "(action_key, action_type, target_player_tag, status, objective, prompt_text, "
         " proposed_at, decided_at, created_at, updated_at, is_test) "
         "VALUES (?, ?, ?, ?, 'x', 'x', ?, ?, ?, ?, 0)",
-        (f"{action_type}:{player_tag}:{decided_at}", action_type, player_tag, status,
-         decided_at, decided_at, decided_at, decided_at),
+        (
+            f"{action_type}:{player_tag}:{decided_at}",
+            action_type,
+            player_tag,
+            status,
+            decided_at,
+            decided_at,
+            decided_at,
+            decided_at,
+        ),
     )
 
 
 def _done_kick(player_tag, *, decided_at):
-    _action(player_tag, action_type="kick_recommendation", status="done", decided_at=decided_at)
+    _action(
+        player_tag,
+        action_type="kick_recommendation",
+        status="done",
+        decided_at=decided_at,
+    )
 
 
 def _open_case(case_type, tag, name):
@@ -74,7 +88,10 @@ def test_closes_departed_case_keeps_current_member():
 
     tags = {d["target_player_tag"] for d in reconciled}
     assert "#LEFT01" in tags and "#STAYS1" not in tags
-    assert db.get_decision_case("inactivity_review:member:#STAYS1")["status"] == db.CASE_OPEN
+    assert (
+        db.get_decision_case("inactivity_review:member:#STAYS1")["status"]
+        == db.CASE_OPEN
+    )
 
 
 def test_organic_leave_is_dismissed_as_member_left():
@@ -121,18 +138,29 @@ def test_member_with_no_membership_row_is_dismissed():
     out = reconcile_departed_member_cases()
 
     assert "#GHOST1" in {d["target_player_tag"] for d in out}
-    assert db.get_decision_case("promotion_review:member:#GHOST1")["status"] == db.CASE_DISMISSED
+    assert (
+        db.get_decision_case("promotion_review:member:#GHOST1")["status"]
+        == db.CASE_DISMISSED
+    )
 
 
 def test_covers_all_member_review_case_types():
     _set_membership("#LEFT03", left_at="2026-07-04")
-    for ct in ("inactivity_review", "promotion_review", "demotion_review", "war_recovery"):
+    for ct in (
+        "inactivity_review",
+        "promotion_review",
+        "demotion_review",
+        "war_recovery",
+    ):
         _open_case(ct, "#LEFT03", "Leaver")
 
     out = reconcile_departed_member_cases()
 
     assert {d["case_type"] for d in out} == {
-        "inactivity_review", "promotion_review", "demotion_review", "war_recovery",
+        "inactivity_review",
+        "promotion_review",
+        "demotion_review",
+        "war_recovery",
     }
 
 
@@ -140,6 +168,7 @@ def test_covers_all_member_review_case_types():
 # sync_terminal_leader_action_cases — a done/rejected action closes its case
 # at decision time, before the member ever leaves the roster.
 # ---------------------------------------------------------------------------
+
 
 def test_done_kick_resolves_inactivity_case_while_member_present():
     # Member is still in the clan; the leader marked the kick done.
@@ -151,29 +180,46 @@ def test_done_kick_resolves_inactivity_case_while_member_present():
 
     assert {c["target_player_tag"] for c in out} == {"#DONEK1"}
     assert out[0]["outcome"] == "accepted"
-    assert db.get_decision_case("inactivity_review:member:#DONEK1")["status"] == db.CASE_RESOLVED
+    assert (
+        db.get_decision_case("inactivity_review:member:#DONEK1")["status"]
+        == db.CASE_RESOLVED
+    )
 
 
 def test_done_promotion_resolves_promotion_case():
     _set_membership("#PROMO1", left_at=None)
-    _action("#PROMO1", action_type="promotion_recommendation", status="done",
-            decided_at="2026-07-02T10:00:00")
+    _action(
+        "#PROMO1",
+        action_type="promotion_recommendation",
+        status="done",
+        decided_at="2026-07-02T10:00:00",
+    )
     _open_case("promotion_review", "#PROMO1", "Promoted")
 
     out = sync_terminal_leader_action_cases()
 
-    assert db.get_decision_case("promotion_review:member:#PROMO1")["status"] == db.CASE_RESOLVED
+    assert (
+        db.get_decision_case("promotion_review:member:#PROMO1")["status"]
+        == db.CASE_RESOLVED
+    )
     assert out[0]["case_type"] == "promotion_review"
 
 
 def test_rejected_action_dismisses_case():
-    _action("#REJ1", action_type="kick_recommendation", status="rejected",
-            decided_at="2026-07-02T10:00:00")
+    _action(
+        "#REJ1",
+        action_type="kick_recommendation",
+        status="rejected",
+        decided_at="2026-07-02T10:00:00",
+    )
     _open_case("inactivity_review", "#REJ1", "Rejected")
 
     sync_terminal_leader_action_cases()
 
-    assert db.get_decision_case("inactivity_review:member:#REJ1")["status"] == db.CASE_DISMISSED
+    assert (
+        db.get_decision_case("inactivity_review:member:#REJ1")["status"]
+        == db.CASE_DISMISSED
+    )
 
 
 def test_sync_never_creates_a_case():

@@ -3,10 +3,9 @@
 {% block content %}
 <h1>Recognition — the decision trail</h1>
 {% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
-<p class="muted">Offline legacy recognition history plus durable award claims. Suppressions carry their reason
-(the "why didn't you post X?" answer). Lanes: <code>member-highlights</code> → #player-highlights ·
-<code>clan-events</code> → #clan-events · <code>river-race</code> → #river-race ·
-<code>arena-relay</code> → #actions (leadership; unknown types fail closed here).</p>
+<p class="muted">Durable award claims plus the retired deterministic recognizer's history.
+Suppressions carry their reason (the "why didn't you post X?" answer). Current proactive
+decisions live in <a href="/awareness">Awareness</a>.</p>
 
 <form class="filters" method="get" action="/recognition">
   <select name="stream">
@@ -22,7 +21,7 @@
 
 <div class="card" style="overflow-x:auto;">
   <table>
-    <tr><th>claimed</th><th>key</th><th>stream</th><th class="num">score</th><th>outcome</th><th>lane</th><th></th></tr>
+    <tr><th>claimed</th><th>key</th><th>stream</th><th class="num">score</th><th>outcome</th><th></th></tr>
     {% for c in claims %}
       <tr>
         <td title="{{ c.claimed_at }}">{{ c.claimed_at | reltime }}</td>
@@ -32,18 +31,16 @@
         <td>
           {% if c.suppressed_reason %}
             <span class="badge bad" title="{{ c.suppressed_reason }}">suppressed: {{ c.suppressed_reason | truncate(40) }}</span>
-          {% elif c.intent_status %}
-            <span class="badge {{ 'good' if c.intent_status == 'fulfilled' else ('bad' if c.intent_status in ('failed','expired') else '') }}">{{ c.intent_status }}</span>
-            {% if c.last_error %}<span class="muted" title="{{ c.last_error }}">({{ c.attempts }} attempts)</span>{% endif %}
+          {% elif c.intent_id is not none %}
+            <span class="muted">legacy post #{{ c.intent_id }} (archived)</span>
           {% else %}
             <span class="muted">claimed</span>
           {% endif %}
         </td>
-        <td>{{ c.lane or '' }}</td>
         <td></td>
       </tr>
     {% else %}
-      <tr><td colspan="7" class="muted">No claims match.</td></tr>
+      <tr><td colspan="6" class="muted">No claims match.</td></tr>
     {% endfor %}
   </table>
 </div>

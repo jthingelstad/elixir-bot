@@ -9,8 +9,10 @@ log = logging.getLogger("elixir")
 
 __all__ = [
     "_match_clan_member",
-    "_resolve_member_candidate", "_extract_member_deck_target",
-    "_build_member_deck_report", "_build_member_war_decks_report",
+    "_resolve_member_candidate",
+    "_extract_member_deck_target",
+    "_build_member_deck_report",
+    "_build_member_war_decks_report",
 ]
 
 from runtime.helpers._common import (
@@ -32,9 +34,18 @@ def _match_clan_member(nickname):
         matches = db.resolve_member(nickname, limit=2)
         if matches:
             best = matches[0]
-            if best.get("match_source") in {"player_tag_exact", "current_name_exact", "alias_exact"}:
-                if len(matches) == 1 or matches[0].get("match_score") != matches[1].get("match_score"):
-                    return (best["player_tag"], best.get("current_name") or best.get("member_name"))
+            if best.get("match_source") in {
+                "player_tag_exact",
+                "current_name_exact",
+                "alias_exact",
+            }:
+                if len(matches) == 1 or matches[0].get("match_score") != matches[1].get(
+                    "match_score"
+                ):
+                    return (
+                        best["player_tag"],
+                        best.get("current_name") or best.get("member_name"),
+                    )
             return None
     except Exception:
         log.warning("resolve_member_db_error nickname=%r", nickname, exc_info=True)
@@ -58,7 +69,9 @@ def _resolve_member_candidate(query: str):
     if best:
         return best, None
     choices = ", ".join(
-        item.get("member_ref_with_handle") or item.get("current_name") or item["player_tag"]
+        item.get("member_ref_with_handle")
+        or item.get("current_name")
+        or item["player_tag"]
         for item in matches[:3]
     )
     return None, f"I couldn't tell which member you meant. Top matches: {choices}"
@@ -71,8 +84,10 @@ def _extract_member_deck_target(text: str, message):
         if linked:
             return linked["player_tag"]
     mentioned_users = [
-        user for user in getattr(message, "mentions", [])
-        if getattr(user, "id", None) != getattr(getattr(_bot(), "user", None), "id", None)
+        user
+        for user in getattr(message, "mentions", [])
+        if getattr(user, "id", None)
+        != getattr(getattr(_bot(), "user", None), "id", None)
     ]
     if len(mentioned_users) == 1:
         linked = db.get_linked_member_for_discord_user(mentioned_users[0].id)
@@ -99,7 +114,12 @@ def _build_member_deck_report(member_query: str):
         member["player_tag"], facets=("loadout",), source=db
     )
     deck = (member_read.get("loadout") or {}).get("current_deck")
-    label = member.get("member_ref_with_handle") or member.get("member_ref") or member.get("current_name") or member["player_tag"]
+    label = (
+        member.get("member_ref_with_handle")
+        or member.get("member_ref")
+        or member.get("current_name")
+        or member["player_tag"]
+    )
     if not deck or not deck.get("cards"):
         return f"I don't have a stored current deck yet for {label}."
     lines = [f"**Current Deck for {label}**"]
@@ -150,7 +170,9 @@ def _build_member_war_decks_report(member_query: str):
     if status == "insufficient_data" or not decks:
         reason = result.get("reason")
         gaps = result.get("gaps") or []
-        detail = reason or (gaps[0] if gaps else "not enough recent war battles to reconstruct.")
+        detail = reason or (
+            gaps[0] if gaps else "not enough recent war battles to reconstruct."
+        )
         return (
             f"I don't have enough recent war battle data to reconstruct {label}'s war decks yet. "
             f"{detail}"

@@ -7,9 +7,12 @@ from db import (
     managed_connection,
 )
 from storage._enrichment import _member_reference_fields, _membership_status_for
-from storage.war_status import _season_bounds, get_current_season_id, get_current_war_status
-
 from storage._formatting import format_member_reference as _format_member_reference
+from storage.war_status import (
+    _season_bounds,
+    get_current_season_id,
+    get_current_war_status,
+)
 
 
 @managed_connection
@@ -18,6 +21,7 @@ def member_roster_status(tag, conn=None) -> dict:
     left_at}. QA H6/M1/M20/L18 — lets read paths flag a departed member rather
     than reporting them as an active roster player / war no-show."""
     return _membership_status_for(conn, _canon_tag(tag))
+
 
 # v5.1 sources: war_participation is keyed (season_id, section_index,
 # player_tag); the per-day source is war_attendance_days; war battle records
@@ -31,7 +35,11 @@ def get_member_war_status(tag, season_id=None, conn=None):
         season_id = get_current_season_id(conn=conn)
     current_day = None
     current_war = get_current_war_status(conn=conn)
-    if current_war and season_id is not None and current_war.get("section_index") is not None:
+    if (
+        current_war
+        and season_id is not None
+        and current_war.get("section_index") is not None
+    ):
         day_row = conn.execute(
             "SELECT war_day_index, decks_used, decks_available, fame_delta "
             "FROM war_attendance_days "
@@ -80,7 +88,9 @@ def get_member_war_status(tag, season_id=None, conn=None):
         ).fetchone()["cnt"]
         season = dict(season_row)
         season["total_races_in_season"] = total_races
-        season["participation_rate"] = round((season["races_played"] or 0) / total_races, 4) if total_races else 0
+        season["participation_rate"] = (
+            round((season["races_played"] or 0) / total_races, 4) if total_races else 0
+        )
         summary["season"] = season
     return summary
 
@@ -139,7 +149,9 @@ def get_member_war_attendance(tag, season_id=None, conn=None):
     # compact cutoff drops the ISO-format rows (the two NEWEST weeks) because '-'
     # sorts below digits, understating recent attendance and feeding kick reads.
     # Normalise both sides to a bare YYYYMMDD date prefix before comparing.
-    four_week_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=28)).strftime("%Y%m%d")
+    four_week_cutoff = (
+        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=28)
+    ).strftime("%Y%m%d")
     recent_total = conn.execute(
         "SELECT COUNT(*) AS cnt FROM war_weeks WHERE substr(REPLACE(created_date, '-', ''), 1, 8) >= ?",
         (four_week_cutoff,),
@@ -159,15 +171,23 @@ def get_member_war_attendance(tag, season_id=None, conn=None):
         "season": {
             "races_played": season_row["races_played"] if season_row else 0,
             "total_races": total_races,
-            "participation_rate": round((season_row["races_played"] or 0) / total_races, 4) if season_row and total_races else 0,
+            "participation_rate": round(
+                (season_row["races_played"] or 0) / total_races, 4
+            )
+            if season_row and total_races
+            else 0,
             "total_points": season_row["total_points"] if season_row else 0,
             "total_decks_used": season_row["total_decks_used"] if season_row else 0,
-            "races_missed": max(0, total_races - (season_row["races_played"] or 0)) if season_row else total_races,
+            "races_missed": max(0, total_races - (season_row["races_played"] or 0))
+            if season_row
+            else total_races,
         },
         "last_4_weeks": {
             "races_played": recent_played or 0,
             "total_races": recent_total or 0,
-            "participation_rate": round((recent_played or 0) / recent_total, 4) if recent_total else 0,
+            "participation_rate": round((recent_played or 0) / recent_total, 4)
+            if recent_total
+            else 0,
         },
     }
 
@@ -261,7 +281,9 @@ def get_member_missed_war_days(tag, season_id=None, conn=None):
         if status and (status["decks_used"] or 0) > 0:
             participated += 1
         else:
-            missed.append(f"Week {row['section_index'] + 1} Battle Day {row['war_day_index'] + 1}")
+            missed.append(
+                f"Week {row['section_index'] + 1} Battle Day {row['war_day_index'] + 1}"
+            )
     return {
         "season_id": season_id,
         "tag": canon_tag,

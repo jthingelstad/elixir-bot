@@ -22,13 +22,15 @@ def test_fresh_build_matches_committed_schema_fingerprint(tmp_path):
     build(str(path), None)
     conn = sqlite3.connect(path)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        assert (
+            conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        )
         assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
     finally:
         conn.close()
 
 
-def test_v1_migration_backfills_awareness_posts_and_loop_numbers(tmp_path):
+def test_legacy_migration_backfills_awareness_then_removes_retired_queue(tmp_path):
     path = tmp_path / "pre-v1.db"
     build(str(path), None)
     conn = sqlite3.connect(path)
@@ -45,6 +47,21 @@ def test_v1_migration_backfills_awareness_posts_and_loop_numbers(tmp_path):
         conn.execute(
             "INSERT INTO awareness_thoughts (thought_id, at) "
             "VALUES ('old-thought', '2026-07-13T12:00:00Z')"
+        )
+        conn.execute(
+            """CREATE TABLE communication_intents (
+                intent_id INTEGER PRIMARY KEY,
+                intent_type TEXT NOT NULL,
+                lane TEXT NOT NULL,
+                scope TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                fulfilled_at TEXT,
+                discord_message_id TEXT
+            )"""
         )
         payload = json.dumps(
             {
@@ -76,7 +93,21 @@ def test_v1_migration_backfills_awareness_posts_and_loop_numbers(tmp_path):
         ).fetchone()
         assert thought == (1, None)
         assert post == ("elixir", "A migrated awareness post", 9, "123")
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert (
+            conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        )
+        assert (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name = 'communication_intents'"
+            ).fetchone()
+            is None
+        )
+        assert "shadow" not in {
+            row[1] for row in conn.execute("PRAGMA table_info(awareness_thoughts)")
+        }
+        assert "legacy_intent_id" not in {
+            row[1] for row in conn.execute("PRAGMA table_info(awareness_posts)")
+        }
     finally:
         conn.close()
 
@@ -85,7 +116,9 @@ def test_empty_get_connection_builds_complete_current_schema(tmp_path):
     path = tmp_path / "empty.db"
     conn = db.get_connection(path)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        assert (
+            conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        )
         assert conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='discord_users'"
         ).fetchone()
@@ -122,12 +155,16 @@ def test_system_status_reads_awareness_native_ledgers(tmp_path):
         conn.execute(
             "INSERT INTO awareness_thoughts "
             "(thought_id, loop_number, at, read_json, plan_json, chose_silence, "
-            "post_count, skipped_reason, shadow) VALUES "
+            "post_count, skipped_reason) VALUES "
             "('ok', 1, strftime('%Y-%m-%dT%H:%M:%SZ','now'), "
-            "?, '{}', 1, 0, 'quiet', 0), "
+            "?, '{}', 1, 0, 'quiet'), "
             "('failed', 2, strftime('%Y-%m-%dT%H:%M:%SZ','now'), "
-            "'{}', '{}', 0, 0, '⚠️ tick failed: delivery @ post: boom', 0)",
-            (json.dumps({"signals_by_lane": {"elixir": [{"key": "a"}, {"key": "b"}]}}),),
+            "'{}', '{}', 0, 0, '⚠️ tick failed: delivery @ post: boom')",
+            (
+                json.dumps(
+                    {"signals_by_lane": {"elixir": [{"key": "a"}, {"key": "b"}]}}
+                ),
+            ),
         )
         conn.execute(
             "INSERT INTO awareness_posts "

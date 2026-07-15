@@ -4,6 +4,7 @@ the simulator found live (roster players never ensure_player'd, no clans row) â€
 the "works only because migration pre-seeded" trap. The whole point is that a
 fresh install must survive its first tick.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -22,39 +23,85 @@ class _ColdApi:
 
     def get_clan(self):
         return {
-            "tag": HOME_CLAN, "name": "COLD KINGS", "clanScore": 600,
+            "tag": HOME_CLAN,
+            "name": "COLD KINGS",
+            "clanScore": 600,
             "clanWarTrophies": 2000,
             "memberList": [
-                {"tag": "#AAA", "name": "Aaa", "role": "member", "expLevel": 42,
-                 "trophies": 5100, "donations": 120, "donationsReceived": 40,
-                 "clanRank": 1, "previousClanRank": 1,
-                 "lastSeen": "20260706T140000.000Z"},
-                {"tag": "#BBB", "name": "Bbb", "role": "elder", "expLevel": 55,
-                 "trophies": 6200, "donations": 300, "donationsReceived": 80,
-                 "clanRank": 2, "previousClanRank": 2,
-                 "lastSeen": "20260706T140000.000Z"},
+                {
+                    "tag": "#AAA",
+                    "name": "Aaa",
+                    "role": "member",
+                    "expLevel": 42,
+                    "trophies": 5100,
+                    "donations": 120,
+                    "donationsReceived": 40,
+                    "clanRank": 1,
+                    "previousClanRank": 1,
+                    "lastSeen": "20260706T140000.000Z",
+                },
+                {
+                    "tag": "#BBB",
+                    "name": "Bbb",
+                    "role": "elder",
+                    "expLevel": 55,
+                    "trophies": 6200,
+                    "donations": 300,
+                    "donationsReceived": 80,
+                    "clanRank": 2,
+                    "previousClanRank": 2,
+                    "lastSeen": "20260706T140000.000Z",
+                },
             ],
         }
 
     def get_current_war(self):
         return {
-            "state": "full", "sectionIndex": 0, "periodIndex": 0,
+            "state": "full",
+            "sectionIndex": 0,
+            "periodIndex": 0,
             "periodType": "training",
-            "clan": {"tag": HOME_CLAN, "name": "COLD KINGS", "fame": 0,
-                     "participants": []},
-            "clans": [{"tag": HOME_CLAN, "name": "COLD KINGS", "fame": 0,
-                       "periodPoints": 0, "clanScore": 600}],
+            "clan": {
+                "tag": HOME_CLAN,
+                "name": "COLD KINGS",
+                "fame": 0,
+                "participants": [],
+            },
+            "clans": [
+                {
+                    "tag": HOME_CLAN,
+                    "name": "COLD KINGS",
+                    "fame": 0,
+                    "periodPoints": 0,
+                    "clanScore": 600,
+                }
+            ],
         }
 
     def get_player(self, tag):
-        return {"tag": tag, "name": tag.strip("#"), "expLevel": 42, "trophies": 5100,
-                "bestTrophies": 5300, "wins": 800, "losses": 400,
-                "cards": [{"id": 26000000, "name": "Knight", "rarity": "common",
-                           "level": 14, "maxLevel": 16}],
-                "badges": [], "arena": {"id": 54000012, "name": "Spooky Town"},
-                "currentPathOfLegendSeasonResult": {},
-                "lastPathOfLegendSeasonResult": {},
-                "bestPathOfLegendSeasonResult": {}}
+        return {
+            "tag": tag,
+            "name": tag.strip("#"),
+            "expLevel": 42,
+            "trophies": 5100,
+            "bestTrophies": 5300,
+            "wins": 800,
+            "losses": 400,
+            "cards": [
+                {
+                    "id": 26000000,
+                    "name": "Knight",
+                    "rarity": "common",
+                    "level": 14,
+                    "maxLevel": 16,
+                }
+            ],
+            "badges": [],
+            "arena": {"id": 54000012, "name": "Spooky Town"},
+            "currentPathOfLegendSeasonResult": {},
+            "lastPathOfLegendSeasonResult": {},
+            "bestPathOfLegendSeasonResult": {},
+        }
 
     def get_player_battle_log(self, tag):
         return []

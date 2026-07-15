@@ -11,13 +11,13 @@ Since the 2026-07-12 scoring rework (participation, not league/prestige), being
 control — so the whole board is fair to surface. No Discord tables (they don't
 render): bold headers + short bullet lines only.
 """
+
 from __future__ import annotations
 
 import logging
 import re
 
 from db import managed_connection
-
 
 log = logging.getLogger("elixir.elder_standing")
 
@@ -72,8 +72,11 @@ def build_elder_standing(now: str | None = None, *, conn=None) -> dict:
 
     def entry(tag, reason=None):
         m = {**reviewed.get(tag, {}), "tag": tag}
-        e = {"tag": tag, "name": scores[tag].get("name") or m.get("name") or tag,
-             "why": _why(conn, m, now)}
+        e = {
+            "tag": tag,
+            "name": scores[tag].get("name") or m.get("name") or tag,
+            "why": _why(conn, m, now),
+        }
         if reason:
             e["reason"] = reason
         return e
@@ -83,9 +86,13 @@ def build_elder_standing(now: str | None = None, *, conn=None) -> dict:
 
     elders = [t for t, s in scores.items() if s["role"] == "elder"]
     members = [t for t, s in scores.items() if s["role"] == "member"]
-    holding = [entry(t) for t in by_rank(e for e in elders if e not in band["demotable"])]
-    stepping = [entry(t, band["demote_reasons"].get(t) or "outranked")
-                for t in by_rank(e for e in elders if e in band["demotable"])]
+    holding = [
+        entry(t) for t in by_rank(e for e in elders if e not in band["demotable"])
+    ]
+    stepping = [
+        entry(t, band["demote_reasons"].get(t) or "outranked")
+        for t in by_rank(e for e in elders if e in band["demotable"])
+    ]
     rising = [entry(t) for t in by_rank(m for m in members if m in band["should_be"])]
     return {
         "composition": {"elders": len(elders), "members": len(members)},
@@ -96,6 +103,7 @@ def build_elder_standing(now: str | None = None, *, conn=None) -> dict:
 
 
 # ── Deterministic render (grounded fallback; no Discord tables) ─────────────
+
 
 def _bullets(members: list[dict]) -> str:
     return "\n".join(
@@ -121,12 +129,18 @@ def render_elder_standing(standing: dict, *, date: str | None = None) -> str:
         "",
         "**Holding strong.**",
     ]
-    parts += ["These Elders keep earning it:\n" + _bullets(holding)] if holding \
+    parts += (
+        ["These Elders keep earning it:\n" + _bullets(holding)]
+        if holding
         else ["_(no Elders to feature this week)_"]
+    )
 
     parts += ["", "**On the rise.**"]
-    parts += ["Trending toward Elder — keep it up:\n" + _bullets(rising)] if rising \
+    parts += (
+        ["Trending toward Elder — keep it up:\n" + _bullets(rising)]
+        if rising
         else ["No one's knocking on the door just yet."]
+    )
 
     parts += ["", "**Stepping-down watch.**"]
     if stepping:
@@ -143,11 +157,13 @@ def render_elder_standing(standing: dict, *, date: str | None = None) -> str:
 
 # ── Facts brief for the LLM composer + grounding guard ─────────────────────
 
+
 def facts_for_model(standing: dict, *, date: str | None = None) -> str:
     def _fmt(members):
-        return "\n".join(
-            f"- {m['name']} ({m['why'] or 'no evidence'})" for m in members
-        ) or "- (none)"
+        return (
+            "\n".join(f"- {m['name']} ({m['why'] or 'no evidence'})" for m in members)
+            or "- (none)"
+        )
 
     comp = standing.get("composition", {})
     return (
@@ -184,8 +200,9 @@ def output_is_grounded(text: str, standing: dict) -> bool:
     return all(name.strip() in allow for name in claimed)
 
 
-def compose_elder_standing_report(*, date: str | None = None, now: str | None = None,
-                                  conn=None) -> tuple[str, str]:
+def compose_elder_standing_report(
+    *, date: str | None = None, now: str | None = None, conn=None
+) -> tuple[str, str]:
     """Assemble → LLM-warm → grounding-guard → deterministic fallback. Returns
     (report_text, source) where source is 'composed' (LLM passed the guard) or
     'deterministic' (LLM missing / failed the guard). No posting here."""

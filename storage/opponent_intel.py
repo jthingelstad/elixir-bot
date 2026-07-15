@@ -58,13 +58,15 @@ def analyze_clan_roster(clan_profile: dict, *, now: datetime | None = None) -> d
                 active_within_week += 1
 
         if len(top_players) < 5:
-            top_players.append({
-                # QA L19: external opponent names never enter the display_name
-                # pipeline — sanitize inline so injection tokens don't reach the brain.
-                "name": external_safe_name(m.get("name")),
-                "trophies": m.get("trophies", 0),
-                "role": role,
-            })
+            top_players.append(
+                {
+                    # QA L19: external opponent names never enter the display_name
+                    # pipeline — sanitize inline so injection tokens don't reach the brain.
+                    "name": external_safe_name(m.get("name")),
+                    "trophies": m.get("trophies", 0),
+                    "role": role,
+                }
+            )
 
     return {
         "tag": clan_profile.get("tag", ""),
@@ -125,8 +127,12 @@ def analyze_war_participants(clan_war_entry: dict) -> dict:
         "active_participants": active_participants,
         "full_deck_today": full_deck_today,
         "zero_deck_today": zero_deck_today,
-        "engagement_pct": round(active_participants / participant_count * 100, 1) if participant_count else 0,
-        "avg_decks_used": round(total_decks / participant_count, 1) if participant_count else 0,
+        "engagement_pct": round(active_participants / participant_count * 100, 1)
+        if participant_count
+        else 0,
+        "avg_decks_used": round(total_decks / participant_count, 1)
+        if participant_count
+        else 0,
         # QA M23: decks_used / active_participants / fame are CUMULATIVE across
         # the week's battle days; *_today fields are just the current war day.
         # Don't read total_decks_used as today's effort.
@@ -153,7 +159,9 @@ def war_day_context(war_payload: dict | None) -> dict:
     period_type = payload.get("periodType") or None
     period_index = payload.get("periodIndex")
     section_index = payload.get("sectionIndex")
-    day_index = period_index % _PERIODS_PER_SECTION if isinstance(period_index, int) else None
+    day_index = (
+        period_index % _PERIODS_PER_SECTION if isinstance(period_index, int) else None
+    )
     war_day_index = (
         day_index - _TRAINING_DAYS
         if isinstance(day_index, int) and day_index >= _TRAINING_DAYS
@@ -167,7 +175,9 @@ def war_day_context(war_payload: dict | None) -> dict:
         label = "War day (unknown index)"
     return {
         "section_index": section_index,
-        "week_label": f"Week {section_index + 1}" if isinstance(section_index, int) else None,
+        "week_label": f"Week {section_index + 1}"
+        if isinstance(section_index, int)
+        else None,
         "period_index": period_index,
         "period_type": period_type,
         "war_day_index": war_day_index,
@@ -233,14 +243,23 @@ def threat_rating_breakdown(roster: dict | None, war: dict | None) -> dict:
     """
     components: dict[str, float] = {}
     if roster:
-        components["war_trophies"] = round(min(roster.get("war_trophies", 0) / 500, 10), 2)
-        components["avg_trophies"] = round(min(roster.get("avg_trophies", 0) / 800, 10), 2)
+        components["war_trophies"] = round(
+            min(roster.get("war_trophies", 0) / 500, 10), 2
+        )
+        components["avg_trophies"] = round(
+            min(roster.get("avg_trophies", 0) / 800, 10), 2
+        )
         components["roster_fullness"] = round(
-            roster.get("member_count", 0) / (roster.get("max_members", 50) or 50) * 10, 2
+            roster.get("member_count", 0) / (roster.get("max_members", 50) or 50) * 10,
+            2,
         )
         mc = roster.get("member_count", 1) or 1
-        components["recent_activity"] = round(roster.get("recently_active_count", 0) / mc * 10, 2)
-        components["donations"] = round(min(roster.get("donations_per_week", 0) / 2000, 10), 2)
+        components["recent_activity"] = round(
+            roster.get("recently_active_count", 0) / mc * 10, 2
+        )
+        components["donations"] = round(
+            min(roster.get("donations_per_week", 0) / 2000, 10), 2
+        )
     if war:
         components["war_engagement"] = round(war.get("engagement_pct", 0) / 10, 2)
     return {
@@ -270,7 +289,9 @@ def build_clan_intel_entry(
     """
     tag = (clan_war_entry.get("tag") or "").lstrip("#").upper()
     war_analysis = analyze_war_participants(clan_war_entry)
-    roster_analysis = analyze_clan_roster(clan_profile, now=now) if clan_profile else None
+    roster_analysis = (
+        analyze_clan_roster(clan_profile, now=now) if clan_profile else None
+    )
     profile_available = clan_profile is not None
     threat = threat_rating_breakdown(roster_analysis, war_analysis)
     return {
@@ -313,7 +334,11 @@ def build_intel_report(
     war_clans = war_data.get("clans") or []
     our_war_entry = war_data.get("clan")
     if our_war_entry:
-        war_clans_all = [our_war_entry] + [c for c in war_clans if c.get("tag", "").lstrip("#").upper() != our_tag_clean]
+        war_clans_all = [our_war_entry] + [
+            c
+            for c in war_clans
+            if c.get("tag", "").lstrip("#").upper() != our_tag_clean
+        ]
     else:
         war_clans_all = war_clans
 

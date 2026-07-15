@@ -49,12 +49,18 @@ log = logging.getLogger("elixir")
 
 
 def gate_enabled() -> bool:
-    return os.getenv("ELIXIR_AWARENESS_GATE", "1").strip().lower() not in ("0", "false", "no", "off")
+    return os.getenv("ELIXIR_AWARENESS_GATE", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
 
 
 # ---------------------------------------------------------------------------
 # Deterministic trigger classification
 # ---------------------------------------------------------------------------
+
 
 def _hard_post(read: dict) -> list:
     return [s for s in (read.get("hard_post_signals") or []) if s]
@@ -86,8 +92,11 @@ def _soft_lane_signals(read: dict) -> list:
         for s in sigs:
             if isinstance(s, dict) and s.get("signal_key") in hard_keys:
                 continue
-            if (isinstance(s, dict) and s.get("event_type") in _CAKE_EVENT_TYPES
-                    and s.get("subject_tag") in posted_cake):
+            if (
+                isinstance(s, dict)
+                and s.get("event_type") in _CAKE_EVENT_TYPES
+                and s.get("subject_tag") in posted_cake
+            ):
                 continue
             out.append(s)
     return out
@@ -144,16 +153,22 @@ def _cake_day_already_posted(read: dict, cake: dict) -> bool:
 
 def _posted_cake_tags(read: dict) -> set:
     """Subject tags whose cake day has already been celebrated in a post today."""
-    return {c.get("subject_tag") for c in (read.get("cake_days_today") or [])
-            if c and c.get("subject_tag") and _cake_day_already_posted(read, c)}
+    return {
+        c.get("subject_tag")
+        for c in (read.get("cake_days_today") or [])
+        if c and c.get("subject_tag") and _cake_day_already_posted(read, c)
+    }
 
 
 def _fresh_cake_days(read: dict) -> list:
     """Cake days that have NOT already been celebrated in a post today — the only
     ones that should still nudge the gate toward a look."""
     posted = _posted_cake_tags(read)
-    return [c for c in (read.get("cake_days_today") or [])
-            if c and c.get("subject_tag") not in posted]
+    return [
+        c
+        for c in (read.get("cake_days_today") or [])
+        if c and c.get("subject_tag") not in posted
+    ]
 
 
 def _soft_context(read: dict) -> dict:
@@ -191,20 +206,41 @@ def classify(read: dict) -> dict:
 
     if hard:
         kinds = sorted({s.get("event_type") for s in hard if isinstance(s, dict)})
-        return {"tier": "deliberate", "reason": f"hard-post signal(s): {', '.join(k for k in kinds if k)}", "triggers": triggers}
+        return {
+            "tier": "deliberate",
+            "reason": f"hard-post signal(s): {', '.join(k for k in kinds if k)}",
+            "triggers": triggers,
+        }
     if revisits:
-        return {"tier": "deliberate", "reason": f"{len(revisits)} due revisit(s)", "triggers": triggers}
+        return {
+            "tier": "deliberate",
+            "reason": f"{len(revisits)} due revisit(s)",
+            "triggers": triggers,
+        }
     # Notable soft signals (Legendary badge, arena climb) always reach the brain —
     # too rare/cool to risk a cheap-triage mute.
     if notable:
         kinds = sorted({s.get("event_type") for s in notable if isinstance(s, dict)})
-        return {"tier": "deliberate", "reason": f"notable signal(s): {', '.join(k for k in kinds if k)}", "triggers": triggers}
+        return {
+            "tier": "deliberate",
+            "reason": f"notable signal(s): {', '.join(k for k in kinds if k)}",
+            "triggers": triggers,
+        }
     # Heartbeat: a long quiet stretch WITH something real to say → let the brain
     # compose a warm roundup rather than flat-lining.
     if quiet and soft_lanes:
-        return {"tier": "deliberate", "reason": f"quiet stretch ({len(soft_lanes)} soft signal(s) to surface)", "triggers": triggers}
+        return {
+            "tier": "deliberate",
+            "reason": f"quiet stretch ({len(soft_lanes)} soft signal(s) to surface)",
+            "triggers": triggers,
+        }
 
-    has_soft = bool(soft_lanes) or bool(ctx["cake_days"]) or bool(ctx["due_cases"]) or ctx["management_actionable"]
+    has_soft = (
+        bool(soft_lanes)
+        or bool(ctx["cake_days"])
+        or bool(ctx["due_cases"])
+        or ctx["management_actionable"]
+    )
     if has_soft:
         bits = []
         if soft_lanes:
@@ -217,7 +253,11 @@ def classify(read: dict) -> dict:
             bits.append(f"{ctx['management_actionable']} mgmt candidate(s)")
         return {"tier": "triage", "reason": "; ".join(bits), "triggers": triggers}
 
-    return {"tier": "skip", "reason": "no signals in any lane and no standing context", "triggers": triggers}
+    return {
+        "tier": "skip",
+        "reason": "no signals in any lane and no standing context",
+        "triggers": triggers,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -251,24 +291,41 @@ Respond with ONLY a JSON object: {"decision": "post" | "silent", "reason": "<one
 
 def _compact_read_for_triage(read: dict) -> str:
     """A small, cost-cheap serialization of just the parts the triage needs."""
+
     def _slim_sig(s):
         if not isinstance(s, dict):
             return str(s)
-        return {k: s.get(k) for k in
-                ("event_type", "subject_tag", "observed_at", "signal_key",
-                 "badge_tier", "badge_name", "arena_name") if s.get(k)}
+        return {
+            k: s.get(k)
+            for k in (
+                "event_type",
+                "subject_tag",
+                "observed_at",
+                "signal_key",
+                "badge_tier",
+                "badge_name",
+                "arena_name",
+            )
+            if s.get(k)
+        }
 
     time_block = read.get("time") or {}
     payload = {
         "now": read.get("generated_at"),
-        "war_phase": (time_block.get("war_day_label") or time_block.get("phase") or None),
+        "war_phase": (
+            time_block.get("war_day_label") or time_block.get("phase") or None
+        ),
         "posting_pulse": read.get("posting_pulse") or {},
         "soft_signals": [_slim_sig(s) for s in _soft_lane_signals(read)],
         # only cake days not yet celebrated today — an already-posted anniversary
         # must not tempt the triage into a re-post/escalation (over-escalation leak).
         "cake_days_today": _fresh_cake_days(read),
         "due_decision_cases": [
-            {k: c.get(k) for k in ("case_id", "kind", "subject", "member_ref") if isinstance(c, dict) and c.get(k)}
+            {
+                k: c.get(k)
+                for k in ("case_id", "kind", "subject", "member_ref")
+                if isinstance(c, dict) and c.get(k)
+            }
             for c in ((read.get("decision_cases") or {}).get("due") or [])
         ],
         "recent_member_spotlights": (read.get("recent_member_spotlights") or [])[:12],
@@ -293,7 +350,9 @@ def _default_generate(system_prompt: str, user_msg: str) -> str | None:
     )
 
 
-def triage(read: dict, *, generate: Callable[[str, str], str | None] | None = None) -> dict:
+def triage(
+    read: dict, *, generate: Callable[[str, str], str | None] | None = None
+) -> dict:
     """Run the lightweight post-vs-silence triage. Returns
     ``{"decision": "post"|"silent", "reason": str}``.
 
@@ -309,7 +368,9 @@ def triage(read: dict, *, generate: Callable[[str, str], str | None] | None = No
     try:
         raw = gen(_TRIAGE_SYSTEM, user_msg)
     except Exception as exc:  # pragma: no cover - defensive
-        log.warning("awareness gate: triage call raised (%s); failing safe to deliberate", exc)
+        log.warning(
+            "awareness gate: triage call raised (%s); failing safe to deliberate", exc
+        )
         return {"decision": "post", "reason": f"triage error: {exc}"}
 
     if not raw:
@@ -318,7 +379,10 @@ def triage(read: dict, *, generate: Callable[[str, str], str | None] | None = No
 
     decision, reason = _parse_verdict(raw)
     if decision is None:
-        log.warning("awareness gate: triage verdict unparseable (%r); failing safe to deliberate", raw[:200])
+        log.warning(
+            "awareness gate: triage verdict unparseable (%r); failing safe to deliberate",
+            raw[:200],
+        )
         return {"decision": "post", "reason": "triage unparseable"}
     return {"decision": decision, "reason": reason or ""}
 
@@ -331,7 +395,7 @@ def _parse_verdict(raw: str):
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end != -1 and end > start:
         try:
-            obj = json.loads(text[start:end + 1])
+            obj = json.loads(text[start : end + 1])
             d = str(obj.get("decision", "")).strip().lower()
             if d in ("post", "silent"):
                 return d, str(obj.get("reason", "")).strip()
@@ -351,6 +415,7 @@ def _parse_verdict(raw: str):
 # Orchestration
 # ---------------------------------------------------------------------------
 
+
 def decide(read: dict, *, triage_fn: Callable[[dict], dict] | None = None) -> dict:
     """Decide whether the expensive brain should run for this read.
 
@@ -366,7 +431,11 @@ def decide(read: dict, *, triage_fn: Callable[[dict], dict] | None = None) -> di
     """
     try:
         if not gate_enabled():
-            return {"deliberate": True, "tier": "disabled", "reason": "gate disabled via env"}
+            return {
+                "deliberate": True,
+                "tier": "disabled",
+                "reason": "gate disabled via env",
+            }
 
         cls = classify(read)
         tier = cls["tier"]
@@ -379,7 +448,9 @@ def decide(read: dict, *, triage_fn: Callable[[dict], dict] | None = None) -> di
                 "deliberate": False,
                 "tier": "skip",
                 "decider": "gate",
-                "silence_reason": "Gate: " + cls["reason"] + " — deterministic silence, no deliberation needed.",
+                "silence_reason": "Gate: "
+                + cls["reason"]
+                + " — deterministic silence, no deliberation needed.",
             }
 
         # tier == "triage": cheap model makes the post-vs-silence call.
@@ -389,17 +460,22 @@ def decide(read: dict, *, triage_fn: Callable[[dict], dict] | None = None) -> di
                 "deliberate": False,
                 "tier": "triage",
                 "decider": "triage",
-                "silence_reason": "Triage (lightweight): " + (verdict.get("reason") or "nothing worth posting this hour")
+                "silence_reason": "Triage (lightweight): "
+                + (verdict.get("reason") or "nothing worth posting this hour")
                 + f" [soft triggers: {cls['reason']}]",
             }
         # "post" (or fail-safe): escalate to the full brain to compose.
         return {
             "deliberate": True,
             "tier": "triage->deliberate",
-            "reason": "triage escalated: " + (verdict.get("reason") or "worth a closer look") + f" [{cls['reason']}]",
+            "reason": "triage escalated: "
+            + (verdict.get("reason") or "worth a closer look")
+            + f" [{cls['reason']}]",
         }
     except Exception as exc:  # pragma: no cover - defensive
-        log.warning("awareness gate: decide failed (%s); failing safe to deliberate", exc)
+        log.warning(
+            "awareness gate: decide failed (%s); failing safe to deliberate", exc
+        )
         return {"deliberate": True, "tier": "error", "reason": f"gate error: {exc}"}
 
 

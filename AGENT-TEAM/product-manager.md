@@ -35,7 +35,7 @@ Read AGENTS.md, AGENT-TEAM/WORKFLOW.md, and AGENT-TEAM/README.md before acting.
 Cadence: weekly — discovery benefits from a wider window.
 
 Evidence standard:
-* Use exact artifacts before summaries. For delivered Elixir copy and source-intent traces, start with `messages` and `communication_intents`; for requested leadership actions, start with `leader_action_recommendations`.
+* Use exact artifacts before summaries. For proactive copy and its decision trace, start with `awareness_posts` and the linked `awareness_thoughts`; for interactive copy, start with `messages`; for requested leadership actions, start with `leader_action_recommendations`.
 * When citing Discord evidence, include channel, timestamp, Discord message ID, workflow/event type, intent ID, and action ID when present.
 * Treat `messages` as recent conversation memory, not a complete long-term audit archive. Use a Discord API/history export only to recover missing exact message bodies or IDs for a defined discovery window.
 

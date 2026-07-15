@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
 import inspect
 import json
 import sys
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 from unittest.mock import patch
 
@@ -70,7 +70,9 @@ def _validate_manual_activity(activity_key: str):
     return activity
 
 
-async def run_activity_once(activity_key: str, *, runtime_module: Any) -> ActivityRunResult:
+async def run_activity_once(
+    activity_key: str, *, runtime_module: Any
+) -> ActivityRunResult:
     activity = _validate_manual_activity(activity_key)
     resolved = resolve_activity(activity.activity_key, runtime_module)
     job_callable = resolved["job_callable"]
@@ -84,7 +86,9 @@ async def run_activity_once(activity_key: str, *, runtime_module: Any) -> Activi
     )
 
 
-async def _build_rest_channel_lookup(runtime_module: Any) -> tuple[discord.Client, _ChannelLookup]:
+async def _build_rest_channel_lookup(
+    runtime_module: Any,
+) -> tuple[discord.Client, _ChannelLookup]:
     import prompts
 
     token = getattr(runtime_module, "TOKEN", None)
@@ -104,8 +108,10 @@ async def _build_rest_channel_lookup(runtime_module: Any) -> tuple[discord.Clien
                 channels[channel_id] = await client.fetch_channel(channel_id)
             except Exception:
                 import logging
+
                 logging.getLogger("elixir").warning(
-                    "activity_runner: channel %s unreachable; skipping", channel_id)
+                    "activity_runner: channel %s unreachable; skipping", channel_id
+                )
         return client, _ChannelLookup(channels)
     except Exception:
         await client.close()
@@ -138,20 +144,31 @@ async def run_shell_activity(activity_key: str) -> ActivityRunResult:
 
 
 def _print_json(payload: dict[str, Any], *, stream=None) -> None:
-    print(json.dumps(payload, ensure_ascii=False, default=str), file=stream or sys.stdout)
+    print(
+        json.dumps(payload, ensure_ascii=False, default=str), file=stream or sys.stdout
+    )
 
 
 async def _run_cli(args: argparse.Namespace) -> int:
     try:
         result = await run_shell_activity(args.activity)
     except UnknownActivityError as exc:
-        _print_json({"ok": False, "error": str(exc), "error_type": "unknown_activity"}, stream=sys.stderr)
+        _print_json(
+            {"ok": False, "error": str(exc), "error_type": "unknown_activity"},
+            stream=sys.stderr,
+        )
         return 2
     except ManualActivityNotAllowed as exc:
-        _print_json({"ok": False, "error": str(exc), "error_type": "manual_not_allowed"}, stream=sys.stderr)
+        _print_json(
+            {"ok": False, "error": str(exc), "error_type": "manual_not_allowed"},
+            stream=sys.stderr,
+        )
         return 3
     except Exception as exc:
-        _print_json({"ok": False, "error": str(exc), "error_type": type(exc).__name__}, stream=sys.stderr)
+        _print_json(
+            {"ok": False, "error": str(exc), "error_type": type(exc).__name__},
+            stream=sys.stderr,
+        )
         return 1
 
     _print_json({"ok": True, **result.as_dict()})
@@ -159,10 +176,14 @@ async def _run_cli(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run a registered Elixir activity once.")
+    parser = argparse.ArgumentParser(
+        description="Run a registered Elixir activity once."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    run_parser = subparsers.add_parser("run", help="Run one manual-triggerable activity.")
+    run_parser = subparsers.add_parser(
+        "run", help="Run one manual-triggerable activity."
+    )
     run_parser.add_argument("activity", help="Activity key or registry alias.")
 
     args = parser.parse_args(argv)

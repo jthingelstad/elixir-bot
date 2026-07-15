@@ -68,9 +68,7 @@ def test_capability_combines_activity_leaders_ranked_state_and_duos(engine_conn)
     _seed_battle(engine_conn, "r2", "#A", "ranked", outcome="L")
     _seed_battle(engine_conn, "r3", "#B", "ranked")
     _seed_battle(engine_conn, "d1", "#A", "two_v_two", teammate_tag="#B")
-    _seed_battle(
-        engine_conn, "d2", "#A", "two_v_two", outcome="L", teammate_tag="#B"
-    )
+    _seed_battle(engine_conn, "d2", "#A", "two_v_two", outcome="L", teammate_tag="#B")
 
     result = get_clan_game_modes(days=7, limit=10, conn=engine_conn)
 

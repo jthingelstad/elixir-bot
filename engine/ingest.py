@@ -17,10 +17,9 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from storage.game_modes import classify_battle_mode
-
 from engine.clock import WarClock, resolve_war_keys
 from engine.db import canon_tag
+from storage.game_modes import classify_battle_mode
 
 _COMPETITIVE = {"ladder", "ranked", "war", "special_event", "tournament", "two_v_two"}
 
@@ -70,8 +69,7 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
             (
                 member
                 for member in team
-                if isinstance(member, dict)
-                and canon_tag(member.get("tag")) == tag
+                if isinstance(member, dict) and canon_tag(member.get("tag")) == tag
             ),
             team[0] if team else {},
         )
@@ -83,7 +81,11 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
         teammate = None
         if len(team) > 1:
             for tm in team:
-                tm_tag = canon_tag(tm.get("tag")) if isinstance(tm, dict) and tm.get("tag") else None
+                tm_tag = (
+                    canon_tag(tm.get("tag"))
+                    if isinstance(tm, dict) and tm.get("tag")
+                    else None
+                )
                 if tm_tag and tm_tag != tag:
                     teammate = tm_tag
                     break
@@ -107,7 +109,9 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
                 "battle_type": b.get("type") or "unknown",
                 "opponent_tag": o0.get("tag") or "",
                 "crowns_for": t0.get("crowns") if t0.get("crowns") is not None else -1,
-                "crowns_against": o0.get("crowns") if o0.get("crowns") is not None else -1,
+                "crowns_against": o0.get("crowns")
+                if o0.get("crowns") is not None
+                else -1,
                 "game_mode_id": gm.get("id"),
                 "game_mode_name": gm.get("name"),
                 "mode_group": mode_group,
@@ -136,13 +140,37 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
 
 
 _INSERT_COLUMNS = (
-    "dedup_key", "player_tag", "battle_time", "observed_at",
-    "battle_type", "opponent_tag", "crowns_for", "crowns_against",
-    "game_mode_id", "game_mode_name", "mode_group", "outcome",
-    "is_war", "is_ladder", "is_ranked", "is_competitive", "is_special_event",
-    "trophy_change", "starting_trophies", "deck_selection", "deck_json",
-    "arena_id", "arena_name", "teammate_tag", "league_number", "is_hosted_match",
-    "tournament_tag", "event_tag", "season_id", "section_index", "war_day_index",
+    "dedup_key",
+    "player_tag",
+    "battle_time",
+    "observed_at",
+    "battle_type",
+    "opponent_tag",
+    "crowns_for",
+    "crowns_against",
+    "game_mode_id",
+    "game_mode_name",
+    "mode_group",
+    "outcome",
+    "is_war",
+    "is_ladder",
+    "is_ranked",
+    "is_competitive",
+    "is_special_event",
+    "trophy_change",
+    "starting_trophies",
+    "deck_selection",
+    "deck_json",
+    "arena_id",
+    "arena_name",
+    "teammate_tag",
+    "league_number",
+    "is_hosted_match",
+    "tournament_tag",
+    "event_tag",
+    "season_id",
+    "section_index",
+    "war_day_index",
 )
 
 _INSERT_SQL = (

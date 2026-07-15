@@ -1,4 +1,5 @@
 """King Tower Level calculation (CR 2026 Collection Level model)."""
+
 from engine.king_tower import KING_TOWER_REQUIREMENTS, king_tower_level
 
 

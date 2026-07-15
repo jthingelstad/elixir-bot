@@ -28,15 +28,23 @@ import db
 LEADER_ACTION_OPEN_CARD_CAP = int(os.getenv("LEADER_ACTION_OPEN_CARD_CAP", "5"))
 # Open cards older than this stop counting against the backlog so a stale
 # action from a finished war cannot deadlock the board forever.
-LEADER_ACTION_BACKLOG_WINDOW_DAYS = int(os.getenv("LEADER_ACTION_BACKLOG_WINDOW_DAYS", "7"))
+LEADER_ACTION_BACKLOG_WINDOW_DAYS = int(
+    os.getenv("LEADER_ACTION_BACKLOG_WINDOW_DAYS", "7")
+)
 # Earned frequency: an action type the leader keeps declining self-throttles.
 # Once at least MIN_DECIDED decisions exist in the trailing window and the
 # decline rate crosses the threshold, that type is limited to one card per
 # cooldown instead of posting freely. Critical war actions bypass this like
 # they bypass every other gate.
-LEADER_ACTION_DECLINE_RATE_THRESHOLD = float(os.getenv("LEADER_ACTION_DECLINE_RATE_THRESHOLD", "0.6"))
-LEADER_ACTION_MIN_DECIDED_FOR_THROTTLE = int(os.getenv("LEADER_ACTION_MIN_DECIDED_FOR_THROTTLE", "5"))
-LEADER_ACTION_THROTTLED_COOLDOWN_HOURS = int(os.getenv("LEADER_ACTION_THROTTLED_COOLDOWN_HOURS", "72"))
+LEADER_ACTION_DECLINE_RATE_THRESHOLD = float(
+    os.getenv("LEADER_ACTION_DECLINE_RATE_THRESHOLD", "0.6")
+)
+LEADER_ACTION_MIN_DECIDED_FOR_THROTTLE = int(
+    os.getenv("LEADER_ACTION_MIN_DECIDED_FOR_THROTTLE", "5")
+)
+LEADER_ACTION_THROTTLED_COOLDOWN_HOURS = int(
+    os.getenv("LEADER_ACTION_THROTTLED_COOLDOWN_HOURS", "72")
+)
 # In-game relay feedback is often objective-specific: "we already posted the
 # battle-day start" should suppress another participation nudge, but not a
 # later final-hours callout or a different welcome/recruiting card.
@@ -51,7 +59,11 @@ def count_open_leader_actions(*, conn=None, now: datetime | None = None) -> int:
     if current.tzinfo is None:
         current = current.replace(tzinfo=timezone.utc)
     now_text = current.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-    cutoff = (current - timedelta(days=max(1, LEADER_ACTION_BACKLOG_WINDOW_DAYS))).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff = (
+        (current - timedelta(days=max(1, LEADER_ACTION_BACKLOG_WINDOW_DAYS)))
+        .astimezone(timezone.utc)
+        .strftime("%Y-%m-%dT%H:%M:%S")
+    )
     close = conn is None
     conn = conn or db.get_connection()
     try:
@@ -89,11 +101,15 @@ def can_post_leader_action(
         return False, f"open_card_backlog:{backlog}/{LEADER_ACTION_OPEN_CARD_CAP}"
     clean_type = (action_type or "").strip()
     clean_objective = (objective or "").strip()
-    if clean_type == "in_game_relay" and clean_objective and db.has_recent_leader_action(
-        action_type=clean_type,
-        objective=clean_objective,
-        within_hours=LEADER_ACTION_IN_GAME_RELAY_OBJECTIVE_COOLDOWN_HOURS,
-        conn=conn,
+    if (
+        clean_type == "in_game_relay"
+        and clean_objective
+        and db.has_recent_leader_action(
+            action_type=clean_type,
+            objective=clean_objective,
+            within_hours=LEADER_ACTION_IN_GAME_RELAY_OBJECTIVE_COOLDOWN_HOURS,
+            conn=conn,
+        )
     ):
         return (
             False,

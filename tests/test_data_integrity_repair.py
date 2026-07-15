@@ -137,15 +137,24 @@ def test_integrity_repair_dry_run_apply_and_idempotence(engine_conn):
         "WHERE player_tag='#FIX' AND metric_date='2026-07-05'"
     ).fetchone()
     assert (daily["best_trophies"], daily["exp_level"]) == (5000, 50)
-    assert c.execute(
-        "SELECT created_date FROM war_weeks WHERE season_id=190"
-    ).fetchone()[0] == "2026-07-01T09:37:00Z"
-    assert c.execute(
-        "SELECT channel_id FROM conversation_threads WHERE thread_id=9001"
-    ).fetchone()[0] is None
-    assert c.execute(
-        "SELECT COUNT(*) FROM clan_memberships WHERE player_tag='#OVER'"
-    ).fetchone()[0] == 1
+    assert (
+        c.execute("SELECT created_date FROM war_weeks WHERE season_id=190").fetchone()[
+            0
+        ]
+        == "2026-07-01T09:37:00Z"
+    )
+    assert (
+        c.execute(
+            "SELECT channel_id FROM conversation_threads WHERE thread_id=9001"
+        ).fetchone()[0]
+        is None
+    )
+    assert (
+        c.execute(
+            "SELECT COUNT(*) FROM clan_memberships WHERE player_tag='#OVER'"
+        ).fetchone()[0]
+        == 1
+    )
 
     again = run_repair(c, apply=True)
     assert all(value == 0 for value in again["changes"].values())

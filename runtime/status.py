@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 
@@ -13,6 +15,9 @@ def _utcnow() -> str:
 
 
 _LOCK = threading.Lock()
+_STATUS_WRITER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="elixir-status")
+_STATUS_FUTURES = set()
+_STATUS_FUTURES_LOCK = threading.Lock()
 STARTED_AT = _utcnow()
 
 _JOB_STATUS = {}
@@ -66,13 +71,42 @@ def _default_job_state() -> dict:
 
 
 def _persist_job_status(name: str, state: dict) -> None:
-    try:
-        import db
+    def write() -> None:
+        try:
+            import db
 
-        db.save_runtime_job_status(name, state)
-    except Exception:
-        # Runtime status should never break the job it is observing.
-        return
+            db.save_runtime_job_status(name, state)
+        except Exception:
+            # Runtime status should never break the job it is observing.
+            return
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        write()
+    else:
+        # Preserve start/success/failure ordering on one worker while keeping
+        # SQLite lock waits off Discord's event loop.
+        future = _STATUS_WRITER.submit(write)
+        with _STATUS_FUTURES_LOCK:
+            _STATUS_FUTURES.add(future)
+        future.add_done_callback(_discard_status_future)
+
+
+def _discard_status_future(future) -> None:
+    with _STATUS_FUTURES_LOCK:
+        _STATUS_FUTURES.discard(future)
+
+
+def flush_status_writes(timeout: float = 30.0) -> None:
+    """Wait for queued status receipts (tests and graceful shutdowns)."""
+    while True:
+        with _STATUS_FUTURES_LOCK:
+            pending = tuple(_STATUS_FUTURES)
+        if not pending:
+            return
+        for future in pending:
+            future.result(timeout=timeout)
 
 
 def _load_persisted_job_status() -> dict:
@@ -100,8 +134,7 @@ def clear_stale_running_jobs() -> list[str]:
     cleared: list[str] = []
     with _LOCK:
         active_current_jobs = {
-            name for name, state in _JOB_STATUS.items()
-            if state.get("running")
+            name for name, state in _JOB_STATUS.items() if state.get("running")
         }
 
     for name, state in statuses.items():
@@ -155,7 +188,15 @@ def mark_job_failure(name: str, error: str) -> None:
     _persist_job_status(name, snapshot_state)
 
 
-def record_api_call(endpoint: str, entity_key: str | None = None, *, ok: bool, status_code=None, error=None, duration_ms=None) -> None:
+def record_api_call(
+    endpoint: str,
+    entity_key: str | None = None,
+    *,
+    ok: bool,
+    status_code=None,
+    error=None,
+    duration_ms=None,
+) -> None:
     with _LOCK:
         now = _utcnow()
         _API_STATUS["call_count"] += 1
@@ -198,7 +239,19 @@ def record_api_call(endpoint: str, entity_key: str | None = None, *, ok: bool, s
         per_endpoint["last_duration_ms"] = duration_ms
 
 
-def record_llm_call(workflow: str, *, ok: bool, model=None, error=None, duration_ms=None, prompt_tokens=None, completion_tokens=None, total_tokens=None, cache_creation_tokens=None, cache_read_tokens=None) -> None:
+def record_llm_call(
+    workflow: str,
+    *,
+    ok: bool,
+    model=None,
+    error=None,
+    duration_ms=None,
+    prompt_tokens=None,
+    completion_tokens=None,
+    total_tokens=None,
+    cache_creation_tokens=None,
+    cache_read_tokens=None,
+) -> None:
     with _LOCK:
         now = _utcnow()
         _LLM_STATUS["call_count"] += 1

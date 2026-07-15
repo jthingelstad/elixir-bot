@@ -15,7 +15,9 @@ import os
 import sqlite3
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 
 def _normalize(value: str | None) -> str | None:
@@ -32,18 +34,28 @@ def _normalize(value: str | None) -> str | None:
 def main() -> int:
     db_path = os.getenv(
         "ELIXIR_DB_PATH",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                     "elixir-v51.db"),
+        os.path.join(
+            os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            ),
+            "elixir-v51.db",
+        ),
     )
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=30000")
     fixed = 0
     for table, id_col, cols in (
-        ("memories", "memory_id", ("created_at", "updated_at", "expires_at", "retired_at")),
+        (
+            "memories",
+            "memory_id",
+            ("created_at", "updated_at", "expires_at", "retired_at"),
+        ),
         ("memory_log", "log_id", ("at",)),
     ):
-        for row in conn.execute(f"SELECT {id_col}, {', '.join(cols)} FROM {table}").fetchall():
+        for row in conn.execute(
+            f"SELECT {id_col}, {', '.join(cols)} FROM {table}"
+        ).fetchall():
             updates = {}
             for col in cols:
                 val = row[col]

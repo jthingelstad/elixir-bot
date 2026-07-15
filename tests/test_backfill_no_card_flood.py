@@ -8,8 +8,11 @@ import os
 
 import db
 
-_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                     "scripts", "backfill_game_events.py")
+_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "scripts",
+    "backfill_game_events.py",
+)
 
 
 def _load():
@@ -26,7 +29,9 @@ def test_backfill_plan_emits_no_card_added_even_with_full_catalog():
         for cid, name in ((26000000, "Knight"), (26000106, "Ronin")):
             conn.execute(
                 "INSERT OR IGNORE INTO card_catalog (card_id, name, rarity, synced_at) "
-                "VALUES (?, ?, 'common', '2026-01-01')", (cid, name))
+                "VALUES (?, ?, 'common', '2026-01-01')",
+                (cid, name),
+            )
         conn.commit()
 
         plan = _load()._plan(conn)

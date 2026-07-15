@@ -23,9 +23,14 @@ from db import (
 _DISCORD_MENTION_RE = re.compile(r"^<@!?(\d+)>$")
 
 
-def _upsert_discord_user_record(conn, discord_user_id, *, username=None, global_name=None, display_name=None):
+def _upsert_discord_user_record(
+    conn, discord_user_id, *, username=None, global_name=None, display_name=None
+):
     now = _utcnow()
-    row = conn.execute("SELECT discord_user_id FROM discord_users WHERE discord_user_id = ?", (str(discord_user_id),)).fetchone()
+    row = conn.execute(
+        "SELECT discord_user_id FROM discord_users WHERE discord_user_id = ?",
+        (str(discord_user_id),),
+    ).fetchone()
     if row:
         conn.execute(
             "UPDATE discord_users SET username = COALESCE(?, username), global_name = COALESCE(?, global_name), display_name = COALESCE(?, display_name), last_seen_at = ? WHERE discord_user_id = ?",
@@ -38,25 +43,49 @@ def _upsert_discord_user_record(conn, discord_user_id, *, username=None, global_
         )
 
 
-def _apply_discord_link(conn, discord_user_id, member_tag, *, username=None, display_name=None,
-                        source="manual_link", confidence=1.0, is_primary=True):
+def _apply_discord_link(
+    conn,
+    discord_user_id,
+    member_tag,
+    *,
+    username=None,
+    display_name=None,
+    source="manual_link",
+    confidence=1.0,
+    is_primary=True,
+):
     # v5.1: discord_links is discord_user_id <-> player_tag; the username /
     # display-name columns dropped (they duplicate discord_users). The
     # username/display_name params are accepted for caller compatibility.
     del username, display_name
     player_tag = _ensure_member(conn, member_tag, name=None)
     if is_primary:
-        conn.execute("UPDATE discord_links SET is_primary = 0 WHERE discord_user_id = ?", (str(discord_user_id),))
-        conn.execute("UPDATE discord_links SET is_primary = 0 WHERE player_tag = ?", (player_tag,))
+        conn.execute(
+            "UPDATE discord_links SET is_primary = 0 WHERE discord_user_id = ?",
+            (str(discord_user_id),),
+        )
+        conn.execute(
+            "UPDATE discord_links SET is_primary = 0 WHERE player_tag = ?",
+            (player_tag,),
+        )
     conn.execute(
         "INSERT INTO discord_links (discord_user_id, player_tag, linked_at, source, confidence, is_primary) VALUES (?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(discord_user_id, player_tag) DO UPDATE SET linked_at = excluded.linked_at, source = excluded.source, confidence = excluded.confidence, is_primary = excluded.is_primary",
-        (str(discord_user_id), player_tag, _utcnow(), source, confidence, 1 if is_primary else 0),
+        (
+            str(discord_user_id),
+            player_tag,
+            _utcnow(),
+            source,
+            confidence,
+            1 if is_primary else 0,
+        ),
     )
     return player_tag
 
 
-def _infer_member_tag_for_discord_user(conn, discord_user_id, *, username=None, global_name=None, display_name=None):
+def _infer_member_tag_for_discord_user(
+    conn, discord_user_id, *, username=None, global_name=None, display_name=None
+):
     existing = conn.execute(
         "SELECT dl.player_tag "
         "FROM discord_links dl "
@@ -78,7 +107,8 @@ def _infer_member_tag_for_discord_user(conn, discord_user_id, *, username=None, 
     for candidate in candidate_values:
         matches = resolve_member(candidate, status="active", limit=3, conn=conn)
         exact = [
-            item for item in matches
+            item
+            for item in matches
             if item.get("match_source") in {"current_name_exact", "alias_exact"}
         ]
         if len(exact) == 1:
@@ -90,7 +120,9 @@ def _infer_member_tag_for_discord_user(conn, discord_user_id, *, username=None, 
     return None
 
 
-def _maybe_auto_link_discord_user(conn, discord_user_id, *, username=None, global_name=None, display_name=None):
+def _maybe_auto_link_discord_user(
+    conn, discord_user_id, *, username=None, global_name=None, display_name=None
+):
     member_tag = _infer_member_tag_for_discord_user(
         conn,
         discord_user_id,
@@ -111,8 +143,15 @@ def _maybe_auto_link_discord_user(conn, discord_user_id, *, username=None, globa
         is_primary=True,
     )
 
+
 @managed_connection
-def upsert_discord_user(discord_user_id: str | int, username: Optional[str] = None, global_name: Optional[str] = None, display_name: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> None:
+def upsert_discord_user(
+    discord_user_id: str | int,
+    username: Optional[str] = None,
+    global_name: Optional[str] = None,
+    display_name: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
     _upsert_discord_user_record(
         conn,
         discord_user_id,
@@ -131,7 +170,9 @@ def upsert_discord_user(discord_user_id: str | int, username: Optional[str] = No
 
 
 @managed_connection
-def set_member_discord_identity(member_tag: str, discord_name: str, conn: Optional[sqlite3.Connection] = None) -> int:
+def set_member_discord_identity(
+    member_tag: str, discord_name: str, conn: Optional[sqlite3.Connection] = None
+) -> int:
     identity_text = (discord_name or "").strip()
     if not identity_text:
         raise ValueError("discord name is required")
@@ -185,9 +226,19 @@ def set_member_discord_identity(member_tag: str, discord_name: str, conn: Option
 
 
 @managed_connection
-def link_discord_user_to_member(discord_user_id: str | int, member_tag: str, username: Optional[str] = None, display_name: Optional[str] = None,
-                                source: str = "manual_link", confidence: float = 1.0, is_primary: bool = True, conn: Optional[sqlite3.Connection] = None) -> int:
-    upsert_discord_user(discord_user_id, username=username, display_name=display_name, conn=conn)
+def link_discord_user_to_member(
+    discord_user_id: str | int,
+    member_tag: str,
+    username: Optional[str] = None,
+    display_name: Optional[str] = None,
+    source: str = "manual_link",
+    confidence: float = 1.0,
+    is_primary: bool = True,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    upsert_discord_user(
+        discord_user_id, username=username, display_name=display_name, conn=conn
+    )
     member_id = _apply_discord_link(
         conn,
         discord_user_id,
@@ -203,15 +254,21 @@ def link_discord_user_to_member(discord_user_id: str | int, member_tag: str, use
 
 
 @managed_connection
-def clear_member_discord_link(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> str:
+def clear_member_discord_link(
+    member_tag: str, conn: Optional[sqlite3.Connection] = None
+) -> str:
     player_tag = _ensure_member(conn, member_tag)
-    conn.execute("UPDATE discord_links SET is_primary = 0 WHERE player_tag = ?", (player_tag,))
+    conn.execute(
+        "UPDATE discord_links SET is_primary = 0 WHERE player_tag = ?", (player_tag,)
+    )
     conn.commit()
     return player_tag
 
 
 @managed_connection
-def get_discord_link(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_discord_link(
+    member_tag: str, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     row = conn.execute(
         "SELECT m.player_tag, m.current_name, du.discord_user_id, du.username AS discord_username, du.display_name AS discord_display_name "
         "FROM players m "
@@ -224,7 +281,9 @@ def get_discord_link(member_tag: str, conn: Optional[sqlite3.Connection] = None)
 
 
 @managed_connection
-def get_member_identity(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_member_identity(
+    member_tag: str, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     _ensure_email_schema(conn)
     row = conn.execute(
         "SELECT m.player_tag, m.current_name AS member_name, du.discord_user_id, du.username AS discord_username, du.display_name AS discord_display_name, "
@@ -242,14 +301,17 @@ def get_member_identity(member_tag: str, conn: Optional[sqlite3.Connection] = No
     out = dict(row)
     out["email"] = out.get("email") or ""
     out["email_status"] = (
-        "verified" if (out["email"] and out.get("email_verified_at"))
+        "verified"
+        if (out["email"] and out.get("email_verified_at"))
         else ("unverified" if out["email"] else "none")
     )
     return out
 
 
 @managed_connection
-def get_linked_member_for_discord_user(discord_user_id: str | int, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_linked_member_for_discord_user(
+    discord_user_id: str | int, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     row = conn.execute(
         "SELECT m.player_tag, m.current_name AS member_name, du.discord_user_id, du.username AS discord_username, du.display_name AS discord_display_name "
         "FROM discord_links dl "
@@ -279,40 +341,63 @@ def _ensure_email_schema(conn) -> None:
     from db.schema import require_columns
 
     require_columns(
-        conn, "player_metadata", {"email", "email_verified_at", "email_source"},
+        conn,
+        "player_metadata",
+        {"email", "email_verified_at", "email_source"},
     )
     require_columns(
-        conn, "email_verifications", {"player_tag", "code_hash", "expires_at"},
+        conn,
+        "email_verifications",
+        {"player_tag", "code_hash", "expires_at"},
     )
 
 
 @managed_connection
-def set_member_email(member_tag: str, email: Optional[str], *, source: str,
-                     verified_at: Optional[str] = None,
-                     conn: Optional[sqlite3.Connection] = None) -> None:
+def set_member_email(
+    member_tag: str,
+    email: Optional[str],
+    *,
+    source: str,
+    verified_at: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
     """Store a member's email. `source` records how it was set (self_service /
     admin_set); `verified_at` stamps it verified (admin-set counts as trusted)."""
     _ensure_email_schema(conn)
     tag = _canon_tag(member_tag)
     _ensure_member(conn, tag)
-    _upsert_member_metadata(conn, tag, email=(email or "").strip() or None,
-                            email_verified_at=verified_at,
-                            email_source=(source or "").strip() or None)
+    _upsert_member_metadata(
+        conn,
+        tag,
+        email=(email or "").strip() or None,
+        email_verified_at=verified_at,
+        email_source=(source or "").strip() or None,
+    )
     conn.commit()
 
 
 @managed_connection
-def clear_member_email(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> None:
+def clear_member_email(
+    member_tag: str, conn: Optional[sqlite3.Connection] = None
+) -> None:
     _ensure_email_schema(conn)
     tag = _canon_tag(member_tag)
-    _upsert_member_metadata(conn, tag, email=None, email_verified_at=None, email_source=None)
+    _upsert_member_metadata(
+        conn, tag, email=None, email_verified_at=None, email_source=None
+    )
     conn.execute("DELETE FROM email_verifications WHERE player_tag = ?", (tag,))
     conn.commit()
 
 
 @managed_connection
-def upsert_email_challenge(member_tag: str, *, pending_email: str, code_hash: str,
-                           expires_at: str, conn: Optional[sqlite3.Connection] = None) -> None:
+def upsert_email_challenge(
+    member_tag: str,
+    *,
+    pending_email: str,
+    code_hash: str,
+    expires_at: str,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
     """Store (or replace) the one active verification challenge for a member."""
     _ensure_email_schema(conn)
     tag = _canon_tag(member_tag)
@@ -328,7 +413,9 @@ def upsert_email_challenge(member_tag: str, *, pending_email: str, code_hash: st
 
 
 @managed_connection
-def get_email_challenge(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_email_challenge(
+    member_tag: str, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     _ensure_email_schema(conn)
     row = conn.execute(
         "SELECT player_tag, pending_email, code_hash, expires_at, attempts, created_at "
@@ -339,17 +426,29 @@ def get_email_challenge(member_tag: str, conn: Optional[sqlite3.Connection] = No
 
 
 @managed_connection
-def bump_email_challenge_attempts(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> int:
+def bump_email_challenge_attempts(
+    member_tag: str, conn: Optional[sqlite3.Connection] = None
+) -> int:
     tag = _canon_tag(member_tag)
-    conn.execute("UPDATE email_verifications SET attempts = attempts + 1 WHERE player_tag = ?", (tag,))
+    conn.execute(
+        "UPDATE email_verifications SET attempts = attempts + 1 WHERE player_tag = ?",
+        (tag,),
+    )
     conn.commit()
-    row = conn.execute("SELECT attempts FROM email_verifications WHERE player_tag = ?", (tag,)).fetchone()
+    row = conn.execute(
+        "SELECT attempts FROM email_verifications WHERE player_tag = ?", (tag,)
+    ).fetchone()
     return row["attempts"] if row else 0
 
 
 @managed_connection
-def clear_email_challenge(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> None:
-    conn.execute("DELETE FROM email_verifications WHERE player_tag = ?", (_canon_tag(member_tag),))
+def clear_email_challenge(
+    member_tag: str, conn: Optional[sqlite3.Connection] = None
+) -> None:
+    conn.execute(
+        "DELETE FROM email_verifications WHERE player_tag = ?",
+        (_canon_tag(member_tag),),
+    )
     conn.commit()
 
 
@@ -371,7 +470,9 @@ def list_member_emails(conn: Optional[sqlite3.Connection] = None) -> list[dict]:
 
 
 @managed_connection
-def format_member_reference(member_or_tag: str | dict, conn: Optional[sqlite3.Connection] = None) -> str:
+def format_member_reference(
+    member_or_tag: str | dict, conn: Optional[sqlite3.Connection] = None
+) -> str:
     """Return the readable, LLM-safe display name for a member tag or dict.
 
     Normalize-at-source: when a connection + tag are available this reads the
@@ -379,7 +480,11 @@ def format_member_reference(member_or_tag: str | dict, conn: Optional[sqlite3.Co
     fallback). Without a connection it cleans and injection-guards the available
     raw name in place, so "²⁸"→"28" and an instruction-like name never surfaces.
     """
-    from storage._formatting import callable_name, injection_safe, preferred_display_name
+    from storage._formatting import (
+        callable_name,
+        injection_safe,
+        preferred_display_name,
+    )
 
     member = member_or_tag if isinstance(member_or_tag, dict) else None
     tag = (member.get("player_tag") or member.get("tag")) if member else member_or_tag
@@ -388,24 +493,50 @@ def format_member_reference(member_or_tag: str | dict, conn: Optional[sqlite3.Co
         if dn:
             return dn
     if member is None:
-        member = get_member_identity(member_or_tag, conn=conn) if conn is not None else None
-    raw = ((member or {}).get("member_name") or (member or {}).get("current_name")
-           or (member or {}).get("player_tag") or str(member_or_tag))
+        member = (
+            get_member_identity(member_or_tag, conn=conn) if conn is not None else None
+        )
+    raw = (
+        (member or {}).get("member_name")
+        or (member or {}).get("current_name")
+        or (member or {}).get("player_tag")
+        or str(member_or_tag)
+    )
     return injection_safe(callable_name(raw)) or callable_name(raw)
 
 
 @managed_connection
-def save_memory_episode(subject_type: str, subject_key: str, episode_type: str, summary: str, importance: int = 1,
-                        source_message_ids: Optional[list] = None, conn: Optional[sqlite3.Connection] = None) -> None:
+def save_memory_episode(
+    subject_type: str,
+    subject_key: str,
+    episode_type: str,
+    summary: str,
+    importance: int = 1,
+    source_message_ids: Optional[list] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
     conn.execute(
         "INSERT INTO memory_episodes (subject_type, subject_key, episode_type, summary, importance, source_message_ids_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (subject_type, subject_key, episode_type, summary, importance, _json_or_none(source_message_ids or []), _utcnow()),
+        (
+            subject_type,
+            subject_key,
+            episode_type,
+            summary,
+            importance,
+            _json_or_none(source_message_ids or []),
+            _utcnow(),
+        ),
     )
     conn.commit()
 
 
 @managed_connection
-def get_memory_episodes(subject_type: str, subject_key: str, limit: int = 5, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def get_memory_episodes(
+    subject_type: str,
+    subject_key: str,
+    limit: int = 5,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     rows = conn.execute(
         "SELECT episode_type, summary, importance, source_message_ids_json, created_at "
         "FROM memory_episodes "
@@ -417,7 +548,9 @@ def get_memory_episodes(subject_type: str, subject_key: str, limit: int = 5, con
 
 
 @managed_connection
-def get_channel_state(channel_id: str | int, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+def get_channel_state(
+    channel_id: str | int, conn: Optional[sqlite3.Connection] = None
+) -> Optional[dict]:
     row = conn.execute(
         "SELECT channel_id, last_elixir_post_at, last_topics_json, recent_style_notes_json, last_summary "
         "FROM channel_state WHERE channel_id = ?",
@@ -428,9 +561,10 @@ def get_channel_state(channel_id: str | int, conn: Optional[sqlite3.Connection] 
 
 @managed_connection
 def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
-    from storage.war import get_current_season_id
     from storage.player import get_player_intel_refresh_targets
     from storage.roster import get_clan_roster_summary
+    from storage.war import get_current_season_id
+
     db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
     schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
     schema_display = f"baseline schema (migration v{schema_version})"
@@ -465,7 +599,6 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
             counts["contextual_inferences"] = mem["inferences"] or 0
             counts["contextual_system_notes"] = mem["system_notes"] or 0
             _memory_latest = mem["latest"]
-            _memory_vec = None  # embeddings retired in v5.1 (memory.md D2)
         finally:
             pass  # shared operational connection — caller owns its lifecycle
     except Exception:
@@ -475,7 +608,6 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         counts.setdefault("contextual_inferences", 0)
         counts.setdefault("contextual_system_notes", 0)
         _memory_latest = None
-        _memory_vec = None
     freshness = {
         "member_state_at": conn.execute(
             "SELECT MAX(observed_at) AS ts FROM player_current_state"
@@ -501,11 +633,9 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         ).fetchall()
     )
     current_season_id = get_current_season_id(conn=conn)
-    stale_targets = len(get_player_intel_refresh_targets(limit=500, stale_after_hours=6, conn=conn))
-    latest_signal = conn.execute(
-        "SELECT recognition_key AS signal_type, claimed_at AS signal_date FROM recognition_ledger "
-        "ORDER BY claimed_at DESC LIMIT 1"
-    ).fetchone()
+    stale_targets = len(
+        get_player_intel_refresh_targets(limit=500, stale_after_hours=6, conn=conn)
+    )
     llm_cost_7d = conn.execute(
         """
         SELECT COUNT(*) AS calls,
@@ -543,7 +673,6 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
                AND skipped_reason LIKE '⚠️ tick failed:%') AS failed_ticks
         """
     ).fetchone()
-    memory_index_status = _memory_vec
     roster_summary = get_clan_roster_summary(conn=conn)
     size_bytes = None
     if db_path and os.path.exists(db_path):
@@ -560,11 +689,9 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         "raw_payloads_by_endpoint": endpoint_counts,
         "current_season_id": current_season_id,
         "stale_player_intel_targets": stale_targets,
-        "latest_signal": dict(latest_signal) if latest_signal else None,
         "llm_cost_7d": dict(llm_cost_7d) if llm_cost_7d else None,
         "awareness_7d": dict(awareness_7d) if awareness_7d else None,
         "contextual_memory": {
-            "sqlite_vec_enabled": bool(memory_index_status and str(memory_index_status["value"]) == "1"),
             "latest_memory_at": freshness["contextual_memory_at"],
             "total": counts.get("contextual_memory_count", 0),
             "leader_notes": counts.get("contextual_leader_notes", 0),
@@ -657,7 +784,16 @@ def get_database_status(conn: Optional[sqlite3.Connection] = None) -> dict:
 
 
 @managed_connection
-def build_memory_context(discord_user_id: Optional[str | int] = None, member_tag: Optional[str] = None, channel_id: Optional[str | int] = None, *, viewer_scope: str = "public", durable_memory_limit: int = 5, query: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> dict:
+def build_memory_context(
+    discord_user_id: Optional[str | int] = None,
+    member_tag: Optional[str] = None,
+    channel_id: Optional[str | int] = None,
+    *,
+    viewer_scope: str = "public",
+    durable_memory_limit: int = 5,
+    query: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
     """v2 (memory.md §2.3): durable memories come from ranked selection —
     member/channel match + optional query FTS + confidence + recency — via
     memory_store.select_memories on the SAME engine-DB connection (the old

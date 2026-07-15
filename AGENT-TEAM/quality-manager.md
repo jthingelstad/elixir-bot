@@ -11,7 +11,7 @@ Read AGENTS.md, AGENT-TEAM/WORKFLOW.md, and AGENT-TEAM/README.md before acting. 
 Cadence: daily — catch regressions and noise fast.
 
 Evidence standard:
-* Use exact artifacts before summaries. For proactive delivery, start with `awareness_posts` and its linked `awareness_thoughts` plan; for interactive copy, start with `messages`; for requested leadership actions, start with `leader_action_recommendations`. `communication_intents` is an offline legacy rehearsal queue, not the live delivery ledger.
+* Use exact artifacts before summaries. For proactive delivery, start with `awareness_posts` and its linked `awareness_thoughts` plan; for interactive copy, start with `messages`; for requested leadership actions, start with `leader_action_recommendations`. The retired deterministic queue exists only as a connection-local table during explicit offline rehearsal.
 * When citing Discord evidence, include channel, timestamp, Discord message ID, workflow/event type, intent ID, and action ID when present.
 * Treat `messages` as recent conversation memory, not a complete long-term audit archive. Use a Discord API/history export only to recover missing exact message bodies or IDs for a defined quality window.
 

@@ -29,12 +29,18 @@ EMAIL_ADDRESS = os.getenv("ELIXIR_EMAIL_ADDRESS", "elixir@poapkings.com")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--to", default=None,
-                        help="override: email ONLY this address (testing). Default broadcasts "
-                             "to every clan member with a verified email.")
-    parser.add_argument("--days", type=int, default=None, help="scope: look back N days")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--to",
+        default=None,
+        help="override: email ONLY this address (testing). Default broadcasts "
+        "to every clan member with a verified email.",
+    )
+    parser.add_argument(
+        "--days", type=int, default=None, help="scope: look back N days"
+    )
     parser.add_argument("--since", metavar="REF", help="scope: changes since this ref")
     parser.add_argument("--dry-run", action="store_true", help="print, send nothing")
     args = parser.parse_args()
@@ -51,19 +57,23 @@ def main() -> int:
     name = draft.get("release_name")
     subject = draft["subject"]
     if name and name.lower() not in subject.lower():
-        subject = f'{name} — {subject}'
+        subject = f"{name} — {subject}"
     recipients = [args.to] if args.to else [m["email"] for m in db.list_member_emails()]
     print(f"Release name: {name or '(nameless)'}")
     print(f"Window: {draft['window']}")
     print(f"Subject: {subject}")
-    print(f"Recipients: {len(recipients)} "
-          f"({'override' if args.to else 'clan members with a verified email'})\n")
+    print(
+        f"Recipients: {len(recipients)} "
+        f"({'override' if args.to else 'clan members with a verified email'})\n"
+    )
 
     if args.dry_run:
         print("=" * 72)
         print(draft["body"])
         print("=" * 72)
-        print(f"\n[dry-run] would email to {len(recipients)} recipient(s) from {EMAIL_ADDRESS}")
+        print(
+            f"\n[dry-run] would email to {len(recipients)} recipient(s) from {EMAIL_ADDRESS}"
+        )
         return 0
 
     if not recipients:

@@ -43,7 +43,10 @@ def _resolve_custom_emoji(text: str, guild) -> str:
                     unicode_name,
                 )
                 return f":{unicode_name}:"
-        log.info("emoji shortcode stripped: :%s: is not a guild custom emoji or Unicode shortcode", name)
+        log.info(
+            "emoji shortcode stripped: :%s: is not a guild custom emoji or Unicode shortcode",
+            name,
+        )
         return ""
 
     cleaned = re.sub(r":([a-zA-Z][a-zA-Z0-9_]{1,31}):", _replace, text)
@@ -51,13 +54,75 @@ def _resolve_custom_emoji(text: str, guild) -> str:
 
 
 _POST_MERGE_STOPWORDS = {
-    "about", "after", "again", "all", "also", "an", "and", "are", "around", "back", "been",
-    "before", "between", "both", "but", "can", "clan", "day", "days", "discord",
-    "everyone", "for", "from", "get", "getting", "has", "have", "help", "here",
-    "into", "just", "keep", "kings", "lets", "live", "member", "members", "more", "much",
-    "need", "news", "our", "out", "over", "poap", "post", "posts", "right", "same", "show",
-    "still", "team", "that", "the", "their", "them", "there", "these", "this", "those",
-    "through", "today", "topic", "update", "updates", "using", "want", "with", "your",
+    "about",
+    "after",
+    "again",
+    "all",
+    "also",
+    "an",
+    "and",
+    "are",
+    "around",
+    "back",
+    "been",
+    "before",
+    "between",
+    "both",
+    "but",
+    "can",
+    "clan",
+    "day",
+    "days",
+    "discord",
+    "everyone",
+    "for",
+    "from",
+    "get",
+    "getting",
+    "has",
+    "have",
+    "help",
+    "here",
+    "into",
+    "just",
+    "keep",
+    "kings",
+    "lets",
+    "live",
+    "member",
+    "members",
+    "more",
+    "much",
+    "need",
+    "news",
+    "our",
+    "out",
+    "over",
+    "poap",
+    "post",
+    "posts",
+    "right",
+    "same",
+    "show",
+    "still",
+    "team",
+    "that",
+    "the",
+    "their",
+    "them",
+    "there",
+    "these",
+    "this",
+    "those",
+    "through",
+    "today",
+    "topic",
+    "update",
+    "updates",
+    "using",
+    "want",
+    "with",
+    "your",
 }
 
 
@@ -83,7 +148,7 @@ def _should_merge_related_posts(posts: list[str]) -> bool:
         return True
     overlaps = []
     for idx, left in enumerate(non_empty):
-        for right in non_empty[idx + 1:]:
+        for right in non_empty[idx + 1 :]:
             baseline = max(1, min(len(left), len(right)))
             overlaps.append(len(left & right) / baseline)
     return bool(overlaps) and (sum(overlaps) / len(overlaps)) >= 0.34
@@ -91,7 +156,9 @@ def _should_merge_related_posts(posts: list[str]) -> bool:
 
 def _normalize_entry_posts(content) -> list[str]:
     if isinstance(content, list):
-        posts = [item.strip() for item in content if isinstance(item, str) and item.strip()]
+        posts = [
+            item.strip() for item in content if isinstance(item, str) and item.strip()
+        ]
         if _should_merge_related_posts(posts):
             return ["\n\n".join(posts)]
         return posts
@@ -121,7 +188,9 @@ async def _post_to_elixir(channel, entry: dict):
     return sent_messages
 
 
-async def compose_and_post(channel, *, lane: str, context: str, leadership: bool = False) -> bool:
+async def compose_and_post(
+    channel, *, lane: str, context: str, leadership: bool = False
+) -> bool:
     """Agent-compose an in-voice update from `context` and post it to `channel`.
 
     The v5-style replacement for the v4 awareness-delivery path (`_deliver_signal_
@@ -144,7 +213,8 @@ async def compose_and_post(channel, *, lane: str, context: str, leadership: bool
         if _la_id is not None and getattr(channel, "id", None) == _la_id:
             log.warning(
                 "compose_and_post: refused narrative post to #actions "
-                "(cards-only invariant); lane=%s", lane,
+                "(cards-only invariant); lane=%s",
+                lane,
             )
             return False
     except Exception:
@@ -154,7 +224,10 @@ async def compose_and_post(channel, *, lane: str, context: str, leadership: bool
 
         result = await asyncio.to_thread(
             elixir_agent.generate_channel_update,
-            getattr(channel, "name", lane), lane, context, leadership=leadership,
+            getattr(channel, "name", lane),
+            lane,
+            context,
+            leadership=leadership,
         )
     except Exception:
         log.exception("compose_and_post: agent failed for lane %s", lane)

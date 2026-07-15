@@ -8,10 +8,14 @@ only genuine leader-judgment contradictions are eligible for #actions.
 """
 
 __all__ = [
-    "MEMORY_SYNTHESIS_DAY", "MEMORY_SYNTHESIS_HOUR",
-    "MEMORY_SYNTHESIS_DRY_RUN", "MEMORY_SYNTHESIS_POSTS_PER_CHANNEL",
-    "MEMORY_SYNTHESIS_MEMORY_LIMIT", "MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT",
-    "MEMORY_SYNTHESIS_MEMORY_BODY_CHARS", "MEMORY_SYNTHESIS_POST_CHARS",
+    "MEMORY_SYNTHESIS_DAY",
+    "MEMORY_SYNTHESIS_HOUR",
+    "MEMORY_SYNTHESIS_DRY_RUN",
+    "MEMORY_SYNTHESIS_POSTS_PER_CHANNEL",
+    "MEMORY_SYNTHESIS_MEMORY_LIMIT",
+    "MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT",
+    "MEMORY_SYNTHESIS_MEMORY_BODY_CHARS",
+    "MEMORY_SYNTHESIS_POST_CHARS",
     "_memory_synthesis_cycle",
     "_build_memory_synthesis_context",
     "_reduce_memory_synthesis_context_for_retry",
@@ -29,13 +33,13 @@ import prompts
 from capabilities import awards as awards_capability
 from capabilities import game_modes as game_mode_capability
 from capabilities import war as war_capability
-from runtime.helpers import _stream_facades as event_facades
 from memory_store import update_memory
-from storage.contextual_memory import upsert_weekly_summary_memory
 from runtime import elixir_log
+from runtime import status as runtime_status
 from runtime.helpers import _channel_scope
 from runtime.leader_action_ui import LEADER_ACTION_UI_VERSION, post_leader_action_card
-from runtime import status as runtime_status
+from storage import events_read as event_facades
+from storage.contextual_memory import upsert_weekly_summary_memory
 
 log = logging.getLogger("elixir")
 
@@ -60,20 +64,44 @@ bot = _BotProxy()
 
 MEMORY_SYNTHESIS_DAY = os.getenv("MEMORY_SYNTHESIS_DAY", "sun")
 MEMORY_SYNTHESIS_HOUR = int(os.getenv("MEMORY_SYNTHESIS_HOUR", "22"))
-MEMORY_SYNTHESIS_DRY_RUN = os.getenv("MEMORY_SYNTHESIS_DRY_RUN", "").strip().lower() in {"1", "true", "yes", "on"}
+MEMORY_SYNTHESIS_DRY_RUN = os.getenv(
+    "MEMORY_SYNTHESIS_DRY_RUN", ""
+).strip().lower() in {"1", "true", "yes", "on"}
 MEMORY_SYNTHESIS_MEMORY_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_MEMORY_LIMIT", "80"))
-MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT", "12"))
-MEMORY_SYNTHESIS_POSTS_PER_CHANNEL = int(os.getenv("MEMORY_SYNTHESIS_POSTS_PER_CHANNEL", "12"))
-MEMORY_SYNTHESIS_MEMORY_BODY_CHARS = int(os.getenv("MEMORY_SYNTHESIS_MEMORY_BODY_CHARS", "500"))
+MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT = int(
+    os.getenv("MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT", "12")
+)
+MEMORY_SYNTHESIS_POSTS_PER_CHANNEL = int(
+    os.getenv("MEMORY_SYNTHESIS_POSTS_PER_CHANNEL", "12")
+)
+MEMORY_SYNTHESIS_MEMORY_BODY_CHARS = int(
+    os.getenv("MEMORY_SYNTHESIS_MEMORY_BODY_CHARS", "500")
+)
 MEMORY_SYNTHESIS_POST_CHARS = int(os.getenv("MEMORY_SYNTHESIS_POST_CHARS", "700"))
-MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT", "30"))
-MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT", "6"))
-MEMORY_SYNTHESIS_RETRY_POSTS_PER_CHANNEL = int(os.getenv("MEMORY_SYNTHESIS_RETRY_POSTS_PER_CHANNEL", "5"))
-MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT", "20"))
-MEMORY_SYNTHESIS_RETRY_RECENT_INTENTS_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_RETRY_RECENT_INTENTS_LIMIT", "10"))
-MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT", "8"))
-MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS = int(os.getenv("MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS", "280"))
-MEMORY_SYNTHESIS_RETRY_POST_CHARS = int(os.getenv("MEMORY_SYNTHESIS_RETRY_POST_CHARS", "350"))
+MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT = int(
+    os.getenv("MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT", "30")
+)
+MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT = int(
+    os.getenv("MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT", "6")
+)
+MEMORY_SYNTHESIS_RETRY_POSTS_PER_CHANNEL = int(
+    os.getenv("MEMORY_SYNTHESIS_RETRY_POSTS_PER_CHANNEL", "5")
+)
+MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT = int(
+    os.getenv("MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT", "20")
+)
+MEMORY_SYNTHESIS_RETRY_AWARENESS_LIMIT = int(
+    os.getenv("MEMORY_SYNTHESIS_RETRY_AWARENESS_LIMIT", "10")
+)
+MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT = int(
+    os.getenv("MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT", "8")
+)
+MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS = int(
+    os.getenv("MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS", "280")
+)
+MEMORY_SYNTHESIS_RETRY_POST_CHARS = int(
+    os.getenv("MEMORY_SYNTHESIS_RETRY_POST_CHARS", "350")
+)
 # Cap contradiction cards per weekly run so a bad synthesis can't flood the
 # action board.
 MEMORY_CONTRADICTION_CARD_LIMIT = int(os.getenv("MEMORY_CONTRADICTION_CARD_LIMIT", "3"))
@@ -187,42 +215,22 @@ def _compact_event_row(row: dict) -> dict:
     }
 
 
-def _compact_intent_row(row: dict) -> dict:
-    return {
-        "intent_id": row.get("intent_id"),
-        "workflow": row.get("workflow"),
-        "intent_type": row.get("intent_type"),
-        "status": row.get("status"),
-        "target_channel_key": row.get("target_channel_key"),
-        "source_signal_key": row.get("source_signal_key"),
-        "source_signal_type": row.get("source_signal_type"),
-        "case_id": row.get("case_id"),
-        "project_id": row.get("project_id"),
-        "summary": _clip_text(row.get("summary"), 200),
-        "skipped_reason": _clip_text(row.get("skipped_reason"), 160),
-        "updated_at": row.get("updated_at"),
-    }
-
-
 def _compact_retry_memory_row(row: dict) -> dict:
     compact = _compact_memory_row(row)
     compact["title"] = _clip_text(compact.get("title"), 120)
-    compact["body"] = _clip_text(compact.get("body"), MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS)
+    compact["body"] = _clip_text(
+        compact.get("body"), MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS
+    )
     compact["summary"] = _clip_text(compact.get("summary"), 160)
     return compact
 
 
 def _compact_retry_post_row(row: dict) -> dict:
     compact = _compact_post_row(row)
-    compact["content"] = _clip_text(compact.get("content"), MEMORY_SYNTHESIS_RETRY_POST_CHARS)
+    compact["content"] = _clip_text(
+        compact.get("content"), MEMORY_SYNTHESIS_RETRY_POST_CHARS
+    )
     compact["summary"] = _clip_text(compact.get("summary"), 160)
-    return compact
-
-
-def _compact_retry_intent_row(row: dict) -> dict:
-    compact = _compact_intent_row(row)
-    compact["summary"] = _clip_text(compact.get("summary"), 120)
-    compact["skipped_reason"] = _clip_text(compact.get("skipped_reason"), 120)
     return compact
 
 
@@ -276,13 +284,15 @@ def _compact_retry_standings(rows) -> list[dict]:
     for row in rows[:5]:
         if not isinstance(row, dict):
             continue
-        compact.append({
-            "rank": row.get("rank"),
-            "name": row.get("name") or row.get("clan_name"),
-            "tag": row.get("tag") or row.get("clan_tag"),
-            "score": row.get("score") or row.get("fame") or row.get("clan_score"),
-            "finish_time": row.get("finish_time") or row.get("finished_at"),
-        })
+        compact.append(
+            {
+                "rank": row.get("rank"),
+                "name": row.get("name") or row.get("clan_name"),
+                "tag": row.get("tag") or row.get("clan_tag"),
+                "score": row.get("score") or row.get("fame") or row.get("clan_score"),
+                "finish_time": row.get("finish_time") or row.get("finished_at"),
+            }
+        )
     return compact
 
 
@@ -365,7 +375,8 @@ def _compact_retry_game_modes(snapshot) -> dict:
                     "active_members": mode.get("active_members"),
                     "top_members": [
                         {
-                            "member_ref": member.get("member_ref") or member.get("name"),
+                            "member_ref": member.get("member_ref")
+                            or member.get("name"),
                             "player_tag": member.get("player_tag") or member.get("tag"),
                             "battles": member.get("battles"),
                             "wins": member.get("wins"),
@@ -432,27 +443,39 @@ def _compact_retry_operations_context(operations_context) -> dict:
     if "recent_events" in operations_context:
         compact["recent_events"] = [
             _compact_event_row(row)
-            for row in (operations_context.get("recent_events") or [])[:MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT]
+            for row in (operations_context.get("recent_events") or [])[
+                :MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT
+            ]
             if isinstance(row, dict)
         ]
     if "war_season" in operations_context:
-        compact["war_season"] = _compact_retry_war_season(operations_context.get("war_season"))
+        compact["war_season"] = _compact_retry_war_season(
+            operations_context.get("war_season")
+        )
     if "award_races" in operations_context:
         compact["award_races"] = _compact_retry_award_races(
             operations_context.get("award_races")
         )
     if "game_modes" in operations_context:
-        compact["game_modes"] = _compact_retry_game_modes(operations_context.get("game_modes"))
+        compact["game_modes"] = _compact_retry_game_modes(
+            operations_context.get("game_modes")
+        )
     if "season_window" in operations_context:
         compact["season_window"] = operations_context.get("season_window")
     if "decision_cases" in operations_context:
-        compact["decision_cases"] = _compact_retry_decision_cases(operations_context.get("decision_cases"))
-    if "recent_intents" in operations_context:
-        compact["recent_intents"] = [
-            _compact_retry_intent_row(row)
-            for row in (operations_context.get("recent_intents") or [])[:MEMORY_SYNTHESIS_RETRY_RECENT_INTENTS_LIMIT]
-            if isinstance(row, dict)
-        ]
+        compact["decision_cases"] = _compact_retry_decision_cases(
+            operations_context.get("decision_cases")
+        )
+    if "awareness_activity" in operations_context:
+        activity = operations_context.get("awareness_activity") or {}
+        compact["awareness_activity"] = {
+            "thoughts": list(activity.get("thoughts") or [])[
+                :MEMORY_SYNTHESIS_RETRY_AWARENESS_LIMIT
+            ],
+            "posts": list(activity.get("posts") or [])[
+                :MEMORY_SYNTHESIS_RETRY_AWARENESS_LIMIT
+            ],
+        }
     return compact
 
 
@@ -478,17 +501,23 @@ def _reduce_memory_synthesis_context_for_retry(context: dict) -> dict:
         "week_window": context.get("week_window") or {},
         "week_memories": [
             _compact_retry_memory_row(row)
-            for row in (context.get("week_memories") or [])[:MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT]
+            for row in (context.get("week_memories") or [])[
+                :MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT
+            ]
             if isinstance(row, dict)
         ],
         "prior_arcs": [
             _compact_retry_memory_row(row)
-            for row in (context.get("prior_arcs") or [])[:MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT]
+            for row in (context.get("prior_arcs") or [])[
+                :MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT
+            ]
             if isinstance(row, dict)
         ],
         "week_posts": week_posts,
         "live_clan_state": context.get("live_clan_state") or {},
-        "operations_context": _compact_retry_operations_context(context.get("operations_context")),
+        "operations_context": _compact_retry_operations_context(
+            context.get("operations_context")
+        ),
     }
 
 
@@ -518,7 +547,11 @@ def _contradiction_text(item: dict) -> str:
 
 
 def _contradiction_category(item: dict) -> str:
-    return str(item.get("category") or item.get("contradiction_type") or "").strip().lower()
+    return (
+        str(item.get("category") or item.get("contradiction_type") or "")
+        .strip()
+        .lower()
+    )
 
 
 def _is_derived_state_contradiction(item: dict) -> bool:
@@ -535,7 +568,11 @@ def _requires_leader_memory_review(item: dict) -> bool:
         return False
     if category in LEADER_REVIEW_CONTRADICTION_CATEGORIES:
         return True
-    for key in ("needs_leader_review", "requires_leader_review", "requires_leader_judgment"):
+    for key in (
+        "needs_leader_review",
+        "requires_leader_review",
+        "requires_leader_judgment",
+    ):
         if item.get(key) is True:
             return True
     review_scope = str(item.get("review_scope") or "").strip().lower()
@@ -565,7 +602,8 @@ def _auto_expire_contradiction_ids(contradictions: list[dict]) -> list[int]:
 
 def _leader_review_contradictions(contradictions: list[dict]) -> list[dict]:
     return [
-        item for item in contradictions or []
+        item
+        for item in contradictions or []
         if isinstance(item, dict) and _requires_leader_memory_review(item)
     ]
 
@@ -625,7 +663,9 @@ def _build_memory_synthesis_context():
                 "assistant",
             )
         except Exception:
-            log.warning("memory synthesis: posts load failed for %s", key, exc_info=True)
+            log.warning(
+                "memory synthesis: posts load failed for %s", key, exc_info=True
+            )
             rows = []
         posts_by_channel[key] = [_compact_post_row(r) for r in rows or []]
 
@@ -668,32 +708,39 @@ def _build_memory_synthesis_context():
     except Exception:
         log.warning("memory synthesis: award races context load failed", exc_info=True)
     try:
-        operations_context["game_modes"] = game_mode_capability.get_clan_game_mode_windows(
-            windows=(7, 28)
+        operations_context["game_modes"] = (
+            game_mode_capability.get_clan_game_mode_windows(windows=(7, 28))
         )
     except Exception:
         log.warning("memory synthesis: game modes context load failed", exc_info=True)
     try:
         operations_context["season_window"] = db.get_season_window()
     except Exception:
-        log.warning("memory synthesis: season window context load failed", exc_info=True)
+        log.warning(
+            "memory synthesis: season window context load failed", exc_info=True
+        )
     try:
         operations_context["decision_cases"] = db.decision_case_snapshot(
             open_limit=20,
             due_limit=20,
         )
     except Exception:
-        log.warning("memory synthesis: decision case context load failed", exc_info=True)
+        log.warning(
+            "memory synthesis: decision case context load failed", exc_info=True
+        )
     try:
-        operations_context["recent_intents"] = [
-            _compact_intent_row(row)
-            for row in db.list_recent_communication_intents(limit=25)
-        ]
+        operations_context["awareness_activity"] = db.get_awareness_activity(limit=25)
     except Exception:
-        log.warning("memory synthesis: communication intent context load failed", exc_info=True)
+        log.warning(
+            "memory synthesis: awareness activity context load failed", exc_info=True
+        )
 
     return {
-        "week_window": {"start": week_ago, "end": now.strftime("%Y-%m-%dT%H:%M:%S"), "war_week_id": week_id},
+        "week_window": {
+            "start": week_ago,
+            "end": now.strftime("%Y-%m-%dT%H:%M:%S"),
+            "war_week_id": week_id,
+        },
         "week_memories": [_compact_memory_row(m) for m in week_memories],
         "prior_arcs": [_compact_memory_row(m) for m in prior_arcs],
         "week_posts": posts_by_channel,
@@ -702,7 +749,9 @@ def _build_memory_synthesis_context():
     }
 
 
-def _apply_memory_synthesis_plan(plan: dict, *, week_id: str | None, dry_run: bool = False) -> dict:
+def _apply_memory_synthesis_plan(
+    plan: dict, *, week_id: str | None, dry_run: bool = False
+) -> dict:
     """Persist arc memories + expire stale ids. Returns a small stats dict.
 
     Writes happen synchronously in this helper so the caller can thread it
@@ -758,11 +807,14 @@ def _apply_memory_synthesis_plan(plan: dict, *, week_id: str | None, dry_run: bo
                 metadata={"synthesized_at": now_stamp},
             )
         except Exception:
-            log.warning("memory synthesis: arc create failed title=%r", title, exc_info=True)
+            log.warning(
+                "memory synthesis: arc create failed title=%r", title, exc_info=True
+            )
             continue
         if tags:
             try:
                 from memory_store import attach_tags
+
                 attach_tags(created["memory_id"], tags, actor=actor)
             except Exception:
                 log.warning("memory synthesis: attach_tags failed", exc_info=True)
@@ -805,7 +857,9 @@ async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
     try:
         channel_config = prompts.discord_singleton_lane("arena-relay")
     except Exception:
-        log.info("memory contradiction cards skipped: arena-relay unavailable", exc_info=True)
+        log.info(
+            "memory contradiction cards skipped: arena-relay unavailable", exc_info=True
+        )
         return 0
     channel = bot.get_channel(channel_config["id"])
     if not channel:
@@ -844,7 +898,9 @@ async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
         first_message = sent_messages[0] if sent_messages else None
         await asyncio.to_thread(
             db.save_message,
-            _channel_scope(channel), "assistant", prompt_text,
+            _channel_scope(channel),
+            "assistant",
+            prompt_text,
             summary=f"Leader action R{action.get('action_id')}: memory review",
             channel_id=channel_config["id"],
             channel_name=channel_name,
@@ -874,7 +930,9 @@ async def _memory_synthesis_cycle():
         context = await asyncio.to_thread(_build_memory_synthesis_context)
     except Exception as exc:
         log.error("memory_synthesis: context build failed: %s", exc, exc_info=True)
-        runtime_status.mark_job_failure("memory_synthesis", f"context build failed: {exc}")
+        runtime_status.mark_job_failure(
+            "memory_synthesis", f"context build failed: {exc}"
+        )
         return
 
     try:
@@ -891,20 +949,32 @@ async def _memory_synthesis_cycle():
         log.warning("memory_synthesis: agent returned structured error: %s", error)
         if error.get("kind") == "truncation":
             retry_context = _reduce_memory_synthesis_context_for_retry(context)
-            log.warning("memory_synthesis: retrying after truncation with reduced context")
+            log.warning(
+                "memory_synthesis: retrying after truncation with reduced context"
+            )
             try:
-                plan = await asyncio.to_thread(elixir_agent.run_memory_synthesis, retry_context)
+                plan = await asyncio.to_thread(
+                    elixir_agent.run_memory_synthesis, retry_context
+                )
             except Exception as exc:
-                log.error("memory_synthesis: retry agent call failed: %s", exc, exc_info=True)
-                runtime_status.mark_job_failure("memory_synthesis", f"retry agent call failed: {exc}")
+                log.error(
+                    "memory_synthesis: retry agent call failed: %s", exc, exc_info=True
+                )
+                runtime_status.mark_job_failure(
+                    "memory_synthesis", f"retry agent call failed: {exc}"
+                )
                 return
             if plan is None:
-                runtime_status.mark_job_failure("memory_synthesis", "retry agent returned no plan")
+                runtime_status.mark_job_failure(
+                    "memory_synthesis", "retry agent returned no plan"
+                )
                 return
             context = retry_context
             error = _memory_synthesis_error(plan)
             if error:
-                log.warning("memory_synthesis: retry agent returned structured error: %s", error)
+                log.warning(
+                    "memory_synthesis: retry agent returned structured error: %s", error
+                )
                 runtime_status.mark_job_failure(
                     "memory_synthesis",
                     f"retry {_memory_synthesis_error_message(error)}",
@@ -962,7 +1032,9 @@ async def _memory_synthesis_cycle():
         )
 
     cards_posted = await _post_memory_contradiction_cards(contradictions)
-    if stats.get("contradictions_auto_expired") or stats.get("contradictions_leader_review"):
+    if stats.get("contradictions_auto_expired") or stats.get(
+        "contradictions_leader_review"
+    ):
         lines = [
             "🧠 Memory synthesis hygiene",
             f"Auto-expired metric/current-state memories: {stats.get('contradictions_auto_expired', 0)}",
@@ -970,11 +1042,16 @@ async def _memory_synthesis_cycle():
         ]
         auto_ids = _auto_expire_contradiction_ids(contradictions)
         if auto_ids:
-            lines.append("Auto-expired IDs: " + ", ".join(f"`#{memory_id}`" for memory_id in auto_ids[:8]))
+            lines.append(
+                "Auto-expired IDs: "
+                + ", ".join(f"`#{memory_id}`" for memory_id in auto_ids[:8])
+            )
         try:
             await elixir_log.post_event_async("\n".join(lines))
         except Exception:
-            log.warning("memory_synthesis: elixir-log hygiene summary failed", exc_info=True)
+            log.warning(
+                "memory_synthesis: elixir-log hygiene summary failed", exc_info=True
+            )
     runtime_status.mark_job_success(
         "memory_synthesis",
         "synthesis complete "

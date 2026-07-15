@@ -3,6 +3,7 @@ assembled prompt + response onto its llm_calls row (not just awareness), so
 anything Elixir sends the model is drillable in the Observatory. Blobs are
 pruned after 14 days; the metadata row survives 90 days for cost analysis.
 The #thinking end-of-loop links to the LLM view."""
+
 from __future__ import annotations
 
 import asyncio
@@ -86,14 +87,20 @@ def test_every_call_captures_prompt_and_response(monkeypatch):
 
 
 def test_get_llm_call_roundtrips_blobs_decoded(monkeypatch):
-    tool_use = _Block(type="tool_use", id="tu_1", name="get_elixir_state",
-                      input={"section": "battle"})
-    monkeypatch.setattr(core, "_get_client",
-                        lambda: _FakeClient(_Resp('{"posts": []}', tool_uses=[tool_use])))
+    tool_use = _Block(
+        type="tool_use", id="tu_1", name="get_elixir_state", input={"section": "battle"}
+    )
+    monkeypatch.setattr(
+        core,
+        "_get_client",
+        lambda: _FakeClient(_Resp('{"posts": []}', tool_uses=[tool_use])),
+    )
     monkeypatch.setattr(db, "record_llm_call", messages_store.record_llm_call)
     core._create_chat_completion(
-        workflow="awareness", system="SYS",
-        messages=[{"role": "user", "content": "the read"}], max_tokens=8192,
+        workflow="awareness",
+        system="SYS",
+        messages=[{"role": "user", "content": "the read"}],
+        max_tokens=8192,
     )
     conn = db.get_connection()
     try:
@@ -106,12 +113,15 @@ def test_get_llm_call_roundtrips_blobs_decoded(monkeypatch):
     detail = db.get_llm_call(call_id)
     assert detail["prompt"]["system"] == "SYS"
     assert detail["response"]["tool_uses"] == [
-        {"name": "get_elixir_state", "input": {"section": "battle"}}]
+        {"name": "get_elixir_state", "input": {"section": "battle"}}
+    ]
 
 
 def test_llm_call_detail_query_and_missing():
     messages_store.record_llm_call(
-        "clanops", "claude-sonnet-4-6", ok=True,
+        "clanops",
+        "claude-sonnet-4-6",
+        ok=True,
         prompt_json=json.dumps({"system": "s", "messages": []}),
         response_json=json.dumps({"text": "hi", "tool_uses": []}),
     )
@@ -135,8 +145,12 @@ def _insert_call_at(recorded_at, *, with_blobs=True, conn=None):
     conn.execute(
         "INSERT INTO llm_calls (recorded_at, workflow, model, ok, prompt_json, response_json) "
         "VALUES (?, 'awareness', 'm', 1, ?, ?)",
-        (recorded_at, '{"system":"s"}' if with_blobs else None,
-         '{"text":"t"}' if with_blobs else None))
+        (
+            recorded_at,
+            '{"system":"s"}' if with_blobs else None,
+            '{"text":"t"}' if with_blobs else None,
+        ),
+    )
     conn.commit()
 
 
@@ -144,7 +158,10 @@ def test_blobs_pruned_after_14d_row_survives():
     # 30 days old: past the 14d BLOB window but within the 90d ROW window, so the
     # row must survive with its blobs NULLed (not deleted).
     from datetime import datetime, timedelta, timezone
-    mid_ts = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    mid_ts = (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     _insert_call_at(mid_ts)
     _insert_call_at("2999-01-01T00:00:00Z")  # future → blobs kept
     stats = metadata_store.purge_old_data()
@@ -153,7 +170,8 @@ def test_blobs_pruned_after_14d_row_survives():
     conn = db.get_connection()
     try:
         old = conn.execute(
-            "SELECT prompt_json, response_json FROM llm_calls WHERE recorded_at=?", (mid_ts,)
+            "SELECT prompt_json, response_json FROM llm_calls WHERE recorded_at=?",
+            (mid_ts,),
         ).fetchone()
         fresh = conn.execute(
             "SELECT prompt_json FROM llm_calls WHERE recorded_at='2999-01-01T00:00:00Z'"
@@ -161,7 +179,9 @@ def test_blobs_pruned_after_14d_row_survives():
     finally:
         conn.close()
     # 30-day row still EXISTS (metadata kept < 90d) but its blobs are gone.
-    assert old is not None and old["prompt_json"] is None and old["response_json"] is None
+    assert (
+        old is not None and old["prompt_json"] is None and old["response_json"] is None
+    )
     # Fresh row keeps its blobs.
     assert fresh["prompt_json"] is not None
 
@@ -169,12 +189,17 @@ def test_blobs_pruned_after_14d_row_survives():
 def test_metadata_row_deleted_after_90d():
     # 100 days old → past the 90d metadata window → whole row gone.
     from datetime import datetime, timedelta, timezone
-    old_ts = (datetime.now(timezone.utc) - timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=100)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     _insert_call_at(old_ts, with_blobs=False)
     metadata_store.purge_old_data()
     conn = db.get_connection()
     try:
-        gone = conn.execute("SELECT 1 FROM llm_calls WHERE recorded_at = ?", (old_ts,)).fetchone()
+        gone = conn.execute(
+            "SELECT 1 FROM llm_calls WHERE recorded_at = ?", (old_ts,)
+        ).fetchone()
     finally:
         conn.close()
     assert gone is None
@@ -235,13 +260,18 @@ def test_end_event_links_to_llm_view(monkeypatch):
     monkeypatch.setattr(app, "bot", _Bot())
     app._thinking_session.clear()
     render = {
-        "header": "🧠 · Loop #42", "outcome": "posted", "color": 0x2ECC71,
-        "fields": {"Decision": "1 post"}, "thread_name": "Loop #42 · posted",
+        "header": "🧠 · Loop #42",
+        "outcome": "posted",
+        "color": 0x2ECC71,
+        "fields": {"Decision": "1 post"},
+        "thread_name": "Loop #42 · posted",
         "thread_chunks": ["the decision"],
         "observatory_url": diag_mod.observatory_url(),
     }
     asyncio.run(app._awareness_event({"type": "start", "read_summary": "x"}))
-    asyncio.run(app._awareness_event({"type": "end", "render": render, "loop_number": 42}))
+    asyncio.run(
+        app._awareness_event({"type": "end", "render": render, "loop_number": 42})
+    )
 
     thread = channel.messages[0].thread
     assert any("/llm?workflow=awareness" in s for s in thread.sent)

@@ -94,7 +94,9 @@ def run_census(source_path: str, days: int) -> int:
 def run_rehearsal(source_path: str, target_path: str, days: int) -> int:
     import os
 
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    sys.path.insert(
+        0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
     try:
         from engine.offline import OfflineEngine
     except ModuleNotFoundError as exc:
@@ -132,10 +134,14 @@ def run_rehearsal(source_path: str, target_path: str, days: int) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", default="elixir-v5.db", help="DB holding raw_api_payloads")
+    parser.add_argument(
+        "--source", default="elixir-v5.db", help="DB holding raw_api_payloads"
+    )
     parser.add_argument("--target", default="/tmp/elixir-v51-rehearsal.db")
     parser.add_argument("--days", type=int, default=14)
-    parser.add_argument("--census", action="store_true", help="report the replay stream only")
+    parser.add_argument(
+        "--census", action="store_true", help="report the replay stream only"
+    )
     args = parser.parse_args()
     if args.census:
         return run_census(args.source, args.days)

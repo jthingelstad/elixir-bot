@@ -21,7 +21,12 @@ class _WarSource:
             "day_scored": True,
             "day_rank": 1,
             "day_standings": [
-                {"rank": 1, "clan_name": "POAP KINGS", "period_points": 1400, "is_us": True}
+                {
+                    "rank": 1,
+                    "clan_name": "POAP KINGS",
+                    "period_points": 1400,
+                    "is_us": True,
+                }
             ],
             "fame": 0,
             "period_points": 1400,
@@ -30,7 +35,11 @@ class _WarSource:
         }
 
     def build_war_now_context(self):
-        return {"phase_display": "Battle Day 2", "race_standings": [], "day_standings": []}
+        return {
+            "phase_display": "Battle Day 2",
+            "race_standings": [],
+            "day_standings": [],
+        }
 
     def get_current_war_day_state(self):
         return {

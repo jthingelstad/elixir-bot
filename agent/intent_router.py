@@ -15,7 +15,11 @@ import time
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from agent.core import _create_chat_completion, _lightweight_model_name, response_tool_uses
+from agent.core import (
+    _create_chat_completion,
+    _lightweight_model_name,
+    response_tool_uses,
+)
 from runtime.intent_registry import (
     ROUTE_KEYS,
     get_route,
@@ -26,7 +30,9 @@ log = logging.getLogger("elixir_agent")
 
 INTENT_ROUTER_WORKFLOW = "intent_router"
 
-_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "agents" / "intent_router.md"
+_PROMPT_PATH = (
+    Path(__file__).resolve().parent.parent / "prompts" / "agents" / "intent_router.md"
+)
 
 
 class Intent(TypedDict, total=False):
@@ -121,16 +127,20 @@ def _build_user_message(
         "",
     ]
     if history_text:
-        parts.extend([
-            "Recent conversation (oldest first):",
-            history_text,
+        parts.extend(
+            [
+                "Recent conversation (oldest first):",
+                history_text,
+                "",
+            ]
+        )
+    parts.extend(
+        [
+            f"Current message: {question}",
             "",
-        ])
-    parts.extend([
-        f"Current message: {question}",
-        "",
-        "Call select_route exactly once.",
-    ])
+            "Call select_route exactly once.",
+        ]
+    )
     return "\n".join(parts)
 
 
@@ -156,7 +166,11 @@ def classify_intent(
     started = time.perf_counter()
     selected_model = model or _lightweight_model_name()
 
-    workflows = ("interactive", "clanops") if workflow not in {"interactive", "clanops"} else (workflow,)
+    workflows = (
+        ("interactive", "clanops")
+        if workflow not in {"interactive", "clanops"}
+        else (workflow,)
+    )
     system_prompt = _load_prompt(workflows)
     history_text = _format_conversation_history(conversation_history)
     user_msg = _build_user_message(
@@ -182,7 +196,9 @@ def classify_intent(
         )
     except Exception as exc:
         log.warning("intent_router_call_failed: %s", exc, exc_info=True)
-        return _fallback_intent(started, selected_model, f"llm_error: {exc.__class__.__name__}")
+        return _fallback_intent(
+            started, selected_model, f"llm_error: {exc.__class__.__name__}"
+        )
 
     tool_uses = response_tool_uses(resp)
     if not tool_uses:

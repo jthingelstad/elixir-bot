@@ -52,13 +52,15 @@ _SUBJECT_TAG = re.compile(r"<subject>(.*?)</subject>", re.S | re.I)
 # `## Blazing Balloon (2026-07-08)`. Match ONLY those two — never the
 # `## The story` / `## Features` section headers inside a release body.
 _RELEASE_HEADER = re.compile(
-    r"^## (?:(v[\d.]+) — (.+?)|(.+?) \((\d{4}-\d{2}-\d{2})\))\s*$", re.M)
+    r"^## (?:(v[\d.]+) — (.+?)|(.+?) \((\d{4}-\d{2}-\d{2})\))\s*$", re.M
+)
 
 
 def slugify_release(name: str) -> str:
     """Ref-safe git-tag slug from a coined name: 'Blazing Balloon' → 'blazing-balloon'.
     Returns '' for an empty/None name so the caller can fall back to a dated tag."""
     return re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+
 
 ANNOUNCEMENTS_CHANNEL_ID = "1474760975851982959"  # prompts/DISCORD.md #announcements
 
@@ -105,9 +107,13 @@ def release_history() -> list[dict]:
     out: list[dict] = []
     for m in _RELEASE_HEADER.finditer(text):
         if m.group(1):  # legacy `## v5.1 — Name`
-            out.append({"version": m.group(1), "name": m.group(2).strip(), "date": None})
-        else:           # current `## Name (YYYY-MM-DD)`
-            out.append({"version": None, "name": m.group(3).strip(), "date": m.group(4)})
+            out.append(
+                {"version": m.group(1), "name": m.group(2).strip(), "date": None}
+            )
+        else:  # current `## Name (YYYY-MM-DD)`
+            out.append(
+                {"version": None, "name": m.group(3).strip(), "date": m.group(4)}
+            )
     return out
 
 
@@ -118,8 +124,12 @@ def recent_changes(*, days: int | None = None, since_ref: str | None = None) -> 
         since_ref = latest_release_tag()
     if since_ref:
         rev = [f"{since_ref}..HEAD"]
-        info = _git(["log", "-1", "--date=short", "--pretty=format:%h %ad %s", since_ref]).strip()
-        window = f"since {since_ref}" + (f" ({info.split(' ', 1)[1][:10]})" if info else "")
+        info = _git(
+            ["log", "-1", "--date=short", "--pretty=format:%h %ad %s", since_ref]
+        ).strip()
+        window = f"since {since_ref}" + (
+            f" ({info.split(' ', 1)[1][:10]})" if info else ""
+        )
     else:
         days = days or 7
         rev = [f"--since={days} days ago"]
@@ -128,12 +138,24 @@ def recent_changes(*, days: int | None = None, since_ref: str | None = None) -> 
     total = [ln for ln in _git(["log", *rev, "--oneline"]).splitlines() if ln]
     count = len(total)
     merges = _git(["log", *rev, "--merges", "--pretty=format:- %h %s"]).strip()
-    commits = _git([
-        "log", *rev, "-n", str(_COMMIT_CAP), "--no-merges", "--stat", "--date=short",
-        "--pretty=format:%n### %h %ad %s%n%b",
-    ]).strip()
-    doc_lines = _git(["log", *rev, "--name-only", "--pretty=format:", "--", "*.md"]).splitlines()
-    changed_docs = sorted({ln.strip() for ln in doc_lines if ln.strip().endswith(".md")})
+    commits = _git(
+        [
+            "log",
+            *rev,
+            "-n",
+            str(_COMMIT_CAP),
+            "--no-merges",
+            "--stat",
+            "--date=short",
+            "--pretty=format:%n### %h %ad %s%n%b",
+        ]
+    ).strip()
+    doc_lines = _git(
+        ["log", *rev, "--name-only", "--pretty=format:", "--", "*.md"]
+    ).splitlines()
+    changed_docs = sorted(
+        {ln.strip() for ln in doc_lines if ln.strip().endswith(".md")}
+    )
     try:
         releases_head = "\n".join(open(RELEASES_MD).read().splitlines()[:60])
     except OSError:
@@ -158,8 +180,12 @@ def _card_names() -> list[str]:
 
     conn = db.get_connection()
     try:
-        return [r["name"] for r in conn.execute(
-            "SELECT name FROM card_catalog ORDER BY name").fetchall()]
+        return [
+            r["name"]
+            for r in conn.execute(
+                "SELECT name FROM card_catalog ORDER BY name"
+            ).fetchall()
+        ]
     finally:
         conn.close()
 
@@ -176,14 +202,17 @@ def coin_release_name(material: dict) -> str:
         if not cards:
             return ""
         used = [r["name"] for r in release_history() if r.get("name")]
-        used_block = ("\n".join(f"- {n}" for n in used)
-                      if used else "(none yet — this is the first named release)")
+        used_block = (
+            "\n".join(f"- {n}" for n in used)
+            if used
+            else "(none yet — this is the first named release)"
+        )
         user = (
             "Coin the name for this release of Elixir (POAP KINGS' Clash Royale clan agent). "
             "Rules:\n"
             "- Pick ONE card from the catalog below whose spirit fits this batch of changes.\n"
             "- The name is: one alliterative adjective + that card's distinctive word, card word "
-            "LAST — for \"Balloon\" you might coin \"Blazing Balloon\". The adjective MUST start "
+            'LAST — for "Balloon" you might coin "Blazing Balloon". The adjective MUST start '
             "with the same letter/sound as the card word. Two or three words total; never append "
             "extra words after the card word.\n"
             "- Never reuse a previously used name OR its anchor card.\n"
@@ -198,7 +227,7 @@ def coin_release_name(material: dict) -> str:
         resp = _create_chat_completion(
             workflow="lightweight",
             system="You name software releases for a Clash Royale clan's agent. "
-                   "You answer with the name only.",
+            "You answer with the name only.",
             messages=[{"role": "user", "content": user}],
             temperature=0.7,
             max_tokens=200,
@@ -221,22 +250,24 @@ def release_notes_prompt(material: dict) -> str:
     trunc = (
         f"\n(NOTE: {material['count']} commits landed in this window; only the {_COMMIT_CAP} "
         "most recent are shown in full below. Say so if it matters.)"
-        if material["truncated"] else ""
+        if material["truncated"]
+        else ""
     )
     docs = "\n".join(f"- {d}" for d in material["changed_docs"]) or "(no docs changed)"
     name = material.get("release_name") or ""
     naming = (
-        f"RELEASE NAME: this release has been christened \"{name}\" — every release of your "
+        f'RELEASE NAME: this release has been christened "{name}" — every release of your '
         "software is named with an alliteration on a Clash Royale card. Your OPEN framing "
         "sentence must introduce the release by this name; a short clause on why that card fits "
         "this batch is welcome. The subject MAY carry the name too, if it lands naturally.\n\n"
-        if name else ""
+        if name
+        else ""
     )
     return (
         "Write a short announcement to the POAP KINGS clan Discord describing the new "
         f"capabilities YOU — Elixir — have gained. This batch covers {window}. This is you, in "
         "first person, telling the clan what you can now do and what changed under the hood.\n\n"
-        "VOICE: first person throughout (\"I can now…\", \"I rebuilt…\", \"I learned…\"). "
+        'VOICE: first person throughout ("I can now…", "I rebuilt…", "I learned…"). '
         "Specific and honest — name the actual mechanism, don't be hand-wavey — but pitched for "
         "clan members, not engineers: lead with what they'll notice, and where the internals are "
         "genuinely interesting, share them with a sentence of WHY the change is good — what it "
@@ -302,7 +333,7 @@ def _extract_subject(text: str) -> str:
         return " ".join(m.group(1).split()).strip()
     opened = re.search(r"<subject>", text, re.I)
     if opened:
-        rest = text[opened.end():].strip()
+        rest = text[opened.end() :].strip()
         first = rest.splitlines()[0] if rest else ""
         return re.sub(r"</?subject\s*>", "", first, flags=re.I).strip()
     return ""
@@ -316,7 +347,7 @@ def _extract_tag(text: str, name: str) -> str:
         return m.group(1).strip()
     opened = re.search(rf"<{name}>", text, re.I)
     if opened:
-        return re.sub(rf"</{name}\s*>", "", text[opened.end():], flags=re.I).strip()
+        return re.sub(rf"</{name}\s*>", "", text[opened.end() :], flags=re.I).strip()
     return ""
 
 
@@ -326,7 +357,9 @@ def _extract_notes(text: str) -> str:
     return _extract_tag(text, "detailed") or _extract_tag(text, "notes") or text.strip()
 
 
-def release_notes_draft(*, days: int | None = None, since_ref: str | None = None) -> dict | None:
+def release_notes_draft(
+    *, days: int | None = None, since_ref: str | None = None
+) -> dict | None:
     """Build the three-tier announcement in ONE model call. Returns
     {subject, body, announcement, clanchat, window, release_name}, or None if
     there were no changes in the window. `body` is the detailed tier
@@ -348,7 +381,8 @@ def release_notes_draft(*, days: int | None = None, since_ref: str | None = None
     )
     out = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
     return {
-        "subject": _extract_subject(out) or f"Under my hood: what changed ({material['window']})",
+        "subject": _extract_subject(out)
+        or f"Under my hood: what changed ({material['window']})",
         "body": _extract_notes(out),
         "announcement": _extract_tag(out, "announcement"),
         "clanchat": _extract_tag(out, "clanchat"),
@@ -365,10 +399,15 @@ def _gh_bin() -> str | None:
     found = shutil.which("gh")
     if found:
         return found
-    return next((p for p in ("/opt/homebrew/bin/gh", "/usr/local/bin/gh") if os.path.exists(p)), None)
+    return next(
+        (p for p in ("/opt/homebrew/bin/gh", "/usr/local/bin/gh") if os.path.exists(p)),
+        None,
+    )
 
 
-def create_github_release(*, name: str, date: str, tag: str, commit: str, body: str) -> str | None:
+def create_github_release(
+    *, name: str, date: str, tag: str, commit: str, body: str
+) -> str | None:
     """Tag `commit` and publish the GitHub release — the permanent code
     reference for what shipped. `tag` is the ref-safe name-slug (e.g.
     'blazing-balloon'); the title carries the human label 'Name (date)'.
@@ -378,22 +417,45 @@ def create_github_release(*, name: str, date: str, tag: str, commit: str, body: 
     title = f"{name} ({date})" if name else f"Release ({date})"
     try:
         if not _git(["tag", "-l", tag]).strip():
-            subprocess.run(["git", "tag", "-a", tag, commit, "-m", f"{title} — Elixir release"],
-                           cwd=REPO_ROOT, check=True, capture_output=True, text=True, timeout=15)
-            subprocess.run(["git", "push", "origin", tag],
-                           cwd=REPO_ROOT, check=True, capture_output=True, text=True, timeout=60)
+            subprocess.run(
+                ["git", "tag", "-a", tag, commit, "-m", f"{title} — Elixir release"],
+                cwd=REPO_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            subprocess.run(
+                ["git", "push", "origin", tag],
+                cwd=REPO_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
         gh = _gh_bin()
         if not gh:
-            log.warning("gh CLI not found; tag %s pushed but no GitHub release created", tag)
+            log.warning(
+                "gh CLI not found; tag %s pushed but no GitHub release created", tag
+            )
             return None
-        view = subprocess.run([gh, "release", "view", tag, "--json", "url", "-q", ".url"],
-                              cwd=REPO_ROOT, capture_output=True, text=True, timeout=30)
+        view = subprocess.run(
+            [gh, "release", "view", tag, "--json", "url", "-q", ".url"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         if view.returncode == 0 and view.stdout.strip():
             return view.stdout.strip()
-        made = subprocess.run([gh, "release", "create", tag, "--title", title,
-                               "--notes-file", "-"],
-                              cwd=REPO_ROOT, capture_output=True, text=True, timeout=60,
-                              input=body)
+        made = subprocess.run(
+            [gh, "release", "create", tag, "--title", title, "--notes-file", "-"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            input=body,
+        )
         if made.returncode != 0:
             raise RuntimeError((made.stderr or made.stdout or "")[-500:])
         return made.stdout.strip() or None
@@ -404,8 +466,10 @@ def create_github_release(*, name: str, date: str, tag: str, commit: str, body: 
 
 # ------------------------------------------------------ Discord announcement
 
-def announcement_messages(*, announcement: str, release_url: str | None,
-                          name: str, date: str) -> list[str]:
+
+def announcement_messages(
+    *, announcement: str, release_url: str | None, name: str, date: str
+) -> list[str]:
     """The #announcements post: the MEDIUM tier, chunked to Discord's limit,
     opening with the 'Name (date)' title line and closing with the GitHub link."""
     from runtime.helpers import DISCORD_CHUNK_SIZE, _chunk_for_discord
@@ -448,10 +512,17 @@ def _main() -> None:
     from dotenv import load_dotenv
 
     load_dotenv()  # standalone preview: env from .env, like the runtime does
-    parser = argparse.ArgumentParser(description="Preview Elixir's release notes draft.")
-    parser.add_argument("--days", type=int, default=None, help="look back this many days")
-    parser.add_argument("--since", metavar="REF",
-                        help="scope to changes since this commit-ish (default: latest v* tag)")
+    parser = argparse.ArgumentParser(
+        description="Preview Elixir's release notes draft."
+    )
+    parser.add_argument(
+        "--days", type=int, default=None, help="look back this many days"
+    )
+    parser.add_argument(
+        "--since",
+        metavar="REF",
+        help="scope to changes since this commit-ish (default: latest v* tag)",
+    )
     args = parser.parse_args()
 
     draft = release_notes_draft(days=args.days, since_ref=args.since)

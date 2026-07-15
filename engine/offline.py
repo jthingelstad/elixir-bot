@@ -19,8 +19,8 @@ from engine.emitters import emit
 from engine.emitters.clan import project_clan_aspects
 from engine.emitters.player import project_player_aspects
 from engine.emitters.war import project_race_aspect
-from engine.recognition.compose import render_intent
 from engine.normalize import parse_cr_time
+from engine.recognition.compose import render_intent
 
 HOME_CLAN = "#J2RGCRVG"
 
@@ -51,6 +51,15 @@ class OfflineEngine:
             if start is not None:
                 self._season_timeline.append((int(row["season_id"]), start, end))
 
+    def close(self) -> None:
+        self.conn.close()
+
+    def __enter__(self) -> OfflineEngine:
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        self.close()
+
     def _count(self, key: str, n: int = 1) -> None:
         self.counters[key] = self.counters.get(key, 0) + n
 
@@ -63,14 +72,20 @@ class OfflineEngine:
                 return season_id
         return infer_season_id(self.conn, payload)
 
-    def apply(self, endpoint: str, entity_key: str, payload_json: str, fetched_at: str) -> None:
+    def apply(
+        self, endpoint: str, entity_key: str, payload_json: str, fetched_at: str
+    ) -> None:
         try:
             payload = json.loads(payload_json)
         except (TypeError, ValueError):
             self._count("bad_payload")
             return
-        now = datetime.fromisoformat(fetched_at.replace("Z", "+00:00")).astimezone(timezone.utc)
-        expected_key = HOME_CLAN if endpoint in {"clan", "currentriverrace"} else entity_key
+        now = datetime.fromisoformat(fetched_at.replace("Z", "+00:00")).astimezone(
+            timezone.utc
+        )
+        expected_key = (
+            HOME_CLAN if endpoint in {"clan", "currentriverrace"} else entity_key
+        )
         if endpoint in {"clan", "currentriverrace", "player", "player_battlelog"}:
             result = observations.admit(endpoint, expected_key, payload)
             if not result.accepted:
@@ -82,7 +97,10 @@ class OfflineEngine:
             self._count("clan_polls")
             for aspect, aspect_payload in project_clan_aspects(payload).items():
                 self._count(
-                    "events", emit(self.conn, "clan", HOME_CLAN, aspect, aspect_payload, fetched_at)
+                    "events",
+                    emit(
+                        self.conn, "clan", HOME_CLAN, aspect, aspect_payload, fetched_at
+                    ),
                 )
         elif endpoint == "currentriverrace":
             self._count("race_polls")
@@ -92,14 +110,24 @@ class OfflineEngine:
                 race_aspect = project_race_aspect(payload, self.clock.season_id)
                 self._count(
                     "events",
-                    emit(self.conn, "riverrace", HOME_CLAN, "race", race_aspect, fetched_at),
+                    emit(
+                        self.conn,
+                        "riverrace",
+                        HOME_CLAN,
+                        "race",
+                        race_aspect,
+                        fetched_at,
+                    ),
                 )
         elif endpoint == "player":
             tag = canon_tag(entity_key)
             ensure_player(self.conn, tag, payload.get("name"), fetched_at)
             self._count("profile_polls")
             for aspect, aspect_payload in project_player_aspects(payload).items():
-                self._count("events", emit(self.conn, "player", tag, aspect, aspect_payload, fetched_at))
+                self._count(
+                    "events",
+                    emit(self.conn, "player", tag, aspect, aspect_payload, fetched_at),
+                )
             self._touched.add(tag)
         elif endpoint == "player_battlelog":
             tag = canon_tag(entity_key)
@@ -107,7 +135,9 @@ class OfflineEngine:
             self._count("battlelog_polls")
             self._count(
                 "battles",
-                ingest.mirror_battles(self.conn, tag, payload, fetched_at, self.clock, now=now),
+                ingest.mirror_battles(
+                    self.conn, tag, payload, fetched_at, self.clock, now=now
+                ),
             )
             self._touched.add(tag)
         # riverracelog / cards / events / clan_by_tag: no offline consumer
@@ -127,7 +157,7 @@ class OfflineEngine:
         dormant recognizer cursors and manufactures legacy ledger claims and
         communication intents that production would never create.
 
-        ``legacy_proactive=True`` is an explicit shadow/rehearsal seam for the
+        ``legacy_proactive=True`` is an explicit comparison/rehearsal seam for the
         deterministic recognizer and renderer. It never becomes the default
         again. ``now`` freezes the wall clock for deterministic callers.
         """
@@ -150,13 +180,18 @@ class OfflineEngine:
             from engine import legacy_proactive as legacy
 
             rec, d = legacy.run(
-                self.conn, self.clock, now_iso,
-                send_fn=send_fn, compose_fn=compose_fn,
+                self.conn,
+                self.clock,
+                now_iso,
+                send_fn=send_fn,
+                compose_fn=compose_fn,
             )
         self.conn.commit()
         out = dict(self.counters)
         out.update({f"recognize_{k}": v for k, v in rec.items()})
         out.update({f"deliver_{k}": v for k, v in d.items()})
         out["posts_composed"] = len(sent)
-        out["proactive_mode"] = "legacy_shadow" if legacy_proactive else "awareness_only"
+        out["proactive_mode"] = (
+            "legacy_comparison" if legacy_proactive else "awareness_only"
+        )
         return out

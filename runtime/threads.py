@@ -37,10 +37,17 @@ async def create_thread(bot, channel_id: int, name: str):
         )
         return thread
     except Exception as exc:
-        log.warning("thread create failed for %r under %s", name, channel_id, exc_info=True)
+        log.warning(
+            "thread create failed for %r under %s", name, channel_id, exc_info=True
+        )
         from storage.incidents import record_incident
-        record_incident("threads.create", exc, context={"name": name, "channel_id": channel_id},
-                        severity="warn")
+
+        record_incident(
+            "threads.create",
+            exc,
+            context={"name": name, "channel_id": channel_id},
+            severity="warn",
+        )
         return None
 
 
@@ -60,11 +67,16 @@ async def lock_thread(bot, thread_id: int, closing_text: str | None = None) -> b
     except Exception as exc:
         log.warning("thread lock failed for %s", thread_id, exc_info=True)
         from storage.incidents import record_incident
-        record_incident("threads.lock", exc, context={"thread_id": thread_id}, severity="warn")
+
+        record_incident(
+            "threads.lock", exc, context={"thread_id": thread_id}, severity="warn"
+        )
         return False
 
 
-def war_week_thread_name(season_id: int, section_index: int, period_type: str | None) -> str:
+def war_week_thread_name(
+    season_id: int, section_index: int, period_type: str | None
+) -> str:
     if (period_type or "").lower() == "colosseum":
         return f"Colosseum — Season {season_id}"
     return f"War Week {int(section_index) + 1} — Season {season_id}"
@@ -96,7 +108,9 @@ def build_week_opener(conn, season_id: int, section_index: int, name: str) -> st
     return "\n".join(lines)
 
 
-async def ensure_war_week_thread(bot, conn_factory, river_race_channel_id: int) -> int | None:
+async def ensure_war_week_thread(
+    bot, conn_factory, river_race_channel_id: int
+) -> int | None:
     """Engine-tick post-step: the newest unfinished war week without a thread
     gets one (idempotent — thread_id set exactly once). Returns thread id."""
     import asyncio
@@ -117,7 +131,9 @@ async def ensure_war_week_thread(bot, conn_factory, river_race_channel_id: int) 
     week = await asyncio.to_thread(_find)
     if not week:
         return None
-    name = war_week_thread_name(week["season_id"], week["section_index"], week.get("period_type"))
+    name = war_week_thread_name(
+        week["season_id"], week["section_index"], week.get("period_type")
+    )
     thread = await create_thread(bot, river_race_channel_id, name)
     if thread is None:
         return None
@@ -133,7 +149,9 @@ async def ensure_war_week_thread(bot, conn_factory, river_race_channel_id: int) 
             conn.commit()
             if cur.rowcount == 0:
                 return None  # lost a race with another writer; keep theirs
-            return build_week_opener(conn, week["season_id"], week["section_index"], name)
+            return build_week_opener(
+                conn, week["season_id"], week["section_index"], name
+            )
         finally:
             conn.close()
 

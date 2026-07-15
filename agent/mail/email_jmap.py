@@ -27,7 +27,9 @@ SUBMISSION = "urn:ietf:params:jmap:submission"
 
 # ── Config (env-driven; .env is loaded by the runtime and cut_release.py) ──
 JMAP_TOKEN = os.getenv("FASTMAIL_JMAP_TOKEN")
-JMAP_SESSION_URL = os.getenv("FASTMAIL_JMAP_SESSION_URL", "https://api.fastmail.com/jmap/session")
+JMAP_SESSION_URL = os.getenv(
+    "FASTMAIL_JMAP_SESSION_URL", "https://api.fastmail.com/jmap/session"
+)
 EMAIL_ADDRESS = os.getenv("ELIXIR_EMAIL_ADDRESS", "elixir@poapkings.com")
 EMAIL_FROM_NAME = os.getenv("ELIXIR_EMAIL_FROM_NAME", "Elixir")
 SENT_PARENT = os.getenv("ELIXIR_EMAIL_SENT_PARENT", "Sent")
@@ -51,8 +53,13 @@ def enabled() -> bool:
 
 
 class JMAPClient:
-    def __init__(self, *, token: str | None = None, session_url: str | None = None,
-                 timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        *,
+        token: str | None = None,
+        session_url: str | None = None,
+        timeout: float = 30.0,
+    ) -> None:
         self.token = token or JMAP_TOKEN
         self.session_url = session_url or JMAP_SESSION_URL
         self.timeout = timeout
@@ -91,7 +98,9 @@ class JMAPClient:
                 return account_id
         raise JMAPError(f"No account supports {capability}")
 
-    def call(self, method_calls: list[list[Any]], *, using: list[str] | None = None) -> list[list[Any]]:
+    def call(
+        self, method_calls: list[list[Any]], *, using: list[str] | None = None
+    ) -> list[list[Any]]:
         body = {"using": using or [CORE, MAIL, SUBMISSION], "methodCalls": method_calls}
         r = requests.post(
             self.api_url,
@@ -127,34 +136,62 @@ class JMAPClient:
         sent_parent = self._find_parent(rows, SENT_PARENT, "sent")
         drafts = self._find_parent(rows, "Drafts", "drafts")
         sent_elixir = self._find_child(
-            rows, by_id, sent_parent["id"], SENT_FOLDER, f"{SENT_PARENT}/{SENT_FOLDER}",
+            rows,
+            by_id,
+            sent_parent["id"],
+            SENT_FOLDER,
+            f"{SENT_PARENT}/{SENT_FOLDER}",
         )
         return MailFolders(sent_elixir=sent_elixir["id"], drafts=drafts["id"])
 
     def _mailboxes(self) -> list[dict[str, Any]]:
-        responses = self.call([
-            ["Mailbox/get", {
-                "accountId": self.mail_account_id,
-                "ids": None,
-                "properties": ["id", "name", "parentId", "role"],
-            }, "mailboxes"],
-        ], using=[CORE, MAIL])
+        responses = self.call(
+            [
+                [
+                    "Mailbox/get",
+                    {
+                        "accountId": self.mail_account_id,
+                        "ids": None,
+                        "properties": ["id", "name", "parentId", "role"],
+                    },
+                    "mailboxes",
+                ],
+            ],
+            using=[CORE, MAIL],
+        )
         return responses[0][1]["list"]
 
     @staticmethod
-    def _find_parent(rows: list[dict[str, Any]], name: str, role: str) -> dict[str, Any]:
+    def _find_parent(
+        rows: list[dict[str, Any]], name: str, role: str
+    ) -> dict[str, Any]:
         role_match = next((m for m in rows if m.get("role") == role), None)
         if role_match:
             return role_match
-        name_match = next((m for m in rows if m.get("parentId") is None and m.get("name") == name), None)
+        name_match = next(
+            (m for m in rows if m.get("parentId") is None and m.get("name") == name),
+            None,
+        )
         if name_match:
             return name_match
         raise JMAPError(f"Could not find {name} mailbox")
 
     @staticmethod
-    def _find_child(rows: list[dict[str, Any]], by_id: dict[str, dict[str, Any]],
-                    parent_id: str, name: str, path: str) -> dict[str, Any]:
-        child = next((m for m in rows if m.get("parentId") == parent_id and m.get("name") == name), None)
+    def _find_child(
+        rows: list[dict[str, Any]],
+        by_id: dict[str, dict[str, Any]],
+        parent_id: str,
+        name: str,
+        path: str,
+    ) -> dict[str, Any]:
+        child = next(
+            (
+                m
+                for m in rows
+                if m.get("parentId") == parent_id and m.get("name") == name
+            ),
+            None,
+        )
         if child:
             return child
         flat = next((m for m in rows if m.get("name") == path), None)
@@ -164,27 +201,46 @@ class JMAPClient:
 
     @cached_property
     def identity_id(self) -> str:
-        responses = self.call([
-            ["Identity/get", {
-                "accountId": self.submission_account_id,
-                "ids": None,
-                "properties": ["id", "name", "email"],
-            }, "identities"],
-        ], using=[CORE, SUBMISSION])
+        responses = self.call(
+            [
+                [
+                    "Identity/get",
+                    {
+                        "accountId": self.submission_account_id,
+                        "ids": None,
+                        "properties": ["id", "name", "email"],
+                    },
+                    "identities",
+                ],
+            ],
+            using=[CORE, SUBMISSION],
+        )
         identities = responses[0][1]["list"]
         wanted = EMAIL_ADDRESS.lower()
-        match = next((i for i in identities if (i.get("email") or "").lower() == wanted), None)
+        match = next(
+            (i for i in identities if (i.get("email") or "").lower() == wanted), None
+        )
         if not match and identities:
-            log.warning("No identity for %s; using first configured Fastmail identity", wanted)
+            log.warning(
+                "No identity for %s; using first configured Fastmail identity", wanted
+            )
             match = identities[0]
         if not match:
             raise JMAPError("No JMAP sending identities are configured")
         return match["id"]
 
-    def send_email(self, *, to: list[str] | str, subject: str, body: str,
-                   html_body: str | None = None,
-                   cc: list[str] | str | None = None, bcc: list[str] | str | None = None,
-                   in_reply_to: str | None = None, references: list[str] | None = None) -> dict[str, Any]:
+    def send_email(
+        self,
+        *,
+        to: list[str] | str,
+        subject: str,
+        body: str,
+        html_body: str | None = None,
+        cc: list[str] | str | None = None,
+        bcc: list[str] | str | None = None,
+        in_reply_to: str | None = None,
+        references: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Create the message as a draft and submit it; on success move it out of
         Drafts into Sent/Elixir. Mirrors Oliver's Email/set + EmailSubmission/set."""
         recipients = _addresses(to)
@@ -232,39 +288,56 @@ class JMAPClient:
         if refs:
             email_obj["references"] = refs[-20:]
 
-        rcpt_to = [{"email": r["email"], "parameters": None}
-                   for r in recipients + cc_recipients + bcc_recipients]
-        responses = self.call([
-            ["Email/set", {
-                "accountId": self.mail_account_id,
-                "create": {create_id: email_obj},
-            }, "create"],
-            ["EmailSubmission/set", {
-                "accountId": self.submission_account_id,
-                "create": {
-                    submit_id: {
-                        "identityId": self.identity_id,
-                        "emailId": f"#{create_id}",
-                        "envelope": {
-                            "mailFrom": {"email": EMAIL_ADDRESS, "parameters": None},
-                            "rcptTo": rcpt_to,
+        rcpt_to = [
+            {"email": r["email"], "parameters": None}
+            for r in recipients + cc_recipients + bcc_recipients
+        ]
+        responses = self.call(
+            [
+                [
+                    "Email/set",
+                    {
+                        "accountId": self.mail_account_id,
+                        "create": {create_id: email_obj},
+                    },
+                    "create",
+                ],
+                [
+                    "EmailSubmission/set",
+                    {
+                        "accountId": self.submission_account_id,
+                        "create": {
+                            submit_id: {
+                                "identityId": self.identity_id,
+                                "emailId": f"#{create_id}",
+                                "envelope": {
+                                    "mailFrom": {
+                                        "email": EMAIL_ADDRESS,
+                                        "parameters": None,
+                                    },
+                                    "rcptTo": rcpt_to,
+                                },
+                            },
+                        },
+                        "onSuccessUpdateEmail": {
+                            f"#{submit_id}": {
+                                f"mailboxIds/{self.folders.drafts}": None,
+                                f"mailboxIds/{self.folders.sent_elixir}": True,
+                                "keywords/$draft": None,
+                                "keywords/$seen": True,
+                            },
                         },
                     },
-                },
-                "onSuccessUpdateEmail": {
-                    f"#{submit_id}": {
-                        f"mailboxIds/{self.folders.drafts}": None,
-                        f"mailboxIds/{self.folders.sent_elixir}": True,
-                        "keywords/$draft": None,
-                        "keywords/$seen": True,
-                    },
-                },
-            }, "submit"],
-        ])
+                    "submit",
+                ],
+            ]
+        )
         create_payload = responses[0][1]
         submit_payload = responses[1][1]
         if create_payload.get("notCreated"):
-            raise JMAPError(f"Email draft was not created: {create_payload['notCreated']}")
+            raise JMAPError(
+                f"Email draft was not created: {create_payload['notCreated']}"
+            )
         if submit_payload.get("notCreated"):
             raise JMAPError(f"Email was not submitted: {submit_payload['notCreated']}")
         created_email = (create_payload.get("created") or {}).get(create_id) or {}

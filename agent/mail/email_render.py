@@ -20,7 +20,9 @@ class _EscapeRawHtmlPostprocessor(_RawHtmlPostprocessor):
     def run(self, text: str) -> str:
         for i in range(self.md.htmlStash.html_counter):
             raw = self.md.htmlStash.rawHtmlBlocks[i]
-            text = text.replace(self.md.htmlStash.get_placeholder(i), html.escape(str(raw)))
+            text = text.replace(
+                self.md.htmlStash.get_placeholder(i), html.escape(str(raw))
+            )
         return text
 
 
@@ -35,7 +37,8 @@ def _render_markdown(text: str) -> str:
     extension neutralizes raw HTML. No nl2br: single mid-sentence newlines collapse to a
     space, paragraphs come from blank lines."""
     return _markdown.markdown(
-        text or "", extensions=["sane_lists", "tables", _EscapeRawHtmlExtension()])
+        text or "", extensions=["sane_lists", "tables", _EscapeRawHtmlExtension()]
+    )
 
 
 # Email CSS. Delivered as a <style> block (well-supported in Apple Mail, Gmail, most
@@ -73,9 +76,9 @@ def text_to_html(text: str, *, signature_html: str | None = None) -> str:
     is appended inside the wrapper as its own styled footer (trusted HTML, NOT markdown-rendered)."""
     body = _render_markdown(text) or "<p></p>"
     return (
-        "<!doctype html><html><head><meta charset=\"utf-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        '<!doctype html><html><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f"<style>{_EMAIL_CSS}</style></head>"
-        "<body><div class=\"elixir-email\">"
+        '<body><div class="elixir-email">'
         f"{body}{signature_html or ''}</div></body></html>"
     )

@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 import db as db_facade
+from capabilities.contracts import ManagementDecisionResult
 from engine.management import management_read_summary
 
 CAPABILITY_ID = "management_decisions"
@@ -94,7 +95,7 @@ def _board(source, *, conn=None) -> dict:
 
 def get_management_decisions(
     *, view: str = "summary", arguments: dict | None = None, source=None, conn=None
-) -> dict:
+) -> ManagementDecisionResult:
     """Return an authoritative leadership-only management view."""
     source = _source(source)
     arguments = dict(arguments or {})

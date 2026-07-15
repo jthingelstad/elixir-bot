@@ -31,7 +31,9 @@ def test_validate_clan_chat_messages_enforces_exact_once_route():
     )
 
     assert ok.violations == []
-    assert f"not_exactly_once:{clan_chat_copy.DISCORD_INVITE_ROUTE}" in repeated.violations
+    assert (
+        f"not_exactly_once:{clan_chat_copy.DISCORD_INVITE_ROUTE}" in repeated.violations
+    )
 
 
 def test_role_action_clan_chat_copy_uses_public_reason_and_word_boundary():
@@ -62,15 +64,20 @@ def test_sign_clan_chat_text_appends_signature_inside_limit():
 
 
 def test_generate_clan_chat_copy_uses_fallback_when_llm_violates_guardrails():
-    with patch("runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy", return_value={
-        "messages": ["Read more at https://example.com"],
-    }) as mock_generate:
-        result = asyncio.run(clan_chat_copy.generate_clan_chat_copy(
-            intent="weekly_story_relay",
-            context="Story context",
-            max_messages=1,
-            fallback_messages=["POAP KINGS keeps rolling this week."],
-        ))
+    with patch(
+        "runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy",
+        return_value={
+            "messages": ["Read more at https://example.com"],
+        },
+    ) as mock_generate:
+        result = asyncio.run(
+            clan_chat_copy.generate_clan_chat_copy(
+                intent="weekly_story_relay",
+                context="Story context",
+                max_messages=1,
+                fallback_messages=["POAP KINGS keeps rolling this week."],
+            )
+        )
 
     request = mock_generate.call_args.args[0]
     assert request["target_surface"] == "Clash Royale in-game clan chat"
@@ -81,7 +88,9 @@ def test_generate_clan_chat_copy_uses_fallback_when_llm_violates_guardrails():
     }
     assert result is not None
     assert result.used_fallback is True
-    assert result.messages == [f"POAP KINGS keeps rolling this week. {clan_chat_copy.CLAN_CHAT_SIGNATURE_TEXT}"]
+    assert result.messages == [
+        f"POAP KINGS keeps rolling this week. {clan_chat_copy.CLAN_CHAT_SIGNATURE_TEXT}"
+    ]
 
 
 def test_signed_valid_messages_accepts_plain_brain_copy():
@@ -94,7 +103,9 @@ def test_signed_valid_messages_accepts_plain_brain_copy():
 
 
 def test_signed_valid_messages_accepts_single_string():
-    out = clan_chat_copy.signed_valid_messages("War week clinched — nice work everyone.")
+    out = clan_chat_copy.signed_valid_messages(
+        "War week clinched — nice work everyone."
+    )
     assert out is not None and len(out) == 1
 
 

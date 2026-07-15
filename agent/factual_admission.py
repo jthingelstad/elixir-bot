@@ -7,12 +7,11 @@ allowed; a persistent contradiction becomes deterministic safe copy.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
+from collections.abc import Callable
 
 from capabilities.game_truth import deterministic_correction
 from engine.game_check import check_post
-
 
 log = logging.getLogger("elixir.agent.factual_admission")
 

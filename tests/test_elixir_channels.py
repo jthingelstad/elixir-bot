@@ -9,10 +9,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, PropertyMock, patch
 
 import pytest
+from PIL import Image
 
 import elixir
 import runtime.channel_router as channel_router
-from PIL import Image
 from runtime.activities import (
     list_registered_activities,
     manual_activity_choices,
@@ -41,7 +41,9 @@ class _DummyChannel:
         return _TypingContext()
 
 
-def _make_message(channel_id, channel_name, content, *, mentions=None, roles=None, attachments=None):
+def _make_message(
+    channel_id, channel_name, content, *, mentions=None, roles=None, attachments=None
+):
     author = SimpleNamespace(
         bot=False,
         id=123,
@@ -93,34 +95,54 @@ def test_on_message_routes_interactive_channel_when_mentioned():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.helpers._common.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 100,
-            "name": "#member-chat",
-            "role": "interactive",
-            "workflow": "interactive",
-            "mention_required": True,
-            "allow_proactive": False,
-        }),
+        patch(
+            "runtime.helpers._common.bot",
+            new=SimpleNamespace(user=SimpleNamespace(id=999)),
+        ),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 100,
+                "name": "#member-chat",
+                "role": "interactive",
+                "workflow": "interactive",
+                "mention_required": True,
+                "allow_proactive": False,
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]) as mock_history,
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message"),
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
-        patch("elixir.elixir_agent.respond_in_channel", return_value={"event_type": "channel_response", "content": "You look solid.", "summary": "solid"}) as mock_respond,
+        patch(
+            "elixir._load_live_clan_context",
+            new=AsyncMock(return_value=({"memberList": []}, {})),
+        ),
+        patch(
+            "elixir.elixir_agent.respond_in_channel",
+            return_value={
+                "event_type": "channel_response",
+                "content": "You look solid.",
+                "summary": "solid",
+            },
+        ) as mock_respond,
         patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
     ):
         asyncio.run(elixir.on_message(message))
 
     assert mock_respond.call_args.kwargs["workflow"] == "interactive"
-    mock_history.assert_called_once_with("channel_user:100:123", elixir.CHANNEL_CONVERSATION_LIMIT)
+    mock_history.assert_called_once_with(
+        "channel_user:100:123", elixir.CHANNEL_CONVERSATION_LIMIT
+    )
     message.reply.assert_awaited_once_with("You look solid.")
     mock_share.assert_awaited_once()
     mock_process.assert_not_awaited()
 
 
 def test_on_message_routes_ask_elixir_without_mention():
-    message = _make_message(1482368505058955467, "ask-elixir", "what deck should I learn next?")
+    message = _make_message(
+        1482368505058955467, "ask-elixir", "what deck should I learn next?"
+    )
     sent_message = SimpleNamespace(id=987)
     message.reply = AsyncMock(return_value=sent_message)
 
@@ -131,21 +153,31 @@ def test_on_message_routes_ask_elixir_without_mention():
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=False),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1482368505058955467,
-            "name": "#ask-elixir",
-            "lane": "ask-elixir",
-            "workflow": "interactive",
-            "reply_policy": "open_channel",
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+                "workflow": "interactive",
+                "reply_policy": "open_channel",
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]) as mock_history,
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message") as mock_save,
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "elixir._load_live_clan_context",
+            new=AsyncMock(return_value=({"memberList": []}, {})),
+        ),
         patch(
             "elixir.elixir_agent.respond_in_channel",
-            return_value={"event_type": "channel_response", "content": "Try a deck with faster cycles so you can learn matchups quicker.", "summary": "learn a faster deck"},
+            return_value={
+                "event_type": "channel_response",
+                "content": "Try a deck with faster cycles so you can learn matchups quicker.",
+                "summary": "learn a faster deck",
+            },
         ) as mock_respond,
         patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
     ):
@@ -153,16 +185,24 @@ def test_on_message_routes_ask_elixir_without_mention():
 
     assert mock_respond.call_args.kwargs["workflow"] == "interactive"
     assert mock_respond.call_args.kwargs["channel_name"] == "#ask-elixir"
-    mock_history.assert_called_once_with("channel_user:1482368505058955467:123", elixir.CHANNEL_CONVERSATION_LIMIT)
-    message.reply.assert_awaited_once_with("Try a deck with faster cycles so you can learn matchups quicker.")
-    assistant_save = [call for call in mock_save.call_args_list if call.args[1] == "assistant"][0]
+    mock_history.assert_called_once_with(
+        "channel_user:1482368505058955467:123", elixir.CHANNEL_CONVERSATION_LIMIT
+    )
+    message.reply.assert_awaited_once_with(
+        "Try a deck with faster cycles so you can learn matchups quicker."
+    )
+    assistant_save = [
+        call for call in mock_save.call_args_list if call.args[1] == "assistant"
+    ][0]
     assert assistant_save.kwargs["discord_message_id"] == "987"
     mock_share.assert_awaited_once()
     mock_process.assert_not_awaited()
 
 
 def test_on_message_keeps_open_ask_elixir_not_for_bot_in_llm_path():
-    message = _make_message(1482368505058955467, "ask-elixir", "Who is donating beast in our clan???")
+    message = _make_message(
+        1482368505058955467, "ask-elixir", "Who is donating beast in our clan???"
+    )
     message.reply = AsyncMock(return_value=SimpleNamespace(id=990))
 
     async def fake_to_thread(fn, *args, **kwargs):
@@ -172,14 +212,17 @@ def test_on_message_keeps_open_ask_elixir_not_for_bot_in_llm_path():
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=False),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1482368505058955467,
-            "name": "#ask-elixir",
-            "lane": "ask-elixir",
-            "workflow": "interactive",
-            "reply_policy": "open_channel",
-            "memory_scope": "public",
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+                "workflow": "interactive",
+                "reply_policy": "open_channel",
+                "memory_scope": "public",
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]),
         patch("elixir.db.build_memory_context", return_value={}),
@@ -192,7 +235,10 @@ def test_on_message_keeps_open_ask_elixir_not_for_bot_in_llm_path():
                 "rationale": "asking clan members about donations",
             },
         ) as mock_classify,
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "elixir._load_live_clan_context",
+            new=AsyncMock(return_value=({"memberList": []}, {})),
+        ),
         patch(
             "elixir.elixir_agent.respond_in_channel",
             return_value={
@@ -208,7 +254,9 @@ def test_on_message_keeps_open_ask_elixir_not_for_bot_in_llm_path():
     mock_classify.assert_called_once()
     assert mock_classify.call_args.kwargs["allows_open_channel_reply"] is True
     mock_respond.assert_called_once()
-    message.reply.assert_awaited_once_with("I can check donation leaders from the current clan data.")
+    message.reply.assert_awaited_once_with(
+        "I can check donation leaders from the current clan data."
+    )
     mock_share.assert_awaited_once()
     mock_process.assert_not_awaited()
 
@@ -224,14 +272,17 @@ def test_on_message_ignores_blank_ask_elixir_mention_before_intent_routing():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=True),
         patch("elixir._strip_bot_mentions", return_value=""),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1482368505058955467,
-            "name": "#ask-elixir",
-            "lane": "ask-elixir",
-            "workflow": "interactive",
-            "reply_policy": "open_channel",
-            "memory_scope": "public",
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+                "workflow": "interactive",
+                "reply_policy": "open_channel",
+                "memory_scope": "public",
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages") as mock_history,
         patch("elixir.db.save_message") as mock_save,
@@ -273,25 +324,39 @@ def test_on_message_routes_ask_elixir_image_only_screenshot():
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=False),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1482368505058955467,
-            "name": "#ask-elixir",
-            "lane": "ask-elixir",
-            "workflow": "interactive",
-            "reply_policy": "open_channel",
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+                "workflow": "interactive",
+                "reply_policy": "open_channel",
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]),
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message") as mock_save,
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "elixir._load_live_clan_context",
+            new=AsyncMock(return_value=({"memberList": []}, {})),
+        ),
         patch(
             "agent.intent_router.classify_intent",
-            return_value={"route": "llm_chat", "confidence": 0.75, "rationale": "screenshot question"},
+            return_value={
+                "route": "llm_chat",
+                "confidence": 0.75,
+                "rationale": "screenshot question",
+            },
         ),
         patch(
             "elixir.elixir_agent.respond_in_channel",
-            return_value={"event_type": "channel_response", "content": "I can read this clan chat screenshot.", "summary": "screenshot"},
+            return_value={
+                "event_type": "channel_response",
+                "content": "I can read this clan chat screenshot.",
+                "summary": "screenshot",
+            },
         ) as mock_respond,
         patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
     ):
@@ -301,14 +366,16 @@ def test_on_message_routes_ask_elixir_image_only_screenshot():
     kwargs = mock_respond.call_args.kwargs
     assert "Shared Clash Royale screenshot image" in kwargs["question"]
     assert "clan-chat.jpg" in kwargs["question"]
-    assert kwargs["image_blocks"] == [{
-        "type": "image",
-        "source": {
-            "type": "base64",
-            "media_type": "image/jpeg",
-            "data": "ZmFrZWltYWdl",
-        },
-    }]
+    assert kwargs["image_blocks"] == [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/jpeg",
+                "data": "ZmFrZWltYWdl",
+            },
+        }
+    ]
     user_save = [call for call in mock_save.call_args_list if call.args[1] == "user"][0]
     assert "Shared Clash Royale screenshot image" in user_save.args[2]
     message.reply.assert_awaited_once_with("I can read this clan chat screenshot.")
@@ -338,25 +405,39 @@ def test_on_message_corrects_mislabeled_screenshot_media_type():
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=False),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1482368505058955467,
-            "name": "#ask-elixir",
-            "lane": "ask-elixir",
-            "workflow": "interactive",
-            "reply_policy": "open_channel",
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+                "workflow": "interactive",
+                "reply_policy": "open_channel",
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]),
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message"),
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "elixir._load_live_clan_context",
+            new=AsyncMock(return_value=({"memberList": []}, {})),
+        ),
         patch(
             "agent.intent_router.classify_intent",
-            return_value={"route": "llm_chat", "confidence": 0.75, "rationale": "screenshot question"},
+            return_value={
+                "route": "llm_chat",
+                "confidence": 0.75,
+                "rationale": "screenshot question",
+            },
         ),
         patch(
             "elixir.elixir_agent.respond_in_channel",
-            return_value={"event_type": "channel_response", "content": "I can read this clan chat screenshot.", "summary": "screenshot"},
+            return_value={
+                "event_type": "channel_response",
+                "content": "I can read this clan chat screenshot.",
+                "summary": "screenshot",
+            },
         ) as mock_respond,
         patch("elixir._share_channel_result", new=AsyncMock()),
     ):
@@ -390,20 +471,25 @@ def test_on_message_passes_screenshot_to_deck_review():
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=False),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1482368505058955467,
-            "name": "#ask-elixir",
-            "lane": "ask-elixir",
-            "workflow": "interactive",
-            "reply_policy": "open_channel",
-            "memory_scope": "public",
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+                "workflow": "interactive",
+                "reply_policy": "open_channel",
+                "memory_scope": "public",
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]),
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message"),
         patch("elixir._extract_member_deck_target", return_value="#ABC123"),
-        patch("elixir.db.get_member_profile", return_value={"current_name": "King Thing"}),
+        patch(
+            "elixir.db.get_member_profile", return_value={"current_name": "King Thing"}
+        ),
         patch(
             "agent.intent_router.classify_intent",
             return_value={
@@ -416,7 +502,11 @@ def test_on_message_passes_screenshot_to_deck_review():
         ),
         patch(
             "elixir.elixir_agent.respond_in_deck_review",
-            return_value={"event_type": "deck_review_response", "content": "This deck has a clear win condition.", "summary": "deck"},
+            return_value={
+                "event_type": "deck_review_response",
+                "content": "This deck has a clear win condition.",
+                "summary": "deck",
+            },
         ) as mock_review,
     ):
         asyncio.run(elixir.on_message(message))
@@ -442,28 +532,40 @@ def test_on_message_routes_reception_without_mention():
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=False),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1476456514121109514,
-            "name": "#welcome",
-            "lane": "reception",
-            "workflow": "reception",
-            "reply_policy": "open_channel",
-            "memory_scope": "public",
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1476456514121109514,
+                "name": "#welcome",
+                "lane": "reception",
+                "workflow": "reception",
+                "reply_policy": "open_channel",
+                "memory_scope": "public",
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message"),
-        patch("runtime.channel_router.cr_api.get_clan", return_value={"memberList": [{"tag": "#ABC123", "name": "King Levy"}]}),
+        patch(
+            "runtime.channel_router.cr_api.get_clan",
+            return_value={"memberList": [{"tag": "#ABC123", "name": "King Levy"}]},
+        ),
         patch(
             "runtime.channel_router.elixir_agent.respond_in_reception",
-            return_value={"event_type": "reception_response", "content": "Set your server nickname to your Clash name and I can help verify you."},
+            return_value={
+                "event_type": "reception_response",
+                "content": "Set your server nickname to your Clash name and I can help verify you.",
+            },
         ) as mock_respond,
         patch("elixir._reply_text", new=AsyncMock()) as mock_reply,
     ):
         asyncio.run(elixir.on_message(message))
 
     assert mock_respond.call_args.kwargs["question"] == "how do I get verified?"
-    mock_reply.assert_awaited_once_with(message, "Set your server nickname to your Clash name and I can help verify you.")
+    mock_reply.assert_awaited_once_with(
+        message,
+        "Set your server nickname to your Clash name and I can help verify you.",
+    )
     mock_process.assert_not_awaited()
 
 
@@ -476,30 +578,47 @@ def test_on_message_does_not_save_unsent_interactive_reply():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.helpers._common.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 100,
-            "name": "#member-chat",
-            "role": "interactive",
-            "workflow": "interactive",
-            "mention_required": True,
-            "allow_proactive": False,
-        }),
+        patch(
+            "runtime.helpers._common.bot",
+            new=SimpleNamespace(user=SimpleNamespace(id=999)),
+        ),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 100,
+                "name": "#member-chat",
+                "role": "interactive",
+                "workflow": "interactive",
+                "mention_required": True,
+                "allow_proactive": False,
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]),
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message") as mock_save,
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "elixir._load_live_clan_context",
+            new=AsyncMock(return_value=({"memberList": []}, {})),
+        ),
         patch(
             "elixir.elixir_agent.respond_in_channel",
-            return_value={"event_type": "channel_response", "content": "You look solid.", "summary": "solid"},
+            return_value={
+                "event_type": "channel_response",
+                "content": "You look solid.",
+                "summary": "solid",
+            },
         ),
-        patch("elixir._reply_text", new=AsyncMock(side_effect=RuntimeError("send failed"))),
+        patch(
+            "elixir._reply_text", new=AsyncMock(side_effect=RuntimeError("send failed"))
+        ),
         patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
     ):
         asyncio.run(elixir.on_message(message))
 
-    assistant_saves = [call for call in mock_save.call_args_list if call.args[1] == "assistant"]
+    assistant_saves = [
+        call for call in mock_save.call_args_list if call.args[1] == "assistant"
+    ]
     assert assistant_saves == []
     mock_share.assert_not_awaited()
     message.reply.assert_awaited_once_with("Hit an error. Try again in a moment.")
@@ -512,7 +631,9 @@ def test_on_raw_reaction_add_marks_arena_relay_action_done():
         message_id=987,
         user_id=123,
         emoji="✅",
-        member=SimpleNamespace(bot=False, roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)]),
+        member=SimpleNamespace(
+            bot=False, roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)]
+        ),
     )
 
     async def fake_to_thread(fn, *args, **kwargs):
@@ -520,18 +641,28 @@ def test_on_raw_reaction_add_marks_arena_relay_action_done():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1513758211206025227,
-            "name": "#leader-actions",
-            "lane": "arena-relay",
-        }),
-        patch("runtime.prompt_feedback.db.decide_leader_action_by_message", return_value={
-            "action_id": 42,
-            "action_type": "in_game_relay",
-            "status": "done",
-        }) as mock_decide,
-        patch("runtime.prompt_feedback.queue_leader_action_feedback_refresh") as mock_feedback_refresh,
-        patch("runtime.prompt_feedback.refresh_leader_action_card", new=AsyncMock()) as mock_refresh_card,
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1513758211206025227,
+                "name": "#leader-actions",
+                "lane": "arena-relay",
+            },
+        ),
+        patch(
+            "runtime.prompt_feedback.db.decide_leader_action_by_message",
+            return_value={
+                "action_id": 42,
+                "action_type": "in_game_relay",
+                "status": "done",
+            },
+        ) as mock_decide,
+        patch(
+            "runtime.prompt_feedback.queue_leader_action_feedback_refresh"
+        ) as mock_feedback_refresh,
+        patch(
+            "runtime.prompt_feedback.refresh_leader_action_card", new=AsyncMock()
+        ) as mock_refresh_card,
     ):
         asyncio.run(elixir.on_raw_reaction_add(payload))
 
@@ -561,21 +692,29 @@ def test_arena_relay_reply_records_action_note():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1513758211206025227,
-            "name": "#leader-actions",
-            "lane": "arena-relay",
-            "workflow": "channel_update",
-            "reply_policy": "disabled",
-            "memory_scope": "leadership",
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1513758211206025227,
+                "name": "#leader-actions",
+                "lane": "arena-relay",
+                "workflow": "channel_update",
+                "reply_policy": "disabled",
+                "memory_scope": "leadership",
+            },
+        ),
         patch("runtime.channel_router.db.upsert_discord_user"),
-        patch("runtime.channel_router.db.record_leader_action_note_by_message", return_value={
-            "action_id": 1,
-            "action_type": "in_game_relay",
-        }) as mock_note,
+        patch(
+            "runtime.channel_router.db.record_leader_action_note_by_message",
+            return_value={
+                "action_id": 1,
+                "action_type": "in_game_relay",
+            },
+        ) as mock_note,
         patch("runtime.channel_router.db.save_message") as mock_save,
-        patch("runtime.channel_router.queue_leader_action_feedback_refresh") as mock_feedback_refresh,
+        patch(
+            "runtime.channel_router.queue_leader_action_feedback_refresh"
+        ) as mock_feedback_refresh,
     ):
         asyncio.run(elixir.on_message(message))
 
@@ -613,18 +752,24 @@ def test_arena_relay_leader_screenshot_is_observed():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1513758211206025227,
-            "name": "#leader-actions",
-            "lane": "arena-relay",
-            "workflow": "channel_update",
-            "reply_policy": "disabled",
-            "memory_scope": "leadership",
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1513758211206025227,
+                "name": "#leader-actions",
+                "lane": "arena-relay",
+                "workflow": "channel_update",
+                "reply_policy": "disabled",
+                "memory_scope": "leadership",
+            },
+        ),
         patch("runtime.channel_router.db.upsert_discord_user"),
         patch("runtime.channel_router.db.build_memory_context", return_value={}),
         patch("runtime.channel_router.db.save_message", return_value=111) as mock_save,
-        patch("runtime.channel_router.db.save_arena_relay_screenshot_observation", return_value={"screenshot_type": "boat_defense", "image_count": 1}) as mock_observation,
+        patch(
+            "runtime.channel_router.db.save_arena_relay_screenshot_observation",
+            return_value={"screenshot_type": "boat_defense", "image_count": 1},
+        ) as mock_observation,
         patch(
             "runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot",
             return_value={
@@ -634,7 +779,9 @@ def test_arena_relay_leader_screenshot_is_observed():
                 "observation": {
                     "screenshot_type": "boat_defense",
                     "players": ["dez42"],
-                    "actionable_facts": ["At least three open defense slots are visible."],
+                    "actionable_facts": [
+                        "At least three open defense slots are visible."
+                    ],
                     "uncertainty": None,
                 },
             },
@@ -658,7 +805,9 @@ def test_arena_relay_leader_screenshot_is_observed():
     mock_observation.assert_called_once()
     assert mock_observation.call_args.kwargs["screenshot_type"] == "boat_defense"
     assert mock_observation.call_args.kwargs["players"] == ["dez42"]
-    message.reply.assert_awaited_once_with("**👁️ Screenshot Read**\nVisible open boat-defense slots: at least 3.")
+    message.reply.assert_awaited_once_with(
+        "**👁️ Screenshot Read**\nVisible open boat-defense slots: at least 3."
+    )
     mock_process.assert_not_awaited()
 
 
@@ -693,14 +842,17 @@ def test_arena_relay_screenshot_persists_structured_memories():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1513758211206025227,
-            "name": "#leader-actions",
-            "lane": "arena-relay",
-            "workflow": "channel_update",
-            "reply_policy": "disabled",
-            "memory_scope": "leadership",
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1513758211206025227,
+                "name": "#leader-actions",
+                "lane": "arena-relay",
+                "workflow": "channel_update",
+                "reply_policy": "disabled",
+                "memory_scope": "leadership",
+            },
+        ),
         patch("runtime.channel_router.db.upsert_discord_user"),
         patch("runtime.channel_router.db.build_memory_context", return_value={}),
         patch("runtime.channel_router.db.save_message", return_value=111),
@@ -713,8 +865,13 @@ def test_arena_relay_screenshot_persists_structured_memories():
                 "memories": memories,
             },
         ),
-        patch("runtime.channel_router._persist_screenshot_memories", return_value=1) as mock_persist,
-        patch("runtime.channel_router.db.save_arena_relay_screenshot_observation", return_value={"screenshot_type": "clan_chat", "image_count": 1}),
+        patch(
+            "runtime.channel_router._persist_screenshot_memories", return_value=1
+        ) as mock_persist,
+        patch(
+            "runtime.channel_router.db.save_arena_relay_screenshot_observation",
+            return_value={"screenshot_type": "clan_chat", "image_count": 1},
+        ),
     ):
         asyncio.run(elixir.on_message(message))
 
@@ -724,7 +881,9 @@ def test_arena_relay_screenshot_persists_structured_memories():
         "arena-relay",
         555,
     )
-    message.reply.assert_awaited_once_with("**Read:** Fullboat is camping with limited signal.")
+    message.reply.assert_awaited_once_with(
+        "**Read:** Fullboat is camping with limited signal."
+    )
     mock_process.assert_not_awaited()
 
 
@@ -740,8 +899,12 @@ def test_persist_screenshot_memories_saves_elixir_inference_with_evidence():
     ]
 
     with (
-        patch("agent.tool_exec._resolve_member_tag", return_value="#ABC123") as mock_resolve,
-        patch("memory_store.create_memory", return_value={"memory_id": 42}) as mock_create,
+        patch(
+            "agent.tool_exec._resolve_member_tag", return_value="#ABC123"
+        ) as mock_resolve,
+        patch(
+            "memory_store.create_memory", return_value={"memory_id": 42}
+        ) as mock_create,
         patch("memory_store.attach_tags") as mock_tags,
         patch("memory_store.attach_evidence_ref") as mock_evidence,
     ):
@@ -764,7 +927,11 @@ def test_persist_screenshot_memories_saves_elixir_inference_with_evidence():
     assert kwargs["event_type"] == "arena_relay_screenshot_fact"
     assert kwargs["event_id"] == "555"
     assert kwargs["metadata"]["source"] == "arena_relay_screenshot"
-    mock_tags.assert_called_once_with(42, ["screenshot", "arena-relay", "availability"], actor="elixir:arena-relay-screenshot")
+    mock_tags.assert_called_once_with(
+        42,
+        ["screenshot", "arena-relay", "availability"],
+        actor="elixir:arena-relay-screenshot",
+    )
     mock_evidence.assert_called_once()
     assert mock_evidence.call_args.kwargs["evidence_ref"] == "555"
 
@@ -794,18 +961,24 @@ def test_arena_relay_leader_multi_screenshot_corrects_media_types():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1513758211206025227,
-            "name": "#leader-actions",
-            "lane": "arena-relay",
-            "workflow": "channel_update",
-            "reply_policy": "disabled",
-            "memory_scope": "leadership",
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1513758211206025227,
+                "name": "#leader-actions",
+                "lane": "arena-relay",
+                "workflow": "channel_update",
+                "reply_policy": "disabled",
+                "memory_scope": "leadership",
+            },
+        ),
         patch("runtime.channel_router.db.upsert_discord_user"),
         patch("runtime.channel_router.db.build_memory_context", return_value={}),
         patch("runtime.channel_router.db.save_message", return_value=111),
-        patch("runtime.channel_router.db.save_arena_relay_screenshot_observation", return_value={"screenshot_type": "unknown", "image_count": 3}),
+        patch(
+            "runtime.channel_router.db.save_arena_relay_screenshot_observation",
+            return_value={"screenshot_type": "unknown", "image_count": 3},
+        ),
         patch(
             "runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot",
             return_value={
@@ -845,7 +1018,9 @@ def test_collect_screenshot_payload_resizes_large_images():
         attachments=[attachment],
     )
 
-    blocks, metadata = asyncio.run(channel_router._collect_screenshot_image_payload(message))
+    blocks, metadata = asyncio.run(
+        channel_router._collect_screenshot_image_payload(message)
+    )
 
     attachment.read.assert_awaited_once()
     assert len(blocks) == 1
@@ -854,7 +1029,10 @@ def test_collect_screenshot_payload_resizes_large_images():
     assert len(submitted) < len(data)
     assert metadata[0]["resized"] is True
     assert metadata[0]["reencoded"] is True
-    assert max(metadata[0]["width"], metadata[0]["height"]) == channel_router.MAX_SCREENSHOT_LONG_EDGE
+    assert (
+        max(metadata[0]["width"], metadata[0]["height"])
+        == channel_router.MAX_SCREENSHOT_LONG_EDGE
+    )
 
 
 def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():
@@ -889,11 +1067,31 @@ def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "lane": "ask-elixir"}),
-        patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
-        patch("runtime.prompt_feedback.db.upsert_prompt_feedback", return_value={"prompt_feedback_id": 44, "became_active_down": True}) as mock_upsert,
-        patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
-        patch("runtime.app.bot", new=SimpleNamespace(user=SimpleNamespace(id=999), get_channel=lambda _channel_id: channel)),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+            },
+        ),
+        patch(
+            "runtime.prompt_feedback.db.get_message_by_discord_message_id",
+            return_value=assistant_row,
+        ),
+        patch(
+            "runtime.prompt_feedback.db.upsert_prompt_feedback",
+            return_value={"prompt_feedback_id": 44, "became_active_down": True},
+        ) as mock_upsert,
+        patch(
+            "runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited"
+        ) as mock_mark,
+        patch(
+            "runtime.app.bot",
+            new=SimpleNamespace(
+                user=SimpleNamespace(id=999), get_channel=lambda _channel_id: channel
+            ),
+        ),
     ):
         asyncio.run(elixir.on_raw_reaction_add(payload))
 
@@ -922,7 +1120,9 @@ def test_on_raw_reaction_add_emits_warning_on_active_thumbs_down(caplog):
         "author_type": "assistant",
         "workflow": "interactive",
     }
-    reacted_message = SimpleNamespace(add_reaction=AsyncMock(), reply=AsyncMock(return_value=SimpleNamespace(id=654)))
+    reacted_message = SimpleNamespace(
+        add_reaction=AsyncMock(), reply=AsyncMock(return_value=SimpleNamespace(id=654))
+    )
     channel = SimpleNamespace(fetch_message=AsyncMock(return_value=reacted_message))
 
     async def fake_to_thread(fn, *args, **kwargs):
@@ -930,11 +1130,29 @@ def test_on_raw_reaction_add_emits_warning_on_active_thumbs_down(caplog):
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "lane": "ask-elixir"}),
-        patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
-        patch("runtime.prompt_feedback.db.upsert_prompt_feedback", return_value={"prompt_feedback_id": 99, "became_active_down": True}),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+            },
+        ),
+        patch(
+            "runtime.prompt_feedback.db.get_message_by_discord_message_id",
+            return_value=assistant_row,
+        ),
+        patch(
+            "runtime.prompt_feedback.db.upsert_prompt_feedback",
+            return_value={"prompt_feedback_id": 99, "became_active_down": True},
+        ),
         patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited"),
-        patch("runtime.app.bot", new=SimpleNamespace(user=SimpleNamespace(id=999), get_channel=lambda _channel_id: channel)),
+        patch(
+            "runtime.app.bot",
+            new=SimpleNamespace(
+                user=SimpleNamespace(id=999), get_channel=lambda _channel_id: channel
+            ),
+        ),
     ):
         with caplog.at_level("INFO", logger="elixir"):
             asyncio.run(elixir.on_raw_reaction_add(payload))
@@ -977,11 +1195,31 @@ def test_on_raw_reaction_add_records_positive_feedback_and_acknowledges_receipt(
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "lane": "ask-elixir"}),
-        patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
-        patch("runtime.prompt_feedback.db.upsert_prompt_feedback", return_value={"prompt_feedback_id": 45, "became_active_down": False}) as mock_upsert,
-        patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
-        patch("runtime.app.bot", new=SimpleNamespace(user=SimpleNamespace(id=999), get_channel=lambda _channel_id: channel)),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+            },
+        ),
+        patch(
+            "runtime.prompt_feedback.db.get_message_by_discord_message_id",
+            return_value=assistant_row,
+        ),
+        patch(
+            "runtime.prompt_feedback.db.upsert_prompt_feedback",
+            return_value={"prompt_feedback_id": 45, "became_active_down": False},
+        ) as mock_upsert,
+        patch(
+            "runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited"
+        ) as mock_mark,
+        patch(
+            "runtime.app.bot",
+            new=SimpleNamespace(
+                user=SimpleNamespace(id=999), get_channel=lambda _channel_id: channel
+            ),
+        ),
     ):
         asyncio.run(elixir.on_raw_reaction_add(payload))
 
@@ -1019,10 +1257,25 @@ def test_on_raw_reaction_add_ignores_non_owner_feedback():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "lane": "ask-elixir"}),
-        patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+            },
+        ),
+        patch(
+            "runtime.prompt_feedback.db.get_message_by_discord_message_id",
+            return_value=assistant_row,
+        ),
         patch("runtime.prompt_feedback.db.upsert_prompt_feedback") as mock_upsert,
-        patch("runtime.app.bot", new=SimpleNamespace(user=SimpleNamespace(id=111), get_channel=lambda _channel_id: None)),
+        patch(
+            "runtime.app.bot",
+            new=SimpleNamespace(
+                user=SimpleNamespace(id=111), get_channel=lambda _channel_id: None
+            ),
+        ),
     ):
         asyncio.run(elixir.on_raw_reaction_add(payload))
 
@@ -1056,11 +1309,31 @@ def test_on_raw_reaction_add_does_not_repeat_retry_invitation_for_active_down_fe
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "lane": "ask-elixir"}),
-        patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
-        patch("runtime.prompt_feedback.db.upsert_prompt_feedback", return_value={"prompt_feedback_id": 44, "became_active_down": False}) as mock_upsert,
-        patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
-        patch("runtime.app.bot", new=SimpleNamespace(user=SimpleNamespace(id=999), get_channel=lambda _channel_id: None)),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+            },
+        ),
+        patch(
+            "runtime.prompt_feedback.db.get_message_by_discord_message_id",
+            return_value=assistant_row,
+        ),
+        patch(
+            "runtime.prompt_feedback.db.upsert_prompt_feedback",
+            return_value={"prompt_feedback_id": 44, "became_active_down": False},
+        ) as mock_upsert,
+        patch(
+            "runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited"
+        ) as mock_mark,
+        patch(
+            "runtime.app.bot",
+            new=SimpleNamespace(
+                user=SimpleNamespace(id=999), get_channel=lambda _channel_id: None
+            ),
+        ),
     ):
         asyncio.run(elixir.on_raw_reaction_add(payload))
 
@@ -1094,10 +1367,25 @@ def test_on_raw_reaction_remove_clears_matching_feedback():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "lane": "ask-elixir"}),
-        patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+            },
+        ),
+        patch(
+            "runtime.prompt_feedback.db.get_message_by_discord_message_id",
+            return_value=assistant_row,
+        ),
         patch("runtime.prompt_feedback.db.clear_prompt_feedback") as mock_clear,
-        patch("runtime.app.bot", new=SimpleNamespace(user=SimpleNamespace(id=999), get_channel=lambda _channel_id: None)),
+        patch(
+            "runtime.app.bot",
+            new=SimpleNamespace(
+                user=SimpleNamespace(id=999), get_channel=lambda _channel_id: None
+            ),
+        ),
     ):
         asyncio.run(elixir.on_raw_reaction_remove(payload))
 
@@ -1109,7 +1397,9 @@ def test_on_raw_reaction_remove_clears_matching_feedback():
 
 
 def test_on_message_saves_primary_discord_message_id_for_multipart_ask_elixir_reply():
-    message = _make_message(1482368505058955467, "ask-elixir", "give me a deeper explanation")
+    message = _make_message(
+        1482368505058955467, "ask-elixir", "give me a deeper explanation"
+    )
     sent_messages = [
         SimpleNamespace(id=2001),
         SimpleNamespace(id=2002),
@@ -1123,18 +1413,24 @@ def test_on_message_saves_primary_discord_message_id_for_multipart_ask_elixir_re
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=False),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1482368505058955467,
-            "name": "#ask-elixir",
-            "lane": "ask-elixir",
-            "workflow": "interactive",
-            "reply_policy": "open_channel",
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+                "workflow": "interactive",
+                "reply_policy": "open_channel",
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]),
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message") as mock_save,
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "elixir._load_live_clan_context",
+            new=AsyncMock(return_value=({"memberList": []}, {})),
+        ),
         patch(
             "agent.intent_router.classify_intent",
             return_value={"route": "llm_chat", "confidence": 1.0, "rationale": "test"},
@@ -1151,7 +1447,9 @@ def test_on_message_saves_primary_discord_message_id_for_multipart_ask_elixir_re
     ):
         asyncio.run(elixir.on_message(message))
 
-    assistant_save = [call for call in mock_save.call_args_list if call.args[1] == "assistant"][0]
+    assistant_save = [
+        call for call in mock_save.call_args_list if call.args[1] == "assistant"
+    ][0]
     assert assistant_save.kwargs["discord_message_id"] == "2001"
     assert assistant_save.args[2] == "Part one.\n\nPart two."
     mock_share.assert_awaited_once()
@@ -1170,7 +1468,10 @@ def test_is_bot_mentioned_requires_leading_mention():
 
 def test_strip_bot_mentions_removes_only_leading_mention():
     with (
-        patch("runtime.helpers._common.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
+        patch(
+            "runtime.helpers._common.bot",
+            new=SimpleNamespace(user=SimpleNamespace(id=999)),
+        ),
         patch("runtime.helpers._common.BOT_ROLE_ID", 777),
     ):
         assert elixir._strip_bot_mentions("<@999> help <@999>") == "help <@999>"
@@ -1181,7 +1482,9 @@ def test_strip_bot_mentions_removes_only_leading_mention():
 def test_post_to_elixir_sends_content_list_as_multiple_messages():
     channel = SimpleNamespace(send=AsyncMock())
 
-    asyncio.run(elixir._post_to_elixir(channel, {"content": ["First post", "Second post"]}))
+    asyncio.run(
+        elixir._post_to_elixir(channel, {"content": ["First post", "Second post"]})
+    )
 
     assert channel.send.await_args_list[0].args == ("First post",)
     assert channel.send.await_args_list[1].args == ("Second post",)
@@ -1220,12 +1523,18 @@ def test_entry_posts_keeps_distinct_updates_separate():
 
 
 def test_post_to_elixir_resolves_custom_emoji_shortcodes():
-    guild = SimpleNamespace(emojis=[SimpleNamespace(name="elixir_hype", id=321, animated=False)])
+    guild = SimpleNamespace(
+        emojis=[SimpleNamespace(name="elixir_hype", id=321, animated=False)]
+    )
     channel = SimpleNamespace(send=AsyncMock(), guild=guild)
 
-    asyncio.run(elixir._post_to_elixir(channel, {"content": "Keep climbing :elixir_hype:"}))
+    asyncio.run(
+        elixir._post_to_elixir(channel, {"content": "Keep climbing :elixir_hype:"})
+    )
 
     channel.send.assert_awaited_once_with("Keep climbing <:elixir_hype:321>")
+
+
 def test_post_startup_message_posts_build_hash_to_elixir_log_webhook():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -1239,14 +1548,25 @@ def test_post_startup_message_posts_build_hash_to_elixir_log_webhook():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge"}]),
-        patch("elixir.prompts.discord_channel_configs", return_value=proactive_channels),
+        patch(
+            "elixir.prompts.discord_channels_by_workflow",
+            return_value=[{"id": 200, "name": "#leader-lounge"}],
+        ),
+        patch(
+            "elixir.prompts.discord_channel_configs", return_value=proactive_channels
+        ),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir.db.list_channel_messages", return_value=[]),
         patch("elixir.elixir_agent.RELEASE_LABEL", 'v3.0 "Three-Lane Elixir"'),
         patch("elixir.elixir_agent.BUILD_HASH", "abc1234"),
-        patch("elixir.elixir_agent.generate_message", return_value=":elixir_hype: I just dropped into the arena and the king tower is awake.") as mock_generate,
-        patch("runtime.startup.elixir_log.post_event_async", new=AsyncMock(return_value=True)) as mock_log,
+        patch(
+            "elixir.elixir_agent.generate_message",
+            return_value=":elixir_hype: I just dropped into the arena and the king tower is awake.",
+        ) as mock_generate,
+        patch(
+            "runtime.startup.elixir_log.post_event_async",
+            new=AsyncMock(return_value=True),
+        ) as mock_log,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
     ):
@@ -1273,15 +1593,29 @@ def test_post_startup_message_fetches_channel_when_not_cached():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge"}]),
-        patch("elixir.prompts.discord_channel_configs", return_value=[{"id": 200, "name": "#leader-lounge", "workflow": "clanops"}]),
+        patch(
+            "elixir.prompts.discord_channels_by_workflow",
+            return_value=[{"id": 200, "name": "#leader-lounge"}],
+        ),
+        patch(
+            "elixir.prompts.discord_channel_configs",
+            return_value=[{"id": 200, "name": "#leader-lounge", "workflow": "clanops"}],
+        ),
         patch.object(elixir.bot, "get_channel", return_value=None),
-        patch.object(elixir.bot, "fetch_channel", new=AsyncMock(return_value=channel)) as mock_fetch,
+        patch.object(
+            elixir.bot, "fetch_channel", new=AsyncMock(return_value=channel)
+        ) as mock_fetch,
         patch("elixir.db.list_channel_messages", return_value=[]),
         patch("elixir.elixir_agent.RELEASE_LABEL", 'v3.0 "Three-Lane Elixir"'),
         patch("elixir.elixir_agent.BUILD_HASH", "abc1234"),
-        patch("elixir.elixir_agent.generate_message", return_value="Elixir has entered the arena.") as mock_generate,
-        patch("runtime.startup.elixir_log.post_event_async", new=AsyncMock(return_value=True)),
+        patch(
+            "elixir.elixir_agent.generate_message",
+            return_value="Elixir has entered the arena.",
+        ) as mock_generate,
+        patch(
+            "runtime.startup.elixir_log.post_event_async",
+            new=AsyncMock(return_value=True),
+        ),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
     ):
@@ -1303,14 +1637,26 @@ def test_post_startup_message_falls_back_to_clanops_when_webhook_unavailable():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge"}]),
-        patch("elixir.prompts.discord_channel_configs", return_value=[{"id": 200, "name": "#leader-lounge", "workflow": "clanops"}]),
+        patch(
+            "elixir.prompts.discord_channels_by_workflow",
+            return_value=[{"id": 200, "name": "#leader-lounge"}],
+        ),
+        patch(
+            "elixir.prompts.discord_channel_configs",
+            return_value=[{"id": 200, "name": "#leader-lounge", "workflow": "clanops"}],
+        ),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir.db.list_channel_messages", return_value=[]),
         patch("elixir.elixir_agent.RELEASE_LABEL", 'v3.0 "Three-Lane Elixir"'),
         patch("elixir.elixir_agent.BUILD_HASH", "abc1234"),
-        patch("elixir.elixir_agent.generate_message", return_value="Elixir has entered the arena."),
-        patch("runtime.startup.elixir_log.post_event_async", new=AsyncMock(return_value=False)),
+        patch(
+            "elixir.elixir_agent.generate_message",
+            return_value="Elixir has entered the arena.",
+        ),
+        patch(
+            "runtime.startup.elixir_log.post_event_async",
+            new=AsyncMock(return_value=False),
+        ),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
     ):
@@ -1381,8 +1727,15 @@ def test_startup_channel_audit_reports_missing_or_unwritable_channels():
 
     with (
         patch.object(elixir.bot, "get_channel", side_effect=fake_get_channel),
-        patch.object(elixir.bot, "fetch_channel", new=AsyncMock(side_effect=fake_fetch_channel)),
-        patch.object(type(elixir.bot), "user", new_callable=PropertyMock, return_value=SimpleNamespace(id=999)),
+        patch.object(
+            elixir.bot, "fetch_channel", new=AsyncMock(side_effect=fake_fetch_channel)
+        ),
+        patch.object(
+            type(elixir.bot),
+            "user",
+            new_callable=PropertyMock,
+            return_value=SimpleNamespace(id=999),
+        ),
         patch(
             "elixir.prompts.discord_channel_configs",
             return_value=[
@@ -1426,25 +1779,45 @@ def test_startup_channel_audit_flags_missing_soft_perms():
     )
     guild = SimpleNamespace(id=1, me=object())
     reception_channel = SimpleNamespace(
-        id=200, name="reception", type="text",
-        guild=guild, permissions_for=lambda m: perms_missing_history,
+        id=200,
+        name="reception",
+        type="text",
+        guild=guild,
+        permissions_for=lambda m: perms_missing_history,
     )
     ask_channel = SimpleNamespace(
-        id=300, name="ask-elixir", type="text",
-        guild=guild, permissions_for=lambda m: perms_missing_reactions,
+        id=300,
+        name="ask-elixir",
+        type="text",
+        guild=guild,
+        permissions_for=lambda m: perms_missing_reactions,
     )
     leader_channel = SimpleNamespace(
-        id=400, name="leader-lounge", type="text",
-        guild=guild, permissions_for=lambda m: perms_ok,
+        id=400,
+        name="leader-lounge",
+        type="text",
+        guild=guild,
+        permissions_for=lambda m: perms_ok,
     )
 
     def fake_get_channel(channel_id):
-        return {200: reception_channel, 300: ask_channel, 400: leader_channel}.get(channel_id)
+        return {200: reception_channel, 300: ask_channel, 400: leader_channel}.get(
+            channel_id
+        )
 
     with (
         patch.object(elixir.bot, "get_channel", side_effect=fake_get_channel),
-        patch.object(elixir.bot, "fetch_channel", new=AsyncMock(side_effect=RuntimeError("unused"))),
-        patch.object(type(elixir.bot), "user", new_callable=PropertyMock, return_value=SimpleNamespace(id=999)),
+        patch.object(
+            elixir.bot,
+            "fetch_channel",
+            new=AsyncMock(side_effect=RuntimeError("unused")),
+        ),
+        patch.object(
+            type(elixir.bot),
+            "user",
+            new_callable=PropertyMock,
+            return_value=SimpleNamespace(id=999),
+        ),
         patch(
             "elixir.prompts.discord_channel_configs",
             return_value=[
@@ -1462,7 +1835,11 @@ def test_startup_channel_audit_flags_missing_soft_perms():
 
 
 def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
-    message = _make_message(200, "clan-ops", "<@999> What is my current war participation rate over the last 4 weeks?")
+    message = _make_message(
+        200,
+        "clan-ops",
+        "<@999> What is my current war participation rate over the last 4 weeks?",
+    )
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -1470,30 +1847,42 @@ def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.helpers._common.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 200,
-            "name": "#clan-ops",
-            "role": "clanops",
-            "workflow": "clanops",
-            "mention_required": False,
-            "allow_proactive": True,
-        }),
+        patch(
+            "runtime.helpers._common.bot",
+            new=SimpleNamespace(user=SimpleNamespace(id=999)),
+        ),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 200,
+                "name": "#clan-ops",
+                "role": "clanops",
+                "workflow": "clanops",
+                "mention_required": False,
+                "allow_proactive": True,
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]),
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message"),
         patch("elixir.db.record_prompt_failure", return_value=17) as mock_failure,
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "elixir._load_live_clan_context",
+            new=AsyncMock(return_value=({"memberList": []}, {})),
+        ),
         patch("elixir.elixir_agent.respond_in_channel", return_value=None),
         patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
-        patch("elixir.runtime_status.snapshot", return_value={
-            "llm": {
-                "last_error": "Error code: 429 rate_limit_exceeded",
-                "last_model": "claude-sonnet-4-6",
-                "last_call_at": "2026-03-07T19:12:00",
-            }
-        }),
+        patch(
+            "elixir.runtime_status.snapshot",
+            return_value={
+                "llm": {
+                    "last_error": "Error code: 429 rate_limit_exceeded",
+                    "last_model": "claude-sonnet-4-6",
+                    "last_call_at": "2026-03-07T19:12:00",
+                }
+            },
+        ),
     ):
         asyncio.run(elixir.on_message(message))
 
@@ -1521,7 +1910,9 @@ def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
 
 
 def test_on_message_logs_agent_failure_payload_details():
-    message = _make_message(200, "clan-ops", "<@999> Who is on the hottest streak right now?")
+    message = _make_message(
+        200, "clan-ops", "<@999> Who is on the hottest streak right now?"
+    )
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -1529,38 +1920,53 @@ def test_on_message_logs_agent_failure_payload_details():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.helpers._common.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 200,
-            "name": "#clan-ops",
-            "role": "clanops",
-            "workflow": "clanops",
-            "mention_required": False,
-            "allow_proactive": True,
-        }),
+        patch(
+            "runtime.helpers._common.bot",
+            new=SimpleNamespace(user=SimpleNamespace(id=999)),
+        ),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 200,
+                "name": "#clan-ops",
+                "role": "clanops",
+                "workflow": "clanops",
+                "mention_required": False,
+                "allow_proactive": True,
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]),
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message"),
         patch("elixir.db.record_prompt_failure", return_value=18) as mock_failure,
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
-        patch("elixir.elixir_agent.respond_in_channel", return_value={
-            "_error": {
-                "kind": "schema_error",
-                "detail": "missing required field: content",
-                "phase": "repair_response",
-                "result_preview": '{"event_type":"channel_response"}',
-                "raw_json": {"event_type": "channel_response"},
-            }
-        }),
+        patch(
+            "elixir._load_live_clan_context",
+            new=AsyncMock(return_value=({"memberList": []}, {})),
+        ),
+        patch(
+            "elixir.elixir_agent.respond_in_channel",
+            return_value={
+                "_error": {
+                    "kind": "schema_error",
+                    "detail": "missing required field: content",
+                    "phase": "repair_response",
+                    "result_preview": '{"event_type":"channel_response"}',
+                    "raw_json": {"event_type": "channel_response"},
+                }
+            },
+        ),
         patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
-        patch("elixir.runtime_status.snapshot", return_value={
-            "llm": {
-                "last_error": None,
-                "last_model": "claude-sonnet-4-6",
-                "last_call_at": "2026-03-11T07:00:00",
-            }
-        }),
+        patch(
+            "elixir.runtime_status.snapshot",
+            return_value={
+                "llm": {
+                    "last_error": None,
+                    "last_model": "claude-sonnet-4-6",
+                    "last_call_at": "2026-03-11T07:00:00",
+                }
+            },
+        ),
     ):
         asyncio.run(elixir.on_message(message))
 
@@ -1588,7 +1994,9 @@ def test_on_message_logs_agent_failure_payload_details():
 
 
 def test_on_message_ignores_unmentioned_clanops_chat():
-    message = _make_message(200, "clan-ops", "I think we need to review promotions this week.")
+    message = _make_message(
+        200, "clan-ops", "I think we need to review promotions this week."
+    )
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -1597,20 +2005,33 @@ def test_on_message_ignores_unmentioned_clanops_chat():
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=False),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 200,
-            "name": "#clan-ops",
-            "role": "clanops",
-            "workflow": "clanops",
-            "mention_required": False,
-            "allow_proactive": True,
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 200,
+                "name": "#clan-ops",
+                "role": "clanops",
+                "workflow": "clanops",
+                "mention_required": False,
+                "allow_proactive": True,
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]) as mock_history,
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message") as mock_save,
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
-        patch("elixir.elixir_agent.respond_in_channel", return_value={"event_type": "channel_response", "content": "I can pull the current promotion candidates if you want.", "summary": "ops"}) as mock_respond,
+        patch(
+            "elixir._load_live_clan_context",
+            new=AsyncMock(return_value=({"memberList": []}, {})),
+        ),
+        patch(
+            "elixir.elixir_agent.respond_in_channel",
+            return_value={
+                "event_type": "channel_response",
+                "content": "I can pull the current promotion candidates if you want.",
+                "summary": "ops",
+            },
+        ) as mock_respond,
         patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
     ):
         asyncio.run(elixir.on_message(message))
@@ -1633,35 +2054,62 @@ def test_on_message_handles_explicit_member_deck_request_without_llm():
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=True),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 200,
-            "name": "#clan-ops",
-            "role": "clanops",
-            "workflow": "clanops",
-            "mention_required": False,
-            "allow_proactive": True,
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 200,
+                "name": "#clan-ops",
+                "role": "clanops",
+                "workflow": "clanops",
+                "mention_required": False,
+                "allow_proactive": True,
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.save_message") as mock_save,
-        patch("elixir.db.resolve_member", return_value=[{
-            "player_tag": "#DEF456",
-            "current_name": "Vijay",
-            "member_ref": "Vijay",
-            "member_ref_with_handle": "Vijay (<@456>)",
-            "match_score": 850,
-            "match_source": "discord_display_exact",
-        }]) as mock_resolve,
+        patch(
+            "elixir.db.resolve_member",
+            return_value=[
+                {
+                    "player_tag": "#DEF456",
+                    "current_name": "Vijay",
+                    "member_ref": "Vijay",
+                    "member_ref_with_handle": "Vijay (<@456>)",
+                    "match_score": 850,
+                    "match_source": "discord_display_exact",
+                }
+            ],
+        ) as mock_resolve,
         patch(
             "agent.intent_router.classify_intent",
-            return_value={"route": "deck_display", "confidence": 1.0, "rationale": "test"},
+            return_value={
+                "route": "deck_display",
+                "confidence": 1.0,
+                "rationale": "test",
+            },
         ),
-        patch("elixir.db.get_member_current_deck", return_value={
-            "fetched_at": "2026-03-07T12:00:00",
-            "cards": [
-                {"name": "Knight", "level": 16, "supports_evo": True, "supports_hero": True, "mode_status_label": "Evo + Hero unlocked"},
-                {"name": "Fireball", "level": 16, "supports_evo": False, "supports_hero": False, "mode_status_label": None},
-            ],
-        }),
+        patch(
+            "elixir.db.get_member_current_deck",
+            return_value={
+                "fetched_at": "2026-03-07T12:00:00",
+                "cards": [
+                    {
+                        "name": "Knight",
+                        "level": 16,
+                        "supports_evo": True,
+                        "supports_hero": True,
+                        "mode_status_label": "Evo + Hero unlocked",
+                    },
+                    {
+                        "name": "Fireball",
+                        "level": 16,
+                        "supports_evo": False,
+                        "supports_hero": False,
+                        "mode_status_label": None,
+                    },
+                ],
+            },
+        ),
         patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
     ):
         asyncio.run(elixir.on_message(message))
@@ -1681,7 +2129,11 @@ def test_on_message_handles_explicit_member_deck_request_without_llm():
 
 
 def test_on_message_keeps_interpretive_main_deck_questions_in_llm_path():
-    message = _make_message(1482368505058955467, "ask-elixir", "What is the average level of the cards I use in my current main deck?")
+    message = _make_message(
+        1482368505058955467,
+        "ask-elixir",
+        "What is the average level of the cards I use in my current main deck?",
+    )
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -1690,20 +2142,36 @@ def test_on_message_keeps_interpretive_main_deck_questions_in_llm_path():
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=False),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 1482368505058955467,
-            "name": "#ask-elixir",
-            "lane": "ask-elixir",
-            "workflow": "interactive",
-            "reply_policy": "open_channel",
-            "memory_scope": "public",
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 1482368505058955467,
+                "name": "#ask-elixir",
+                "lane": "ask-elixir",
+                "workflow": "interactive",
+                "reply_policy": "open_channel",
+                "memory_scope": "public",
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]),
-        patch("elixir.db.build_memory_context", return_value={"channel": {"state": None, "episodes": []}}),
+        patch(
+            "elixir.db.build_memory_context",
+            return_value={"channel": {"state": None, "episodes": []}},
+        ),
         patch("elixir.db.save_message"),
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
-        patch("elixir.elixir_agent.respond_in_channel", return_value={"event_type": "channel_response", "content": "LLM answer", "summary": "llm"}) as mock_respond,
+        patch(
+            "elixir._load_live_clan_context",
+            new=AsyncMock(return_value=({"memberList": []}, {})),
+        ),
+        patch(
+            "elixir.elixir_agent.respond_in_channel",
+            return_value={
+                "event_type": "channel_response",
+                "content": "LLM answer",
+                "summary": "llm",
+            },
+        ) as mock_respond,
         patch("elixir.db.resolve_member") as mock_resolve,
         patch("elixir.db.get_member_current_deck") as mock_current_deck,
         patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
@@ -1731,20 +2199,29 @@ def test_on_message_rewrites_member_refs_before_reply_and_save():
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=True),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 100,
-            "name": "#member-chat",
-            "role": "interactive",
-            "workflow": "interactive",
-            "mention_required": True,
-            "allow_proactive": False,
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 100,
+                "name": "#member-chat",
+                "role": "interactive",
+                "workflow": "interactive",
+                "mention_required": True,
+                "allow_proactive": False,
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]),
         patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.format_member_reference", side_effect=fake_format_member_reference),
+        patch(
+            "elixir.db.format_member_reference",
+            side_effect=fake_format_member_reference,
+        ),
         patch("elixir.db.save_message") as mock_save,
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "elixir._load_live_clan_context",
+            new=AsyncMock(return_value=({"memberList": []}, {})),
+        ),
         patch(
             "elixir.elixir_agent.respond_in_channel",
             return_value={
@@ -1771,7 +2248,9 @@ def test_slash_help_does_not_save_conversation_history():
     root = _root(bot, "clanops")
     help_command = root.get_command("help")
 
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    response = SimpleNamespace(
+        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
+    )
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
@@ -1801,7 +2280,14 @@ def test_command_surface_is_split_member_vs_leader():
     clanops = _root(bot, "clanops")
     assert sorted(c.name for c in elixir.commands) == ["email", "help"]
     assert set(c.name for c in clanops.commands) == {
-        "clan", "member", "relay", "activity", "tournament", "release", "help"}
+        "clan",
+        "member",
+        "relay",
+        "activity",
+        "tournament",
+        "release",
+        "help",
+    }
     # dropped groups exist under neither root
     for root in (elixir, clanops):
         for gone in ("system", "memory", "signal"):
@@ -1815,7 +2301,9 @@ def test_member_help_is_ungated():
     register_elixir_app_commands(bot)
     help_cmd = _root(bot, "elixir").get_command("help")
 
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    response = SimpleNamespace(
+        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
+    )
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=999, name="general", type="text"),
         user=SimpleNamespace(id=42, name="member", display_name="Member", roles=[]),
@@ -1847,11 +2335,18 @@ def test_slash_relay_status_allowed_in_arena_relay():
     relay_group = root.get_command("relay")
     status_command = relay_group.get_command("status")
 
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    response = SimpleNamespace(
+        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
+    )
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=300, name="leader-actions", type="text"),
-        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[SimpleNamespace(name="Leader")]),
+        user=SimpleNamespace(
+            id=123,
+            name="jamie",
+            display_name="Jamie",
+            roles=[SimpleNamespace(name="Leader")],
+        ),
         response=response,
         followup=followup,
         edit_original_response=AsyncMock(),
@@ -1859,9 +2354,15 @@ def test_slash_relay_status_allowed_in_arena_relay():
 
     with (
         patch("runtime.app._is_clanops_channel", return_value=False),
-        patch("runtime.app._get_channel_behavior", return_value={"name": "#leader-actions", "lane": "arena-relay"}),
+        patch(
+            "runtime.app._get_channel_behavior",
+            return_value={"name": "#leader-actions", "lane": "arena-relay"},
+        ),
         patch("runtime.app._has_leader_role", return_value=True),
-        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="relay report")) as mock_dispatch,
+        patch(
+            "runtime.discord_commands.dispatch_admin_command",
+            new=AsyncMock(return_value="relay report"),
+        ) as mock_dispatch,
     ):
         asyncio.run(status_command.callback(interaction, view="pending", limit=5))
 
@@ -1883,11 +2384,18 @@ def test_slash_non_relay_command_still_rejected_in_arena_relay():
     clan_group = root.get_command("clan")
     war_status_command = clan_group.get_command("war")
 
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    response = SimpleNamespace(
+        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
+    )
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=300, name="leader-actions", type="text"),
-        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[SimpleNamespace(name="Leader")]),
+        user=SimpleNamespace(
+            id=123,
+            name="jamie",
+            display_name="Jamie",
+            roles=[SimpleNamespace(name="Leader")],
+        ),
         response=response,
         followup=followup,
         edit_original_response=AsyncMock(),
@@ -1895,12 +2403,20 @@ def test_slash_non_relay_command_still_rejected_in_arena_relay():
 
     with (
         patch("runtime.app._is_clanops_channel", return_value=False),
-        patch("runtime.app._get_channel_behavior", return_value={"name": "#leader-actions", "lane": "arena-relay"}),
-        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="war report")) as mock_dispatch,
+        patch(
+            "runtime.app._get_channel_behavior",
+            return_value={"name": "#leader-actions", "lane": "arena-relay"},
+        ),
+        patch(
+            "runtime.discord_commands.dispatch_admin_command",
+            new=AsyncMock(return_value="war report"),
+        ) as mock_dispatch,
     ):
         asyncio.run(war_status_command.callback(interaction))
 
-    response.send_message.assert_awaited_once_with("Use `/clanops ...` in `#clanops`.", ephemeral=True)
+    response.send_message.assert_awaited_once_with(
+        "Use `/clanops ...` in `#clanops`.", ephemeral=True
+    )
     response.defer.assert_not_awaited()
     mock_dispatch.assert_not_awaited()
     interaction.edit_original_response.assert_not_awaited()
@@ -1918,13 +2434,21 @@ def test_register_elixir_app_commands_includes_member_audit_discord():
 
 def test_dispatch_admin_command_handles_member_audit_discord():
     human = SimpleNamespace(
-        id=555, bot=False, display_name="UnlinkedUser", nick=None,
-        name="UnlinkedUser", global_name="UnlinkedUser",
+        id=555,
+        bot=False,
+        display_name="UnlinkedUser",
+        nick=None,
+        name="UnlinkedUser",
+        global_name="UnlinkedUser",
         roles=[],
     )
     linked = SimpleNamespace(
-        id=777, bot=False, display_name="King Levy", nick="King Levy",
-        name="kinglevy", global_name="King Levy",
+        id=777,
+        bot=False,
+        display_name="King Levy",
+        nick="King Levy",
+        name="kinglevy",
+        global_name="King Levy",
         roles=[SimpleNamespace(id=999)],
     )
     bot_member = SimpleNamespace(id=888, bot=True)
@@ -1940,15 +2464,28 @@ def test_dispatch_admin_command_handles_member_audit_discord():
         patch("runtime.app.bot", new=SimpleNamespace(get_guild=lambda gid: guild)),
         patch("runtime.app.GUILD_ID", 100),
         patch("runtime.app.MEMBER_ROLE_ID", 999),
-        patch("db.list_members", return_value=[
-            {"player_tag": "#ABC", "current_name": "King Levy", "discord_user_id": "777"},
-            {"player_tag": "#DEF", "current_name": "Lonely", "discord_user_id": None},
-        ]),
+        patch(
+            "db.list_members",
+            return_value=[
+                {
+                    "player_tag": "#ABC",
+                    "current_name": "King Levy",
+                    "discord_user_id": "777",
+                },
+                {
+                    "player_tag": "#DEF",
+                    "current_name": "Lonely",
+                    "discord_user_id": None,
+                },
+            ],
+        ),
         patch("db.get_linked_member_for_discord_user", side_effect=fake_linked_lookup),
         patch("db.resolve_member", return_value=[]),
     ):
         result = asyncio.run(
-            elixir.dispatch_admin_command("member.audit-discord", preview=False, short=False, args={}),
+            elixir.dispatch_admin_command(
+                "member.audit-discord", preview=False, short=False, args={}
+            ),
         )
 
     assert "Active clan members: 2 (1 without a Discord link)" in result
@@ -1959,8 +2496,13 @@ def test_dispatch_admin_command_handles_member_audit_discord():
 
 def test_dispatch_admin_command_handles_verify_discord():
     with (
-        patch("runtime.admin._resolve_member_tag", return_value=("#ABC123", "King Levy")),
-        patch("runtime.onboarding.verify_discord_membership", new=AsyncMock(return_value="Verified Discord identity for King Levy.")) as mock_verify,
+        patch(
+            "runtime.admin._resolve_member_tag", return_value=("#ABC123", "King Levy")
+        ),
+        patch(
+            "runtime.onboarding.verify_discord_membership",
+            new=AsyncMock(return_value="Verified Discord identity for King Levy."),
+        ) as mock_verify,
     ):
         result = asyncio.run(
             elixir.dispatch_admin_command(
@@ -1976,7 +2518,10 @@ def test_dispatch_admin_command_handles_verify_discord():
 
 
 def test_dispatch_admin_command_handles_clan_list_full():
-    with patch("runtime.admin._build_clan_list_report", return_value="**Clan List Full (2 active)**") as mock_report:
+    with patch(
+        "runtime.admin._build_clan_list_report",
+        return_value="**Clan List Full (2 active)**",
+    ) as mock_report:
         result = asyncio.run(
             elixir.dispatch_admin_command(
                 "clan.members",
@@ -1991,7 +2536,14 @@ def test_dispatch_admin_command_handles_clan_list_full():
 
 
 def test_dispatch_admin_command_returns_runtime_job_failure_text():
-    with patch("elixir._weekly_clan_recap", new=AsyncMock(side_effect=RuntimeError("weekly recap post failed: missing Discord permissions in #weekly-digest"))):
+    with patch(
+        "elixir._weekly_clan_recap",
+        new=AsyncMock(
+            side_effect=RuntimeError(
+                "weekly recap post failed: missing Discord permissions in #weekly-digest"
+            )
+        ),
+    ):
         result = asyncio.run(
             elixir.dispatch_admin_command(
                 "activity.run",
@@ -2001,7 +2553,10 @@ def test_dispatch_admin_command_returns_runtime_job_failure_text():
             )
         )
 
-    assert result == "`weekly-recap` failed: weekly recap post failed: missing Discord permissions in #weekly-digest"
+    assert (
+        result
+        == "`weekly-recap` failed: weekly recap post failed: missing Discord permissions in #weekly-digest"
+    )
 
 
 def test_dispatch_admin_command_rejects_non_manual_activity():
@@ -2018,7 +2573,10 @@ def test_dispatch_admin_command_rejects_non_manual_activity():
 
 
 def test_dispatch_admin_command_handles_activity_run():
-    with patch("runtime.admin._run_runtime_job", new=AsyncMock(return_value="Ran `site-content`.")) as mock_job:
+    with patch(
+        "runtime.admin._run_runtime_job",
+        new=AsyncMock(return_value="Ran `site-content`."),
+    ) as mock_job:
         result = asyncio.run(
             elixir.dispatch_admin_command(
                 "activity.run",
@@ -2034,8 +2592,14 @@ def test_dispatch_admin_command_handles_activity_run():
 
 def test_dispatch_admin_command_handles_set_discord():
     with (
-        patch("runtime.onboarding.resolve_discord_member_input", new=AsyncMock(return_value=None)),
-        patch("runtime.admin.asyncio.to_thread", new=AsyncMock(side_effect=[("#ABC123", "King Levy")])) as mock_to_thread,
+        patch(
+            "runtime.onboarding.resolve_discord_member_input",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "runtime.admin.asyncio.to_thread",
+            new=AsyncMock(side_effect=[("#ABC123", "King Levy")]),
+        ) as mock_to_thread,
     ):
         result = asyncio.run(
             elixir.dispatch_admin_command(
@@ -2046,7 +2610,10 @@ def test_dispatch_admin_command_handles_set_discord():
             )
         )
 
-    assert "Couldn't resolve `@kinglevy` to a unique Discord member for King Levy." in result
+    assert (
+        "Couldn't resolve `@kinglevy` to a unique Discord member for King Levy."
+        in result
+    )
     assert "Use a real mention" in result
     assert len(mock_to_thread.await_args_list) == 1
 
@@ -2054,8 +2621,14 @@ def test_dispatch_admin_command_handles_set_discord():
 def test_dispatch_admin_command_handles_set_discord_with_resolved_guild_member():
     guild_member = SimpleNamespace(id=456, name="ditaka_user", display_name="Ditaka")
     with (
-        patch("runtime.onboarding.resolve_discord_member_input", new=AsyncMock(return_value=guild_member)),
-        patch("runtime.admin.asyncio.to_thread", new=AsyncMock(side_effect=[("#VGJJLC9PR", "Ditaka"), None])) as mock_to_thread,
+        patch(
+            "runtime.onboarding.resolve_discord_member_input",
+            new=AsyncMock(return_value=guild_member),
+        ),
+        patch(
+            "runtime.admin.asyncio.to_thread",
+            new=AsyncMock(side_effect=[("#VGJJLC9PR", "Ditaka"), None]),
+        ) as mock_to_thread,
     ):
         result = asyncio.run(
             elixir.dispatch_admin_command(
@@ -2082,13 +2655,20 @@ def test_dispatch_admin_command_handles_set_discord_with_resolved_guild_member()
 def test_dispatch_admin_command_handles_set_note_and_writes_contextual_memory():
     from runtime import admin as runtime_admin
 
-    with patch("runtime.admin.asyncio.to_thread", new=AsyncMock(side_effect=[("#ABC123", "King Levy"), None, None])) as mock_to_thread:
+    with patch(
+        "runtime.admin.asyncio.to_thread",
+        new=AsyncMock(side_effect=[("#ABC123", "King Levy"), None, None]),
+    ) as mock_to_thread:
         result = asyncio.run(
             elixir.dispatch_admin_command(
                 "member.set",
                 preview=False,
                 short=False,
-                args={"member": "King Levy", "field": "note", "value": "Reliable war leader."},
+                args={
+                    "member": "King Levy",
+                    "field": "note",
+                    "value": "Reliable war leader.",
+                },
             )
         )
 
@@ -2099,7 +2679,9 @@ def test_dispatch_admin_command_handles_set_note_and_writes_contextual_memory():
         None,
         "Reliable war leader.",
     )
-    assert mock_to_thread.await_args_list[2].args == (runtime_admin.upsert_member_note_memory,)
+    assert mock_to_thread.await_args_list[2].args == (
+        runtime_admin.upsert_member_note_memory,
+    )
     assert mock_to_thread.await_args_list[2].kwargs == {
         "member_tag": "#ABC123",
         "member_label": "King Levy",
@@ -2112,7 +2694,10 @@ def test_dispatch_admin_command_handles_set_note_and_writes_contextual_memory():
 def test_dispatch_admin_command_handles_clear_note_and_archives_contextual_memory():
     from runtime import admin as runtime_admin
 
-    with patch("runtime.admin.asyncio.to_thread", new=AsyncMock(side_effect=[("#ABC123", "King Levy"), None, None])) as mock_to_thread:
+    with patch(
+        "runtime.admin.asyncio.to_thread",
+        new=AsyncMock(side_effect=[("#ABC123", "King Levy"), None, None]),
+    ) as mock_to_thread:
         result = asyncio.run(
             elixir.dispatch_admin_command(
                 "member.clear",
@@ -2128,7 +2713,9 @@ def test_dispatch_admin_command_handles_clear_note_and_archives_contextual_memor
         "#ABC123",
         None,
     )
-    assert mock_to_thread.await_args_list[2].args == (runtime_admin.archive_member_note_memory,)
+    assert mock_to_thread.await_args_list[2].args == (
+        runtime_admin.archive_member_note_memory,
+    )
     assert mock_to_thread.await_args_list[2].kwargs == {
         "member_tag": "#ABC123",
         "actor": "leader:admin-command",
@@ -2140,7 +2727,13 @@ def test_resolve_member_tag_accepts_name_with_tag_label():
 
     with patch(
         "db.resolve_member",
-        return_value=[{"player_tag": "#VGJJLC9PR", "match_score": 1000, "member_ref_with_handle": "Ditaka"}],
+        return_value=[
+            {
+                "player_tag": "#VGJJLC9PR",
+                "match_score": 1000,
+                "member_ref_with_handle": "Ditaka",
+            }
+        ],
     ) as mock_resolve:
         tag, label = runtime_admin._resolve_member_tag("Ditaka (#VGJJLC9PR)")
 
@@ -2150,8 +2743,9 @@ def test_resolve_member_tag_accepts_name_with_tag_label():
 
 
 def test_resolve_member_tag_rejects_empty_and_overlong_inputs():
-    from runtime import admin as runtime_admin
     import pytest
+
+    from runtime import admin as runtime_admin
 
     with pytest.raises(ValueError, match="required"):
         runtime_admin._resolve_member_tag("")
@@ -2168,8 +2762,14 @@ def test_admin_command_requires_leader_classification():
 
 def test_dispatch_admin_command_handles_war_status():
     with (
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS"}, {"clans": [{}, {}]}))) as mock_load,
-        patch("elixir._build_war_status_report", return_value="**POAP KINGS War Status**\n- Live: Battle Day 2") as mock_report,
+        patch(
+            "elixir._load_live_clan_context",
+            new=AsyncMock(return_value=({"name": "POAP KINGS"}, {"clans": [{}, {}]})),
+        ) as mock_load,
+        patch(
+            "elixir._build_war_status_report",
+            return_value="**POAP KINGS War Status**\n- Live: Battle Day 2",
+        ) as mock_report,
     ):
         result = asyncio.run(
             elixir.dispatch_admin_command(
@@ -2192,7 +2792,9 @@ def test_slash_clan_members_full_passes_flag_to_admin_dispatch():
     clan_group = root.get_command("clan")
     clan_list_command = clan_group.get_command("members")
 
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    response = SimpleNamespace(
+        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
+    )
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
@@ -2204,7 +2806,10 @@ def test_slash_clan_members_full_passes_flag_to_admin_dispatch():
 
     with (
         patch("runtime.app._is_clanops_channel", return_value=True),
-        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="full list")) as mock_dispatch,
+        patch(
+            "runtime.discord_commands.dispatch_admin_command",
+            new=AsyncMock(return_value="full list"),
+        ) as mock_dispatch,
     ):
         asyncio.run(clan_list_command.callback(interaction, detail="full"))
 
@@ -2226,7 +2831,9 @@ def test_slash_clan_war_dispatches_to_admin():
     clan_group = root.get_command("clan")
     war_status_command = clan_group.get_command("war")
 
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    response = SimpleNamespace(
+        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
+    )
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
@@ -2238,7 +2845,10 @@ def test_slash_clan_war_dispatches_to_admin():
 
     with (
         patch("runtime.app._is_clanops_channel", return_value=True),
-        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="war report")) as mock_dispatch,
+        patch(
+            "runtime.discord_commands.dispatch_admin_command",
+            new=AsyncMock(return_value="war report"),
+        ) as mock_dispatch,
     ):
         asyncio.run(war_status_command.callback(interaction))
 
@@ -2260,11 +2870,18 @@ def test_slash_member_set_discord_passes_identity_to_admin_dispatch():
     member_group = root.get_command("member")
     set_discord_command = member_group.get_command("set")
 
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    response = SimpleNamespace(
+        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
+    )
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
-        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[SimpleNamespace(name="Leader")]),
+        user=SimpleNamespace(
+            id=123,
+            name="jamie",
+            display_name="Jamie",
+            roles=[SimpleNamespace(name="Leader")],
+        ),
         response=response,
         followup=followup,
         edit_original_response=AsyncMock(),
@@ -2273,9 +2890,16 @@ def test_slash_member_set_discord_passes_identity_to_admin_dispatch():
     with (
         patch("runtime.app._is_clanops_channel", return_value=True),
         patch("runtime.app._has_leader_role", return_value=True),
-        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="linked")) as mock_dispatch,
+        patch(
+            "runtime.discord_commands.dispatch_admin_command",
+            new=AsyncMock(return_value="linked"),
+        ) as mock_dispatch,
     ):
-        asyncio.run(set_discord_command.callback(interaction, member="King Levy", field="discord", value="@kinglevy"))
+        asyncio.run(
+            set_discord_command.callback(
+                interaction, member="King Levy", field="discord", value="@kinglevy"
+            )
+        )
 
     mock_dispatch.assert_awaited_once_with(
         "member.set",
@@ -2295,11 +2919,18 @@ def test_slash_activity_run_defers_before_dispatching():
     jobs_group = root.get_command("activity")
     run_command = jobs_group.get_command("run")
 
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    response = SimpleNamespace(
+        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
+    )
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
-        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[SimpleNamespace(name="Leader")]),
+        user=SimpleNamespace(
+            id=123,
+            name="jamie",
+            display_name="Jamie",
+            roles=[SimpleNamespace(name="Leader")],
+        ),
         response=response,
         followup=followup,
         edit_original_response=AsyncMock(),
@@ -2308,9 +2939,14 @@ def test_slash_activity_run_defers_before_dispatching():
     with (
         patch("runtime.app._is_clanops_channel", return_value=True),
         patch("runtime.app._has_leader_role", return_value=True),
-        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="job failed")) as mock_dispatch,
+        patch(
+            "runtime.discord_commands.dispatch_admin_command",
+            new=AsyncMock(return_value="job failed"),
+        ) as mock_dispatch,
     ):
-        asyncio.run(run_command.callback(interaction, activity="weekly-recap", preview=False))
+        asyncio.run(
+            run_command.callback(interaction, activity="weekly-recap", preview=False)
+        )
 
     response.defer.assert_awaited_once_with(ephemeral=True)
     mock_dispatch.assert_awaited_once_with(
@@ -2335,10 +2971,14 @@ def test_queue_startup_system_signals_enqueues_well_formed_announcements():
 
     for system_signal in STARTUP_SYSTEM_SIGNALS:
         payload = system_signal["payload"]
-        assert payload.get("title", "").startswith("Achievement Unlocked"), system_signal["signal_key"]
+        assert payload.get("title", "").startswith("Achievement Unlocked"), (
+            system_signal["signal_key"]
+        )
         assert payload.get("message"), system_signal["signal_key"]
         assert payload.get("capability_area"), system_signal["signal_key"]
-        assert system_signal["signal_type"] in {"capability_unlock"}, system_signal["signal_key"]
+        assert system_signal["signal_type"] in {"capability_unlock"}, system_signal[
+            "signal_key"
+        ]
 
 
 def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
@@ -2361,21 +3001,40 @@ def test_cr_api_auth_failure_alert_posts_once_per_signature():
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
 
     with (
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "lane": "leader-lounge", "workflow": "clanops"}]),
+        patch(
+            "elixir.prompts.discord_channels_by_workflow",
+            return_value=[
+                {
+                    "id": 200,
+                    "name": "#leader-lounge",
+                    "lane": "leader-lounge",
+                    "workflow": "clanops",
+                }
+            ],
+        ),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
-        patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
+        patch(
+            "elixir.db.format_member_reference",
+            return_value="King Thing (<@704062105258557511>)",
+        ),
         patch("elixir.db.save_message") as mock_save,
-        patch("runtime.alerts.elixir_log.post_event_async", new=AsyncMock(return_value=True)) as mock_log,
-        patch("elixir.runtime_status.snapshot", return_value={
-            "api": {
-                "last_ok": False,
-                "last_status_code": 403,
-                "last_error": "403 Client Error: Forbidden",
-                "last_endpoint": "clan",
-                "last_entity_key": "J2RGCRVG",
-            }
-        }),
+        patch(
+            "runtime.alerts.elixir_log.post_event_async",
+            new=AsyncMock(return_value=True),
+        ) as mock_log,
+        patch(
+            "elixir.runtime_status.snapshot",
+            return_value={
+                "api": {
+                    "last_ok": False,
+                    "last_status_code": 403,
+                    "last_error": "403 Client Error: Forbidden",
+                    "last_endpoint": "clan",
+                    "last_entity_key": "J2RGCRVG",
+                }
+            },
+        ),
     ):
         elixir._CR_API_ALERT_SIGNATURE = None
         first = asyncio.run(elixir._maybe_alert_cr_api_failure("live clan refresh"))
@@ -2400,22 +3059,41 @@ def test_cr_api_outage_alert_posts_after_consecutive_failures():
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
 
     with (
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "lane": "leader-lounge", "workflow": "clanops"}]),
+        patch(
+            "elixir.prompts.discord_channels_by_workflow",
+            return_value=[
+                {
+                    "id": 200,
+                    "name": "#leader-lounge",
+                    "lane": "leader-lounge",
+                    "workflow": "clanops",
+                }
+            ],
+        ),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
-        patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
+        patch(
+            "elixir.db.format_member_reference",
+            return_value="King Thing (<@704062105258557511>)",
+        ),
         patch("elixir.db.save_message") as mock_save,
-        patch("runtime.alerts.elixir_log.post_event_async", new=AsyncMock(return_value=True)) as mock_log,
-        patch("elixir.runtime_status.snapshot", return_value={
-            "api": {
-                "last_ok": False,
-                "last_status_code": 500,
-                "last_error": "500 Server Error: Internal Server Error",
-                "last_endpoint": "clan",
-                "last_entity_key": "J2RGCRVG",
-                "consecutive_error_count": 3,
-            }
-        }),
+        patch(
+            "runtime.alerts.elixir_log.post_event_async",
+            new=AsyncMock(return_value=True),
+        ) as mock_log,
+        patch(
+            "elixir.runtime_status.snapshot",
+            return_value={
+                "api": {
+                    "last_ok": False,
+                    "last_status_code": 500,
+                    "last_error": "500 Server Error: Internal Server Error",
+                    "last_endpoint": "clan",
+                    "last_entity_key": "J2RGCRVG",
+                    "consecutive_error_count": 3,
+                }
+            },
+        ),
     ):
         elixir._CR_API_OUTAGE_ALERT_SIGNATURE = None
         sent = asyncio.run(elixir._maybe_alert_cr_api_failure("player intel refresh"))
@@ -2443,21 +3121,40 @@ def test_llm_outage_alert_fires_on_first_hard_fail_error():
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
 
     with (
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "lane": "leader-lounge", "workflow": "clanops"}]),
+        patch(
+            "elixir.prompts.discord_channels_by_workflow",
+            return_value=[
+                {
+                    "id": 200,
+                    "name": "#leader-lounge",
+                    "lane": "leader-lounge",
+                    "workflow": "clanops",
+                }
+            ],
+        ),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
-        patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
+        patch(
+            "elixir.db.format_member_reference",
+            return_value="King Thing (<@704062105258557511>)",
+        ),
         patch("elixir.db.save_message") as mock_save,
-        patch("runtime.alerts.elixir_log.post_event_async", new=AsyncMock(return_value=True)) as mock_log,
-        patch("runtime.app.runtime_status.snapshot", return_value={
-            "llm": {
-                "last_ok": False,
-                "last_error": "Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-05-01 at 00:00 UTC.'}}",
-                "last_workflow": "channel_update",
-                "last_model": "claude-haiku-4-5-20251001",
-                "consecutive_error_count": 1,
-            }
-        }),
+        patch(
+            "runtime.alerts.elixir_log.post_event_async",
+            new=AsyncMock(return_value=True),
+        ) as mock_log,
+        patch(
+            "runtime.app.runtime_status.snapshot",
+            return_value={
+                "llm": {
+                    "last_ok": False,
+                    "last_error": "Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-05-01 at 00:00 UTC.'}}",
+                    "last_workflow": "channel_update",
+                    "last_model": "claude-haiku-4-5-20251001",
+                    "consecutive_error_count": 1,
+                }
+            },
+        ),
     ):
         runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
         sent = asyncio.run(runtime_app._maybe_alert_llm_failure("channel update"))
@@ -2495,19 +3192,45 @@ def test_llm_outage_alert_waits_for_three_consecutive_soft_errors():
         }
 
     with (
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "lane": "leader-lounge", "workflow": "clanops"}]),
+        patch(
+            "elixir.prompts.discord_channels_by_workflow",
+            return_value=[
+                {
+                    "id": 200,
+                    "name": "#leader-lounge",
+                    "lane": "leader-lounge",
+                    "workflow": "clanops",
+                }
+            ],
+        ),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
-        patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
+        patch(
+            "elixir.db.format_member_reference",
+            return_value="King Thing (<@704062105258557511>)",
+        ),
         patch("elixir.db.save_message"),
-        patch("runtime.alerts.elixir_log.post_event_async", new=AsyncMock(return_value=True)) as mock_log,
+        patch(
+            "runtime.alerts.elixir_log.post_event_async",
+            new=AsyncMock(return_value=True),
+        ) as mock_log,
     ):
         runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
         try:
-            with patch("runtime.app.runtime_status.snapshot", return_value=snapshot_with_count(2)):
-                early = asyncio.run(runtime_app._maybe_alert_llm_failure("channel update"))
-            with patch("runtime.app.runtime_status.snapshot", return_value=snapshot_with_count(3)):
-                third = asyncio.run(runtime_app._maybe_alert_llm_failure("channel update"))
+            with patch(
+                "runtime.app.runtime_status.snapshot",
+                return_value=snapshot_with_count(2),
+            ):
+                early = asyncio.run(
+                    runtime_app._maybe_alert_llm_failure("channel update")
+                )
+            with patch(
+                "runtime.app.runtime_status.snapshot",
+                return_value=snapshot_with_count(3),
+            ):
+                third = asyncio.run(
+                    runtime_app._maybe_alert_llm_failure("channel update")
+                )
         finally:
             runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
 
@@ -2541,21 +3264,40 @@ def test_llm_outage_alert_dedupes_on_signature():
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
 
     with (
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "lane": "leader-lounge", "workflow": "clanops"}]),
+        patch(
+            "elixir.prompts.discord_channels_by_workflow",
+            return_value=[
+                {
+                    "id": 200,
+                    "name": "#leader-lounge",
+                    "lane": "leader-lounge",
+                    "workflow": "clanops",
+                }
+            ],
+        ),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
-        patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
+        patch(
+            "elixir.db.format_member_reference",
+            return_value="King Thing (<@704062105258557511>)",
+        ),
         patch("elixir.db.save_message"),
-        patch("runtime.alerts.elixir_log.post_event_async", new=AsyncMock(return_value=True)) as mock_log,
-        patch("runtime.app.runtime_status.snapshot", return_value={
-            "llm": {
-                "last_ok": False,
-                "last_error": "invalid_request_error: usage limits reached",
-                "last_workflow": "site_home_message",
-                "last_model": "claude-haiku-4-5-20251001",
-                "consecutive_error_count": 1,
-            }
-        }),
+        patch(
+            "runtime.alerts.elixir_log.post_event_async",
+            new=AsyncMock(return_value=True),
+        ) as mock_log,
+        patch(
+            "runtime.app.runtime_status.snapshot",
+            return_value={
+                "llm": {
+                    "last_ok": False,
+                    "last_error": "invalid_request_error: usage limits reached",
+                    "last_workflow": "site_home_message",
+                    "last_model": "claude-haiku-4-5-20251001",
+                    "consecutive_error_count": 1,
+                }
+            },
+        ),
     ):
         runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
         try:
@@ -2655,12 +3397,16 @@ def test_activity_registry_has_unique_keys_and_required_fields():
     assert all(activity.owner_lane for activity in activities)
     assert all(activity.job_id for activity in activities)
     assert all(activity.job_function for activity in activities)
-    assert all(activity.schedule_kind in {"interval", "cron"} for activity in activities)
+    assert all(
+        activity.schedule_kind in {"interval", "cron"} for activity in activities
+    )
     assert all(activity.delivery_targets for activity in activities)
 
 
 def test_activity_registry_exposes_war_and_promotion_visibility():
-    specs = {spec["activity_key"]: spec for spec in schedule_specs_from_registry(elixir)}
+    specs = {
+        spec["activity_key"]: spec for spec in schedule_specs_from_registry(elixir)
+    }
 
     assert specs["engine-tick"]["owner_lane"] == "player-highlights"
     assert specs["engine-tick"]["activity_role"] == "observer"
@@ -2680,7 +3426,10 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert specs["weekly-discord-invite-relay"]["owner_lane"] == "arena-relay"
     assert specs["weekly-discord-invite-relay"]["activity_role"] == "communicator"
     assert specs["weekly-discord-invite-relay"]["schedule"] == "Daily at 13:00 CT."
-    assert "Discord: #actions in-game-relay nudge card (quiet periods only)" in specs["weekly-discord-invite-relay"]["delivery_targets"]
+    assert (
+        "Discord: #actions in-game-relay nudge card (quiet periods only)"
+        in specs["weekly-discord-invite-relay"]["delivery_targets"]
+    )
     assert "db-maintenance" in specs
     assert specs["db-maintenance"]["owner_lane"] == "elixir-log"
     assert specs["db-maintenance"]["activity_role"] == "observer+communicator"
@@ -2689,7 +3438,10 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert specs["api-sentinel"]["owner_lane"] == "leader-lounge"
     assert specs["api-sentinel"]["activity_role"] == "observer+communicator"
     assert specs["api-sentinel"]["schedule"] == "Every 240 minutes."
-    assert "Discord: #leaders on first-seen CR API schema or event drift" in specs["api-sentinel"]["delivery_targets"]
+    assert (
+        "Discord: #leaders on first-seen CR API schema or event drift"
+        in specs["api-sentinel"]["delivery_targets"]
+    )
     assert "promotion-content" in specs
     assert specs["promotion-content"]["activity_role"] == "communicator"
     assert "Discord: #recruiting" in specs["promotion-content"]["delivery_targets"]
@@ -2700,7 +3452,14 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
 
     class _Scheduler:
         def add_job(self, func, schedule_kind, id, **kwargs):
-            added.append({"func": func, "schedule_kind": schedule_kind, "id": id, "kwargs": kwargs})
+            added.append(
+                {
+                    "func": func,
+                    "schedule_kind": schedule_kind,
+                    "id": id,
+                    "kwargs": kwargs,
+                }
+            )
 
     registered = register_scheduled_activities(
         scheduler=_Scheduler(),
@@ -2737,16 +3496,28 @@ def test_api_sentinel_tick_is_record_only_no_leader_posts():
         return fn(*args, **kwargs)
 
     with (
-        patch("runtime.jobs._maintenance.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._maintenance.db.bootstrap_api_sentinel_baseline", return_value={
-            "bootstrapped": True,
-            "payloads": 3,
-            "observations": 9,
-        }),
-        patch("runtime.jobs._maintenance.cr_api.get_events", return_value=[{"eventTag": "#E", "title": "Event"}]),
+        patch(
+            "runtime.jobs._maintenance.asyncio.to_thread", side_effect=fake_to_thread
+        ),
+        patch(
+            "runtime.jobs._maintenance.db.bootstrap_api_sentinel_baseline",
+            return_value={
+                "bootstrapped": True,
+                "payloads": 3,
+                "observations": 9,
+            },
+        ),
+        patch(
+            "runtime.jobs._maintenance.cr_api.get_events",
+            return_value=[{"eventTag": "#E", "title": "Event"}],
+        ),
         patch("runtime.jobs._maintenance.runtime_status.mark_job_start") as mock_start,
-        patch("runtime.jobs._maintenance.runtime_status.mark_job_success") as mock_success,
-        patch("runtime.jobs._maintenance.runtime_status.mark_job_failure") as mock_failure,
+        patch(
+            "runtime.jobs._maintenance.runtime_status.mark_job_success"
+        ) as mock_success,
+        patch(
+            "runtime.jobs._maintenance.runtime_status.mark_job_failure"
+        ) as mock_failure,
     ):
         # No pending-signal listing and no signal posting happen anymore; if the
         # tick tried, these attributes wouldn't even be patched here.
@@ -2775,99 +3546,103 @@ def test_build_status_report_omits_job_schedule_section():
         patch("elixir.scheduler", scheduler),
         patch("elixir.elixir_agent.RELEASE_LABEL", 'v3.0 "Three-Lane Elixir"'),
         patch("elixir.elixir_agent.BUILD_HASH", "abc1234"),
-        patch("elixir.runtime_status.snapshot", return_value={
-            "started_at": "2026-03-08T10:00:00",
-            "env": {
-                "has_discord_token": True,
-                "has_claude_api_key": True,
-                "has_cr_api_key": True,
+        patch(
+            "elixir.runtime_status.snapshot",
+            return_value={
+                "started_at": "2026-03-08T10:00:00",
+                "env": {
+                    "has_discord_token": True,
+                    "has_claude_api_key": True,
+                    "has_cr_api_key": True,
+                },
+                "api": {
+                    "last_ok": True,
+                    "last_endpoint": "clan",
+                    "last_entity_key": "J2RGCRVG",
+                    "last_call_at": "2026-03-08T10:30:00",
+                    "last_status_code": 200,
+                    "last_duration_ms": 125,
+                    "call_count": 10,
+                    "error_count": 0,
+                },
+                "llm": {
+                    "last_ok": True,
+                    "last_workflow": "observation",
+                    "last_model": "claude-sonnet-4-6",
+                    "last_call_at": "2026-03-08T10:29:00",
+                    "last_duration_ms": 500,
+                    "last_prompt_tokens": 100,
+                    "last_completion_tokens": 50,
+                    "last_total_tokens": 150,
+                    "call_count": 3,
+                    "error_count": 0,
+                },
+                "jobs": {
+                    "clan_awareness": {"last_summary": "ok"},
+                },
             },
-            "api": {
-                "last_ok": True,
-                "last_endpoint": "clan",
-                "last_entity_key": "J2RGCRVG",
-                "last_call_at": "2026-03-08T10:30:00",
-                "last_status_code": 200,
-                "last_duration_ms": 125,
-                "call_count": 10,
-                "error_count": 0,
+        ),
+        patch(
+            "elixir.db.get_system_status",
+            return_value={
+                "db_path": "/tmp/elixir.db",
+                "db_size_bytes": 1024,
+                "schema_display": "baseline schema (migration v2)",
+                "schema_version": 2,
+                "roster_summary": {"active_members": 21},
+                "freshness": {
+                    "member_state_at": "2026-03-08T10:00:00",
+                    "player_profile_at": "2026-03-08T09:00:00",
+                    "battle_fact_at": "2026-03-08T08:00:00",
+                    "war_state_at": "2026-03-08T10:30:00",
+                },
+                "counts": {
+                    "raw_payload_count": 10,
+                    "battle_fact_count": 20,
+                    "message_count": 30,
+                    "discord_links": 5,
+                },
+                "latest_raw_payload": {
+                    "endpoint": "currentriverrace",
+                    "fetched_at": "2026-03-08T10:30:00",
+                },
+                "raw_payloads_by_endpoint": [
+                    {"endpoint": "currentriverrace", "count": 5},
+                ],
+                "stale_player_intel_targets": 2,
+                "current_season_id": 130,
+                "llm_cost_7d": {
+                    "calls": 12,
+                    "failures": 1,
+                    "cost_usd": 3.5,
+                },
+                "awareness_7d": {
+                    "ticks": 20,
+                    "signals_in": 8,
+                    "posts_delivered": 6,
+                    "failed_ticks": 0,
+                    "delivery_failed": 0,
+                },
+                "contextual_memory": {
+                    "latest_memory_at": "2026-03-08T10:20:00",
+                    "total": 7,
+                    "leader_notes": 3,
+                    "inferences": 2,
+                    "system_notes": 2,
+                },
             },
-            "llm": {
-                "last_ok": True,
-                "last_workflow": "observation",
-                "last_model": "claude-sonnet-4-6",
-                "last_call_at": "2026-03-08T10:29:00",
-                "last_duration_ms": 500,
-                "last_prompt_tokens": 100,
-                "last_completion_tokens": 50,
-                "last_total_tokens": 150,
-                "call_count": 3,
-                "error_count": 0,
+        ),
+        patch(
+            "elixir._member_role_grant_status",
+            return_value={
+                "configured": True,
+                "ok": False,
+                "reason": "Manage Roles permission missing",
+                "bot_top_role_position": 2,
+                "member_role_position": 3,
+                "manage_roles": False,
             },
-            "jobs": {
-                "clan_awareness": {"last_summary": "ok"},
-            },
-        }),
-        patch("elixir.db.get_system_status", return_value={
-            "db_path": "/tmp/elixir.db",
-            "db_size_bytes": 1024,
-            "schema_display": "baseline schema (migration v2)",
-            "schema_version": 2,
-            "roster_summary": {"active_members": 21},
-            "freshness": {
-                "member_state_at": "2026-03-08T10:00:00",
-                "player_profile_at": "2026-03-08T09:00:00",
-                "battle_fact_at": "2026-03-08T08:00:00",
-                "war_state_at": "2026-03-08T10:30:00",
-            },
-            "counts": {
-                "raw_payload_count": 10,
-                "battle_fact_count": 20,
-                "message_count": 30,
-                "discord_links": 5,
-            },
-            "latest_raw_payload": {
-                "endpoint": "currentriverrace",
-                "fetched_at": "2026-03-08T10:30:00",
-            },
-            "raw_payloads_by_endpoint": [
-                {"endpoint": "currentriverrace", "count": 5},
-            ],
-            "stale_player_intel_targets": 2,
-            "latest_signal": {
-                "signal_type": "war_week_rollover",
-                "signal_date": "2026-03-08",
-            },
-            "current_season_id": 130,
-            "llm_cost_7d": {
-                "calls": 12,
-                "failures": 1,
-                "cost_usd": 3.5,
-            },
-            "awareness_7d": {
-                "ticks": 20,
-                "signals_in": 8,
-                "posts_delivered": 6,
-                "failed_ticks": 0,
-                "delivery_failed": 0,
-            },
-            "contextual_memory": {
-                "sqlite_vec_enabled": True,
-                "latest_memory_at": "2026-03-08T10:20:00",
-                "total": 7,
-                "leader_notes": 3,
-                "inferences": 2,
-                "system_notes": 2,
-            },
-        }),
-        patch("elixir._member_role_grant_status", return_value={
-            "configured": True,
-            "ok": False,
-            "reason": "Manage Roles permission missing",
-            "bot_top_role_position": 2,
-            "member_role_position": 3,
-            "manage_roles": False,
-        }),
+        ),
     ):
         report = elixir._build_status_report()
 
@@ -2877,8 +3652,14 @@ def test_build_status_report_omits_job_schedule_section():
     assert "Current war season id: 130" in report
     assert "Member role auto-grant: Manage Roles permission missing" in report
     assert "🧠 Context memory: 7 total (3 leader / 2 inference / 2 system)" in report
-    assert "💸 Claude spend: 7d $3.50 across 12 call(s), projected $15.00/mo; failures 1" in report
-    assert "👁️ Awareness 7d: 20 tick(s), 8 signal(s), 6 post(s), failed ticks 0, delivery failures 0" in report
+    assert (
+        "💸 Claude spend: 7d $3.50 across 12 call(s), projected $15.00/mo; failures 1"
+        in report
+    )
+    assert (
+        "👁️ Awareness 7d: 20 tick(s), 8 signal(s), 6 post(s), failed ticks 0, delivery failures 0"
+        in report
+    )
 
 
 def test_on_message_handles_interactive_help_directly():
@@ -2891,20 +3672,27 @@ def test_on_message_handles_interactive_help_directly():
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=True),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 100,
-            "name": "#member-chat",
-            "role": "interactive",
-            "workflow": "interactive",
-            "mention_required": True,
-            "allow_proactive": False,
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 100,
+                "name": "#member-chat",
+                "role": "interactive",
+                "workflow": "interactive",
+                "mention_required": True,
+                "allow_proactive": False,
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message") as mock_save,
         patch(
             "agent.intent_router.classify_intent",
-            return_value={"route": "help", "confidence": 0.95, "rationale": "asking for help"},
+            return_value={
+                "route": "help",
+                "confidence": 0.95,
+                "rationale": "asking for help",
+            },
         ),
         patch(
             "elixir.elixir_agent.respond_to_help_request",
@@ -2928,7 +3716,11 @@ def test_on_message_handles_interactive_help_directly():
 
 
 def test_on_message_handles_roster_join_dates_directly():
-    message = _make_message(200, "clan-ops", "<@999> Who are the members of the clan and when did they join?")
+    message = _make_message(
+        200,
+        "clan-ops",
+        "<@999> Who are the members of the clan and when did they join?",
+    )
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -2936,20 +3728,30 @@ def test_on_message_handles_roster_join_dates_directly():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.helpers._common.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 200,
-            "name": "#clan-ops",
-            "role": "clanops",
-            "workflow": "clanops",
-            "mention_required": False,
-            "allow_proactive": True,
-        }),
+        patch(
+            "runtime.helpers._common.bot",
+            new=SimpleNamespace(user=SimpleNamespace(id=999)),
+        ),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 200,
+                "name": "#clan-ops",
+                "role": "clanops",
+                "workflow": "clanops",
+                "mention_required": False,
+                "allow_proactive": True,
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.save_message") as mock_save,
         patch(
             "agent.intent_router.classify_intent",
-            return_value={"route": "roster_join_dates", "confidence": 0.95, "rationale": "asking for join dates"},
+            return_value={
+                "route": "roster_join_dates",
+                "confidence": 0.95,
+                "rationale": "asking for join dates",
+            },
         ),
         patch(
             "elixir._build_roster_join_dates_report",
@@ -2963,13 +3765,19 @@ def test_on_message_handles_roster_join_dates_directly():
     message.reply.assert_awaited_once_with(
         "**Clan Roster + Join Dates**\n1. King Levy (coLeader) — joined 2024-01-15"
     )
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "roster_join_dates_report"
+    assert (
+        mock_save.call_args_list[1].kwargs["event_type"] == "roster_join_dates_report"
+    )
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 
 
 def test_on_message_handles_kick_risk_directly():
-    message = _make_message(200, "clan-ops", "Who is at risk of being kicked based on participation thresholds?")
+    message = _make_message(
+        200,
+        "clan-ops",
+        "Who is at risk of being kicked based on participation thresholds?",
+    )
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -2978,19 +3786,26 @@ def test_on_message_handles_kick_risk_directly():
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=True),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 200,
-            "name": "#clan-ops",
-            "role": "clanops",
-            "workflow": "clanops",
-            "mention_required": False,
-            "allow_proactive": True,
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 200,
+                "name": "#clan-ops",
+                "role": "clanops",
+                "workflow": "clanops",
+                "mention_required": False,
+                "allow_proactive": True,
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.save_message") as mock_save,
         patch(
             "agent.intent_router.classify_intent",
-            return_value={"route": "kick_risk", "confidence": 0.95, "rationale": "asking about kicks"},
+            return_value={
+                "route": "kick_risk",
+                "confidence": 0.95,
+                "rationale": "asking about kicks",
+            },
         ),
         patch(
             "elixir._build_kick_risk_report",
@@ -3010,7 +3825,9 @@ def test_on_message_handles_kick_risk_directly():
 
 
 def test_on_message_handles_top_war_contributors_directly():
-    message = _make_message(200, "clan-ops", "Who are the top 5 contributors to clan wars this season?")
+    message = _make_message(
+        200, "clan-ops", "Who are the top 5 contributors to clan wars this season?"
+    )
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -3019,19 +3836,26 @@ def test_on_message_handles_top_war_contributors_directly():
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._is_bot_mentioned", return_value=True),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 200,
-            "name": "#clan-ops",
-            "role": "clanops",
-            "workflow": "clanops",
-            "mention_required": False,
-            "allow_proactive": True,
-        }),
+        patch(
+            "elixir._get_channel_behavior",
+            return_value={
+                "id": 200,
+                "name": "#clan-ops",
+                "role": "clanops",
+                "workflow": "clanops",
+                "mention_required": False,
+                "allow_proactive": True,
+            },
+        ),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.save_message") as mock_save,
         patch(
             "agent.intent_router.classify_intent",
-            return_value={"route": "top_war_contributors", "confidence": 0.95, "rationale": "asking for top contributors"},
+            return_value={
+                "route": "top_war_contributors",
+                "confidence": 0.95,
+                "rationale": "asking for top contributors",
+            },
         ),
         patch(
             "elixir._build_top_war_contributors_report",
@@ -3045,65 +3869,123 @@ def test_on_message_handles_top_war_contributors_directly():
     message.reply.assert_awaited_once_with(
         "**Top War Contributors (Season 130)**\n1. King Levy — 3,200 fame across 4 race(s)"
     )
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "top_war_contributors_report"
+    assert (
+        mock_save.call_args_list[1].kwargs["event_type"]
+        == "top_war_contributors_report"
+    )
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 
 
 def test_build_clan_status_report_summarizes_operational_clan_state():
     with (
-        patch("elixir.db.get_clan_roster_summary", return_value={
-            "active_members": 21,
-            "avg_collection_level": 1577,
-            "avg_trophies": 7523.4,
-            "donations_week_total": 1340,
-        }),
-        patch("elixir.db.list_members", return_value=[
-            {"name": "King Levy", "member_ref": "King Levy (<@1474760692992180429>)", "donations_week": 220, "trophies": 9000, "clan_rank": 1},
-            {"name": "Finn", "member_ref": "Finn", "donations_week": 180, "trophies": 8500, "clan_rank": 2},
-            {"name": "Vijay", "member_ref": "Vijay", "donations_week": 140, "trophies": 8100, "clan_rank": 3},
-        ]),
-        patch("elixir.db.get_current_war_status", return_value={
-            "clan_name": "POAP KINGS",
-            "season_id": 77,
-            "week": 2,
-            "war_state": "riverRace",
-            "race_rank": 1,
-            "fame": 12345,
-            "repair_points": 120,
-            "clan_score": 4560,
-        }),
-        patch("elixir.db.get_war_season_summary", return_value={
-            "races": 2,
-            "total_clan_fame": 23456,
-            "fame_per_active_member": 1116.95,
-            "top_contributors": [
-                {"member_ref": "King Levy (<@1474760692992180429>)", "total_points": 3200},
-                {"member_ref": "Finn", "total_points": 3100},
+        patch(
+            "elixir.db.get_clan_roster_summary",
+            return_value={
+                "active_members": 21,
+                "avg_collection_level": 1577,
+                "avg_trophies": 7523.4,
+                "donations_week_total": 1340,
+            },
+        ),
+        patch(
+            "elixir.db.list_members",
+            return_value=[
+                {
+                    "name": "King Levy",
+                    "member_ref": "King Levy (<@1474760692992180429>)",
+                    "donations_week": 220,
+                    "trophies": 9000,
+                    "clan_rank": 1,
+                },
+                {
+                    "name": "Finn",
+                    "member_ref": "Finn",
+                    "donations_week": 180,
+                    "trophies": 8500,
+                    "clan_rank": 2,
+                },
+                {
+                    "name": "Vijay",
+                    "member_ref": "Vijay",
+                    "donations_week": 140,
+                    "trophies": 8100,
+                    "clan_rank": 3,
+                },
             ],
-            "nonparticipants": [{"member_ref": "Vijay"}],
-        }),
-        patch("elixir.db.get_members_at_risk", return_value={"members": [{"member_ref": "Vijay"}]}),
-        patch("elixir.db.get_members_on_losing_streak", return_value=[{"member_ref": "Finn", "current_streak": 3}]),
+        ),
+        patch(
+            "elixir.db.get_current_war_status",
+            return_value={
+                "clan_name": "POAP KINGS",
+                "season_id": 77,
+                "week": 2,
+                "war_state": "riverRace",
+                "race_rank": 1,
+                "fame": 12345,
+                "repair_points": 120,
+                "clan_score": 4560,
+            },
+        ),
+        patch(
+            "elixir.db.get_war_season_summary",
+            return_value={
+                "races": 2,
+                "total_clan_fame": 23456,
+                "fame_per_active_member": 1116.95,
+                "top_contributors": [
+                    {
+                        "member_ref": "King Levy (<@1474760692992180429>)",
+                        "total_points": 3200,
+                    },
+                    {"member_ref": "Finn", "total_points": 3100},
+                ],
+                "nonparticipants": [{"member_ref": "Vijay"}],
+            },
+        ),
+        patch(
+            "elixir.db.get_members_at_risk",
+            return_value={"members": [{"member_ref": "Vijay"}]},
+        ),
+        patch(
+            "elixir.db.get_members_on_losing_streak",
+            return_value=[{"member_ref": "Finn", "current_streak": 3}],
+        ),
         patch("elixir.db.list_recent_joins", return_value=[{"member_ref": "New Guy"}]),
-        patch("elixir.db.get_current_war_day_state", return_value={
-            "total_participants": 21,
-            "used_all_4": [{}, {}],
-            "used_some": [{}, {}, {}],
-            "used_none": [{}, {}],
-        }),
+        patch(
+            "elixir.db.get_current_war_day_state",
+            return_value={
+                "total_participants": 21,
+                "used_all_4": [{}, {}],
+                "used_some": [{}, {}, {}],
+                "used_none": [{}, {}],
+            },
+        ),
     ):
         report = elixir._build_clan_status_report(
-            {"name": "POAP KINGS", "members": 21, "clanScore": 55555, "clanWarTrophies": 3210, "requiredTrophies": 5000, "donationsPerWeek": 1400},
+            {
+                "name": "POAP KINGS",
+                "members": 21,
+                "clanScore": 55555,
+                "clanWarTrophies": 3210,
+                "requiredTrophies": 5000,
+                "donationsPerWeek": 1400,
+            },
             {"clans": [{}, {}, {}, {}, {}]},
         )
 
     assert report.startswith("**POAP KINGS Status**")
     assert "Roster: 21/50 members | 29 open" in report
     assert "weekly donations 1,400" in report
-    assert "top donors King Levy (<@1474760692992180429>) 220, Finn 180, Vijay 140" in report
+    assert (
+        "top donors King Levy (<@1474760692992180429>) 220, Finn 180, Vijay 140"
+        in report
+    )
     assert "War now: season 77 | week 2 | state riverRace | boat-rank 1" in report
-    assert "Watch list: 1 with no war decks this season | 1 at risk | 1 on cold streaks | 1 joined in last 30d" in report
+    assert (
+        "Watch list: 1 with no war decks this season | 1 at risk | 1 on cold streaks | 1 joined in last 30d"
+        in report
+    )
     assert "War today: 2 used all 4 decks | 3 used some | 2 unused" in report
     assert "Recent joins: New Guy (join timing unknown)" in report
     assert "Cold streaks: Finn lost 3 straight" in report
@@ -3111,62 +3993,95 @@ def test_build_clan_status_report_summarizes_operational_clan_state():
 
 def test_build_war_status_report_summarizes_current_war_awareness():
     with (
-        patch("elixir.db.get_current_war_status", return_value={
-            "clan_name": "POAP KINGS",
-            "war_state": "full",
-            "season_id": 129,
-            "week": 2,
-            "phase_display": "Battle Day 2",
-            "race_rank": 2,
-            "fame": 15400,
-            "clan_score": 4780,
-            "period_points": 800,
-        }),
-        patch("elixir.db.get_current_war_day_state", return_value={
-            "season_id": 129,
-            "section_index": 1,
-            "phase": "battle",
-            "phase_display": "Battle Day 2",
-            "time_left_text": "22h 29m",
-            "war_day_key": "s00129-w01-p011",
-            "engaged_count": 17,
-            "finished_count": 9,
-            "untouched_count": 8,
-            "total_participants": 25,
-            "top_points_total": [
-                {"member_ref": "King Levy", "points_today": 800},
-                {"member_ref": "Finn", "points_today": 600},
+        patch(
+            "elixir.db.get_current_war_status",
+            return_value={
+                "clan_name": "POAP KINGS",
+                "war_state": "full",
+                "season_id": 129,
+                "week": 2,
+                "phase_display": "Battle Day 2",
+                "race_rank": 2,
+                "fame": 15400,
+                "clan_score": 4780,
+                "period_points": 800,
+            },
+        ),
+        patch(
+            "elixir.db.get_current_war_day_state",
+            return_value={
+                "season_id": 129,
+                "section_index": 1,
+                "phase": "battle",
+                "phase_display": "Battle Day 2",
+                "time_left_text": "22h 29m",
+                "war_day_key": "s00129-w01-p011",
+                "engaged_count": 17,
+                "finished_count": 9,
+                "untouched_count": 8,
+                "total_participants": 25,
+                "top_points_total": [
+                    {"member_ref": "King Levy", "points_today": 800},
+                    {"member_ref": "Finn", "points_today": 600},
+                ],
+                "used_none": [
+                    {"member_ref": "Vijay"},
+                    {"member_ref": "Ditika"},
+                ],
+            },
+        ),
+        patch(
+            "elixir.db.get_war_week_summary",
+            return_value={
+                "participant_count": 23,
+                "top_participants": [
+                    {"member_ref": "King Levy", "points": 3200},
+                    {"member_ref": "Finn", "points": 2900},
+                ],
+                "day_summaries": [
+                    {
+                        "phase": "battle",
+                        "phase_display": "Battle Day 1",
+                        "engaged_count": 20,
+                        "finished_count": 11,
+                        "top_points_today": [{"member_ref": "King Levy"}],
+                    },
+                ],
+                "race": None,
+            },
+        ),
+        patch(
+            "elixir.db.get_war_season_summary",
+            return_value={
+                "races": 2,
+                "total_clan_fame": 30100,
+                "fame_per_active_member": 1204.0,
+                "top_contributors": [
+                    {"member_ref": "King Levy", "total_points": 6200},
+                    {"member_ref": "Finn", "total_points": 5800},
+                ],
+                "nonparticipants": [{"member_ref": "Vijay"}],
+            },
+        ),
+        patch(
+            "elixir.db.list_recent_war_day_summaries",
+            return_value=[
+                {
+                    "phase": "battle",
+                    "phase_display": "Battle Day 2",
+                    "engaged_count": 17,
+                    "finished_count": 9,
+                    "top_points_today": [{"member_ref": "King Levy"}],
+                },
+                {
+                    "phase": "battle",
+                    "phase_display": "Battle Day 1",
+                    "engaged_count": 20,
+                    "finished_count": 11,
+                    "top_points_today": [{"member_ref": "Finn"}],
+                },
             ],
-            "used_none": [
-                {"member_ref": "Vijay"},
-                {"member_ref": "Ditika"},
-            ],
-        }),
-        patch("elixir.db.get_war_week_summary", return_value={
-            "participant_count": 23,
-            "top_participants": [
-                {"member_ref": "King Levy", "points": 3200},
-                {"member_ref": "Finn", "points": 2900},
-            ],
-            "day_summaries": [
-                {"phase": "battle", "phase_display": "Battle Day 1", "engaged_count": 20, "finished_count": 11, "top_points_today": [{"member_ref": "King Levy"}]},
-            ],
-            "race": None,
-        }),
-        patch("elixir.db.get_war_season_summary", return_value={
-            "races": 2,
-            "total_clan_fame": 30100,
-            "fame_per_active_member": 1204.0,
-            "top_contributors": [
-                {"member_ref": "King Levy", "total_points": 6200},
-                {"member_ref": "Finn", "total_points": 5800},
-            ],
-            "nonparticipants": [{"member_ref": "Vijay"}],
-        }),
-        patch("elixir.db.list_recent_war_day_summaries", return_value=[
-            {"phase": "battle", "phase_display": "Battle Day 2", "engaged_count": 17, "finished_count": 9, "top_points_today": [{"member_ref": "King Levy"}]},
-            {"phase": "battle", "phase_display": "Battle Day 1", "engaged_count": 20, "finished_count": 11, "top_points_today": [{"member_ref": "Finn"}]},
-        ]),
+        ),
         patch("elixir.db.get_latest_clan_boat_defense_status", return_value=None),
     ):
         report = elixir._build_war_status_report(
@@ -3175,33 +4090,43 @@ def test_build_war_status_report_summarizes_current_war_awareness():
         )
 
     assert report.startswith("**POAP KINGS War Status**")
-    assert "Live: state full | season 129 | week 2 | Battle Day 2 | boat-rank 2" in report
+    assert (
+        "Live: state full | season 129 | week 2 | Battle Day 2 | boat-rank 2" in report
+    )
     assert "Clock: Battle Day 2 | time left 22h 29m | key `s00129-w01-p011`" in report
-    assert "Engagement: 17 engaged | 9 finished all 4 | 8 untouched | 25 tracked" in report
+    assert (
+        "Engagement: 17 engaged | 9 finished all 4 | 8 untouched | 25 tracked" in report
+    )
     assert "Season points leaders (War Champ race): King Levy 800, Finn 600" in report
     assert "Waiting on: Vijay, Ditika" in report
-    assert "This season: 2 race(s) | total fame 30,100 | fame/member 1,204.00 | top King Levy 6,200, Finn 5,800" in report
+    assert (
+        "This season: 2 race(s) | total fame 30,100 | fame/member 1,204.00 | top King Levy 6,200, Finn 5,800"
+        in report
+    )
     assert "Live feed: 5 clan(s) in the current river race" in report
 
 
 def test_build_war_status_report_includes_live_finish_and_known_stakes():
     with (
-        patch("elixir.db.get_current_war_status", return_value={
-            "clan_name": "POAP KINGS",
-            "war_state": "full",
-            "season_id": 130,
-            "week": 2,
-            "phase_display": "Battle Day 3",
-            "race_rank": 1,
-            "fame": 10146,
-            "clan_score": 160,
-            "period_points": 10146,
-            "race_completed": True,
-            "finish_time": "20260315T095605.000Z",
-            "race_completed_early": True,
-            "trophy_stakes_known": True,
-            "trophy_stakes_text": "100 trophies on the line",
-        }),
+        patch(
+            "elixir.db.get_current_war_status",
+            return_value={
+                "clan_name": "POAP KINGS",
+                "war_state": "full",
+                "season_id": 130,
+                "week": 2,
+                "phase_display": "Battle Day 3",
+                "race_rank": 1,
+                "fame": 10146,
+                "clan_score": 160,
+                "period_points": 10146,
+                "race_completed": True,
+                "finish_time": "20260315T095605.000Z",
+                "race_completed_early": True,
+                "trophy_stakes_known": True,
+                "trophy_stakes_text": "100 trophies on the line",
+            },
+        ),
         patch("elixir.db.get_current_war_day_state", return_value={}),
         patch("elixir.db.get_war_week_summary", return_value=None),
         patch("elixir.db.get_war_season_summary", return_value=None),
@@ -3220,28 +4145,41 @@ def test_build_war_status_report_includes_live_finish_and_known_stakes():
 
 
 def test_build_db_status_report_lists_group_summaries():
-    with patch("elixir.db.get_database_status", return_value={
-        "db_path": "/tmp/elixir.db",
-        "schema_version": 15,
-        "db_size_bytes": 40960,
-        "wal_size_bytes": 8192,
-        "shm_size_bytes": 32768,
-        "page_size": 4096,
-        "page_count": 10,
-        "freelist_count": 2,
-        "journal_mode": "wal",
-        "table_count": 3,
-        "tables": [
-            {"name": "messages", "row_count": 1200, "approx_bytes": 24576},
-            {"name": "war_participant_snapshots", "row_count": 320, "approx_bytes": 12288},
-            {"name": "members", "row_count": 50, "approx_bytes": 4096},
-        ],
-    }):
+    with patch(
+        "elixir.db.get_database_status",
+        return_value={
+            "db_path": "/tmp/elixir.db",
+            "schema_version": 15,
+            "db_size_bytes": 40960,
+            "wal_size_bytes": 8192,
+            "shm_size_bytes": 32768,
+            "page_size": 4096,
+            "page_count": 10,
+            "freelist_count": 2,
+            "journal_mode": "wal",
+            "table_count": 3,
+            "tables": [
+                {"name": "messages", "row_count": 1200, "approx_bytes": 24576},
+                {
+                    "name": "war_participant_snapshots",
+                    "row_count": 320,
+                    "approx_bytes": 12288,
+                },
+                {"name": "members", "row_count": 50, "approx_bytes": 4096},
+            ],
+        },
+    ):
         report = elixir._build_db_status_report()
 
     assert report.startswith("**Elixir DB Status**")
-    assert "File: `elixir.db` | schema v15 | size 40.0 KB | WAL 8.0 KB | SHM 32.0 KB" in report
-    assert "Storage: page size 4,096 B | pages 10 | free pages 2 | journal wal | tables 3" in report
+    assert (
+        "File: `elixir.db` | schema v15 | size 40.0 KB | WAL 8.0 KB | SHM 32.0 KB"
+        in report
+    )
+    assert (
+        "Storage: page size 4,096 B | pages 10 | free pages 2 | journal wal | tables 3"
+        in report
+    )
     assert "Clan: 1 tables | 50 rows | 4.0 KB" in report
     assert "War: 1 tables | 320 rows | 12.0 KB" in report
     assert "Memory: 1 tables | 1,200 rows | 24.0 KB" in report
@@ -3251,23 +4189,26 @@ def test_build_db_status_report_lists_group_summaries():
 
 
 def test_build_db_status_report_lists_table_counts_and_sizes_for_group():
-    with patch("elixir.db.get_database_status", return_value={
-        "db_path": "/tmp/elixir.db",
-        "schema_version": 15,
-        "db_size_bytes": 40960,
-        "wal_size_bytes": 8192,
-        "shm_size_bytes": 32768,
-        "page_size": 4096,
-        "page_count": 10,
-        "freelist_count": 2,
-        "journal_mode": "wal",
-        "table_count": 3,
-        "tables": [
-            {"name": "messages", "row_count": 1200, "approx_bytes": 24576},
-            {"name": "war_participation", "row_count": 320, "approx_bytes": 12288},
-            {"name": "members", "row_count": 50, "approx_bytes": 4096},
-        ],
-    }):
+    with patch(
+        "elixir.db.get_database_status",
+        return_value={
+            "db_path": "/tmp/elixir.db",
+            "schema_version": 15,
+            "db_size_bytes": 40960,
+            "wal_size_bytes": 8192,
+            "shm_size_bytes": 32768,
+            "page_size": 4096,
+            "page_count": 10,
+            "freelist_count": 2,
+            "journal_mode": "wal",
+            "table_count": 3,
+            "tables": [
+                {"name": "messages", "row_count": 1200, "approx_bytes": 24576},
+                {"name": "war_participation", "row_count": 320, "approx_bytes": 12288},
+                {"name": "members", "row_count": 50, "approx_bytes": 4096},
+            ],
+        },
+    ):
         report = elixir._build_db_status_report(group="memory")
 
     assert report.startswith("**Elixir DB Status | Memory**")
@@ -3278,11 +4219,22 @@ def test_build_db_status_report_lists_table_counts_and_sizes_for_group():
 
 def test_build_clan_status_report_uses_non_war_risk_watchlist():
     with (
-        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_collection_level": 1577, "avg_trophies": 7523.4}),
+        patch(
+            "elixir.db.get_clan_roster_summary",
+            return_value={
+                "active_members": 21,
+                "avg_collection_level": 1577,
+                "avg_trophies": 7523.4,
+            },
+        ),
         patch("elixir.db.list_members", return_value=[]),
-        patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
+        patch(
+            "elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}
+        ),
         patch("elixir.db.get_war_season_summary", return_value=None),
-        patch("elixir.db.get_members_at_risk", return_value={"members": []}) as mock_risk,
+        patch(
+            "elixir.db.get_members_at_risk", return_value={"members": []}
+        ) as mock_risk,
         patch("elixir.db.get_members_on_losing_streak", return_value=[]),
         patch("elixir.db.list_recent_joins", return_value=[]),
         patch("elixir.db.get_war_deck_status_today", return_value={}),
@@ -3301,16 +4253,30 @@ def test_build_clan_status_report_uses_non_war_risk_watchlist():
 def test_build_clan_status_report_formats_recent_joins_as_relative_days():
     joined_date = (datetime.now(elixir.CHICAGO).date() - timedelta(days=3)).isoformat()
     with (
-        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_collection_level": 1577, "avg_trophies": 7523.4}),
+        patch(
+            "elixir.db.get_clan_roster_summary",
+            return_value={
+                "active_members": 21,
+                "avg_collection_level": 1577,
+                "avg_trophies": 7523.4,
+            },
+        ),
         patch("elixir.db.list_members", return_value=[]),
-        patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
+        patch(
+            "elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}
+        ),
         patch("elixir.db.get_war_season_summary", return_value=None),
         patch("elixir.db.get_members_at_risk", return_value={"members": []}),
         patch("elixir.db.get_members_on_losing_streak", return_value=[]),
-        patch("elixir.db.list_recent_joins", return_value=[{"member_ref": "Ditika", "joined_date": joined_date}]),
+        patch(
+            "elixir.db.list_recent_joins",
+            return_value=[{"member_ref": "Ditika", "joined_date": joined_date}],
+        ),
         patch("elixir.db.get_war_deck_status_today", return_value={}),
     ):
-        report = elixir._build_clan_status_report({"name": "POAP KINGS", "members": 21}, {})
+        report = elixir._build_clan_status_report(
+            {"name": "POAP KINGS", "members": 21}, {}
+        )
 
     assert "Recent joins: Ditika (3 days ago)" in report
 
@@ -3318,31 +4284,51 @@ def test_build_clan_status_report_formats_recent_joins_as_relative_days():
 def test_build_clan_status_report_prefers_live_recent_join_delta():
     today = datetime.now(elixir.CHICAGO).date().isoformat()
     with (
-        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_collection_level": 1577, "avg_trophies": 7523.4}),
+        patch(
+            "elixir.db.get_clan_roster_summary",
+            return_value={
+                "active_members": 21,
+                "avg_collection_level": 1577,
+                "avg_trophies": 7523.4,
+            },
+        ),
         patch("elixir.db.list_members", return_value=[]),
-        patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
-        patch("elixir.db.get_war_season_summary", return_value={
-            "races": 1,
-            "total_clan_fame": 1000,
-            "fame_per_active_member": 50.0,
-            "top_contributors": [],
-            "nonparticipants": [],
-        }),
+        patch(
+            "elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}
+        ),
+        patch(
+            "elixir.db.get_war_season_summary",
+            return_value={
+                "races": 1,
+                "total_clan_fame": 1000,
+                "fame_per_active_member": 50.0,
+                "top_contributors": [],
+                "nonparticipants": [],
+            },
+        ),
         patch("elixir.db.get_members_at_risk", return_value={"members": []}),
         patch("elixir.db.get_members_on_losing_streak", return_value=[]),
-        patch("elixir.db.list_recent_joins", return_value=[{"member_ref": "Vijay", "joined_date": "2026-03-07"}]),
+        patch(
+            "elixir.db.list_recent_joins",
+            return_value=[{"member_ref": "Vijay", "joined_date": "2026-03-07"}],
+        ),
         patch("elixir.db.get_war_deck_status_today", return_value={}),
     ):
         report = elixir._build_clan_status_report(
             {
                 "name": "POAP KINGS",
                 "members": 21,
-                "_elixir_recent_joins": [{"member_ref": "Ditika", "joined_date": today}],
+                "_elixir_recent_joins": [
+                    {"member_ref": "Ditika", "joined_date": today}
+                ],
             },
             {},
         )
 
-    assert "Watch list: 0 with no war decks this season | 0 at risk | 0 on cold streaks | 1 joined in last 30d" in report
+    assert (
+        "Watch list: 0 with no war decks this season | 0 at risk | 0 on cold streaks | 1 joined in last 30d"
+        in report
+    )
     assert "Recent joins: Ditika (today)" in report
     assert "Vijay" not in report.split("Recent joins: ", 1)[1]
 
@@ -3353,13 +4339,16 @@ def test_load_live_clan_context_attaches_same_cycle_recent_joins():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.cr_api.get_clan", return_value={
-            "name": "POAP KINGS",
-            "memberList": [
-                {"tag": "#AAA", "name": "Existing"},
-                {"tag": "#BBB", "name": "Ditika"},
-            ],
-        }),
+        patch(
+            "elixir.cr_api.get_clan",
+            return_value={
+                "name": "POAP KINGS",
+                "memberList": [
+                    {"tag": "#AAA", "name": "Existing"},
+                    {"tag": "#BBB", "name": "Ditika"},
+                ],
+            },
+        ),
         patch("elixir.db.get_active_roster_map", return_value={"#AAA": "Existing"}),
         patch("elixir.db.snapshot_members"),
         patch("elixir.cr_api.get_current_war", return_value={}),
@@ -3385,14 +4374,20 @@ def test_load_live_clan_context_does_not_mark_existing_members_new_when_db_tags_
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.cr_api.get_clan", return_value={
-            "name": "POAP KINGS",
-            "memberList": [
-                {"tag": "#AAA", "name": "Existing"},
-                {"tag": "#BBB", "name": "Also Existing"},
-            ],
-        }),
-        patch("elixir.db.get_active_roster_map", return_value={"#AAA": "Existing", "#BBB": "Also Existing"}),
+        patch(
+            "elixir.cr_api.get_clan",
+            return_value={
+                "name": "POAP KINGS",
+                "memberList": [
+                    {"tag": "#AAA", "name": "Existing"},
+                    {"tag": "#BBB", "name": "Also Existing"},
+                ],
+            },
+        ),
+        patch(
+            "elixir.db.get_active_roster_map",
+            return_value={"#AAA": "Existing", "#BBB": "Also Existing"},
+        ),
         patch("elixir.db.snapshot_members"),
         patch("elixir.cr_api.get_current_war", return_value={}),
     ):
@@ -3403,10 +4398,17 @@ def test_load_live_clan_context_does_not_mark_existing_members_new_when_db_tags_
 
 
 def test_build_roster_join_dates_report_uses_human_fallback_for_missing_dates():
-    with patch("elixir.db.list_members", return_value=[
-        {"current_name": "raquaza", "role": "coLeader", "joined_date": None},
-        {"current_name": "King Levy", "role": "leader", "joined_date": "2024-01-15"},
-    ]):
+    with patch(
+        "elixir.db.list_members",
+        return_value=[
+            {"current_name": "raquaza", "role": "coLeader", "joined_date": None},
+            {
+                "current_name": "King Levy",
+                "role": "leader",
+                "joined_date": "2024-01-15",
+            },
+        ],
+    ):
         report = elixir._build_roster_join_dates_report()
 
     assert "raquaza (coLeader) — join date not tracked yet" in report
@@ -3414,17 +4416,20 @@ def test_build_roster_join_dates_report_uses_human_fallback_for_missing_dates():
 
 
 def test_build_kick_risk_report_uses_inactivity_only():
-    with patch("elixir.db.get_members_at_risk", return_value={
-        "members": [
-            {
-                "member_ref": "Vijay",
-                "reasons": [
-                    {"type": "inactive", "detail": "last seen 8 days ago"},
-                    {"type": "low_donations", "detail": "0 donations this week"},
-                ],
-            }
-        ]
-    }) as mock_risk:
+    with patch(
+        "elixir.db.get_members_at_risk",
+        return_value={
+            "members": [
+                {
+                    "member_ref": "Vijay",
+                    "reasons": [
+                        {"type": "inactive", "detail": "last seen 8 days ago"},
+                        {"type": "low_donations", "detail": "0 donations this week"},
+                    ],
+                }
+            ]
+        },
+    ) as mock_risk:
         report = elixir._build_kick_risk_report()
 
         mock_risk.assert_called_once_with(
@@ -3438,13 +4443,16 @@ def test_build_kick_risk_report_uses_inactivity_only():
 
 
 def test_build_top_war_contributors_report_formats_season_leaders():
-    with patch("elixir.db.get_war_season_summary", return_value={
-        "season_id": 130,
-        "top_contributors": [
-            {"member_ref": "King Levy", "total_points": 3200, "races_played": 4},
-            {"member_ref": "Vijay", "total_points": 2800, "races_played": 4},
-        ],
-    }) as mock_summary:
+    with patch(
+        "elixir.db.get_war_season_summary",
+        return_value={
+            "season_id": 130,
+            "top_contributors": [
+                {"member_ref": "King Levy", "total_points": 3200, "races_played": 4},
+                {"member_ref": "Vijay", "total_points": 2800, "races_played": 4},
+            ],
+        },
+    ) as mock_summary:
         report = elixir._build_top_war_contributors_report()
 
     mock_summary.assert_called_once_with(top_n=5)
@@ -3471,7 +4479,9 @@ def test_reply_text_converts_markdown_images_to_discord_friendly_text():
 
 
 def test_reply_text_resolves_custom_emoji_shortcodes():
-    guild = SimpleNamespace(emojis=[SimpleNamespace(name="elixir_trophy", id=987, animated=False)])
+    guild = SimpleNamespace(
+        emojis=[SimpleNamespace(name="elixir_trophy", id=987, animated=False)]
+    )
     message = _make_message(200, "ask-elixir", "nice")
     message.guild = guild
 
@@ -3482,46 +4492,82 @@ def test_reply_text_resolves_custom_emoji_shortcodes():
 
 def test_build_clan_status_short_report_is_compact():
     with (
-        patch("elixir.db.get_clan_roster_summary", return_value={
-            "active_members": 21,
-            "avg_collection_level": 1577,
-            "avg_trophies": 7523.4,
-        }),
-        patch("elixir.db.get_current_war_status", return_value={
-            "clan_name": "POAP KINGS",
-            "season_id": 77,
-            "week": 2,
-            "race_rank": 1,
-            "fame": 12345,
-        }),
-        patch("elixir.db.get_war_season_summary", return_value={
-            "fame_per_active_member": 1116.95,
-            "top_contributors": [
-                {"member_ref": "King Levy (<@1474760692992180429>)", "total_points": 3200},
-                {"member_ref": "Finn", "total_points": 3100},
-            ],
-        }),
-        patch("elixir.db.get_members_at_risk", return_value={"members": [{"member_ref": "Vijay"}]}),
-        patch("elixir.db.get_members_on_losing_streak", return_value=[{"member_ref": "Finn", "current_streak": 3}]),
+        patch(
+            "elixir.db.get_clan_roster_summary",
+            return_value={
+                "active_members": 21,
+                "avg_collection_level": 1577,
+                "avg_trophies": 7523.4,
+            },
+        ),
+        patch(
+            "elixir.db.get_current_war_status",
+            return_value={
+                "clan_name": "POAP KINGS",
+                "season_id": 77,
+                "week": 2,
+                "race_rank": 1,
+                "fame": 12345,
+            },
+        ),
+        patch(
+            "elixir.db.get_war_season_summary",
+            return_value={
+                "fame_per_active_member": 1116.95,
+                "top_contributors": [
+                    {
+                        "member_ref": "King Levy (<@1474760692992180429>)",
+                        "total_points": 3200,
+                    },
+                    {"member_ref": "Finn", "total_points": 3100},
+                ],
+            },
+        ),
+        patch(
+            "elixir.db.get_members_at_risk",
+            return_value={"members": [{"member_ref": "Vijay"}]},
+        ),
+        patch(
+            "elixir.db.get_members_on_losing_streak",
+            return_value=[{"member_ref": "Finn", "current_streak": 3}],
+        ),
     ):
-        report = elixir._build_clan_status_short_report({"name": "POAP KINGS", "members": 21}, {})
+        report = elixir._build_clan_status_short_report(
+            {"name": "POAP KINGS", "members": 21}, {}
+        )
 
     assert report.startswith("**POAP KINGS Status (Short)**")
     assert "Roster: 21/50 | open 29" in report
     assert "War: season 77 | week 2 | boat-rank 1 | boat-fame 12,345 (weekly)" in report
-    assert "Season: fame/member 1,117.0 | top King Levy (<@1474760692992180429>) 3,200, Finn 3,100" in report
+    assert (
+        "Season: fame/member 1,117.0 | top King Levy (<@1474760692992180429>) 3,200, Finn 3,100"
+        in report
+    )
     assert "Watch: 1 at risk | 1 on cold streaks" in report
 
 
 def test_build_clan_status_short_report_uses_non_war_risk_watchlist():
     with (
-        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_collection_level": 1577, "avg_trophies": 7523.4}),
-        patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
+        patch(
+            "elixir.db.get_clan_roster_summary",
+            return_value={
+                "active_members": 21,
+                "avg_collection_level": 1577,
+                "avg_trophies": 7523.4,
+            },
+        ),
+        patch(
+            "elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}
+        ),
         patch("elixir.db.get_war_season_summary", return_value=None),
-        patch("elixir.db.get_members_at_risk", return_value={"members": []}) as mock_risk,
+        patch(
+            "elixir.db.get_members_at_risk", return_value={"members": []}
+        ) as mock_risk,
         patch("elixir.db.get_members_on_losing_streak", return_value=[]),
     ):
-        elixir._build_clan_status_short_report({"name": "POAP KINGS", "members": 21}, {})
+        elixir._build_clan_status_short_report(
+            {"name": "POAP KINGS", "members": 21}, {}
+        )
 
         mock_risk.assert_called_once_with(
             inactivity_days=7,
@@ -3538,10 +4584,20 @@ def test_recap_context_leads_with_public_story_arcs():
     viewer_scope='public' is load-bearing: leadership arcs must never reach
     a public channel's prompt."""
     arcs = [
-        {"memory_id": 1, "title": "Vijay's comeback", "summary": "Three weeks of climb sealed with a 4/4 colosseum.", "member_tag": "#VJ1"},
+        {
+            "memory_id": 1,
+            "title": "Vijay's comeback",
+            "summary": "Three weeks of climb sealed with a 4/4 colosseum.",
+            "member_tag": "#VJ1",
+        },
     ]
     summaries = [
-        {"memory_id": 2, "title": "Race week 3 recap", "summary": "Finished 2nd, best fame total this season.", "member_tag": None},
+        {
+            "memory_id": 2,
+            "title": "Race week 3 recap",
+            "summary": "Finished 2nd, best fame total this season.",
+            "member_tag": None,
+        },
     ]
     calls = []
 
@@ -3616,35 +4672,100 @@ def test_recap_context_uses_shared_game_mode_capability():
 def test_build_weekly_clan_recap_context_summarizes_week():
     with (
         patch("memory_store.list_memories", return_value=[]),
-        patch("elixir.db.get_weekly_digest_summary", return_value={
-            "window_days": 7,
-            "roster": {"active_members": 21, "open_slots": 29, "avg_collection_level": 1577, "avg_trophies": 7523.4, "donations_week_total": 1400},
-            "war_score_trend": {"direction": "up", "score_change": 120, "trophy_change_total": 40, "races": 1, "avg_rank": 1.0, "avg_fame": 12345},
-            "war_season_summary": {"season_id": 77, "races": 3, "total_clan_fame": 50234, "fame_per_active_member": 2392.1, "top_contributors": [{"member_ref": "King Levy", "total_points": 3200}]},
-            "recent_war_races": [{
-                "season_id": 77,
-                "week": 2,
-                "our_rank": 1,
-                "total_clans": 5,
-                "our_fame": 12345,
-                "trophy_change": 20,
-                "created_date": "20260308T180000.000Z",
-                "top_participants": [{"member_ref": "King Levy", "points": 3200, "decks_used": 4}],
-                "standings_preview": [{"rank": 1, "name": "POAP KINGS", "fame": 12345}],
-            }],
-            "trending_war_contributors": {"members": [{"member_ref": "Finn", "fame_delta": 400}]},
-            "progression_highlights": [{"member_ref": "Vijay", "level_gain": 1, "pol_league_gain": 1, "best_trophies_gain": 120, "trophies_change": 95, "wins_gain": 18, "favorite_card": "Hog Rider"}],
-            "trophy_risers": [{"name": "Vijay", "change": 95, "old_trophies": 7000, "new_trophies": 7095}],
-            "trophy_drops": [],
-            "hot_streaks": [{"member_ref": "Finn", "current_streak": 5, "summary": "8-2 over the last 10 battles (hot)."}],
-            "top_donors": [{"member_ref": "Jamie", "donations_week": 220}],
-            "recent_joins": [{"member_ref": "Newbie", "joined_date": "2026-03-08"}],
-        }),
-        patch("elixir.db.build_clan_trend_summary_context", return_value="=== CLAN TREND SUMMARY ===\nclan: POAP KINGS (#J2RGCRVG)"),
+        patch(
+            "elixir.db.get_weekly_digest_summary",
+            return_value={
+                "window_days": 7,
+                "roster": {
+                    "active_members": 21,
+                    "open_slots": 29,
+                    "avg_collection_level": 1577,
+                    "avg_trophies": 7523.4,
+                    "donations_week_total": 1400,
+                },
+                "war_score_trend": {
+                    "direction": "up",
+                    "score_change": 120,
+                    "trophy_change_total": 40,
+                    "races": 1,
+                    "avg_rank": 1.0,
+                    "avg_fame": 12345,
+                },
+                "war_season_summary": {
+                    "season_id": 77,
+                    "races": 3,
+                    "total_clan_fame": 50234,
+                    "fame_per_active_member": 2392.1,
+                    "top_contributors": [
+                        {"member_ref": "King Levy", "total_points": 3200}
+                    ],
+                },
+                "recent_war_races": [
+                    {
+                        "season_id": 77,
+                        "week": 2,
+                        "our_rank": 1,
+                        "total_clans": 5,
+                        "our_fame": 12345,
+                        "trophy_change": 20,
+                        "created_date": "20260308T180000.000Z",
+                        "top_participants": [
+                            {"member_ref": "King Levy", "points": 3200, "decks_used": 4}
+                        ],
+                        "standings_preview": [
+                            {"rank": 1, "name": "POAP KINGS", "fame": 12345}
+                        ],
+                    }
+                ],
+                "trending_war_contributors": {
+                    "members": [{"member_ref": "Finn", "fame_delta": 400}]
+                },
+                "progression_highlights": [
+                    {
+                        "member_ref": "Vijay",
+                        "level_gain": 1,
+                        "pol_league_gain": 1,
+                        "best_trophies_gain": 120,
+                        "trophies_change": 95,
+                        "wins_gain": 18,
+                        "favorite_card": "Hog Rider",
+                    }
+                ],
+                "trophy_risers": [
+                    {
+                        "name": "Vijay",
+                        "change": 95,
+                        "old_trophies": 7000,
+                        "new_trophies": 7095,
+                    }
+                ],
+                "trophy_drops": [],
+                "hot_streaks": [
+                    {
+                        "member_ref": "Finn",
+                        "current_streak": 5,
+                        "summary": "8-2 over the last 10 battles (hot).",
+                    }
+                ],
+                "top_donors": [{"member_ref": "Jamie", "donations_week": 220}],
+                "recent_joins": [{"member_ref": "Newbie", "joined_date": "2026-03-08"}],
+            },
+        ),
+        patch(
+            "elixir.db.build_clan_trend_summary_context",
+            return_value="=== CLAN TREND SUMMARY ===\nclan: POAP KINGS (#J2RGCRVG)",
+        ),
     ):
         report = elixir._build_weekly_clan_recap_context(
             {"name": "POAP KINGS", "tag": "#J2RGCRVG"},
-            {"clan": {"fame": 13000, "repairPoints": 30, "clanScore": 4600, "participants": [{"tag": "#A"}]}},
+            {
+                "clan": {
+                    "fame": 13000,
+                    "repairPoints": 30,
+                    "clanScore": 4600,
+                    "participants": [{"tag": "#A"}],
+                }
+            },
         )
 
     assert "=== WEEKLY CLAN RECAP SNAPSHOT ===" in report
@@ -3669,8 +4790,14 @@ def test_share_channel_result_rewrites_member_refs_before_posting():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.db.format_member_reference", side_effect=fake_format_member_reference),
-        patch("elixir.prompts.resolve_channel_reference", return_value={"id": 300, "role": "announcements", "name": "#announcements"}),
+        patch(
+            "elixir.db.format_member_reference",
+            side_effect=fake_format_member_reference,
+        ),
+        patch(
+            "elixir.prompts.resolve_channel_reference",
+            return_value={"id": 300, "role": "announcements", "name": "#announcements"},
+        ),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
@@ -3687,5 +4814,7 @@ def test_share_channel_result_rewrites_member_refs_before_posting():
             )
         )
 
-    mock_post.assert_awaited_once_with(channel, {"content": "King Levy had a great week."})
+    mock_post.assert_awaited_once_with(
+        channel, {"content": "King Levy had a great week."}
+    )
     assert mock_save.call_args.args[2] == "King Levy had a great week."

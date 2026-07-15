@@ -6,16 +6,19 @@ malformed JSON body). Callers branch on None — nothing here raises
 requests exceptions across the module boundary. InvalidTagError is the
 one deliberate exception, for callers that validate user/LLM input.
 """
+
 import logging
 import os
 import random
 import time
+
 import requests
 from dotenv import load_dotenv
 
 import db
 import prompts
 from runtime import status as runtime_status
+
 
 def _persist_raw_payload(endpoint_name: str, entity_key: str | None, payload) -> None:
     """Store a successful CR API response in raw_api_payloads (hash-deduped).
@@ -43,17 +46,24 @@ def _persist_raw_payload(endpoint_name: str, entity_key: str | None, payload) ->
                 elif label == "leaderboards":
                     db.upsert_game_mode_contexts_from_leaderboards(payload, conn=conn)
             except Exception:
-                log.exception("game_mode_context_persist_failed endpoint=%s entity=%s", label, key)
+                log.exception(
+                    "game_mode_context_persist_failed endpoint=%s entity=%s", label, key
+                )
             conn.commit()
             try:
-                db.record_api_payload_sentinel_observations(label, key, payload, conn=conn)
+                db.record_api_payload_sentinel_observations(
+                    label, key, payload, conn=conn
+                )
             except Exception:
                 conn.rollback()
-                log.exception("api_sentinel_observation_failed endpoint=%s entity=%s", label, key)
+                log.exception(
+                    "api_sentinel_observation_failed endpoint=%s entity=%s", label, key
+                )
         finally:
             conn.close()
     except Exception:
         log.exception("raw_payload_persist_failed endpoint=%s entity=%s", label, key)
+
 
 load_dotenv()
 
@@ -163,7 +173,7 @@ def _retry_delay(attempt: int, response: "requests.Response | None") -> float:
             except (TypeError, ValueError):
                 pass
     # 1, 2, 4, 8, … with up to 50% jitter.
-    base = min(_RETRY_BASE_SECONDS * (2 ** attempt), _RETRY_MAX_SECONDS)
+    base = min(_RETRY_BASE_SECONDS * (2**attempt), _RETRY_MAX_SECONDS)
     return base + random.uniform(0, base * 0.5)
 
 
@@ -186,7 +196,10 @@ def _request_json(endpoint_path, *, endpoint_name, entity_key=None):
             if attempt > 0:
                 log.info(
                     "api_retry_success endpoint=%s attempt=%d/%d duration_ms=%.1f",
-                    endpoint_name, attempt + 1, _MAX_RETRIES + 1, _elapsed_ms(started),
+                    endpoint_name,
+                    attempt + 1,
+                    _MAX_RETRIES + 1,
+                    _elapsed_ms(started),
                 )
             payload = response.json()
             _persist_raw_payload(endpoint_name, entity_key, payload)
@@ -194,11 +207,21 @@ def _request_json(endpoint_path, *, endpoint_name, entity_key=None):
         except (requests.ConnectionError, requests.Timeout) as exc:
             last_exc = exc
             status_code = None
-            log.warning("CR API %s on %s (attempt %d/%d): %s",
-                        type(exc).__name__, endpoint_name, attempt + 1, _MAX_RETRIES + 1, exc)
+            log.warning(
+                "CR API %s on %s (attempt %d/%d): %s",
+                type(exc).__name__,
+                endpoint_name,
+                attempt + 1,
+                _MAX_RETRIES + 1,
+                exc,
+            )
             runtime_status.record_api_call(
-                endpoint_name, entity_key, ok=False,
-                status_code=status_code, error=exc, duration_ms=_elapsed_ms(started),
+                endpoint_name,
+                entity_key,
+                ok=False,
+                status_code=status_code,
+                error=exc,
+                duration_ms=_elapsed_ms(started),
             )
             if attempt < _MAX_RETRIES:
                 time.sleep(_retry_delay(attempt, None))
@@ -206,11 +229,21 @@ def _request_json(endpoint_path, *, endpoint_name, entity_key=None):
         except requests.HTTPError as exc:
             last_exc = exc
             status_code = response.status_code if response is not None else None
-            log.warning("CR API HTTP %s on %s (attempt %d/%d): %s",
-                        status_code, endpoint_name, attempt + 1, _MAX_RETRIES + 1, exc)
+            log.warning(
+                "CR API HTTP %s on %s (attempt %d/%d): %s",
+                status_code,
+                endpoint_name,
+                attempt + 1,
+                _MAX_RETRIES + 1,
+                exc,
+            )
             runtime_status.record_api_call(
-                endpoint_name, entity_key, ok=False,
-                status_code=status_code, error=exc, duration_ms=_elapsed_ms(started),
+                endpoint_name,
+                entity_key,
+                ok=False,
+                status_code=status_code,
+                error=exc,
+                duration_ms=_elapsed_ms(started),
             )
             if _is_transient_status(status_code) and attempt < _MAX_RETRIES:
                 time.sleep(_retry_delay(attempt, response))
@@ -219,9 +252,12 @@ def _request_json(endpoint_path, *, endpoint_name, entity_key=None):
         except (requests.RequestException, ValueError) as exc:
             log.warning("CR API error on %s: %s", endpoint_name, exc)
             runtime_status.record_api_call(
-                endpoint_name, entity_key, ok=False,
+                endpoint_name,
+                entity_key,
+                ok=False,
                 status_code=getattr(response, "status_code", None),
-                error=exc, duration_ms=_elapsed_ms(started),
+                error=exc,
+                duration_ms=_elapsed_ms(started),
             )
             raise
     raise last_exc
@@ -248,7 +284,9 @@ def _cached_fetch(endpoint_name, tag, path, ttl_seconds):
 def get_clan():
     """Fetch our clan profile. Returns payload dict or None on error."""
     try:
-        return _request_json(f"/clans/%23{CLAN_TAG}", endpoint_name="clan", entity_key=CLAN_TAG)
+        return _request_json(
+            f"/clans/%23{CLAN_TAG}", endpoint_name="clan", entity_key=CLAN_TAG
+        )
     except (requests.RequestException, ValueError):
         return None
 
@@ -260,7 +298,8 @@ def get_current_war(tag=None):
     """
     clean_tag = _strip_tag(tag) if tag else CLAN_TAG
     return _cached_fetch(
-        "currentriverrace", clean_tag,
+        "currentriverrace",
+        clean_tag,
         f"/clans/%23{clean_tag}/currentriverrace",
         ttl_seconds=90,
     )
@@ -273,7 +312,8 @@ def get_river_race_log(tag=None):
     """
     clean_tag = _strip_tag(tag) if tag else CLAN_TAG
     return _cached_fetch(
-        "riverracelog", clean_tag,
+        "riverracelog",
+        clean_tag,
         f"/clans/%23{clean_tag}/riverracelog",
         ttl_seconds=600,
     )
@@ -283,7 +323,8 @@ def get_player(tag):
     """Fetch individual player profile from CR API."""
     clean_tag = _strip_tag(tag)
     return _cached_fetch(
-        "player", clean_tag,
+        "player",
+        clean_tag,
         f"/players/%23{clean_tag}",
         ttl_seconds=90,
     )
@@ -293,7 +334,8 @@ def get_player_battle_log(tag):
     """Fetch a player's recent battle log."""
     clean_tag = _strip_tag(tag)
     return _cached_fetch(
-        "player_battlelog", clean_tag,
+        "player_battlelog",
+        clean_tag,
         f"/players/%23{clean_tag}/battlelog",
         ttl_seconds=60,
     )
@@ -303,7 +345,8 @@ def get_tournament(tag):
     """Fetch tournament details by tag."""
     clean_tag = _strip_tag(tag)
     return _cached_fetch(
-        "tournament", clean_tag,
+        "tournament",
+        clean_tag,
         f"/tournaments/%23{clean_tag}",
         ttl_seconds=300,
     )
@@ -316,7 +359,8 @@ def get_player_chests(tag):
     """
     clean_tag = _strip_tag(tag)
     payload = _cached_fetch(
-        "player_chests", clean_tag,
+        "player_chests",
+        clean_tag,
         f"/players/%23{clean_tag}/upcomingchests",
         ttl_seconds=300,
     )
@@ -329,7 +373,8 @@ def get_clan_by_tag(tag):
     """Fetch any clan's profile by tag."""
     clean_tag = _strip_tag(tag)
     return _cached_fetch(
-        "clan_by_tag", clean_tag,
+        "clan_by_tag",
+        clean_tag,
         f"/clans/%23{clean_tag}",
         ttl_seconds=120,
     )

@@ -12,6 +12,7 @@ The stored value is the exceptions layer — not a copy of every name. Display
 resolution (stored → callable_name → raw) lives in
 `storage._formatting.preferred_display_name`.
 """
+
 from __future__ import annotations
 
 import logging
@@ -82,9 +83,12 @@ def _llm_nickname(name: str) -> str | None:
     user = f"In-game name: {name!r}\nUnicode codepoints: {codepoints}\nNickname:"
     try:
         resp = _create_chat_completion(
-            workflow="lightweight", system=system,
+            workflow="lightweight",
+            system=system,
             messages=[{"role": "user", "content": user}],
-            temperature=0.3, max_tokens=20, timeout=10,
+            temperature=0.3,
+            max_tokens=20,
+            timeout=10,
         )
         return response_text(resp)
     except Exception:
@@ -111,8 +115,9 @@ def _placeholder(name: str | None) -> str:
     return "Newcomer"
 
 
-def ensure_nickname(conn, tag: str, name: str | None, observed_at: str,
-                    *, llm_fn=None) -> str | None:
+def ensure_nickname(
+    conn, tag: str, name: str | None, observed_at: str, *, llm_fn=None
+) -> str | None:
     """Idempotent first-sight / name-change hook. Guarantees a residual player
     has a stored nickname before any reference; clears a stale generated one if
     the player renames to something readable. Leader overrides are never
@@ -121,7 +126,8 @@ def ensure_nickname(conn, tag: str, name: str | None, observed_at: str,
 
     existing = conn.execute(
         "SELECT preferred_nickname, nickname_source FROM player_metadata "
-        "WHERE player_tag = ?", (tag,),
+        "WHERE player_tag = ?",
+        (tag,),
     ).fetchone()
     cur_nick = existing["preferred_nickname"] if existing else None
     cur_source = existing["nickname_source"] if existing else None
@@ -133,8 +139,9 @@ def ensure_nickname(conn, tag: str, name: str | None, observed_at: str,
         if cur_nick:
             return cur_nick  # already resolved (idempotent)
         nickname, source = generate_nickname(name, llm_fn=llm_fn)
-        set_member_nickname(tag, nickname, source=source, observed_at=observed_at,
-                            conn=conn)
+        set_member_nickname(
+            tag, nickname, source=source, observed_at=observed_at, conn=conn
+        )
         log.info("nickname for %s (%r) -> %r [%s]", tag, name, nickname, source)
         return nickname
 

@@ -52,7 +52,9 @@ async def _alert_admin(content: str, event_type: str, signature: str) -> bool:
         return True
     channel_configs = prompts.discord_channels_by_workflow("clanops")
     if not channel_configs:
-        log.warning("Admin alert skipped (%s): no clanops channel configured", event_type)
+        log.warning(
+            "Admin alert skipped (%s): no clanops channel configured", event_type
+        )
         return False
     channel = runtime_app.bot.get_channel(channel_configs[0]["id"])
     if not channel:
@@ -78,13 +80,13 @@ def _clear_alert(*event_types: str) -> None:
 
 
 def _clear_cr_api_failure_alert_if_recovered() -> None:
-    api = (runtime_status.snapshot().get("api") or {})
+    api = runtime_status.snapshot().get("api") or {}
     if api.get("last_ok") is True:
         _clear_alert("cr_api_auth_failure", "cr_api_outage")
 
 
 def _cr_api_failure_signature() -> str | None:
-    api = (runtime_status.snapshot().get("api") or {})
+    api = runtime_status.snapshot().get("api") or {}
     if api.get("last_ok") is not False:
         return None
     status_code = api.get("last_status_code")
@@ -97,7 +99,7 @@ def _cr_api_failure_signature() -> str | None:
 
 
 def _cr_api_outage_signature() -> str | None:
-    api = (runtime_status.snapshot().get("api") or {})
+    api = runtime_status.snapshot().get("api") or {}
     if api.get("last_ok") is not False:
         return None
     if int(api.get("consecutive_error_count") or 0) < 3:
@@ -158,13 +160,13 @@ def _is_hard_fail_llm_error(error_text: str | None) -> bool:
 
 
 def _clear_llm_failure_alert_if_recovered() -> None:
-    llm = (runtime_status.snapshot().get("llm") or {})
+    llm = runtime_status.snapshot().get("llm") or {}
     if llm.get("last_ok") is True:
         _clear_alert("llm_outage")
 
 
 def _llm_outage_signature() -> str | None:
-    llm = (runtime_status.snapshot().get("llm") or {})
+    llm = runtime_status.snapshot().get("llm") or {}
     if llm.get("last_ok") is not False:
         return None
     consecutive = int(llm.get("consecutive_error_count") or 0)
@@ -206,14 +208,25 @@ def schedule_llm_failure_alert(context: str) -> None:
         )
         return
     try:
-        future = asyncio.run_coroutine_threadsafe(_maybe_alert_llm_failure(context), loop)
+        future = asyncio.run_coroutine_threadsafe(
+            _maybe_alert_llm_failure(context), loop
+        )
     except Exception:
-        log.critical("schedule_llm_failure_alert: scheduling failed; LLM failure during %s will NOT be alerted", context, exc_info=True)
+        log.critical(
+            "schedule_llm_failure_alert: scheduling failed; LLM failure during %s will NOT be alerted",
+            context,
+            exc_info=True,
+        )
         return
 
     def _report_alert_outcome(fut) -> None:
         exc = fut.exception()
         if exc is not None:
-            log.critical("schedule_llm_failure_alert: alert coroutine failed for %s: %s", context, exc, exc_info=exc)
+            log.critical(
+                "schedule_llm_failure_alert: alert coroutine failed for %s: %s",
+                context,
+                exc,
+                exc_info=exc,
+            )
 
     future.add_done_callback(_report_alert_outcome)

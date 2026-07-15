@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from typing import Any, Iterable, Iterator
 
 import db as db_facade
+from capabilities.contracts import MemberIntelligenceResult
 from engine import profiles as profile_engine
 
 CAPABILITY_ID = "member_intelligence"
@@ -87,13 +88,13 @@ def get_member_intelligence(
     event_limit: int = 50,
     source=None,
     conn=None,
-) -> dict:
+) -> MemberIntelligenceResult:
     """Return selected facets under one stable member contract."""
     source = _source(source)
     tag = _tag(player_tag)
     requested = tuple(dict.fromkeys(facets or DEFAULT_FACETS))
     days = max(1, int(days or 30))
-    result: dict = {
+    result: MemberIntelligenceResult = {
         "capability": CAPABILITY_ID,
         "contract_version": CONTRACT_VERSION,
         "player_tag": tag,
@@ -132,7 +133,11 @@ def get_member_intelligence(
         result["loadout"] = {
             "current_deck": _invoke(source, "get_member_current_deck", tag, conn=conn),
             "signature_cards": _invoke(
-                source, "get_member_signature_cards", tag, mode_scope="overall", conn=conn
+                source,
+                "get_member_signature_cards",
+                tag,
+                mode_scope="overall",
+                conn=conn,
             ),
         }
     if "losses" in requested:
