@@ -113,10 +113,10 @@ Requirements:
 
 The current repo already provides useful building blocks:
 
-- `member_daily_metrics` in [db/__init__.py](/Users/jamie/Projects/elixir-bot/db/__init__.py#L608)
-- daily member snapshot writes in [storage/roster.py](/Users/jamie/Projects/elixir-bot/storage/roster.py#L103)
-- raw battle fact storage in [db/__init__.py](/Users/jamie/Projects/elixir-bot/db/__init__.py#L679)
-- battle ingest and mode classification in [storage/player.py](/Users/jamie/Projects/elixir-bot/storage/player.py#L182)
+- `player_daily_metrics` and the other durable rollups in [the v5.1 baseline schema](../../scripts/migrate_v51/schema_v51.py)
+- battle mirroring and mode normalization in [engine/ingest.py](../../engine/ingest.py)
+- event-to-rollup materialization in [engine/projections.py](../../engine/projections.py)
+- query helpers in the [storage package](../../storage/)
 
 This task should extend that foundation instead of replacing it.
 
@@ -609,4 +609,3 @@ Recommended order:
 Do not start with charts.
 
 First make the trend layer trustworthy, queryable, and testable. Charts and richer LLM use should come after the data semantics are stable.
-

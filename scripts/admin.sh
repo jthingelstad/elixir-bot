@@ -59,13 +59,13 @@ install_bot() {
     <key>WorkingDirectory</key>
     <string>$PROJECT_DIR</string>
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>$PROJECT_DIR/logs/elixir.log</string>
+    <string>$PROJECT_DIR/elixir-v5.log</string>
     <key>StandardErrorPath</key>
-    <string>$PROJECT_DIR/logs/elixir.err</string>
+    <string>$PROJECT_DIR/elixir-v5.log</string>
 </dict>
 </plist>
 PLIST
@@ -73,10 +73,11 @@ PLIST
 }
 
 upgrade_bot() {
+    backup_db
     stop_bot
 
     echo "==> Pulling latest from origin..."
-    git pull origin main
+    git pull --ff-only origin main
 
     echo "==> Updating dependencies..."
     source venv/bin/activate

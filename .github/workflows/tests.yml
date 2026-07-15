@@ -22,6 +22,8 @@ jobs:
       - run: pip install -r requirements.lock -r requirements-dev.txt
       - name: Verify dependency lock
         run: python scripts/check_dependency_lock.py
+      - name: Verify documentation
+        run: python scripts/check_docs.py
       - name: Lint
         run: ruff check .
       - name: Tests

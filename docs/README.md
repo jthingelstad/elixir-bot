@@ -1,26 +1,26 @@
-# docs/
+# Documentation
 
-How the documentation here is organized.
-
-| Path | What it holds | Lifecycle |
+| Path | Purpose | Lifecycle |
 |---|---|---|
-| `data-model-erd.md` | The SQLite data-model ERD (member/war/memory graph). | Living reference. |
-| `reference/` | Enduring design docs for systems that are live and ongoing. | Keep current. |
-| `archive/` | Completed work — design plans, runbooks, and analyses for arcs that have shipped. Kept for provenance; not maintained. | Frozen. |
-| `tasks/` | **Active** long-form design docs and the product-team's briefs/reports (Data Analyst, Quality Manager, Product Manager write here). | Churns; graduate to `reference/` when stable, or `archive/` when the arc completes. |
-| `cr-api-docs/` | Vendored Clash Royale API reference (self-contained, own tooling). | External; update via its own flow. |
-| `poap-api-docs/` | Vendored POAP API reference. | External. |
+| `data-model-erd.md` | Current logical map of the v5.1 database. | Living reference. |
+| `reference/` | Enduring system design and operational contracts. | Keep current or label historical sections clearly. |
+| `reference/v5.1/` | The locked v5.1 build specification plus post-cut design addenda. | Preserve the original rationale; `AGENTS.md` wins when later production decisions supersede it. |
+| `tasks/` | Active long-form designs and product-team reports only. | Move completed work to `archive/`. |
+| `archive/` | Shipped plans, point-in-time assessments, and completed reports. | Frozen provenance; links must still resolve. |
+| `cr-api-docs/` | Vendored Clash Royale API reference with its own tooling. | Update through its own workflow. |
+| `poap-api-docs/` | Vendored POAP API reference. | External reference. |
 
-## Current contents
+## Source-of-truth order
 
-**`reference/`** — `v5.1/` (the v5.1 engine build spec, now the stable-system
-reference: architecture, schema, events, recognition, runtime, management,
-migration, plus `open-questions.md` as the decision record — shipped
-2026-07-03/04), `memory-system.md`, `long-term-trend-data.md`,
-`signal-inventory.md`. Note: `signal-inventory.md` and parts of
-`memory-system.md` describe the pre-v5.1 signal system — superseded where
-they conflict with `v5.1/`.
+1. `AGENTS.md` — current architecture and repository rules.
+2. Executable registries and schemas — for example `runtime/activities.py`,
+   `prompts/DISCORD.md`, and `scripts/migrate_v51/schema_v51.py`.
+3. Living documents in `docs/reference/`.
+4. Locked build specs and archived reports for historical reasoning.
 
-**`archive/event-core-v5/`** — the v5 Event Core migration + v4 signal-system teardown (shipped 2026-06): the event-sourcing design plan, architecture-boundary decision, completion roadmap, cutover runbook, remediation plan, review findings, the v4-deletion runbook, the internal-data-subsystem pivot, and the original agentic-awareness-loop vision it replaced.
-
-**`archive/assessments/`** — the point-in-time analyses that motivated v5: data-flow gap, front-end stream-adoption gap, and the confirmed stream-redesign direction.
+The v5.1 specification describes the clean-break migration and the system that
+shipped on 2026-07-03/04. Later changes made the awareness loop the sole
+proactive owner and moved deterministic recognition/delivery to offline-only
+compatibility seams. Current runtime behavior is therefore defined by
+`AGENTS.md`, `engine/tick.py`, and `runtime/activities.py`, even where an older
+section of the locked build spec narrates the original seven-step design.
