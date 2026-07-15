@@ -38,7 +38,7 @@ Rollback before close-out = old git ref + copy the archive back + relaunch.
 - `runtime/clan_chat_copy.py` — Dedicated Clash Royale in-game clan chat copy generation, validation, and fallback guardrails
 - `runtime/channel_router.py` — Discord message routing for interactive channels
 - `storage/`, `agent/`, `runtime/` — Domain-first implementation packages for persistence, LLM behavior, and Discord runtime; root modules remain the stable public API surface
-- Facade discipline: `elixir_agent.py` is an explicit static facade over `agent/` (its import list is the public API; submodules may only reach it via function-level imports). `elixir` is a sys.modules alias for `runtime.app`, whose explicit import blocks declare the runtime surface that tests and `runtime.activities` address by name. No dynamic re-export machinery — if a name should be public, add it to the explicit lists.
+- Facade discipline: `elixir_agent.py`, `agent/tools.py`, and `storage/war.py` are explicit static facades. `db` uses an explicit name→source registry with lazy resolution to avoid its storage import cycle; duplicate declarations fail at import instead of being chosen by order. `elixir` is a sys.modules alias for `runtime.app`, whose explicit import blocks declare the runtime surface that tests and `runtime.activities` address by name. No namespace-copy re-export machinery — if a name should be public, add it to the explicit lists.
 
 ## The Engine (v5.1)
 
@@ -361,8 +361,6 @@ A new clan forks elixir-bot and primarily rewrites `CLAN.md` and `DISCORD.md`, p
 ### Future work
 
 - startup linting for lane config, reply policy, and activity registry consistency outside the bot runtime
-- the intra-package aggregators (`db/__init__.py`, `storage/war.py`, `agent/tools.py`) still use the dynamic `__export_public` copy loop. Converting them to the explicit-facade pattern requires giving each aggregated submodule a real `__all__` first — without that, a static conversion either enshrines junk names (`datetime`, `Optional`) or risks dropping a name that whole-module `db` mocks in tests would never catch.
-- lift the non-strict file-level xfail marks in `tests/` file-by-file as the deferred-pass semantics settle (see the Phase 8 notes in `docs/reference/v5.1/`).
 
 ## Work Tracking
 

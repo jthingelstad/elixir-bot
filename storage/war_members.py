@@ -272,3 +272,13 @@ def get_member_missed_war_days(tag, season_id=None, conn=None):
         "days_missed": len(missed),
         "missed_dates": missed,
     }
+
+
+__all__ = [
+    "get_member_missed_war_days",
+    "get_member_war_attendance",
+    "get_member_war_battle_record",
+    "get_member_war_stats",
+    "get_member_war_status",
+    "member_roster_status",
+]

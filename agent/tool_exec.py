@@ -1692,4 +1692,6 @@ def _execute_tool(name, arguments, workflow=None):
 
 
 
-__all__ = ["_refresh_member_cache", "_resolve_member_tag", "_execute_tool"]
+execute_tool = _execute_tool
+
+__all__ = ["execute_tool"]

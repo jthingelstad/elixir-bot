@@ -157,6 +157,32 @@ def compare_member_war_to_clan_average(tag: str, season_id: Optional[str] = None
     }
 
 
+__all__ = [
+    "ELDER_DONATION_ROLLING_WEEKS",
+    "ELDER_ELIGIBILITY_DEFAULTS",
+    "INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE",
+    "INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT",
+    "LOOSE_MEMBER_COUNT",
+    "TIGHT_MEMBER_COUNT",
+    "compare_fame_per_member_to_previous_season",
+    "compare_member_war_to_clan_average",
+    "get_clan_boat_battle_record",
+    "get_demotion_candidates",
+    "get_members_at_risk",
+    "get_members_without_war_participation",
+    "get_perfect_war_participants",
+    "get_promotion_candidates",
+    "get_recent_role_changes",
+    "get_trending_war_contributors",
+    "get_war_battle_win_rates",
+    "get_war_champ_standings",
+    "get_war_score_trend",
+    "get_war_season_history",
+    "reconstruct_member_war_decks",
+    "war_player_types_by_tag",
+]
+
+
 def _in_game_idle_days(last_seen_api, now: Optional[str] = None) -> Optional[float]:
     """Days since the CR API lastSeen (the in-game 'idle' roster badge). Pure
     awareness — not an engagement signal (architecture §13.6). None if unknown."""

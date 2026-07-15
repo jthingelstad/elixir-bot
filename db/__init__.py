@@ -610,69 +610,444 @@ def managed_connection(fn: Callable) -> Callable:
 # ---------------------------------------------------------------------------
 # Storage facade
 #
-# db re-exports every public storage function so callers can write
-# db.snapshot_members(...) etc. The storage modules are imported lazily, on
-# first attribute access (PEP 562), NOT at import time. This matters: storage
-# modules import db's core helpers above, so an eager import here would make
-# db <-> storage a bidirectional import-time cycle whose behavior depends on
-# which side happens to be imported first (a storage module imported before
-# db would be only partially initialized when __export_public scanned it,
-# silently dropping names from the facade). Lazy loading guarantees every
-# storage module is fully initialized before its names are merged.
+# `db` remains the stable compatibility surface, but every re-export is named
+# here deliberately. Values are resolved lazily so storage modules can keep
+# importing the core connection/helpers above without an import-time cycle.
+# Import order can no longer overwrite a colliding name: duplicate declarations
+# fail immediately while this registry is built.
 # ---------------------------------------------------------------------------
 
-def __export_public(module):
-    names = getattr(module, "__all__", None) or [
-        name for name in vars(module) if not name.startswith("__")
-    ]
-    for name in names:
-        globals()[name] = getattr(module, name)
-    return names
+_FACADE_EXPORT_GROUPS = {
+    "storage.identity": (
+        "build_memory_context",
+        "bump_email_challenge_attempts",
+        "clear_email_challenge",
+        "clear_member_discord_link",
+        "clear_member_email",
+        "format_member_reference",
+        "get_channel_state",
+        "get_database_status",
+        "get_discord_link",
+        "get_email_challenge",
+        "get_linked_member_for_discord_user",
+        "get_member_identity",
+        "get_memory_episodes",
+        "get_system_status",
+        "is_valid_email",
+        "link_discord_user_to_member",
+        "list_member_emails",
+        "save_memory_episode",
+        "set_member_discord_identity",
+        "set_member_email",
+        "upsert_discord_user",
+        "upsert_email_challenge",
+    ),
+    "storage.war_status": (
+        "DAILY_RANK_FAME",
+        "FAME_FINISH_LINE",
+        "FINAL_BATTLE_PERIOD_OFFSET",
+        "FINAL_PRACTICE_PERIOD_OFFSET",
+        "FIRST_BATTLE_PERIOD_OFFSET",
+        "HOME_CLAN",
+        "NORMAL_RIVER_RACE_FINISH_LINE",
+        "build_war_now_context",
+        "count_war_races_for_season",
+        "get_current_season_id",
+        "get_current_war_day_state",
+        "get_current_war_status",
+        "get_latest_clan_boat_defense_status",
+        "get_latest_war_participant_snapshot_observed_at",
+        "get_latest_war_race_finish_time",
+        "get_season_window",
+        "get_trophy_changes",
+        "get_trophy_drops",
+        "get_war_day_state",
+        "get_war_deck_status_today",
+        "get_war_history",
+        "get_war_season_snapshot",
+        "get_war_season_summary",
+        "get_war_week_summary",
+        "get_week_win_streak",
+        "is_colosseum_week_confirmed",
+        "is_war_section_finalized",
+        "list_recent_war_day_summaries",
+    ),
+    "storage.war_members": (
+        "get_member_missed_war_days",
+        "get_member_war_attendance",
+        "get_member_war_battle_record",
+        "get_member_war_stats",
+        "get_member_war_status",
+        "member_roster_status",
+    ),
+    "storage.war_analytics": (
+        "ELDER_DONATION_ROLLING_WEEKS",
+        "INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE",
+        "INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT",
+        "LOOSE_MEMBER_COUNT",
+        "TIGHT_MEMBER_COUNT",
+        "compare_fame_per_member_to_previous_season",
+        "compare_member_war_to_clan_average",
+        "get_clan_boat_battle_record",
+        "get_demotion_candidates",
+        "get_members_at_risk",
+        "get_members_without_war_participation",
+        "get_perfect_war_participants",
+        "get_promotion_candidates",
+        "get_recent_role_changes",
+        "get_trending_war_contributors",
+        "get_war_battle_win_rates",
+        "get_war_champ_standings",
+        "get_war_score_trend",
+        "get_war_season_history",
+        "reconstruct_member_war_decks",
+        "war_player_types_by_tag",
+    ),
+    "storage.roster": (
+        "get_active_roster_map",
+        "get_clan_roster_summary",
+        "get_member_history",
+        "get_member_membership_summary",
+        "get_member_overview",
+        "get_member_profile",
+        "get_member_recent_form",
+        "get_members_on_hot_streak",
+        "get_members_on_losing_streak",
+        "get_weekly_digest_summary",
+        "list_clan_daily_metrics",
+        "list_longest_tenure_members",
+        "list_members",
+        "list_recent_joins",
+        "pick_best_match",
+        "resolve_member",
+        "snapshot_clan_daily_metrics",
+        "snapshot_members",
+    ),
+    "storage.cards": (
+        "KING_TOWER_MAX_LEVEL",
+        "get_clan_favourite_card_counts",
+        "get_clan_most_common_maxed_cards",
+        "get_clan_overlooked_cards",
+        "get_clan_rare_maxed_cards",
+        "get_clan_recently_played_cards",
+        "get_member_card_collection",
+        "get_member_card_profile",
+        "get_member_current_deck",
+        "get_member_signature_cards",
+        "get_members_with_most_level_16_cards",
+        "list_card_owners",
+        "list_current_member_decks",
+        "list_deck_battle_history",
+        "lookup_member_cards",
+    ),
+    "storage.game_modes": (
+        "FRIENDLY_GAME_MODE_IDS",
+        "LADDER_GAME_MODE_IDS",
+        "MODE_GROUPS",
+        "MODE_GROUP_LABELS",
+        "RANKED_GAME_MODE_IDS",
+        "SPECIAL_EVENT_BADGE_CONTEXTS",
+        "TWO_V_TWO_GAME_MODE_IDS",
+        "WAR_GAME_MODE_IDS",
+        "battle_matches_mode",
+        "classify_battle_mode",
+        "classify_progress_key",
+        "mode_group_label",
+        "special_event_badge_names",
+        "special_event_context_for_badge",
+    ),
+    "storage.player": (
+        "BADGE_NAME_OVERRIDES",
+        "CARD_UNLOCK_SIGNAL_RARITIES",
+        "CARD_UPGRADE_SIGNAL_MIN_LEVEL",
+        "GAMES_PER_DAY_WINDOW_DAYS",
+        "MASTERY_BADGE_SIGNAL_MIN_LEVEL",
+        "get_clan_game_mode_summary",
+        "get_clan_mode_top_members",
+        "get_member_mode_activity",
+        "get_member_ranked_status",
+        "get_member_recent_battles",
+        "get_member_recent_losses",
+        "get_member_special_event_activity",
+        "get_player_intel_refresh_targets",
+        "list_clan_daily_battle_rollups",
+        "list_player_daily_battle_rollups",
+        "snapshot_player_battlelog",
+        "snapshot_player_profile",
+    ),
+    "storage.trends": (
+        "build_clan_trend_summary_context",
+        "build_member_trend_summary_context",
+        "compare_clan_trend_windows",
+        "compare_member_trend_windows",
+        "get_clan_daily_battle_summary",
+        "get_clan_member_count_history",
+        "get_clan_score_history",
+        "get_clan_total_member_trophies_history",
+        "get_member_daily_battle_summary",
+        "get_member_trophy_history",
+    ),
+    "storage.messages": (
+        "clear_prompt_feedback",
+        "get_llm_call",
+        "get_message_by_discord_message_id",
+        "get_signal_detector_cursor",
+        "get_signal_outcome",
+        "list_channel_messages",
+        "list_llm_calls",
+        "list_pending_system_signals",
+        "list_prompt_failures",
+        "list_prompt_feedback",
+        "list_prompt_review_items",
+        "list_recent_signal_outcomes",
+        "list_signal_detector_cursors",
+        "list_signal_outcomes",
+        "list_thread_messages",
+        "mark_announcement_sent",
+        "mark_prompt_feedback_retry_invited",
+        "mark_signal_completed",
+        "mark_signal_sent",
+        "mark_system_signal_announced",
+        "purge_old_conversations",
+        "queue_system_signal",
+        "record_awareness_tick",
+        "record_llm_call",
+        "record_prompt_failure",
+        "save_message",
+        "update_message_summary",
+        "upsert_prompt_feedback",
+        "upsert_signal_detector_cursor",
+        "upsert_signal_outcome",
+        "was_announcement_sent",
+        "was_signal_completed",
+        "was_signal_completed_any_date",
+        "was_signal_outcome_delivered",
+        "was_signal_sent",
+        "was_signal_sent_any_date",
+    ),
+    "storage.cases": (
+        "CASE_DEFERRED",
+        "CASE_DISMISSED",
+        "CASE_OPEN",
+        "CASE_RESOLVED",
+        "CASE_TYPES",
+        "backfill_decision_cases_from_leader_actions",
+        "decision_case_snapshot",
+        "expire_departure_verification_cards",
+        "get_communication_trace_for_message",
+        "get_decision_case",
+        "get_decision_case_by_id",
+        "list_decision_cases",
+        "list_due_decision_cases",
+        "list_recent_communication_intents",
+        "raise_departure_verification_cards",
+        "reconcile_departed_member_cases",
+        "reconcile_uncorroborated_member_cases",
+        "resolve_decision_case",
+        "sync_terminal_leader_action_cases",
+        "upsert_decision_case",
+        "upsert_decision_cases_from_signals",
+        "upsert_member_review_case",
+    ),
+    "storage.events_read": (
+        "DETECTION_WINDOWS",
+        "list_events_after_cursors",
+        "list_recent_events",
+        "summarize_battle_modes",
+        "summarize_event_windows",
+    ),
+    "storage.api_sentinel": (
+        "EVENT_SENTINEL_SIGNAL_TYPE",
+        "SCHEMA_SENTINEL_SIGNAL_TYPE",
+        "bootstrap_api_sentinel_baseline",
+        "build_api_sentinel_observations",
+        "list_api_sentinel_observations",
+        "record_api_payload_sentinel_observations",
+    ),
+    "storage.game_mode_contexts": (
+        "list_game_mode_contexts",
+        "upsert_game_mode_contexts_from_events",
+        "upsert_game_mode_contexts_from_leaderboards",
+    ),
+    "storage.metadata": (
+        "backfill_join_dates",
+        "clear_member_birthday",
+        "clear_member_join_date",
+        "clear_member_note",
+        "clear_member_poap_address",
+        "clear_member_profile_url",
+        "clear_member_tenure",
+        "get_birthdays_today",
+        "get_join_anniversaries_today",
+        "get_member_metadata",
+        "get_member_metadata_map",
+        "list_member_metadata_rows",
+        "purge_old_data",
+        "record_join_date",
+        "set_member_birthday",
+        "set_member_generated_profile",
+        "set_member_join_date",
+        "set_member_note",
+        "set_member_poap_address",
+        "set_member_profile_url",
+        "upsert_member_generated_profiles",
+    ),
+    "storage.tournament": (
+        "build_tournament_recap_context",
+        "deck_selection_label",
+        "finalize_tournament",
+        "game_mode_label",
+        "get_active_tournament",
+        "get_recent_tournaments_for_recap",
+        "get_tournament_battles",
+        "get_tournament_by_tag",
+        "get_tournament_card_stats",
+        "get_tournament_participants",
+        "list_pending_tournament_recaps",
+        "poll_tournament",
+        "register_tournament",
+        "store_tournament_battle",
+    ),
+    "storage.card_catalog": (
+        "catalog_count",
+        "get_all_cards",
+        "get_card_by_name",
+        "lookup_cards",
+        "sync_card_catalog",
+    ),
+    "storage.revisits": (
+        "list_due_revisits",
+        "list_pending_revisits",
+        "mark_revisited",
+        "schedule_revisit",
+    ),
+    "storage.awards": (
+        "award_leaderboard",
+        "get_award_races",
+        "get_awards_by_season",
+        "get_iron_king_candidates",
+        "get_member_trophy_case",
+        "get_rookie_mvp_candidates",
+        "get_season_awards_standings",
+        "get_season_donation_leaderboard",
+        "get_war_participant_candidates",
+        "insert_award",
+        "list_awards",
+        "season_final_section_index",
+        "season_is_complete",
+    ),
+    "storage.member_ranks": (
+        "ELDER_ELIGIBILITY_DEFAULTS",
+        "RANK_FIELDS",
+        "compute_member_ranks",
+        "evaluate_elder_eligibility",
+    ),
+    "storage.leader_actions": (
+        "ACTION_DEFERRED",
+        "ACTION_DONE",
+        "ACTION_OUTCOME_DELAY_HOURS",
+        "ACTION_PROPOSED",
+        "ACTION_REJECTED",
+        "LEADER_ACTION_FEEDBACK_EVENT_TYPE",
+        "LEAVE_SOURCE_VERIFIED",
+        "auto_withdraw_leader_actions",
+        "build_leader_action_baseline",
+        "build_leader_action_feedback_synthesis_context",
+        "classify_departure",
+        "clear_leader_action_decision_by_message",
+        "create_leader_action_recommendation",
+        "decide_leader_action",
+        "decide_leader_action_by_message",
+        "evaluate_leader_action",
+        "get_leader_action_by_id",
+        "get_leader_action_by_key",
+        "get_leader_action_by_message",
+        "get_recent_leader_action_for_target",
+        "has_recent_leader_action",
+        "leader_action_board_snapshot",
+        "leader_action_decision_stats",
+        "list_leader_action_feedback_profiles",
+        "list_leader_actions",
+        "record_leader_action_note_by_message",
+        "refresh_due_leader_action_outcomes",
+        "refresh_leader_action_outcome",
+        "update_leader_action_copy_message",
+        "update_leader_action_copy_messages",
+        "update_leader_action_copy_text",
+        "update_leader_action_message",
+        "upsert_leader_action_feedback_profile",
+    ),
+    "storage.improvements": (
+        "SUGGESTION_CATEGORIES",
+        "SUGGESTION_DISMISSED",
+        "SUGGESTION_IMPLEMENTED",
+        "SUGGESTION_PROMOTED",
+        "SUGGESTION_SHADOW",
+        "SUGGESTION_STATUSES",
+        "build_improvement_github_issue_body",
+        "get_improvement_suggestion",
+        "github_labels_for_improvement",
+        "list_improvement_suggestions",
+        "mark_improvement_suggestion_promoted",
+        "suggestion_key_for",
+        "upsert_improvement_suggestion",
+    ),
+    "storage.runtime_status": (
+        "get_awareness_loop_by_number",
+        "list_runtime_job_status",
+        "save_runtime_job_status",
+    ),
+    "storage.screenshot_observations": (
+        "list_arena_relay_screenshot_observations",
+        "save_arena_relay_screenshot_observation",
+    ),
+}
 
 
-_STORAGE_FACADE_MODULES = (
-    # v5.1: storage.projects / storage.decision_cases /
-    # storage.communication_intents / storage.clan_voyages retired with
-    # Gens A–C (schema.md §8, C6); storage.cases carries the decision-case
-    # tool writes onto the renamed columns.
-    "storage.identity",
-    "storage.war",
-    "storage.roster",
-    "storage.cards",
-    "storage.game_modes",
-    "storage.player",
-    "storage.trends",
-    "storage.messages",
-    "storage.cases",
-    "storage.events_read",
-    "storage.api_sentinel",
-    "storage.game_mode_contexts",
-    "storage.metadata",
-    "storage.tournament",
-    "storage.card_catalog",
-    "storage.war_status",
-    "storage.revisits",
-    "storage.awards",
-    "storage.member_ranks",
-    "storage.leader_actions",
-    "storage.improvements",
-    "storage.runtime_status",
-    "storage.screenshot_observations",
-)
+def _build_facade_exports(groups: dict[str, tuple[str, ...]]) -> dict[str, str]:
+    exports: dict[str, str] = {}
+    for module_name, names in groups.items():
+        for name in names:
+            previous = exports.get(name)
+            if previous is not None:
+                raise RuntimeError(
+                    f"db facade export {name!r} declared by both "
+                    f"{previous!r} and {module_name!r}"
+                )
+            exports[name] = module_name
+    return exports
 
+
+_FACADE_EXPORTS = _build_facade_exports(_FACADE_EXPORT_GROUPS)
+_CORE_EXPORTS = {
+    "BATTLE_EVENT_RETENTION_DAYS",
+    "CHICAGO_TZ",
+    "CLAN_EVENT_RETENTION_DAYS",
+    "CONVERSATION_MAX_PER_SCOPE",
+    "CONVERSATION_RETENTION_DAYS",
+    "DB_PATH",
+    "LLM_CALL_RETENTION_DAYS",
+    "LLM_PROMPT_RETENTION_DAYS",
+    "PLAYER_EVENT_RETENTION_DAYS",
+    "RAW_PAYLOAD_RETENTION_DAYS",
+    "TOURNAMENT_RETENTION_DAYS",
+    "WAR_RETENTION_DAYS",
+    "chicago_date_for_cr_timestamp",
+    "chicago_date_for_utc_timestamp",
+    "chicago_day_bounds_utc",
+    "chicago_today",
+    "get_connection",
+    "managed_connection",
+    "set_member_nickname",
+}
+_core_facade_collisions = _CORE_EXPORTS & set(_FACADE_EXPORTS)
+if _core_facade_collisions:
+    raise RuntimeError(
+        "db facade exports collide with core names: "
+        f"{', '.join(sorted(_core_facade_collisions))}"
+    )
+__all__ = sorted(_CORE_EXPORTS | set(_FACADE_EXPORTS))
 _facade_lock = threading.RLock()
-_facade_loaded = False
-
-
-def _load_storage_facade() -> None:
-    global _facade_loaded
-    with _facade_lock:
-        if _facade_loaded:
-            return
-        for module_name in _STORAGE_FACADE_MODULES:
-            __export_public(importlib.import_module(module_name))
-        globals()["__all__"] = [name for name in globals() if not name.startswith("__")]
-        _facade_loaded = True
 
 
 def __getattr__(name):
@@ -682,8 +1057,23 @@ def __getattr__(name):
     # shadows this resolver.
     if name == "DB_PATH":
         return _resolve_db_path()
-    if not _facade_loaded:
-        _load_storage_facade()
-        if name in globals():
-            return globals()[name]
+    module_name = _FACADE_EXPORTS.get(name)
+    if module_name is not None:
+        with _facade_lock:
+            if name in globals():
+                return globals()[name]
+            module = importlib.import_module(module_name)
+            try:
+                value = getattr(module, name)
+            except AttributeError as exc:
+                raise RuntimeError(
+                    f"db facade declares {name!r} from {module_name!r}, but the "
+                    "source module does not define it"
+                ) from exc
+            globals()[name] = value
+            return value
     raise AttributeError(f"module 'db' has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))
