@@ -26,7 +26,9 @@ from datetime import datetime, timedelta, timezone
 import db
 import elixir_agent
 import prompts
+from capabilities import awards as awards_capability
 from capabilities import game_modes as game_mode_capability
+from capabilities import war as war_capability
 from runtime.helpers import _stream_facades as event_facades
 from memory_store import update_memory
 from storage.contextual_memory import upsert_weekly_summary_memory
@@ -120,7 +122,8 @@ def _current_war_week_id(conn=None) -> str | None:
     """Stable week key used by memory filtering. Mirrors the shape written by
     other per-week upserts — ``"<season>:<week>"``."""
     try:
-        state = db.get_current_war_status(conn=conn) or {}
+        war_read = war_capability.get_war_intelligence(source=db, conn=conn)
+        state = war_read.get("current_state") if war_read.get("available") else {}
     except Exception:
         return None
     season = state.get("season_id")
@@ -384,6 +387,42 @@ def _compact_retry_game_modes(snapshot) -> dict:
     }
 
 
+def _compact_retry_award_races(snapshot) -> dict:
+    if not isinstance(snapshot, dict):
+        return {}
+    compact = {
+        key: snapshot.get(key)
+        for key in ("season_id", "war_champ_leader", "free_pass_leader")
+        if key in snapshot
+    }
+    for key in ("war_champ", "free_pass", "iron_king", "rookie_mvp"):
+        rows = snapshot.get(key)
+        if not isinstance(rows, list):
+            continue
+        compact[key] = [
+            {
+                field: row.get(field)
+                for field in (
+                    "rank",
+                    "tag",
+                    "player_tag",
+                    "name",
+                    "member_name",
+                    "points",
+                    "fame",
+                    "decks_used",
+                    "days_participated",
+                    "attendance_rate",
+                    "tied",
+                )
+                if field in row
+            }
+            for row in rows[:5]
+            if isinstance(row, dict)
+        ]
+    return compact
+
+
 def _compact_retry_operations_context(operations_context) -> dict:
     if not isinstance(operations_context, dict):
         return {}
@@ -398,6 +437,10 @@ def _compact_retry_operations_context(operations_context) -> dict:
         ]
     if "war_season" in operations_context:
         compact["war_season"] = _compact_retry_war_season(operations_context.get("war_season"))
+    if "award_races" in operations_context:
+        compact["award_races"] = _compact_retry_award_races(
+            operations_context.get("award_races")
+        )
     if "game_modes" in operations_context:
         compact["game_modes"] = _compact_retry_game_modes(operations_context.get("game_modes"))
     if "season_window" in operations_context:
@@ -588,7 +631,10 @@ def _build_memory_synthesis_context():
     except Exception:
         log.warning("memory synthesis: roster summary load failed", exc_info=True)
     try:
-        clan_state["war"] = db.get_current_war_status()
+        war_read = war_capability.get_war_intelligence(source=db)
+        clan_state["war"] = (
+            war_read.get("current_state") if war_read.get("available") else None
+        )
     except Exception:
         log.warning("memory synthesis: war status load failed", exc_info=True)
 
@@ -605,9 +651,17 @@ def _build_memory_synthesis_context():
     except Exception:
         log.warning("memory synthesis: event stream load failed", exc_info=True)
     try:
-        operations_context["war_season"] = db.get_war_season_snapshot()
+        operations_context["war_season"] = war_capability.get_war_season_view(
+            view="snapshot", source=db
+        )["data"]
     except Exception:
         log.warning("memory synthesis: war season context load failed", exc_info=True)
+    try:
+        operations_context["award_races"] = awards_capability.get_awards_recognition(
+            view="races", limit=10, source=db
+        )["data"]
+    except Exception:
+        log.warning("memory synthesis: award races context load failed", exc_info=True)
     try:
         operations_context["game_modes"] = game_mode_capability.get_clan_game_mode_windows(
             windows=(7, 28)

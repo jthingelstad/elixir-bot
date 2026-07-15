@@ -19,8 +19,11 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 
 import db
+from capabilities import awards as awards_capability
+from capabilities import war as war_capability
 from capabilities import game_modes as game_mode_capability
-from storage import cases, events_read, leader_actions, revisits, war_analytics, war_status
+from capabilities import management as management_capability
+from storage import cases, events_read, leader_actions, revisits
 
 log = logging.getLogger("elixir")
 
@@ -638,8 +641,9 @@ def _management(conn) -> dict:
     """The engine's current promote/demote/kick verdicts — the authoritative
     source for management recommendations (see engine.management). Imported
     lazily to avoid a runtime->engine import at module load."""
-    from engine.management import management_read_summary
-    return management_read_summary(conn)
+    return management_capability.get_management_decisions(
+        view="summary", conn=conn
+    )["data"]
 
 
 def _due_revisits(conn, limit: int = 20) -> list[dict]:
@@ -677,7 +681,10 @@ def build_read(conn=None) -> dict:
             return default
 
     try:
-        war = _load("war_status", lambda: war_status.get_current_war_status(conn=conn), None)
+        war_read = _load(
+            "war_status", lambda: war_capability.get_war_intelligence(conn=conn), {}
+        )
+        war = war_read.get("current_state") if war_read.get("available") else None
 
         pending = _load(
             "event_backlog",
@@ -707,17 +714,28 @@ def build_read(conn=None) -> dict:
             "time": _load("time", lambda: _time_block(conn, war), None),
             "standing": _load("standing", lambda: _standing_block(war), None),
             "war_season": _load(
-                "war_season", lambda: war_status.get_war_season_snapshot(conn=conn), None
+                "war_season",
+                lambda: war_capability.get_war_season_view(
+                    view="snapshot", conn=conn
+                )["data"],
+                None,
             ),
             "award_races": _load(
-                "award_races", lambda: db.get_award_races(conn=conn),
+                "award_races",
+                lambda: awards_capability.get_awards_recognition(
+                    view="races", limit=10, conn=conn
+                )["data"],
                 {"war_champ": [], "iron_king": [], "rookie_mvp": []},
             ),
             # Season-by-season War Champ + free-pass lineage (rolling 6), so a
             # war-week/season recap or a free-pass designation reflects the deep
             # history, not just the current season.
             "war_history": _load(
-                "war_history", lambda: war_analytics.get_war_season_history(conn=conn), None
+                "war_history",
+                lambda: war_capability.get_war_season_view(
+                    view="history", limit=6, conn=conn
+                )["data"],
+                None,
             ),
             "signals_by_lane": signals_by_lane,
             "hard_post_signals": hard_post_signals,

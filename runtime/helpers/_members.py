@@ -2,6 +2,7 @@ import logging
 import re
 
 import db
+from capabilities import members as member_capability
 from storage.roster import _fold_for_search, pick_best_match
 
 log = logging.getLogger("elixir")
@@ -94,7 +95,10 @@ def _build_member_deck_report(member_query: str):
     member, error = _resolve_member_candidate(member_query)
     if error:
         return error
-    deck = db.get_member_current_deck(member["player_tag"])
+    member_read = member_capability.get_member_intelligence(
+        member["player_tag"], facets=("loadout",), source=db
+    )
+    deck = (member_read.get("loadout") or {}).get("current_deck")
     label = member.get("member_ref_with_handle") or member.get("member_ref") or member.get("current_name") or member["player_tag"]
     if not deck or not deck.get("cards"):
         return f"I don't have a stored current deck yet for {label}."

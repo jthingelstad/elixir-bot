@@ -26,7 +26,7 @@ Rollback before close-out = old git ref + copy the archive back + relaunch.
 - `elixir_agent.py` — Stable public LLM entrypoint; routes observation, channel replies, and content generation through the `agent/` package
 - `cr_api.py` — Clash Royale API client (clan roster, war status, river race log). The **only** API ingress; every response is appended to `raw_api_payloads` under its true endpoint name
 - `engine/` — The v5.1 data engine (spec: `docs/reference/v5.1/`): `tick.py` (the five-step production materializer), `clock.py` (war clock), `ingest.py` (battle mirror), `baselines.py` + `emitters/` (state-diff event emission), `change_sets.py` (invariant-checked multi-table transitions), `management.py` (clan-management state machines), `polling.py` (adaptive budget scheduler), `projections.py` (read models), `offline.py` (rehearsal/replay engine — no API, no Discord). `recognition/` + `delivery.py` are retired proactive machinery, reachable only through `legacy_proactive.py` in explicit offline rehearsals.
-- `capabilities/` — Canonical audience-neutral domain answers shared by agent tools, awareness, scheduled reports, memory synthesis, and admin surfaces. Consumers may compact or present these facts differently, but do not recalculate them. `game_modes.py` is the first vertical slice.
+- `capabilities/` — Canonical domain answers shared by agent tools, awareness, scheduled reports, memory synthesis, and admin surfaces. Consumers may compact or present these facts differently, but do not recalculate them. Versioned contracts currently cover `game_modes.py`, `war.py`, `members.py`, `management.py`, and `awards.py`; management answers are explicitly leadership-scoped, while the other contracts are audience-neutral facts.
 - `db/` — SQLite access package: connection discipline, identity helpers, and the storage facade
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
@@ -334,7 +334,7 @@ This keeps feature announcements discoverable: future changes should usually mea
 
 ## Query Layer (Current)
 
-Elixir’s core member/leader questions should be answered from structured capabilities, query helpers, and tools, not prompt reconstruction. Shared domain answers live in `capabilities/`; LLM tools are adapters over those contracts rather than their sole owners. The first slice, `capabilities/game_modes.py`, feeds `get_clan_game_modes`, the awareness mode pulse, weekly recap, memory synthesis, and Elixir-state game-mode views from one versioned contract.
+Elixir’s core member/leader questions should be answered from structured capabilities, query helpers, and tools, not prompt reconstruction. Shared domain answers live in `capabilities/`; LLM tools are adapters over those contracts rather than their sole owners. The versioned capability layer covers clan game modes, live/season war intelligence, facet-based member intelligence, authoritative management decisions, and provisional-versus-durable awards. These contracts feed tools, awareness, reports, memory synthesis, and admin/Observatory reads. External API refresh remains outside member capabilities, and management capabilities package the engine verdict without rescoring it.
 
 The LLM has a set of domain-aligned tools (defined in `agent/tool_defs.py`) organized into five groups:
 

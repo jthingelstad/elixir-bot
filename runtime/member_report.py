@@ -14,8 +14,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import db
+from capabilities import members as member_capability
 from engine.normalize import humanize_badge, humanize_game_mode
-from engine.profiles import MODE_DISPLAY, player_mode_profile, playstyle_line
+from engine.profiles import MODE_DISPLAY, playstyle_line
 from storage import game_events
 from storage._formatting import preferred_display_name
 
@@ -139,8 +140,14 @@ def build_member_report_context(tag: str, name: str, *, days: int = 7,
         cutoff_c = _cutoff_compact(days, now)    # compact — for battle_events.battle_time
         prev_c = _cutoff_compact(days * 2, now)
 
-        profile = db.get_member_profile(tag, conn=conn) or {}
-        mode_profile = player_mode_profile(conn, tag, days=28)
+        member_read = member_capability.get_member_intelligence(
+            tag,
+            facets=("profile", "playstyle", "war"),
+            days=28,
+            conn=conn,
+        )
+        profile = member_read.get("profile") or {}
+        mode_profile = member_read.get("playstyle") or {}
 
         battles = _window_battles(conn, tag, cutoff_c)
         tally = _battle_tally(battles)
@@ -172,11 +179,7 @@ def build_member_report_context(tag: str, name: str, *, days: int = 7,
                 other.append({"event_type": et, "payload": payload,
                               "observed_at": e.get("observed_at")})
 
-        try:
-            from storage.war_members import get_member_war_attendance
-            war = get_member_war_attendance(tag, conn=conn)
-        except Exception:
-            war = None
+        war = member_read.get("war")
 
         stream = game_events.recent_game_events(conn, days=days, now=now)
         new_cards = [s["payload"] for s in stream if s["event_type"] == "card_added"]

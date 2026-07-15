@@ -5,7 +5,11 @@ import cr_api
 
 from agent.core import log
 from agent.cr_api_tool import _execute_cr_api
+from capabilities import awards as awards_capability
 from capabilities import game_modes as game_mode_capability
+from capabilities import management as management_capability
+from capabilities import members as member_capability
+from capabilities import war as war_capability
 from storage import events_read as event_facades
 
 
@@ -328,47 +332,55 @@ def _execute_get_member(arguments, workflow=None):
     needs_battles = any(a in include for a in ("form", "deck", "war", "battles"))
     _refresh_member_cache(member_tag, include_battles=needs_battles)
 
+    facets = {
+        item
+        for item in include
+        if item in {
+            "profile", "form", "war", "trend", "losses", "battles",
+            "history", "ranked", "mode_activity", "awards",
+        }
+    }
+    if "profile" in include or "form" in include:
+        facets.add("playstyle")
+    if "deck" in include:
+        facets.add("loadout")
+    member_read = member_capability.get_member_intelligence(
+        member_tag,
+        facets=sorted(facets),
+        days=days,
+        scope=scope,
+        battles_scope=arguments.get("battles_scope", "overall_10"),
+        battles_limit=arguments.get("battles_limit", 10),
+        losses_limit=arguments.get("losses_limit", 30),
+        source=db,
+    )
     result = {}
 
     if "profile" in include:
-        result["profile"] = _enrich_member_profile(db.get_member_profile(member_tag))
+        result["profile"] = _enrich_member_profile(member_read.get("profile"))
 
     if "form" in include:
-        result["form"] = db.get_member_recent_form(member_tag, scope=scope)
+        result["form"] = member_read.get("form")
 
     if "profile" in include or "form" in include:
-        # Deterministic mode-mix identity (engine/profiles) — grounded
-        # personality facts; the battery showed member answers never
-        # mentioned Ranked identities without this (cases 26/30).
-        try:
-            from engine import profiles as _profiles
-
-            conn = db.get_connection()
-            try:
-                result["playstyle"] = _profiles.player_mode_profile(conn, member_tag)
-            finally:
-                conn.close()
-        except Exception:
-            pass
+        if member_read.get("playstyle") is not None:
+            result["playstyle"] = member_read["playstyle"]
 
     if "war" in include:
-        result["war"] = db.get_member_war_status(member_tag, season_id=None)
+        result["war"] = member_read.get("war")
 
     if "trend" in include:
-        result["trend"] = db.build_member_trend_summary_context(
-            member_tag, days=days, window_days=min(days // 4, 7) or 7,
-        )
+        result["trend"] = member_read.get("trend")
 
     if "deck" in include:
-        current_deck = db.get_member_current_deck(member_tag)
+        loadout = member_read.get("loadout") or {}
+        current_deck = loadout.get("current_deck")
         if isinstance(current_deck, dict):
             current_deck = dict(current_deck)
             current_deck["cards"] = _slim_card_list(current_deck.get("cards"))
             current_deck["support_cards"] = _slim_card_list(current_deck.get("support_cards"))
         result["current_deck"] = current_deck
-        result["signature_cards"] = db.get_member_signature_cards(
-            member_tag, mode_scope="overall",
-        )
+        result["signature_cards"] = loadout.get("signature_cards")
 
     if "cards" in include:
         result["card_collection"] = {
@@ -381,27 +393,19 @@ def _execute_get_member(arguments, workflow=None):
         }
 
     if "losses" in include:
-        result["losses"] = db.get_member_recent_losses(
-            member_tag,
-            scope=scope,
-            limit=arguments.get("losses_limit", 30),
-        )
+        result["losses"] = member_read.get("losses")
 
     if "battles" in include:
-        result["battles"] = db.get_member_recent_battles(
-            member_tag,
-            scope=arguments.get("battles_scope", "overall_10"),
-            limit=arguments.get("battles_limit", 10),
-        )
+        result["battles"] = member_read.get("battles")
 
     if "history" in include:
-        result["history"] = db.get_member_history(member_tag, days=days)
+        result["history"] = member_read.get("history")
 
     if "ranked" in include:
-        result["ranked"] = db.get_member_ranked_status(member_tag, days=days)
+        result["ranked"] = member_read.get("ranked")
 
     if "mode_activity" in include:
-        result["mode_activity"] = db.get_member_mode_activity(member_tag, days=days)
+        result["mode_activity"] = member_read.get("mode_activity")
 
     if "memories" in include:
         from memory_store import list_memories
@@ -434,7 +438,7 @@ def _execute_get_member(arguments, workflow=None):
         result["chests"] = cr_api.get_player_chests(member_tag)
 
     if "awards" in include:
-        result["awards"] = db.get_member_trophy_case(member_tag)
+        result["awards"] = member_read.get("awards")
 
     return result
 
@@ -449,67 +453,32 @@ def _execute_get_awards(arguments):
     limit = arguments.get("limit")
 
     if mode == "current_standings":
-        target_season = int(season_id) if season_id is not None else None
-        standings = db.get_season_awards_standings(season_id=target_season)
-        if isinstance(standings, dict):
-            standings = dict(standings)
-            standings["freshness"] = _war_standings_freshness(target_season)
-            # QA M26: these are LIVE in-progress standings. The durable awards
-            # ledger (mode='list') is written only at season close, so list()
-            # can show 0 for an active season — not a contradiction.
-            standings["provisional"] = True
-            standings["source_note"] = (
-                "live in-progress standings; awards are committed to the ledger "
-                "(mode='list') only when the season closes."
-            )
-        return standings
+        return awards_capability.get_awards_recognition(
+            view="current_standings", season_id=season_id, source=db
+        )["data"]
 
     if mode == "leaderboard":
         if not award_type:
             raise ValueError("get_awards(mode='leaderboard') requires award_type")
-        results = db.award_leaderboard(
+        return awards_capability.get_awards_recognition(
+            view="leaderboard",
             award_type=award_type,
-            rank=int(rank) if rank is not None else None,
-            limit=int(limit) if limit is not None else 20,
-        )
-        return {
-            "mode": "leaderboard",
-            "filters": {
-                "award_type": award_type,
-                "rank": int(rank) if rank is not None else None,
-            },
-            "count": len(results),
-            "results": results,
-        }
+            rank=rank,
+            limit=limit,
+            source=db,
+        )["data"]
 
     member_tag = arguments.get("member_tag")
     resolved_tag = _resolve_member_tag(member_tag) if member_tag else None
-    results = db.list_awards(
+    return awards_capability.get_awards_recognition(
+        view="list",
         award_type=award_type,
-        season_id=int(season_id) if season_id is not None else None,
-        rank=int(rank) if rank is not None else None,
+        season_id=season_id,
+        rank=rank,
         member_tag=resolved_tag,
-        limit=int(limit) if limit is not None else 100,
-    )
-    cap = int(limit) if limit is not None else 100
-    return {
-        "mode": "list",
-        "filters": {
-            "member_tag": resolved_tag,
-            "award_type": award_type,
-            "season_id": int(season_id) if season_id is not None else None,
-            "rank": int(rank) if rank is not None else None,
-        },
-        "count": len(results),
-        # QA L25: a capped result reads as complete without this.
-        "truncated": len(results) >= cap,
-        # QA M27: season_id is overloaded — war seasons are small integers
-        # (e.g. 129-134); Path-of-Legends champ awards use a YYYYMM month
-        # (e.g. 202606). Filtering by a war integer silently excludes pol awards
-        # for the same period.
-        "season_id_note": "season_id mixes war-season integers (129-134) and Path-of-Legends YYYYMM months (e.g. 202606); a war-integer filter excludes pol awards.",
-        "results": results,
-    }
+        limit=limit,
+        source=db,
+    )["data"]
 
 
 def _execute_get_member_war_detail(arguments):
@@ -545,212 +514,82 @@ def _execute_get_member_war_detail(arguments):
 
 # ── River Race domain execution ────────────────────────────────────────────
 
-def _compact_deck_row(member: dict) -> dict:
-    """Slim a war-day participant to identity + deck/points counts for the
-    get_river_race engagement tool. The full member-reference dict (donation
-    ranks, elder flags, war_points_rank, etc.) is irrelevant to 'who has decks
-    left today' and, times ~50 members, overflowed the tool-result char cap."""
-    return {
-        "member_ref": member.get("member_ref") or member.get("name"),
-        "tag": member.get("tag"),
-        "decks_used_today": member.get("decks_used_today"),
-        "decks_used_total": member.get("decks_used_total"),
-        "points_today": member.get("points_today"),
-    }
-
-
-def _remaining_deck_participant_summary(day_state: dict) -> dict:
-    total_participants = int(day_state.get("total_participants") or 0)
-    finished_count = int(day_state.get("finished_count") or 0)
-    untouched_count = int(day_state.get("untouched_count") or 0)
-
-    used_some = day_state.get("used_some")
-    if isinstance(used_some, list):
-        partial_count = len(used_some)
-    else:
-        partial_count = max(0, total_participants - finished_count - untouched_count)
-
-    participants_with_decks_left = max(0, total_participants - finished_count)
-    if partial_count + untouched_count != participants_with_decks_left:
-        partial_count = max(0, participants_with_decks_left - untouched_count)
-
-    return {
-        "total": participants_with_decks_left,
-        "partial": partial_count,
-        "untouched": untouched_count,
-        "finished": finished_count,
-        "total_participants": total_participants,
-        "count_source": "used_some + used_none",
-        "summary": (
-            f"{participants_with_decks_left} participants have decks left today: "
-            f"{untouched_count} untouched, {partial_count} partial."
-        ),
-    }
-
 
 def _execute_get_river_race(arguments):
     """Execute the consolidated get_river_race tool."""
     aspect = arguments.get("aspect", "standings")
+    snapshot = war_capability.get_war_intelligence(source=db)
 
     if aspect == "standings":
-        war_status = db.get_current_war_status()
-        if not isinstance(war_status, dict):
+        if not snapshot.get("available"):
             return {"error": "No active war data available."}
-        # Two separate races, never coalesced (see storage/war_status.py):
-        #  - race_standings (by fame) = the WEEKLY boat race that decides the week
-        #  - day_standings (by period_points) = TODAY's race, resets each day
-        # Compare within one race only; never a clan's period points vs another's
-        # fame. primary_metric names which race decides this week.
+        weekly = snapshot["weekly_race"]
+        daily = snapshot["daily_race"]
+        projection = snapshot["projection"]
+        period = snapshot["period"]
         return {
-            "primary_metric": war_status.get("primary_metric"),
-            "race_standings": war_status.get("race_standings", []),
-            "race_rank": war_status.get("race_rank"),
-            "finish_line": war_status.get("finish_line"),
-            "boat_scored": war_status.get("boat_scored"),
-            "day_standings": war_status.get("day_standings", []),
-            "day_rank": war_status.get("day_rank"),
-            "day_scored": war_status.get("day_scored"),
-            "period_points": war_status.get("period_points"),
-            "projected_day_fame": war_status.get("projected_day_fame"),
-            # Boat defenses add fame too (from the API's periodLogs) — fold them
-            # into "will we finish today". clinches_finish_today = we cross the
-            # finish line at today's close (winning the week early) if this rank +
-            # defenses hold.
-            "projected_defense_fame": war_status.get("projected_defense_fame"),
-            "projected_fame_at_close": war_status.get("projected_fame_at_close"),
-            "defenses_remaining": war_status.get("defenses_remaining"),
-            "clinches_finish_today": war_status.get("clinches_finish_today"),
-            "season_week_label": war_status.get("season_week_label"),
-            "is_colosseum_week": db.is_colosseum_week_confirmed(
-                war_status.get("period_type"),
-                war_status.get("trophy_change"),
-                trophy_stakes_known=bool(war_status.get("trophy_stakes_known")),
-            ),
-            "is_final_battle_day": bool(war_status.get("final_battle_day_active")),
-            "is_final_practice_day": bool(war_status.get("final_practice_day_active")),
-            "trophy_stakes_text": war_status.get("trophy_stakes_text"),
-            # QA M7: freshness — the race baseline is polled, not live-to-the-second.
-            "observed_at": war_status.get("observed_at"),
+            "primary_metric": projection.get("primary_metric"),
+            "race_standings": weekly.get("standings") or [],
+            "race_rank": weekly.get("rank"),
+            "finish_line": weekly.get("finish_line"),
+            "boat_scored": weekly.get("scored"),
+            "day_standings": daily.get("standings") or [],
+            "day_rank": daily.get("rank"),
+            "day_scored": daily.get("scored"),
+            "period_points": daily.get("period_points"),
+            "projected_day_fame": projection.get("projected_day_fame"),
+            "projected_defense_fame": projection.get("projected_defense_fame"),
+            "projected_fame_at_close": projection.get("projected_fame_at_close"),
+            "defenses_remaining": projection.get("defenses_remaining"),
+            "clinches_finish_today": projection.get("clinches_finish_today"),
+            "season_week_label": period.get("season_week_label"),
+            "is_colosseum_week": period.get("is_colosseum_week"),
+            "is_final_battle_day": period.get("is_final_battle_day"),
+            "is_final_practice_day": period.get("is_final_practice_day"),
+            "trophy_stakes_text": period.get("trophy_stakes_text"),
+            "observed_at": snapshot.get("observed_at"),
         }
 
     if aspect == "engagement":
         from agent.war_render import render_war_now
 
-        data = db.build_war_now_context()
-        if not data:
+        if not snapshot.get("available"):
             return {"error": "No active war data available."}
-        # Render the war-now prose at the agent boundary (storage returns data
-        # only). Surfaced to the brain as the ``now_text`` field, as before.
+        data = dict(snapshot.get("clock") or {})
         data["now_text"] = render_war_now(data)
-        day_state = db.get_current_war_day_state() or {}
-        remaining_deck_participants = _remaining_deck_participant_summary(day_state)
+        engagement = snapshot.get("engagement") or {}
+        remaining = engagement.get("remaining_decks") or {}
+
+        def _legacy_member(member):
+            return {
+                "member_ref": member.get("member_ref"),
+                "tag": member.get("player_tag"),
+                "decks_used_today": member.get("decks_used_today"),
+                "decks_used_total": member.get("decks_used_total"),
+                "points_today": member.get("points_today"),
+            }
+
         data.update({
-            "war_day_key": day_state.get("war_day_key"),
-            "observed_at": day_state.get("observed_at"),  # QA M7: freshness anchor
-            "clan_fame": day_state.get("clan_fame"),          # WEEKLY boat fame (cumulative)
-            "clan_period_points": day_state.get("period_points"),  # TODAY's points (resets daily)
-            "day_rank": day_state.get("day_rank"),
-            "total_participants": day_state.get("total_participants"),
-            "engaged_count": day_state.get("engaged_count"),
-            "finished_count": day_state.get("finished_count"),
-            "untouched_count": day_state.get("untouched_count"),
-            "partial_deck_participant_count": remaining_deck_participants["partial"],
-            "participants_with_decks_left_count": remaining_deck_participants["total"],
-            "remaining_deck_participants": remaining_deck_participants,
-            # Members contribute POINTS, not fame (fame is clan-only); top_points_total
-            # is each member's cumulative season points. The season points leader is
-            # the War Champ. decks_used_today is the daily signal.
-            "top_points_total": day_state.get("top_points_total"),
-            # Deck-usage rosters are slimmed to identity + deck/points counts: the
-            # full member-reference dict (donation ranks, elder flags, etc.) blew
-            # the 20K tool-result cap and dropped used_none (the no-show list the
-            # brain needs). The brain drills into a member via get_member if needed.
-            "used_all_4": [_compact_deck_row(m) for m in (day_state.get("used_all_4") or [])],
-            "used_some": [_compact_deck_row(m) for m in (day_state.get("used_some") or [])],
-            "used_none": [_compact_deck_row(m) for m in (day_state.get("used_none") or [])],
+            "war_day_key": engagement.get("war_day_key"),
+            "observed_at": engagement.get("observed_at"),
+            "clan_fame": engagement.get("clan_fame"),
+            "clan_period_points": engagement.get("clan_period_points"),
+            "day_rank": engagement.get("day_rank"),
+            "total_participants": engagement.get("total_participants"),
+            "engaged_count": engagement.get("engaged_count"),
+            "finished_count": engagement.get("finished_count"),
+            "untouched_count": engagement.get("untouched_count"),
+            "partial_deck_participant_count": remaining.get("partial"),
+            "participants_with_decks_left_count": remaining.get("total"),
+            "remaining_deck_participants": remaining,
+            "top_points_total": engagement.get("top_points_total"),
+            "used_all_4": [_legacy_member(m) for m in engagement.get("used_all_4") or []],
+            "used_some": [_legacy_member(m) for m in engagement.get("used_some") or []],
+            "used_none": [_legacy_member(m) for m in engagement.get("used_none") or []],
         })
         return data
 
     return {"error": f"Unknown aspect: {aspect}"}
-
-
-def _war_standings_freshness(season_id=None):
-    """Snapshot timestamp and section-finalization summary for live standings.
-
-    Returns a dict the agent can quote to players (`as_of`,
-    `current_week_included`, `current_week_war_day_key`, `finalized_races`).
-    Falls back gracefully when no live war is active.
-    """
-    state = db.get_current_war_day_state() or {}
-    state_season = state.get("season_id")
-    target_season = season_id if season_id is not None else state_season
-    war_day_key = state.get("war_day_key")
-    section_index = state.get("section_index")
-
-    finalized_races = 0
-    current_section_finalized = False
-    if target_season is not None:
-        finalized_races = db.count_war_races_for_season(int(target_season)) or 0
-        if section_index is not None:
-            current_section_finalized = db.is_war_section_finalized(
-                int(target_season), int(section_index)
-            )
-
-    current_week_included = bool(
-        war_day_key
-        and section_index is not None
-        and state_season == target_season
-        and not current_section_finalized
-    )
-    as_of = None
-    if current_week_included and war_day_key:
-        as_of = db.get_latest_war_participant_snapshot_observed_at(war_day_key)
-    if not as_of:
-        as_of = db.get_latest_war_race_finish_time(int(target_season)) if target_season is not None else None
-
-    return {
-        "as_of": as_of,
-        "current_week_included": current_week_included,
-        "current_week_war_day_key": war_day_key if current_week_included else None,
-        "current_week_section_index": section_index if current_week_included else None,
-        "finalized_races": finalized_races,
-        "narration_hint": (
-            "Quote `as_of` when answering 'right now' questions so players see how fresh the read is. "
-            "If `current_week_included` is true, today's battles are included; if false, the response covers only finalized weeks."
-        ),
-    }
-
-
-def _current_week_war_top(limit: int = 10) -> list[dict]:
-    """Per-member points for the CURRENT war section (this week), active members.
-    Fail-open: any error returns [] (the summary is still useful without it)."""
-    try:
-        conn = _facade_db().get_connection()
-    except Exception:
-        return []
-    try:
-        row = conn.execute(
-            "SELECT season_id, MAX(section_index) AS section FROM war_participation "
-            "WHERE season_id = (SELECT MAX(season_id) FROM war_participation) "
-            "GROUP BY season_id"
-        ).fetchone()
-        if not row:
-            return []
-        rows = conn.execute(
-            """SELECT COALESCE(p.display_name, p.current_name) AS name, wp.fame AS points, wp.decks_used
-               FROM war_participation wp
-               JOIN players p ON p.player_tag = wp.player_tag
-               JOIN clan_memberships cm ON cm.player_tag = wp.player_tag
-                    AND cm.left_at IS NULL
-               WHERE wp.season_id = ? AND wp.section_index = ?
-               ORDER BY wp.fame DESC LIMIT ?""",
-            (row["season_id"], row["section"], limit),
-        ).fetchall()
-        return [dict(r) for r in rows]
-    except Exception:
-        return []
-    finally:
-        conn.close()
 
 
 def _execute_get_war_season(arguments):
@@ -759,62 +598,17 @@ def _execute_get_war_season(arguments):
     season_id = arguments.get("season_id")
     limit = arguments.get("limit", 10)
 
-    if aspect == "summary":
-        result = db.get_war_season_summary(season_id=season_id, top_n=limit)
-        # "top contributors THIS WEEK" needs the current section's per-member
-        # points, not season cumulative (rehearsal 2026-07-04: the model answered
-        # season totals to a this-week question because only those existed).
-        if isinstance(result, dict) and not season_id:
-            result["current_week_top"] = _current_week_war_top(limit)
-        return result
-    elif aspect == "standings":
-        # "fame" is accepted as a back-compat alias for the per-member points metric.
-        metric = arguments.get("metric", "points")
-        if metric in ("points", "fame"):
-            members = db.get_war_champ_standings(season_id=season_id)
-            _enrich_war_player_types(members)
-            rookie_mvps = db.get_rookie_mvp_candidates(season_id=season_id, limit=3)
-            return {
-                "season_id": season_id,
-                "metric": "points",
-                "freshness": _war_standings_freshness(season_id),
-                "members": members,
-                "rookie_mvps": rookie_mvps,
-            }
-        elif metric == "win_rate":
-            raw = db.get_war_battle_win_rates(
-                season_id=season_id, limit=limit, min_battles=4,
-            )
-        elif metric == "attendance":
-            raw = db.get_members_without_war_participation(season_id=season_id)
-        else:
-            return {"error": f"Unknown metric: {metric}"}
-        if isinstance(raw, dict):
-            members = (
-                raw.get("members") or raw.get("standings") or raw.get("results") or []
-            )
-            _enrich_war_player_types(members)
-        return raw
-    elif aspect == "win_rates":
-        return db.get_war_battle_win_rates(
-            season_id=season_id, limit=limit, min_battles=4,
-        )
-    elif aspect == "boat_battles":
-        return db.get_clan_boat_battle_record(weeks=3)
-    elif aspect == "score_trend":
-        return db.get_war_score_trend(days=30)
-    elif aspect == "season_comparison":
-        return db.compare_fame_per_member_to_previous_season(season_id=season_id)
-    elif aspect == "trending":
-        return db.get_trending_war_contributors(
-            season_id=season_id, recent_races=2, limit=limit,
-        )
-    elif aspect == "perfect_attendance":
-        return db.get_perfect_war_participants(season_id=season_id)
-    elif aspect == "no_participation":
-        return db.get_members_without_war_participation(season_id=season_id)
-    else:
-        return {"error": f"Unknown aspect: {aspect}"}
+    result = war_capability.get_war_season_view(
+        view=aspect,
+        season_id=season_id,
+        metric=arguments.get("metric", "points"),
+        limit=limit,
+        source=db,
+    )["data"]
+    if aspect == "standings" and isinstance(result, dict):
+        members = result.get("members") or result.get("standings") or result.get("results") or []
+        _enrich_war_player_types(members)
+    return result
 
 
 # ── Clan domain execution ─────────────────────────────────────────────────
@@ -924,13 +718,9 @@ def _execute_get_clan_health(arguments, workflow=None):
         return {"error": f"The '{aspect}' analysis is only available in leadership channels."}
 
     if aspect == "at_risk":
-        return db.get_members_at_risk(
-            inactivity_days=arguments.get("inactivity_days", 7),
-            min_donations_week=arguments.get("min_donations_week", 20),
-            require_war_participation=False,
-            min_war_races=1,
-            season_id=arguments.get("season_id"),
-        )
+        return management_capability.get_management_decisions(
+            view="at_risk", arguments=arguments, source=db
+        )["data"]
     elif aspect == "hot_streaks":
         return db.get_members_on_hot_streak(
             min_streak=arguments.get("min_streak", 4),
@@ -947,7 +737,9 @@ def _execute_get_clan_health(arguments, workflow=None):
             min_drop=arguments.get("min_drop", 100),
         )
     elif aspect == "promotion_candidates":
-        return db.get_promotion_candidates()
+        return management_capability.get_management_decisions(
+            view="promotion_candidates", source=db
+        )["data"]
     else:
         return {"error": f"Unknown aspect: {aspect}"}
 
@@ -1193,7 +985,11 @@ def _execute_get_elixir_state(arguments, workflow=None):
         return leadership_error
 
     if aspect == "war_season":
-        return {"war_season": db.get_war_season_snapshot()}
+        return {
+            "war_season": war_capability.get_war_season_view(
+                view="snapshot", source=db
+            )["data"]
+        }
 
     if aspect == "decision_cases":
         status = (arguments.get("status") or "").strip()
@@ -1244,7 +1040,9 @@ def _execute_get_elixir_state(arguments, workflow=None):
             "event_windows": event_facades.summarize_event_windows(windows=_ELIXIR_STATE_WINDOWS, scope=None),
             "recent_events": event_facades.list_recent_events(days=7, limit=10),
             "game_modes": game_mode_capability.get_clan_game_mode_windows(windows=(7,)),
-            "war_season": db.get_war_season_snapshot(),
+            "war_season": war_capability.get_war_season_view(
+                view="snapshot", source=db
+            )["data"],
             "decision_cases": db.decision_case_snapshot(
                 open_limit=case_limit, due_limit=case_limit, dedupe=True
             ),

@@ -3,6 +3,8 @@ import re
 import sqlite3
 
 import db
+from capabilities import members as member_capability
+from capabilities import war as war_capability
 from anthropic import APIError, APIConnectionError
 
 from agent.core import (
@@ -59,7 +61,8 @@ def _war_status_prompt_context():
     from agent.war_render import render_war_now
 
     try:
-        data = db.build_war_now_context()
+        snapshot = war_capability.get_war_intelligence(source=db)
+        data = snapshot.get("clock") if snapshot.get("available") else None
     except Exception as exc:
         log.warning("War status context unavailable: %s", exc)
         return ""
@@ -285,7 +288,9 @@ def _promotion_context(clan_data, war_data, roster_data=None):
                 lines.append(line)
 
     try:
-        season_summary = db.get_war_season_summary(top_n=5)
+        season_summary = war_capability.get_war_season_view(
+            view="summary", limit=5, source=db
+        )["data"]
     except sqlite3.Error:
         season_summary = None
     if season_summary:
@@ -703,7 +708,14 @@ def respond_in_deck_review(question, author_name, channel_name, *, mode, subject
     # elixir costs it could have had for free.
     if mode == "regular" and target_member_tag and subject == "review":
         try:
-            current_deck = db.get_member_current_deck(target_member_tag)
+            current_deck = (
+                member_capability.get_member_intelligence(
+                    target_member_tag,
+                    facets=("loadout",),
+                    source=db,
+                ).get("loadout")
+                or {}
+            ).get("current_deck")
         except Exception as exc:
             log.warning("current_deck pre-fetch failed for %s: %s", target_member_tag, exc)
             current_deck = None
@@ -1244,7 +1256,9 @@ def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_co
     )
     our_state_lines = []
     try:
-        snapshot = db.get_war_season_snapshot()
+        snapshot = war_capability.get_war_season_view(
+            view="snapshot", source=db
+        )["data"]
         if snapshot:
             state = snapshot.get("state") or {}
             health = state.get("participation_health") or {}

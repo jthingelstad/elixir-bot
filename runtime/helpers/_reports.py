@@ -6,7 +6,10 @@ from datetime import datetime, timezone
 import cr_api
 import db
 import elixir_agent
+from capabilities import awards as awards_capability
 from capabilities import game_modes as game_mode_capability
+from capabilities import management as management_capability
+from capabilities import war as war_capability
 from runtime.helpers import _stream_facades as event_facades
 from memory_store import list_memories
 from runtime import status as runtime_status
@@ -60,11 +63,15 @@ def _build_roster_join_dates_report():
 
 
 def _build_kick_risk_report():
-    risk = db.get_members_at_risk(
-        inactivity_days=7,
-        min_donations_week=0,
-        require_war_participation=False,
-    )
+    risk = management_capability.get_management_decisions(
+        view="at_risk",
+        arguments={
+            "inactivity_days": 7,
+            "min_donations_week": 0,
+            "require_war_participation": False,
+        },
+        source=db,
+    )["data"]
     members = (risk or {}).get("members") or []
     lines = ["**Kick Risk (Inactive 7+ Days)**"]
     if not members:
@@ -83,7 +90,9 @@ def _build_kick_risk_report():
 
 
 def _build_top_war_contributors_report(limit=5):
-    summary = db.get_war_season_summary(top_n=limit)
+    summary = war_capability.get_war_season_view(
+        view="summary", limit=limit, source=db
+    )["data"]
     if not summary:
         return "**Top War Contributors**\nNo current war season data is available yet."
 
@@ -284,12 +293,19 @@ def _build_clan_status_report(clan=None, war=None):
     war = war or {}
     roster = db.get_clan_roster_summary()
     members = db.list_members()
-    war_status = db.get_current_war_status()
-    season_summary = db.get_war_season_summary(top_n=3)
-    at_risk = db.get_members_at_risk(require_war_participation=False)
+    war_read = war_capability.get_war_intelligence(source=db)
+    war_status = war_read.get("current_state") if war_read.get("available") else None
+    season_summary = war_capability.get_war_season_view(
+        view="summary", limit=3, source=db
+    )["data"]
+    at_risk = management_capability.get_management_decisions(
+        view="at_risk",
+        arguments={"require_war_participation": False},
+        source=db,
+    )["data"]
     slumping = db.get_members_on_losing_streak(min_streak=3)
     recent_joins, recent_join_count = _recent_join_display_rows(clan)
-    deck_status = db.get_war_deck_status_today()
+    deck_status = war_read.get("day_state") or {}
 
     clan_name = clan.get("name") or (war_status.get("clan_name") if war_status else None)
     clan_name = clan_name or "Clan"
@@ -401,12 +417,15 @@ def _build_clan_status_report(clan=None, war=None):
 def _build_war_status_report(clan=None, war=None):
     clan = clan or {}
     war = war or {}
-    war_status = db.get_current_war_status() or {}
-    current_day = db.get_current_war_day_state() or {}
+    war_read = war_capability.get_war_intelligence(source=db)
+    war_status = war_read.get("current_state") if war_read.get("available") else {}
+    current_day = war_read.get("day_state") or {}
     season_id = current_day.get("season_id") if current_day else war_status.get("season_id")
     section_index = current_day.get("section_index") if current_day else war_status.get("section_index")
     week_summary = db.get_war_week_summary(season_id=season_id, section_index=section_index)
-    season_summary = db.get_war_season_summary(season_id=season_id, top_n=3)
+    season_summary = war_capability.get_war_season_view(
+        view="summary", season_id=season_id, limit=3, source=db
+    )["data"]
     recent_days = db.list_recent_war_day_summaries(limit=4)
     defense_status = db.get_latest_clan_boat_defense_status()
 
@@ -527,9 +546,16 @@ def _build_war_status_report(clan=None, war=None):
 def _build_clan_status_short_report(clan=None, war=None):
     clan = clan or {}
     roster = db.get_clan_roster_summary()
-    war_status = db.get_current_war_status()
-    season_summary = db.get_war_season_summary(top_n=2)
-    at_risk = db.get_members_at_risk(require_war_participation=False)
+    war_read = war_capability.get_war_intelligence(source=db)
+    war_status = war_read.get("current_state") if war_read.get("available") else None
+    season_summary = war_capability.get_war_season_view(
+        view="summary", limit=2, source=db
+    )["data"]
+    at_risk = management_capability.get_management_decisions(
+        view="at_risk",
+        arguments={"require_war_participation": False},
+        source=db,
+    )["data"]
     slumping = db.get_members_on_losing_streak(min_streak=3)
 
     clan_name = clan.get("name") or (war_status.get("clan_name") if war_status else None) or "Clan"
@@ -705,7 +731,9 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
         _log().warning("Weekly recap clan trend summary unavailable: %s", exc)
         clan_trend_summary = ""
     try:
-        war_project = db.get_war_season_snapshot()
+        war_project = war_capability.get_war_season_view(
+            view="snapshot", source=db
+        )["data"]
     except Exception as exc:
         _log().warning("Weekly recap war season context unavailable: %s", exc)
         war_project = None
@@ -722,6 +750,20 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
         _log().warning("Weekly recap mode pulse unavailable: %s", exc)
         mode_pulse = {}
     roster = summary.get("roster") or {}
+    season_awards = summary.get("season_awards") or {}
+    try:
+        shared_awards = awards_capability.get_awards_recognition(
+            view="current_standings",
+            season_id=summary.get("season_id"),
+            source=db,
+        )["data"]
+        if isinstance(shared_awards, dict) and any(
+            shared_awards.get(key)
+            for key in ("war_champ", "iron_kings", "donation_champs", "rookie_mvps")
+        ):
+            season_awards = shared_awards
+    except Exception as exc:
+        _log().warning("Weekly recap awards capability unavailable: %s", exc)
     war_score_trend = summary.get("war_score_trend") or {}
     season_summary = summary.get("war_season_summary") or {}
     clan_name = clan.get("name") or "POAP KINGS"
@@ -961,7 +1003,6 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
             f"top_contributors {top_contributors or 'n/a'}"
         )
 
-    season_awards = summary.get("season_awards") or {}
     if any(season_awards.get(k) for k in ("war_champ", "iron_kings", "donation_champs", "rookie_mvps")):
         lines.append("")
         lines.append("=== SEASON AWARDS STANDINGS (current — not yet final) ===")

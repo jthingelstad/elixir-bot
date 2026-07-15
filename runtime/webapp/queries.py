@@ -14,9 +14,11 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 
 import db
+from capabilities import management as management_capability
+from capabilities import war as war_capability
 from engine.clock import war_clock
 from engine.tick import HOME_CLAN
-from storage import cases, events_read, leader_actions, revisits, runtime_status, war_status
+from storage import cases, events_read, leader_actions, revisits, runtime_status
 
 
 def _now() -> datetime:
@@ -479,9 +481,13 @@ def management_page() -> dict:
             statuses=(cases.CASE_RESOLVED, cases.CASE_DISMISSED), limit=10, conn=conn
         )
         pending_revisits = revisits.list_pending_revisits(limit=25, conn=conn)
+        decision_contract = management_capability.get_management_decisions(
+            view="board", conn=conn
+        )
         return {"rows": rows, "open_actions": actions, "recent_actions": recent,
                 "open_cases": open_cases, "resolved_cases": resolved_cases,
-                "pending_revisits": pending_revisits}
+                "pending_revisits": pending_revisits,
+                "decision_contract": decision_contract}
     finally:
         conn.close()
 
@@ -492,7 +498,9 @@ def war_page() -> dict:
         clock = _war_clock_dict(conn)
         snapshot = None
         try:
-            snapshot = war_status.get_war_season_snapshot(conn=conn)
+            snapshot = war_capability.get_war_season_view(
+                view="snapshot", conn=conn
+            )["data"]
         except Exception:
             snapshot = None
         season_id = (clock or {}).get("season_id")
