@@ -92,20 +92,292 @@ def test_send_returning_none_fails_tick():
 
 
 def test_uncovered_hard_post_floor_fails_tick():
-    # The post covers s1 but the floor also demands s2 → tick fails, and the
-    # (delivered) post is still recorded so it isn't re-sent next loop.
+    # The post covers s1 but the floor also demands s2: the whole side-effect
+    # plan fails validation before any partial Discord delivery can escape.
     record_fn, recorded = _recorder()
+    sent = []
     read = {"hard_post_signals": [{"signal_key": "s1"}, {"signal_key": "s2"}]}
     plan = {
         "posts": [{"channel": "elixir", "content": "hi", "covers_signal_keys": ["s1"]}]
     }
     with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
         result = deliver_mod.deliver_posts(
-            read, plan, post_fn=lambda *_: 5, record_fn=record_fn
+            read,
+            plan,
+            post_fn=lambda *args: sent.append(args) or 5,
+            record_fn=record_fn,
         )
     assert result["failed"] is True
     assert result["uncovered_hard"] == ["s2"]
-    assert len(recorded) == 1  # the delivered post was recorded before the failure
+    assert sent == []
+    assert recorded == []
+
+
+def test_partial_delivery_retry_sends_only_unfulfilled_intent(engine_conn):
+    class IntentStore:
+        @staticmethod
+        def prepare_delivery_intents(posts, required_signal_keys=None):
+            return store.prepare_delivery_intents(
+                posts,
+                required_signal_keys=required_signal_keys,
+                conn=engine_conn,
+            )
+
+        @staticmethod
+        def mark_delivery_sending(intent_key):
+            return store.mark_delivery_sending(intent_key, conn=engine_conn)
+
+        @staticmethod
+        def mark_delivery_pending(intent_key, error):
+            return store.mark_delivery_pending(intent_key, error, conn=engine_conn)
+
+        @staticmethod
+        def mark_delivery_fulfilled(intent_key, message_id, loop_number=None):
+            return store.mark_delivery_fulfilled(
+                intent_key,
+                message_id,
+                loop_number=loop_number,
+                conn=engine_conn,
+            )
+
+    plan = {
+        "posts": [
+            {
+                "channel": "announcements",
+                "content": "Welcome Alpha",
+                "covers_signal_keys": ["s1"],
+            },
+            {
+                "channel": "elixir",
+                "content": "Bravo reached a new best",
+                "covers_signal_keys": ["s2"],
+            },
+        ]
+    }
+    read = {"hard_post_signals": [{"signal_key": "s1"}, {"signal_key": "s2"}]}
+    first_sends = []
+
+    def fail_second(channel_id, copy):
+        first_sends.append((channel_id, copy))
+        if len(first_sends) == 2:
+            raise RuntimeError("discord unavailable")
+        return 901
+
+    def record(**kwargs):
+        store.record_awareness_post(conn=engine_conn, **kwargs)
+
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        first = deliver_mod.deliver_posts(
+            read,
+            plan,
+            post_fn=fail_second,
+            record_fn=record,
+            intent_store=IntentStore,
+        )
+        retry_sends = []
+        second = deliver_mod.deliver_posts(
+            read,
+            plan,
+            post_fn=lambda channel_id, copy: retry_sends.append((channel_id, copy))
+            or 902,
+            record_fn=record,
+            intent_store=IntentStore,
+        )
+
+    assert first["failed"] is True
+    assert first["delivered"] == 1
+    assert second["failed"] is False
+    assert second["delivered"] == 1
+    assert retry_sends == [(222, "Bravo reached a new best")]
+    rows = engine_conn.execute(
+        "SELECT lane, status, attempts FROM awareness_delivery_intents ORDER BY lane"
+    ).fetchall()
+    assert [tuple(row) for row in rows] == [
+        ("announcements", "fulfilled", 1),
+        ("elixir", "fulfilled", 2),
+    ]
+
+
+def test_pending_outbox_post_drains_even_when_fresh_plan_chooses_silence(engine_conn):
+    class IntentStore:
+        @staticmethod
+        def prepare_delivery_intents(posts, required_signal_keys=None):
+            return store.prepare_delivery_intents(
+                posts,
+                required_signal_keys=required_signal_keys,
+                conn=engine_conn,
+            )
+
+        @staticmethod
+        def mark_delivery_sending(intent_key):
+            return store.mark_delivery_sending(intent_key, conn=engine_conn)
+
+        @staticmethod
+        def mark_delivery_pending(intent_key, error):
+            return store.mark_delivery_pending(intent_key, error, conn=engine_conn)
+
+        @staticmethod
+        def mark_delivery_fulfilled(intent_key, message_id, loop_number=None):
+            return store.mark_delivery_fulfilled(
+                intent_key, message_id, loop_number=loop_number, conn=engine_conn
+            )
+
+    pending_post = {
+        "channel": "elixir",
+        "content": "Alpha reached a new best",
+        "covers_signal_keys": ["s1"],
+        "_delivery_content": "Alpha reached a new best",
+    }
+    store.prepare_delivery_intents([pending_post], conn=engine_conn)
+    plan = {"posts": [], "skipped_reason": "fresh read was quiet"}
+    sent = []
+
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {"hard_post_signals": [{"signal_key": "s1"}]},
+            plan,
+            post_fn=lambda channel_id, copy: sent.append((channel_id, copy)) or 903,
+            record_fn=lambda **kwargs: store.record_awareness_post(
+                conn=engine_conn, **kwargs
+            ),
+            intent_store=IntentStore,
+        )
+
+    assert result["failed"] is False
+    assert result["replayed"] == 1
+    assert sent == [(222, "Alpha reached a new best")]
+    assert plan["posts"][0]["covers_signal_keys"] == ["s1"]
+
+
+def test_invalid_hard_post_plan_is_rejected_before_outbox_persistence(engine_conn):
+    class IntentStore:
+        @staticmethod
+        def prepare_delivery_intents(posts, required_signal_keys=None):
+            return store.prepare_delivery_intents(
+                posts,
+                required_signal_keys=required_signal_keys,
+                conn=engine_conn,
+            )
+
+    read = {"hard_post_signals": [{"signal_key": "s1"}, {"signal_key": "s2"}]}
+    plan = {
+        "posts": [
+            {
+                "channel": "elixir",
+                "content": "Only half the mandatory plan",
+                "covers_signal_keys": ["s1"],
+            }
+        ]
+    }
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            read,
+            plan,
+            post_fn=lambda *_: 904,
+            record_fn=lambda **_: None,
+            intent_store=IntentStore,
+        )
+
+    assert result["failed"] is True
+    assert result["uncovered_hard"] == ["s2"]
+    count = engine_conn.execute(
+        "SELECT COUNT(*) FROM awareness_delivery_intents"
+    ).fetchone()[0]
+    assert count == 0
+
+
+def test_fulfilled_sibling_counts_while_pending_sibling_retries(engine_conn):
+    class IntentStore:
+        @staticmethod
+        def prepare_delivery_intents(posts, required_signal_keys=None):
+            return store.prepare_delivery_intents(
+                posts,
+                required_signal_keys=required_signal_keys,
+                conn=engine_conn,
+            )
+
+        @staticmethod
+        def mark_delivery_sending(intent_key):
+            return store.mark_delivery_sending(intent_key, conn=engine_conn)
+
+        @staticmethod
+        def mark_delivery_pending(intent_key, error):
+            return store.mark_delivery_pending(intent_key, error, conn=engine_conn)
+
+        @staticmethod
+        def mark_delivery_fulfilled(intent_key, message_id, loop_number=None):
+            return store.mark_delivery_fulfilled(
+                intent_key, message_id, loop_number=loop_number, conn=engine_conn
+            )
+
+    posts = [
+        {
+            "channel": "announcements",
+            "content": "Alpha joined",
+            "covers_signal_keys": ["s1"],
+            "_delivery_content": "Alpha joined",
+        },
+        {
+            "channel": "elixir",
+            "content": "Bravo reached a new best",
+            "covers_signal_keys": ["s2"],
+            "_delivery_content": "Bravo reached a new best",
+        },
+    ]
+    work = store.prepare_delivery_intents(
+        posts, required_signal_keys={"s1", "s2"}, conn=engine_conn
+    )
+    first_key = next(item["intent_key"] for item in work if item["post"]["channel"] == "announcements")
+    assert store.mark_delivery_sending(first_key, conn=engine_conn) is True
+    store.mark_delivery_fulfilled(first_key, 904, conn=engine_conn)
+    sent = []
+    plan = {"posts": [], "skipped_reason": "fresh plan was quiet"}
+
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {"hard_post_signals": [{"signal_key": "s1"}, {"signal_key": "s2"}]},
+            plan,
+            post_fn=lambda channel_id, copy: sent.append((channel_id, copy)) or 905,
+            record_fn=lambda **kwargs: store.record_awareness_post(
+                conn=engine_conn, **kwargs
+            ),
+            intent_store=IntentStore,
+        )
+
+    assert result["failed"] is False
+    assert result["delivered"] == 1
+    assert sent == [(222, "Bravo reached a new best")]
+
+
+def test_expired_sending_lease_returns_to_pending_for_at_least_once_retry(engine_conn):
+    post = {
+        "channel": "elixir",
+        "content": "Alpha reached a new best",
+        "covers_signal_keys": ["s1"],
+        "_delivery_content": "Alpha reached a new best",
+    }
+    work = store.prepare_delivery_intents([post], conn=engine_conn)
+    intent_key = work[0]["intent_key"]
+    assert store.mark_delivery_sending(intent_key, conn=engine_conn) is True
+
+    # A fresh in-flight lease remains ambiguous and fails closed.
+    fresh = store.prepare_delivery_intents([], conn=engine_conn)
+    assert fresh[0]["status"] == "sending"
+
+    engine_conn.execute(
+        "UPDATE awareness_delivery_intents SET updated_at = '2000-01-01T00:00:00Z' "
+        "WHERE intent_key = ?",
+        (intent_key,),
+    )
+    expired = store.prepare_delivery_intents([], conn=engine_conn)
+
+    assert expired[0]["status"] == "pending"
+    row = engine_conn.execute(
+        "SELECT attempts, last_error FROM awareness_delivery_intents "
+        "WHERE intent_key = ?",
+        (intent_key,),
+    ).fetchone()
+    assert tuple(row) == (1, "delivery lease expired; retrying at least once")
 
 
 def test_relay_failure_does_not_fail_the_post():

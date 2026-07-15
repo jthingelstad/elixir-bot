@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timezone
 
 from engine import baselines, management, materialize, observations, polling, readiness
-from engine.db import canon_tag, ensure_clan, ensure_player, utcnow
+from engine.db import canon_tag, utcnow
 
 log = logging.getLogger("engine.tick")
 
@@ -103,9 +103,9 @@ def _guard(counters: dict, step: str, conn=None):
                 log.exception("engine tick step %s failed", step)
                 counters[f"{step}_error"] = repr(exc)
                 if conn is not None:
-                    # Discard the failed step's partial writes. Every step
-                    # commits at its own end, so only the broken step's work
-                    # rolls back — without this, a later step's commit
+                    # Discard the failed transaction's partial writes. Polling
+                    # control commits separately; apply/readiness/manage share
+                    # one generation transaction — without this, a later commit
                     # persists half an emit (e.g. a member_joined event whose
                     # membership insert failed), the baseline never rolls,
                     # and the diff re-fires every tick (simulator finding:
@@ -158,7 +158,9 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
     now = now or datetime.now(timezone.utc)
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     counters: dict = {}
-    materialization_id = readiness.start_materialization(conn, started_at=now_iso)
+    materialization_id = readiness.start_materialization(
+        conn, started_at=now_iso, run_kind="scheduled"
+    )
     conn.commit()
     counters["materialization_id"] = materialization_id
 
@@ -183,10 +185,12 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
 
     with _guard(counters, "poll", conn):
         contract_rejections: dict[str, list[dict]] = {}
+        receipt_admissions = []
         raw_clan_payload = api.get_clan()
         result, admitted = observations.observe(
             "clan", HOME_CLAN, raw_clan_payload, now_iso, source="engine_tick"
         )
+        receipt_admissions.append((result, raw_clan_payload))
         if _count_admission(counters, result, contract_rejections):
             clan_payload = raw_clan_payload
             clan_observation = admitted
@@ -199,41 +203,17 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
                 now_iso,
                 source="engine_tick",
             )
+            receipt_admissions.append((result, raw_race_payload))
             if _count_admission(counters, result, contract_rejections):
                 race_observation = admitted
-        if clan_payload:
-            ensure_clan(
-                conn, HOME_CLAN, clan_payload.get("name"), now_iso, is_home=True
-            )
-        roster_tags = []
-        for m in (clan_payload or {}).get("memberList", []):
-            tag = canon_tag(m.get("tag"))
-            roster_tags.append(tag)
-            # players row must exist before poll_state / projections touch the
-            # tag (FK) — live DBs carry migrated rows, but a fresh DB (cold
-            # start, simulator) bootstraps right here.
-            ensure_player(conn, tag, m.get("name"), now_iso)
-            # Self-healing membership backfill: polling.plan only considers
-            # players with an OPEN membership, and first sight of a roster
-            # deliberately emits nothing — so a member without a row (cold
-            # start, or drift) would never be deep-polled at all (simulator
-            # finding). A current roster member IS an open membership by
-            # definition; the roster-diff emitter still owns the
-            # member_joined event and skips its insert when a row exists.
-            if (
-                conn.execute(
-                    "SELECT 1 FROM clan_memberships WHERE player_tag = ? AND left_at IS NULL",
-                    (tag,),
-                ).fetchone()
-                is None
-            ):
-                conn.execute(
-                    "INSERT INTO clan_memberships (player_tag, clan_tag, joined_at, join_source) "
-                    "VALUES (?, ?, ?, 'backfill')",
-                    (tag, HOME_CLAN, now_iso),
-                )
-        polling.seed_new_members(conn, roster_tags, now_iso)
-        plan = polling.plan(conn, now_iso)
+        # Poll planning can use the admitted roster without first mutating
+        # identity, membership, or poll state. Those semantic writes belong to
+        # the generation's atomic application transaction below.
+        roster_tags = [
+            canon_tag(member.get("tag"))
+            for member in (clan_payload or {}).get("memberList", [])
+        ]
+        plan = polling.plan(conn, now_iso, roster_tags=roster_tags)
         counters["planned_calls"] = len(plan)
         for endpoint, tag in plan:
             # Release the writer BEFORE the fetch: cr_api persists the raw
@@ -250,6 +230,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
                     now_iso,
                     source="engine_tick",
                 )
+                receipt_admissions.append((result, raw_battlelog))
                 if _count_admission(counters, result, contract_rejections):
                     assert admitted is not None
                     battlelog_observations[tag] = admitted
@@ -262,10 +243,13 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
                     now_iso,
                     source="engine_tick",
                 )
+                receipt_admissions.append((result, raw_player_payload))
                 if _count_admission(counters, result, contract_rejections):
                     assert admitted is not None
                     player_observations[tag] = admitted
             conn.commit()
+        for decision, payload in receipt_admissions:
+            readiness.record_admission_decision(conn, decision, payload)
         _record_contract_rejections(conn, contract_rejections)
         conn.commit()
 
@@ -294,6 +278,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
                     race_observation,
                     now=now,
                     track_poll_freshness=True,
+                    materialization_id=materialization_id,
                 )
                 emitted += applied.events_emitted
                 if applied.clock is not None:
@@ -304,6 +289,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
                     clan_observation,
                     now=now,
                     track_poll_freshness=True,
+                    materialization_id=materialization_id,
                 )
                 emitted += applied.events_emitted
                 projected.update(
@@ -316,6 +302,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
                     observation,
                     now=now,
                     track_poll_freshness=True,
+                    materialization_id=materialization_id,
                 )
                 emitted += applied.events_emitted
                 projected.add(tag)
@@ -326,6 +313,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
                     clock=clock,
                     now=now,
                     track_poll_freshness=True,
+                    materialization_id=materialization_id,
                 )
                 battles_ingested += applied.battles_ingested
                 projected.add(tag)
@@ -339,28 +327,28 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
             counters["battles_ingested"] = battles_ingested
             counters["events_emitted"] = emitted
             counters["players_projected"] = len(projected)
-            conn.commit()
         materialization_succeeded = "materialize_error" not in counters
     else:
         counters["materialize_skipped"] = "poll_failed"
 
     source_freshness = None
     if materialization_succeeded:
-        source_freshness = readiness.evaluate_source_freshness(
-            conn,
-            now=now_iso,
-            home_clan=HOME_CLAN,
-        )
-        counters["management_members_ready"] = source_freshness["members_ready"]
-        counters["management_members_held"] = source_freshness["members_held"]
-        readiness.update_materialization(
-            conn,
-            materialization_id,
-            status="running",
-            apply_ok=True,
-            source_freshness=source_freshness,
-        )
-        conn.commit()
+        with _guard(counters, "readiness", conn):
+            source_freshness = readiness.evaluate_source_freshness(
+                conn,
+                now=now_iso,
+                home_clan=HOME_CLAN,
+            )
+            counters["management_members_ready"] = source_freshness["members_ready"]
+            counters["management_members_held"] = source_freshness["members_held"]
+            readiness.update_materialization(
+                conn,
+                materialization_id,
+                status="running",
+                apply_ok=True,
+                source_freshness=source_freshness,
+            )
+        materialization_succeeded = "readiness_error" not in counters
 
     if not materialization_succeeded:
         counters["manage_skipped"] = "materialization_not_ready"
@@ -500,13 +488,31 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
                     source_signal_type="engine_kick_state",
                     conn=conn,
                 )
-        conn.commit()
 
     counters["proactive_posting"] = "awareness_only"
     counters["tick_completed_at"] = utcnow()
     manage_succeeded = "manage_error" not in counters
-    complete = manage_succeeded and bool(source_freshness and source_freshness["ready"])
     errors = {key: value for key, value in counters.items() if key.endswith("_error")}
+    if not manage_succeeded:
+        # The manage guard rolled back the entire application transaction, so
+        # the generation must not claim that its observation writes survived.
+        readiness.update_materialization(
+            conn,
+            materialization_id,
+            status="failed",
+            completed_at=counters["tick_completed_at"],
+            poll_ok=poll_succeeded,
+            apply_ok=False,
+            manage_ok=False,
+            derivations_ok=False,
+            counters=counters,
+            errors=errors,
+        )
+        conn.commit()
+        return counters
+
+    derivations_ok = not bool(counters.get("materialization_degraded"))
+    complete = bool(source_freshness and source_freshness["ready"]) and derivations_ok
     readiness.update_materialization(
         conn,
         materialization_id,
@@ -515,6 +521,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
         poll_ok=poll_succeeded,
         apply_ok=True,
         manage_ok=manage_succeeded,
+        derivations_ok=derivations_ok,
         source_freshness=source_freshness,
         counters=counters,
         errors=errors,

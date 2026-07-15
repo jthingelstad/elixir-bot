@@ -300,7 +300,7 @@ def snapshot_player_profile(
         )
         return []
     assert observation is not None
-    materialize.apply_observation(
+    materialize.apply_interactive_observation(
         conn,
         observation,
         track_poll_freshness=True,
@@ -1086,7 +1086,7 @@ def snapshot_player_battlelog(
         )
         return []
     assert observation is not None
-    materialize.apply_observation(
+    materialize.apply_interactive_observation(
         conn,
         observation,
         now=now_dt,

@@ -16,6 +16,11 @@
 > `awareness_thoughts`, `awareness_posts`, `watches`, and per-stream rows in
 > `stream_cursors`; `communication_intents` is retained for offline legacy
 > rehearsals and history, not as the production post ledger.
+>
+> **Schema v4 amendment (2026-07-15):** `api_observation_receipts` records every
+> successful API response while `raw_api_payloads` deduplicates body content;
+> `materialization_inputs` links admitted observations to scheduled/interactive
+> generations; `awareness_delivery_intents` is the production per-post outbox.
 
 ## 1. Conventions
 
@@ -32,7 +37,7 @@
 
 | Constant | Value | Applies to |
 |---|---|---|
-| `RAW_PAYLOAD_RETENTION_DAYS` | 14 | `raw_api_payloads` (unchanged) |
+| `RAW_PAYLOAD_RETENTION_DAYS` | 14 | API receipts and deduplicated payload content (content retained from its last receipt) |
 | `BATTLE_EVENT_RETENTION_DAYS` | **180** | `battle_events` (Q8: ≥3 seasons) |
 | `PLAYER_EVENT_RETENTION_DAYS` | 180 | `player_events` |
 | `CLAN_EVENT_RETENTION_DAYS` | 365 | `clan_events` (rare, load-bearing for history reads) |
@@ -61,24 +66,24 @@ tables unchanged and is not redesigned here.
 
 | Layer | Tables | Count |
 |---|---|---|
-| L1 Raw response log (14d) | `raw_api_payloads` | 1 |
+| L1 API provenance (14d) | `api_observation_receipts`, `raw_api_payloads` | 2 |
 | L2 Current-state baselines | `state_baselines` | 1 |
 | L3 Event streams | `battle_events`, `player_events`, `clan_events`, `war_events` | 4 |
 | L4 Rollups (durable) | `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics`, `clan_daily_battle_rollups` | 4 |
 | L5 Identity & tenure (durable) | `players`, `player_metadata`, `player_aliases`, `clans`, `discord_users`, `discord_links`, `clan_memberships` | 7 |
 | L6 Projections / read models | `player_current_state`, `player_card_collection`, `player_recent_form`, `member_management` | 4 |
-| Awareness runtime | `awareness_thoughts`, `awareness_posts`, `watches` | 3 |
-| Legacy recognition & delivery (offline) | `recognition_ledger`, `communication_intents` | 2 |
+| Awareness runtime | `awareness_thoughts`, `awareness_delivery_intents`, `awareness_posts`, `watches` | 4 |
+| Legacy recognition (offline delivery queue is TEMP) | `recognition_ledger` | 1 |
 | Clan management | `leader_action_recommendations`, `decision_cases`, `revisits` | 3 |
 | Bounded stream: war | `war_seasons`, `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days` | 5 |
 | Bounded stream: tournaments | `tournaments`, `tournament_battles`, `tournament_participants` | 3 |
 | Awards (durable) | `awards` | 1 |
-| Engine control | `stream_cursors` (durable), `runtime_job_status`, `poll_state` (runtime.md §4), `materialization_runs` | 4 |
+| Engine control | `stream_cursors` (durable), `runtime_job_status`, `poll_state` (runtime.md §4), `materialization_runs`, `materialization_inputs` | 5 |
 | Ops singletons (carried) | `llm_calls`, `prompt_failures`, `prompt_feedback`, `system_signals`, `api_sentinel_observations`, `arena_relay_screenshot_observations`, `discord_channels`, `channel_state`, `game_mode_contexts`, `card_catalog`, `elixir_improvement_suggestions` | 11 |
-| **Engine total** | | **49** |
+| **Engine total** | | **51** |
 | Deferred pass (carried unchanged) | `clan_memories` + 9 satellites + FTS/vec, `conversation_threads`, `messages`, `memory_facts`, `memory_episodes` | ~19 designed |
 
-49 engine tables from today's 75, with the memory-pass reduction still to come —
+51 engine tables from today's 75, with the memory-pass reduction still to come —
 inside the §5 target once the deferred pass lands. 33 of today's table names
 cease to exist: 26 dropped outright, 7 transformed to tag-keyed successors
 (§8 below).
@@ -449,8 +454,11 @@ owns the only executable adapter into this historical contract.
 and cursor checkpoints advance in one transaction only after deliberate silence
 or successful live delivery. `awareness_posts` stores delivered copy, lane,
 covered signals, loop number, timestamp, and Discord message id for channel
-memory and heartbeat reads. `watches` holds the workflow's standing concerns.
-These tables are created by schema migration v1, not lazily by runtime code.
+memory and heartbeat reads. `awareness_delivery_intents` stores the pre-send
+post plan and per-post attempt/fulfillment state; `awareness_posts.intent_key`
+links confirmed Discord receipts back to it. `watches` holds the workflow's
+standing concerns. These tables are created by ordered schema migrations, not
+lazily by runtime code.
 
 ### 7.3 Clan management & leader actions
 
@@ -566,11 +574,15 @@ constraint.
   last-successful-observation timestamps). Rejected/missing responses do not
   advance freshness. DDL and semantics in `runtime.md` §4; listed here so the
   layer map is complete. Rebuildable (seeds warm), not durable-precious.
-- `materialization_runs` — one generation per production tick: start/completion,
-  complete/partial/failed status, poll/apply/manage gates, source-freshness JSON,
-  counters, and errors. It is the provenance target for
+- `materialization_runs` — one scheduled or interactive generation (`offline`
+  is reserved for a future recorded rehearsal boundary):
+  start/completion, complete/partial/failed status, poll/apply/manage/derivation
+  gates, source-freshness JSON, counters, and errors. It is the provenance target for
   `member_management.materialization_id` and makes partial data products
   queryable instead of implicit in logs.
+- `materialization_inputs` — the admitted endpoint/entity/time/hash/source set
+  applied by a generation, with a nullable link to the exact API receipt (offline
+  and synthetic observations legitimately have no network receipt).
 - Tournaments star (`tournaments`, `tournament_battles`, `tournament_participants`) —
   carried; `tournament_battles.player1_member_id`/`player2_member_id` drop (tags
   already present in the same rows; verified DDL).

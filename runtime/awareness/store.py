@@ -13,6 +13,7 @@ borrowed connection.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
@@ -72,6 +73,11 @@ def ensure_awareness_schema(conn: sqlite3.Connection) -> None:
     """Compatibility name: validate; db.get_connection owns all evolution."""
     require_columns(conn, "awareness_thoughts", {"loop_number", "tool_trace_json"})
     require_columns(conn, "awareness_posts", {"lane", "posted_at", "content_preview"})
+    require_columns(
+        conn,
+        "awareness_delivery_intents",
+        {"intent_key", "lane", "content", "covers_json", "status", "attempts"},
+    )
     require_columns(conn, "watches", {"watch_id", "status"})
 
 
@@ -256,6 +262,7 @@ def record_awareness_post(
     loop_number: int | None = None,
     post: dict | None = None,
     evidence: dict | None = None,
+    intent_key: str | None = None,
     conn: sqlite3.Connection = None,
 ) -> None:
     """Record a delivered brain post in its purpose-built durable ledger.
@@ -267,10 +274,9 @@ def record_awareness_post(
         now = _utcnow()
         preview = (content or "")[:800]
         conn.execute(
-            "INSERT INTO awareness_posts "
+            "INSERT OR IGNORE INTO awareness_posts "
             "(lane, content_preview, covers_json, loop_number, posted_at, "
-            "discord_message_id) VALUES (?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(discord_message_id) DO NOTHING",
+            "discord_message_id, intent_key) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 lane,
                 preview,
@@ -278,6 +284,7 @@ def record_awareness_post(
                 loop_number,
                 now,
                 str(message_id) if message_id is not None else None,
+                intent_key,
             ),
         )
         if post is not None:
@@ -306,6 +313,173 @@ def record_awareness_post(
         )
 
 
+def delivery_intent_key(post: dict, content: str) -> str:
+    """Stable post identity: covered moments first, content only as fallback."""
+    covers = sorted(
+        {str(value) for value in (post.get("covers_signal_keys") or []) if value}
+    )
+    identity = {
+        "lane": str(post.get("channel") or ""),
+        "covers": covers,
+        "content": None if covers else content,
+    }
+    canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    return "awareness:" + hashlib.sha256(canonical.encode()).hexdigest()
+
+
+@managed_connection
+def prepare_delivery_intents(
+    posts: list[dict],
+    *,
+    required_signal_keys: set[str] | None = None,
+    conn: sqlite3.Connection = None,
+) -> list[dict]:
+    """Persist a whole post plan before any Discord side effect."""
+    ensure_awareness_schema(conn)
+    now = _utcnow()
+    required = {str(value) for value in (required_signal_keys or set()) if value}
+    # ``sending`` is a short lease, not a terminal limbo.  A fresh lease fails
+    # closed because Discord may already have accepted the message; after the
+    # lease expires we choose the system's documented at-least-once guarantee
+    # and retry.  Without this recovery, a process crash in the send/finalize
+    # window wedges the entire awareness outbox forever.
+    conn.execute(
+        """UPDATE awareness_delivery_intents
+           SET status = 'pending', updated_at = ?,
+               last_error = 'delivery lease expired; retrying at least once'
+           WHERE status = 'sending'
+             AND datetime(updated_at) < datetime('now', '-15 minutes')""",
+        (now,),
+    )
+    seen = set()
+    for post in posts:
+        content = post.get("_delivery_content") or ""
+        intent_key = delivery_intent_key(post, content)
+        if intent_key in seen:
+            continue
+        seen.add(intent_key)
+        covers = sorted(
+            {str(value) for value in (post.get("covers_signal_keys") or []) if value}
+        )
+        conn.execute(
+            """INSERT OR IGNORE INTO awareness_delivery_intents
+                   (intent_key, lane, content, covers_json, post_json,
+                    status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)""",
+            (
+                intent_key,
+                post.get("channel"),
+                content,
+                json.dumps(covers),
+                json.dumps(post, default=str),
+                now,
+                now,
+            ),
+        )
+        # A receipt is stronger evidence than a stale outbox state. This closes
+        # the crash window between recording a sent post and marking fulfilled.
+        conn.execute(
+            """UPDATE awareness_delivery_intents
+               SET status = 'fulfilled', fulfilled_at = COALESCE(fulfilled_at, ?),
+                   updated_at = ?
+               WHERE intent_key = ? AND EXISTS (
+                   SELECT 1 FROM awareness_posts ap
+                   WHERE ap.intent_key = awareness_delivery_intents.intent_key
+               )""",
+            (now, now, intent_key),
+        )
+    params = list(seen)
+    current_clause = ""
+    if params:
+        current_clause = " OR intent_key IN ({})".format(",".join("?" for _ in params))
+    fulfilled_clause = (
+        " OR (status = 'fulfilled' "
+        "AND datetime(fulfilled_at) >= datetime('now', '-6 hours'))"
+        if required
+        else ""
+    )
+    rows = conn.execute(
+        "SELECT * FROM awareness_delivery_intents "
+        "WHERE (status IN ('pending', 'sending') "
+        "AND datetime(created_at) >= datetime('now', '-6 hours'))"
+        + current_clause
+        + fulfilled_clause
+        + " "
+        "ORDER BY created_at, intent_key",
+        params,
+    ).fetchall()
+    prepared = []
+    for row in rows:
+        persisted_post = json.loads(row["post_json"])
+        covers = {
+            str(value)
+            for value in (persisted_post.get("covers_signal_keys") or [])
+            if value
+        }
+        if (
+            row["status"] == "fulfilled"
+            and row["intent_key"] not in seen
+            and not required.intersection(covers)
+        ):
+            continue
+        persisted_post["_delivery_content"] = row["content"]
+        prepared.append(
+            {
+                "intent_key": row["intent_key"],
+                "status": row["status"],
+                "post": persisted_post,
+                "from_current_plan": row["intent_key"] in seen,
+            }
+        )
+    return prepared
+
+
+@managed_connection
+def mark_delivery_sending(
+    intent_key: str, *, conn: sqlite3.Connection = None
+) -> bool:
+    now = _utcnow()
+    cur = conn.execute(
+        """UPDATE awareness_delivery_intents
+           SET status = 'sending', attempts = attempts + 1,
+               last_attempt_at = ?, updated_at = ?, last_error = NULL
+           WHERE intent_key = ? AND status = 'pending'""",
+        (now, now, intent_key),
+    )
+    return cur.rowcount == 1
+
+
+@managed_connection
+def mark_delivery_pending(
+    intent_key: str, error: str, *, conn: sqlite3.Connection = None
+) -> None:
+    conn.execute(
+        """UPDATE awareness_delivery_intents
+           SET status = 'pending', updated_at = ?, last_error = ?
+           WHERE intent_key = ? AND status = 'sending'""",
+        (_utcnow(), str(error)[:2000], intent_key),
+    )
+
+
+@managed_connection
+def mark_delivery_fulfilled(
+    intent_key: str,
+    message_id: str | int,
+    *,
+    loop_number: int | None = None,
+    conn: sqlite3.Connection = None,
+) -> None:
+    now = _utcnow()
+    conn.execute(
+        """UPDATE awareness_delivery_intents
+           SET status = 'fulfilled', fulfilled_at = ?, updated_at = ?,
+               discord_message_id = ?, loop_number = COALESCE(?, loop_number),
+               last_error = NULL
+           WHERE intent_key = ?""",
+        (now, now, str(message_id), loop_number, intent_key),
+    )
+
+
 @managed_connection
 def attach_awareness_posts_to_loop(
     loop_number: int,
@@ -324,6 +498,15 @@ def attach_awareness_posts_to_loop(
         "UPDATE awareness_posts SET loop_number = ? "
         "WHERE loop_number IS NULL AND datetime(posted_at) >= datetime(?)",
         (int(loop_number), since),
+    )
+    conn.execute(
+        """UPDATE awareness_delivery_intents
+           SET loop_number = COALESCE(loop_number, ?)
+           WHERE intent_key IN (
+               SELECT intent_key FROM awareness_posts
+               WHERE loop_number = ? AND intent_key IS NOT NULL
+           )""",
+        (int(loop_number), int(loop_number)),
     )
     return max(0, cur.rowcount)
 
@@ -362,6 +545,11 @@ __all__ = [
     "ensure_awareness_schema",
     "persist_thought",
     "record_awareness_post",
+    "delivery_intent_key",
+    "prepare_delivery_intents",
+    "mark_delivery_sending",
+    "mark_delivery_pending",
+    "mark_delivery_fulfilled",
     "attach_awareness_posts_to_loop",
     "list_recent_thoughts",
     "open_watches",

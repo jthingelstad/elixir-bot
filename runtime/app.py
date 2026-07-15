@@ -955,6 +955,7 @@ async def _awareness_loop():
             record_fn=awareness_store.record_awareness_post,
             relay_fn=_relay_fn,
             repair_fn=elixir_agent.repair_awareness_plan,
+            intent_store=awareness_store,
         )
 
     try:

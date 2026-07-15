@@ -571,21 +571,15 @@ def _posting_pulse(conn) -> dict:
     }
 
 
-def _recent_agent_writes(limit: int = 10) -> list[dict]:
+def _recent_agent_writes(conn, limit: int = 10) -> list[dict]:
     """Recent leadership-scope memories Elixir authored, so the agent avoids
-    re-flagging a watch or re-writing an arc it just recorded.
-
-    The memory store lives in its own database (``managed_memory_connection``
-    opens it per call), so this never borrows the operational connection.
-    """
+    re-flagging a watch or re-writing an arc it just recorded. Memory lives in
+    the operational database and therefore belongs to the same read snapshot."""
     import memory_store
 
-    mconn = memory_store.get_memory_connection()
-    try:
-        memory_store.ensure_memory_schema(mconn)
-    finally:
-        mconn.close()
-    memories = memory_store.list_memories(viewer_scope="leadership", limit=limit * 3)
+    memories = memory_store.list_memories(
+        viewer_scope="leadership", limit=limit * 3, conn=conn
+    )
     out: list[dict] = []
     for m in memories:
         if m.get("source_type") not in {"elixir_inference", "elixir_synthesis"}:
@@ -702,6 +696,19 @@ def build_read(conn=None) -> dict:
     own = conn is None
     if own:
         conn = db.get_connection()
+    started_snapshot = False
+    # Cursor bootstrapping may write once. Finish that bridge first, then hold
+    # one SQLite read transaction so every capability block sees the same
+    # materialized generation even if the engine commits mid-build.
+    from engine import readiness
+    from runtime.awareness import store as awareness_store
+
+    _, cursors_initialized = awareness_store.ensure_event_cursors(conn)
+    if own and cursors_initialized:
+        conn.commit()
+    if not conn.in_transaction:
+        conn.execute("BEGIN")
+        started_snapshot = True
     degraded: list[str] = []
 
     def _load(name, fn, default):
@@ -742,6 +749,11 @@ def build_read(conn=None) -> dict:
 
         read = {
             "generated_at": _now().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "data_generation": _load(
+                "data_generation",
+                lambda: readiness.generation_snapshot(conn),
+                None,
+            ),
             "clock": _load("clock", _clock_block, None),
             "time": _load("time", lambda: _time_block(conn, war), None),
             "standing": _load("standing", lambda: _standing_block(war), None),
@@ -799,7 +811,7 @@ def build_read(conn=None) -> dict:
             ),
             "posting_pulse": _load("posting_pulse", lambda: _posting_pulse(conn), {}),
             "recent_agent_writes": _load(
-                "recent_agent_writes", lambda: _recent_agent_writes(), []
+                "recent_agent_writes", lambda: _recent_agent_writes(conn), []
             ),
             "editorial_guidance": _load(
                 "editorial_guidance", lambda: _editorial_guidance(conn), []
@@ -827,11 +839,6 @@ def build_read(conn=None) -> dict:
             "has_more": bool(pending.get("has_more")),
             "remaining_by_stream": pending.get("remaining_by_stream") or {},
         }
-        # The first post-cutover read may initialize stream_cursors from the
-        # last successful historical thought. Persist that bridge before this
-        # connection closes; subsequent advancement stays atomic with thoughts.
-        if own and pending.get("initialized"):
-            conn.commit()
         if degraded:
             log.info(
                 "build_read: %d block(s) degraded: %s",
@@ -840,6 +847,8 @@ def build_read(conn=None) -> dict:
             )
         return read
     finally:
+        if started_snapshot and conn.in_transaction:
+            conn.rollback()
         if own:
             conn.close()
 

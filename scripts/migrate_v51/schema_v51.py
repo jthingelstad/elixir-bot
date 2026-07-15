@@ -670,7 +670,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 67
+EXPECTED_TABLE_COUNT = 70
 
 
 _DEAD_MEMBERS_FK = re.compile(

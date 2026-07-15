@@ -14,6 +14,7 @@ from typing import Any, Iterator
 import db as db_facade
 from capabilities.contracts import ManagementDecisionResult
 from engine.management import management_read_summary
+from engine.readiness import generation_snapshot
 
 CAPABILITY_ID = "management_decisions"
 CONTRACT_VERSION = 2
@@ -114,6 +115,16 @@ def get_management_decisions(
     *, view: str = "summary", arguments: dict | None = None, source=None, conn=None
 ) -> ManagementDecisionResult:
     """Return an authoritative leadership-only management view."""
+    if conn is None and source in (None, db_facade):
+        active_source = source or db_facade
+        with _connection(active_source) as active:
+            active.execute("BEGIN")
+            return get_management_decisions(
+                view=view,
+                arguments=arguments,
+                source=active_source,
+                conn=active,
+            )
     source = _source(source)
     arguments = dict(arguments or {})
     summary = _summary(source, conn=conn)
@@ -152,6 +163,9 @@ def get_management_decisions(
             "decision_cases",
             "revisits",
         ],
+        "data_generation": (
+            generation_snapshot(conn) if conn is not None else None
+        ),
         "data": data,
     }
 

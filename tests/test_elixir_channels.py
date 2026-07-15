@@ -6,7 +6,7 @@ import io
 import json
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, PropertyMock, patch
+from unittest.mock import ANY, AsyncMock, PropertyMock, patch
 
 import pytest
 from PIL import Image
@@ -4244,9 +4244,10 @@ def test_build_clan_status_report_uses_non_war_risk_watchlist():
         mock_risk.assert_called_once_with(
             inactivity_days=7,
             min_donations_week=20,
-            require_war_participation=False,
-            min_war_races=1,
-            season_id=None,
+                require_war_participation=False,
+                min_war_races=1,
+                season_id=None,
+                conn=ANY,
         )
 
 
@@ -4435,9 +4436,10 @@ def test_build_kick_risk_report_uses_inactivity_only():
         mock_risk.assert_called_once_with(
             inactivity_days=7,
             min_donations_week=0,
-            require_war_participation=False,
-            min_war_races=1,
-            season_id=None,
+                require_war_participation=False,
+                min_war_races=1,
+                season_id=None,
+                conn=ANY,
         )
     assert report == "**Kick Risk (Inactive 7+ Days)**\n- Vijay — last seen 8 days ago"
 
@@ -4455,7 +4457,7 @@ def test_build_top_war_contributors_report_formats_season_leaders():
     ) as mock_summary:
         report = elixir._build_top_war_contributors_report()
 
-    mock_summary.assert_called_once_with(top_n=5)
+        mock_summary.assert_called_once_with(top_n=5, conn=ANY)
     assert report == (
         "**Top War Contributors (Season 130)**\n"
         "1. King Levy — 3,200 points across 4 race(s)\n"
@@ -4572,9 +4574,10 @@ def test_build_clan_status_short_report_uses_non_war_risk_watchlist():
         mock_risk.assert_called_once_with(
             inactivity_days=7,
             min_donations_week=20,
-            require_war_participation=False,
-            min_war_races=1,
-            season_id=None,
+                require_war_participation=False,
+                min_war_races=1,
+                season_id=None,
+                conn=ANY,
         )
 
 

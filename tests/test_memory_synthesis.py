@@ -256,7 +256,7 @@ def test_build_context_includes_operations_context(memdb, monkeypatch):
     monkeypatch.setattr(
         memory_job.db,
         "get_war_season_snapshot",
-        lambda: {
+        lambda **kwargs: {
             "season_id": 133,
             "summary": "Season 133; rank 1",
         },

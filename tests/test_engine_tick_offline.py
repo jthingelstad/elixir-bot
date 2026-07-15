@@ -275,6 +275,61 @@ def test_tick_materialization_rolls_back_all_derived_writes_on_emit_failure(
         assert "materialize_error" in counters
         assert counters["manage_skipped"] == "materialization_not_ready"
         assert conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0] == 0
+        assert (
+            conn.execute("SELECT COUNT(*) FROM materialization_inputs").fetchone()[0]
+            == 0
+        )
+        run = conn.execute(
+            "SELECT status, apply_ok FROM materialization_runs ORDER BY materialization_id DESC"
+        ).fetchone()
+        assert tuple(run) == ("failed", 0)
+    finally:
+        conn.close()
+
+
+def test_tick_manage_failure_rolls_back_the_whole_generation(
+    tmp_path, v51_schema_template, monkeypatch
+):
+    import shutil
+
+    db_path = str(tmp_path / "tick-manage.db")
+    shutil.copy(v51_schema_template, db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+
+    class Api:
+        def get_clan(self):
+            return json.loads(_clan([("#A", "Al", 10)]))
+
+        def get_current_war(self):
+            return None
+
+        def get_player_battle_log(self, tag):
+            return json.loads(_battlelog())
+
+        def get_player(self, tag):
+            return json.loads(_profile(tag, "Al", 44, 4990))
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("late management failure")
+
+    monkeypatch.setattr("engine.management.renominate_after_cooldown", boom)
+
+    try:
+        counters = run_tick(conn, api=Api())
+        assert "manage_error" in counters
+        assert conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM player_events").fetchone()[0] == 0
+        assert (
+            conn.execute("SELECT COUNT(*) FROM materialization_inputs").fetchone()[0]
+            == 0
+        )
+        run = conn.execute(
+            "SELECT status, apply_ok, manage_ok FROM materialization_runs "
+            "ORDER BY materialization_id DESC"
+        ).fetchone()
+        assert tuple(run) == ("failed", 0, 0)
     finally:
         conn.close()
 

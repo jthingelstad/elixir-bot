@@ -11,6 +11,7 @@ from __future__ import annotations
 import db as db_facade
 from capabilities.contracts import AwardsRecognitionResult
 from capabilities.war import get_war_season_view
+from engine.readiness import generation_snapshot
 
 CAPABILITY_ID = "awards_recognition"
 CONTRACT_VERSION = 1
@@ -51,6 +52,23 @@ def get_awards_recognition(
     conn=None,
 ) -> AwardsRecognitionResult:
     """Return one awards facet with explicit provisional/durable state."""
+    if conn is None and source in (None, db_facade):
+        active_source = source or db_facade
+        active = active_source.get_connection()
+        try:
+            active.execute("BEGIN")
+            return get_awards_recognition(
+                view=view,
+                award_type=award_type,
+                season_id=season_id,
+                rank=rank,
+                member_tag=member_tag,
+                limit=limit,
+                source=active_source,
+                conn=active,
+            )
+        finally:
+            active.close()
     source = _source(source)
     target_season = int(season_id) if season_id is not None else None
     target_rank = int(rank) if rank is not None else None
@@ -151,6 +169,9 @@ def get_awards_recognition(
         "state": state,
         "period": award_period(resolved_season, award_type),
         "sources": ["awards", "war_participation", "war_attendance_days"],
+        "data_generation": (
+            generation_snapshot(conn) if conn is not None else None
+        ),
         "data": data,
     }
 

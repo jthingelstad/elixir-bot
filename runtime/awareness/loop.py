@@ -140,13 +140,14 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
     # failed — we mark the plan so classify + persist agree, the cursor
     # (store.last_tick_at) doesn't advance, and the signals re-surface next
     # loop. Fail-hard, no fallback.
-    if outcome == "posted" and deliver_fn is not None:
+    if outcome in {"posted", "silence"} and deliver_fn is not None:
         try:
             result = deliver_fn(read, plan) or {}
         except Exception as exc:
             log.exception("awareness loop: deliver_fn raised")
             result = {"failed": True, "reason": f"deliver_fn raised: {exc}"}
         counters["posts_delivered"] = result.get("delivered", 0)
+        counters["posts_replayed"] = result.get("replayed", 0)
         if result.get("failed"):
             plan["_error"] = {
                 "kind": "delivery",
@@ -157,6 +158,10 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
             counters["error"] = (
                 counters["error"] or f"delivery_failed: {result.get('reason')}"
             )
+        else:
+            # Draining a prior pending outbox item can turn this turn's fresh
+            # editorial silence into a real delivered plan.
+            outcome, reason = store.classify_plan(plan)
 
     counters["chose_silence"] = outcome == "silence"
     counters["tick_failed"] = outcome == "failed"

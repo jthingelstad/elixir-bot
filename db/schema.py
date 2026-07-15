@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 
 _V1_STATEMENTS = (
@@ -221,13 +221,48 @@ REQUIRED_SCHEMA = {
     "memories": {"memory_id", "kind", "scope"},
     "memory_tags": {"memory_id", "tag"},
     "memory_log": {"log_id", "memory_id"},
+    "raw_api_payloads": {
+        "payload_id",
+        "endpoint",
+        "entity_key",
+        "fetched_at",
+        "last_fetched_at",
+        "payload_hash",
+    },
     "materialization_runs": {
         "materialization_id",
+        "run_kind",
         "status",
         "poll_ok",
         "apply_ok",
         "manage_ok",
+        "derivations_ok",
         "source_freshness_json",
+    },
+    "materialization_inputs": {
+        "materialization_input_id",
+        "materialization_id",
+        "receipt_id",
+        "endpoint",
+        "entity_key",
+        "payload_hash",
+    },
+    "api_observation_receipts": {
+        "receipt_id",
+        "payload_id",
+        "endpoint",
+        "entity_key",
+        "fetched_at",
+        "payload_hash",
+        "admission_status",
+    },
+    "awareness_delivery_intents": {
+        "intent_key",
+        "lane",
+        "content",
+        "covers_json",
+        "status",
+        "attempts",
     },
     "member_management": {
         "player_tag",
@@ -412,6 +447,146 @@ def _apply_v3(conn: sqlite3.Connection) -> None:
             columns.add(column)
 
 
+def _apply_v4(conn: sqlite3.Connection) -> None:
+    """Close the provenance and delivery transaction boundaries.
+
+    ``raw_api_payloads`` remains the bounded, content-deduplicated payload
+    compatibility surface.  Receipts record every successful HTTP response;
+    materialization inputs link admitted observations to the generation that
+    applied them; awareness intents make a multi-post plan retryable per post.
+    """
+    raw_columns = _columns(conn, "raw_api_payloads")
+    if "last_fetched_at" not in raw_columns:
+        conn.execute("ALTER TABLE raw_api_payloads ADD COLUMN last_fetched_at TEXT")
+        conn.execute(
+            "UPDATE raw_api_payloads SET last_fetched_at = fetched_at "
+            "WHERE last_fetched_at IS NULL"
+        )
+
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS api_observation_receipts (
+            receipt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            payload_id INTEGER REFERENCES raw_api_payloads(payload_id)
+                ON DELETE SET NULL,
+            endpoint TEXT NOT NULL,
+            entity_key TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            admission_status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (admission_status IN
+                    ('pending','accepted','rejected','not_applicable','legacy')),
+            admission_errors_json TEXT NOT NULL DEFAULT '[]'
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_api_receipts_lookup "
+        "ON api_observation_receipts(endpoint, entity_key, payload_hash, receipt_id DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_api_receipts_fetched "
+        "ON api_observation_receipts(fetched_at DESC)"
+    )
+    conn.execute(
+        """INSERT INTO api_observation_receipts
+               (payload_id, endpoint, entity_key, fetched_at, payload_hash,
+                admission_status)
+           SELECT payload_id, endpoint, entity_key, fetched_at, payload_hash, 'legacy'
+           FROM raw_api_payloads
+           WHERE NOT EXISTS (
+               SELECT 1 FROM api_observation_receipts r
+               WHERE r.payload_id = raw_api_payloads.payload_id
+                 AND r.admission_status = 'legacy'
+           )"""
+    )
+
+    run_columns = _columns(conn, "materialization_runs")
+    run_additions = (
+        (
+            "run_kind",
+            "TEXT NOT NULL DEFAULT 'scheduled' "
+            "CHECK (run_kind IN ('scheduled','interactive','offline'))",
+        ),
+        ("derivations_ok", "INTEGER NOT NULL DEFAULT 1"),
+    )
+    for column, declaration in run_additions:
+        if column not in run_columns:
+            conn.execute(
+                f"ALTER TABLE materialization_runs ADD COLUMN {column} {declaration}"
+            )
+            run_columns.add(column)
+
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS materialization_inputs (
+            materialization_input_id INTEGER PRIMARY KEY,
+            materialization_id INTEGER NOT NULL
+                REFERENCES materialization_runs(materialization_id) ON DELETE CASCADE,
+            receipt_id INTEGER REFERENCES api_observation_receipts(receipt_id)
+                ON DELETE SET NULL,
+            endpoint TEXT NOT NULL,
+            entity_key TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            source TEXT NOT NULL,
+            applied_at TEXT NOT NULL,
+            UNIQUE(materialization_id, endpoint, entity_key, observed_at, payload_hash)
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_materialization_inputs_run "
+        "ON materialization_inputs(materialization_id, materialization_input_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_materialization_inputs_receipt "
+        "ON materialization_inputs(receipt_id) WHERE receipt_id IS NOT NULL"
+    )
+
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS awareness_delivery_intents (
+            intent_key TEXT PRIMARY KEY,
+            lane TEXT NOT NULL,
+            content TEXT NOT NULL,
+            covers_json TEXT NOT NULL DEFAULT '[]',
+            post_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','sending','fulfilled')),
+            attempts INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_attempt_at TEXT,
+            fulfilled_at TEXT,
+            discord_message_id TEXT,
+            last_error TEXT,
+            loop_number INTEGER
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_awareness_delivery_pending "
+        "ON awareness_delivery_intents(status, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_awareness_delivery_fulfilled "
+        "ON awareness_delivery_intents(fulfilled_at DESC)"
+    )
+
+    post_columns = _columns(conn, "awareness_posts")
+    if "intent_key" not in post_columns:
+        conn.execute(
+            "ALTER TABLE awareness_posts ADD COLUMN intent_key TEXT "
+            "REFERENCES awareness_delivery_intents(intent_key)"
+        )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_awareness_posts_intent "
+        "ON awareness_posts(intent_key) WHERE intent_key IS NOT NULL"
+    )
+
+    # Membership identity is a database invariant, not merely a replay/test
+    # assertion. A Clash Royale account can have only one open clan tenure.
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_clan_memberships_one_open "
+        "ON clan_memberships(player_tag) WHERE left_at IS NULL"
+    )
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -449,6 +624,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         try:
             _apply_v3(conn)
             conn.execute("PRAGMA user_version = 3")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        version = 3
+    if version < 4:
+        try:
+            _apply_v4(conn)
+            conn.execute("PRAGMA user_version = 4")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -512,7 +696,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 # Updated deliberately whenever the fresh-build schema changes.
 CURRENT_SCHEMA_FINGERPRINT = (
-    "380ac5a52d02902de11694d85de3195be37f51ad61d1a2384fed96327d846228"
+    "97a95f1f186fe515f7bd0113bb4e1ececa55d4a7ad91b262185adda67b14687e"
 )
 
 

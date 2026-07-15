@@ -118,12 +118,93 @@ def evaluate_source_freshness(conn, *, now, home_clan: str) -> dict:
     }
 
 
-def start_materialization(conn, *, started_at: str) -> int:
+def start_materialization(
+    conn, *, started_at: str, run_kind: str = "scheduled"
+) -> int:
     cur = conn.execute(
-        "INSERT INTO materialization_runs (started_at) VALUES (?)",
-        (canonical_utc_timestamp(started_at),),
+        "INSERT INTO materialization_runs (started_at, run_kind) VALUES (?, ?)",
+        (canonical_utc_timestamp(started_at), run_kind),
     )
     return int(cur.lastrowid)
+
+
+def add_materialization_input(conn, materialization_id: int, observation) -> int:
+    """Link an admitted observation and its closest raw receipt to a run."""
+    raw_key = str(observation.entity_key).lstrip("#").upper()
+    receipt = conn.execute(
+        """SELECT receipt_id FROM api_observation_receipts
+           WHERE endpoint = ? AND UPPER(LTRIM(entity_key, '#')) = ?
+             AND payload_hash = ?
+           ORDER BY receipt_id DESC LIMIT 1""",
+        (observation.endpoint, raw_key, observation.payload_hash),
+    ).fetchone()
+    receipt_id = int(receipt["receipt_id"]) if receipt else None
+    cur = conn.execute(
+        """INSERT OR IGNORE INTO materialization_inputs
+               (materialization_id, receipt_id, endpoint, entity_key,
+                observed_at, payload_hash, source, applied_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            materialization_id,
+            receipt_id,
+            observation.endpoint,
+            observation.entity_key,
+            observation.observed_at,
+            observation.payload_hash,
+            observation.source,
+            observation.observed_at,
+        ),
+    )
+    if receipt_id is not None:
+        conn.execute(
+            """UPDATE api_observation_receipts
+               SET admission_status = 'accepted', admission_errors_json = '[]'
+               WHERE receipt_id = ?""",
+            (receipt_id,),
+        )
+    if cur.rowcount:
+        return int(cur.lastrowid)
+    row = conn.execute(
+        """SELECT materialization_input_id FROM materialization_inputs
+           WHERE materialization_id = ? AND endpoint = ? AND entity_key = ?
+             AND observed_at = ? AND payload_hash = ?""",
+        (
+            materialization_id,
+            observation.endpoint,
+            observation.entity_key,
+            observation.observed_at,
+            observation.payload_hash,
+        ),
+    ).fetchone()
+    return int(row["materialization_input_id"])
+
+
+def record_admission_decision(conn, decision, payload) -> None:
+    """Attach an endpoint contract decision to its latest network receipt."""
+    if payload is None:
+        return
+    from engine.db import payload_hash
+
+    raw_key = str(decision.entity_key).lstrip("#").upper()
+    row = conn.execute(
+        """SELECT receipt_id FROM api_observation_receipts
+           WHERE endpoint = ? AND UPPER(LTRIM(entity_key, '#')) = ?
+             AND payload_hash = ?
+           ORDER BY receipt_id DESC LIMIT 1""",
+        (decision.endpoint, raw_key, payload_hash(payload)),
+    ).fetchone()
+    if row is None:
+        return
+    conn.execute(
+        """UPDATE api_observation_receipts
+           SET admission_status = ?, admission_errors_json = ?
+           WHERE receipt_id = ?""",
+        (
+            "accepted" if decision.accepted else "rejected",
+            json.dumps(list(decision.errors), separators=(",", ":")),
+            row["receipt_id"],
+        ),
+    )
 
 
 def update_materialization(
@@ -135,6 +216,7 @@ def update_materialization(
     poll_ok: bool | None = None,
     apply_ok: bool | None = None,
     manage_ok: bool | None = None,
+    derivations_ok: bool | None = None,
     source_freshness: dict | None = None,
     counters: dict | None = None,
     errors: dict | None = None,
@@ -146,6 +228,7 @@ def update_materialization(
         ("poll_ok", None if poll_ok is None else int(poll_ok)),
         ("apply_ok", None if apply_ok is None else int(apply_ok)),
         ("manage_ok", None if manage_ok is None else int(manage_ok)),
+        ("derivations_ok", None if derivations_ok is None else int(derivations_ok)),
         (
             "source_freshness_json",
             None
@@ -181,11 +264,40 @@ def latest_materialization(conn) -> dict | None:
     return result
 
 
+def generation_snapshot(conn) -> dict | None:
+    """Return the exact applied generation visible to the current DB snapshot."""
+    row = conn.execute(
+        """SELECT mr.*, COUNT(mi.materialization_input_id) AS input_count
+           FROM materialization_runs mr
+           LEFT JOIN materialization_inputs mi
+             ON mi.materialization_id = mr.materialization_id
+           WHERE mr.apply_ok = 1 AND mr.status IN ('complete', 'partial')
+           GROUP BY mr.materialization_id
+           ORDER BY mr.materialization_id DESC LIMIT 1"""
+    ).fetchone()
+    if row is None:
+        return None
+    result = dict(row)
+    return {
+        "materialization_id": result["materialization_id"],
+        "run_kind": result["run_kind"],
+        "status": result["status"],
+        "started_at": result["started_at"],
+        "completed_at": result["completed_at"],
+        "input_count": result["input_count"],
+        "data_consistent": bool(result["derivations_ok"])
+        and (result["run_kind"] == "interactive" or bool(result["manage_ok"])),
+    }
+
+
 __all__ = [
     "BATTLELOG_MAX_AGE_MINUTES",
     "CLAN_MAX_AGE_MINUTES",
     "PROFILE_MAX_AGE_MINUTES",
     "evaluate_source_freshness",
+    "add_materialization_input",
+    "generation_snapshot",
+    "record_admission_decision",
     "latest_materialization",
     "start_materialization",
     "update_materialization",

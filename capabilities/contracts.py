@@ -16,7 +16,11 @@ class CapabilityEnvelope(TypedDict):
     contract_version: int
 
 
-class SourcedCapabilityEnvelope(CapabilityEnvelope):
+class _GenerationEnvelope(TypedDict, total=False):
+    data_generation: dict[str, Any] | None
+
+
+class SourcedCapabilityEnvelope(CapabilityEnvelope, _GenerationEnvelope):
     sources: list[str]
 
 

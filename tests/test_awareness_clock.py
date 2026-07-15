@@ -37,3 +37,15 @@ def test_build_read_includes_clock_block(engine_conn):
     assert "clock" in r
     assert "clock" not in r.get("_degraded", [])
     assert r["clock"]["utc"].endswith("UTC")
+
+
+def test_build_read_closes_snapshot_it_starts_on_borrowed_connection(engine_conn):
+    # First use may initialize durable event cursors; the caller owns that
+    # write transaction and commits it explicitly.
+    read_mod.build_read(conn=engine_conn)
+    engine_conn.commit()
+    assert engine_conn.in_transaction is False
+
+    read_mod.build_read(conn=engine_conn)
+
+    assert engine_conn.in_transaction is False

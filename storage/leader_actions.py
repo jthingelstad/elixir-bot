@@ -490,7 +490,6 @@ def update_leader_action_message(
         "UPDATE leader_action_recommendations SET source_message_id = ?, updated_at = ? WHERE action_id = ?",
         (str(source_message_id), _db._utcnow(), int(action_id)),
     )
-    conn.commit()
 
 
 @managed_connection
@@ -506,7 +505,6 @@ def update_leader_action_copy_message(
         "UPDATE leader_action_recommendations SET copy_message_id = ?, updated_at = ? WHERE action_id = ?",
         (str(copy_message_id), _db._utcnow(), int(action_id)),
     )
-    conn.commit()
 
 
 @managed_connection
@@ -527,7 +525,6 @@ def update_leader_action_copy_messages(
         """,
         (ids[0], _json_dumps(ids), _db._utcnow(), int(action_id)),
     )
-    conn.commit()
 
 
 def _copy_diff(original: str, edited: str) -> dict:
@@ -596,7 +593,6 @@ def update_leader_action_copy_text(
             int(action_id),
         ),
     )
-    conn.commit()
     # Editor copy-edit feeder (editor.md §3): the leader's rewrite is a paired
     # before/after exemplar for the rubric. Never blocks the edit itself.
     try:
@@ -1147,7 +1143,6 @@ def decide_leader_action(
             action["action_id"],
         ),
     )
-    conn.commit()
     updated = get_leader_action_by_id(action["action_id"], conn=conn)
     if updated and updated.get("case_id"):
         try:
@@ -1173,7 +1168,6 @@ def decide_leader_action(
                     int(updated["case_id"]),
                 ),
             )
-            conn.commit()
         except Exception as exc:
             # The card decision is the user action of record; case sync should
             # not make the Discord reaction handler fail, but the split state
@@ -1303,7 +1297,6 @@ def classify_departure(
         except Exception:
             log.warning("departure memory write failed for %s", canon, exc_info=True)
 
-    conn.commit()
     return get_leader_action_by_id(action["action_id"], conn=conn)
 
 
@@ -1333,7 +1326,6 @@ def clear_leader_action_decision_by_message(
         """,
         (ACTION_PROPOSED, now, action["action_id"]),
     )
-    conn.commit()
     return get_leader_action_by_message(source_message_id, conn=conn)
 
 
@@ -1382,7 +1374,6 @@ def record_leader_action_note_by_message(
             action["action_id"],
         ),
     )
-    conn.commit()
     return get_leader_action_by_message(source_message_id, conn=conn)
 
 
@@ -1404,7 +1395,6 @@ def refresh_leader_action_outcome(
         "UPDATE leader_action_recommendations SET outcome_json = ?, updated_at = ? WHERE action_id = ?",
         (_json_dumps(outcome), _db._utcnow(), int(action_id)),
     )
-    conn.commit()
     return get_leader_action_by_key(action["action_key"], conn=conn)
 
 

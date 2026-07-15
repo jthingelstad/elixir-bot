@@ -14,27 +14,30 @@ Elixir has one external data ingress and one proactive voice:
 ```mermaid
 flowchart LR
     API["Clash Royale API"] --> INGRESS["cr_api.py"]
-    INGRESS --> RAW["raw_api_payloads<br/>14-day analysis buffer"]
-    INGRESS --> TICK["engine tick<br/>poll → ingest → emit → project → manage"]
+    INGRESS --> RECEIPTS["append-only API receipts"]
+    RECEIPTS --> RAW["deduplicated payload content<br/>14-day analysis buffer"]
+    INGRESS --> TICK["atomic materialization generation<br/>apply → derive → manage"]
     TICK --> STREAMS["battle, player, clan,<br/>and war event streams"]
-    TICK --> READS["current projections,<br/>rollups, and management state"]
+    TICK --> READS["current projections, rollups,<br/>management state + generation id"]
     STREAMS --> AWARE["hourly awareness loop"]
     READS --> AWARE
     AWARE --> PLAN["validated post plan<br/>with hard coverage floors"]
-    PLAN --> DISCORD["member-facing Discord lanes"]
+    PLAN --> OUTBOX["durable per-post outbox"]
+    OUTBOX --> DISCORD["member-facing Discord lanes"]
     TICK --> ACTIONS["leader action cards"]
 ```
 
-- `cr_api.py` is the only Clash Royale API ingress. Every response is appended
-  to `raw_api_payloads` under its real endpoint name.
-- `engine.tick.run_tick` runs the five production materialization steps. Each
-  step has its own transaction guard, so one failure is recorded without
-  preventing later steps from running.
+- `cr_api.py` is the only Clash Royale API ingress. Every successful response
+  appends an `api_observation_receipts` row; identical bodies share one
+  `raw_api_payloads` content row.
+- `engine.tick.run_tick` records the admitted inputs and commits streams,
+  projections, rollups, readiness, management, and generation status together.
+  Interactive profile/battle-log refreshes use the same generation contract.
 - Event streams are durable history. Projections are disposable read models.
   Current state is never reconstructed from prompts.
-- The awareness loop reads streams and projections, decides what is worth
-  saying, and is the sole proactive poster. The old deterministic recognition
-  and delivery path is retained only for explicit offline rehearsals.
+- The awareness loop reads one SQLite snapshot identified by `data_generation`,
+  decides what is worth saying, and is the sole proactive poster. Its whole plan
+  is validated and persisted before send; partial retries skip fulfilled posts.
 - Clan management is deterministic. It writes state and leader actions; it does
   not delegate promotion, demotion, or kick policy to the model.
 

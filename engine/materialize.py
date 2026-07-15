@@ -286,9 +286,14 @@ def apply_observation(
     now: datetime | None = None,
     track_poll_freshness: bool = False,
     season_id_override: int | None = None,
+    materialization_id: int | None = None,
 ) -> ApplyResult:
     """Apply one admitted observation inside the caller's transaction."""
     now = now or _as_utc(observation.observed_at)
+    if materialization_id is not None:
+        from engine import readiness
+
+        readiness.add_materialization_input(conn, materialization_id, observation)
     if observation.endpoint == "clan":
         return _apply_clan(conn, observation, now)
     if observation.endpoint == "currentriverrace":
@@ -311,6 +316,44 @@ def apply_observation(
             track_poll_freshness=track_poll_freshness,
         )
     raise ValueError(f"unsupported observation endpoint: {observation.endpoint}")
+
+
+def apply_interactive_observation(
+    conn,
+    observation: Observation,
+    *,
+    clock=None,
+    now: datetime | None = None,
+    track_poll_freshness: bool = True,
+) -> ApplyResult:
+    """Apply one interactive refresh as a complete, attributable generation."""
+    from engine import readiness
+
+    materialization_id = readiness.start_materialization(
+        conn,
+        started_at=observation.observed_at,
+        run_kind="interactive",
+    )
+    result = apply_observation(
+        conn,
+        observation,
+        clock=clock,
+        now=now,
+        track_poll_freshness=track_poll_freshness,
+        materialization_id=materialization_id,
+    )
+    readiness.update_materialization(
+        conn,
+        materialization_id,
+        status="complete",
+        completed_at=observation.observed_at,
+        poll_ok=True,
+        apply_ok=True,
+        manage_ok=False,
+        derivations_ok=True,
+        counters={"observations_applied": 1, "source": observation.source},
+    )
+    return result
 
 
 def apply_tick_derivations(conn, *, clock, observed_at: str) -> ApplyResult:
@@ -369,6 +412,7 @@ __all__ = [
     "ApplyResult",
     "anchored_clock",
     "apply_observation",
+    "apply_interactive_observation",
     "apply_tick_derivations",
     "configured_home_clan",
     "current_clock",

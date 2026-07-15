@@ -576,7 +576,8 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         "(SELECT COUNT(*) FROM discord_users) AS discord_users, "
         "(SELECT COUNT(*) FROM discord_links WHERE is_primary = 1) AS discord_links, "
         "(SELECT COUNT(*) FROM messages) AS message_count, "
-        "(SELECT COUNT(*) FROM raw_api_payloads) AS raw_payload_count, "
+        "(SELECT COUNT(*) FROM api_observation_receipts) AS raw_payload_count, "
+        "(SELECT COUNT(*) FROM raw_api_payloads) AS raw_payload_content_count, "
         "(SELECT COUNT(*) FROM battle_events) AS battle_fact_count"
     ).fetchone()
     counts = dict(counts)
@@ -624,12 +625,14 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         "contextual_memory_at": _memory_latest,
     }
     latest_raw = conn.execute(
-        "SELECT endpoint, entity_key, fetched_at FROM raw_api_payloads ORDER BY fetched_at DESC, payload_id DESC LIMIT 1"
+        "SELECT endpoint, entity_key, fetched_at FROM api_observation_receipts "
+        "ORDER BY receipt_id DESC LIMIT 1"
     ).fetchone()
     endpoint_counts = _rowdicts(
         conn.execute(
             "SELECT endpoint, COUNT(*) AS count, MAX(fetched_at) AS last_fetched_at "
-            "FROM raw_api_payloads GROUP BY endpoint ORDER BY count DESC, endpoint ASC"
+            "FROM api_observation_receipts GROUP BY endpoint "
+            "ORDER BY count DESC, endpoint ASC"
         ).fetchall()
     )
     current_season_id = get_current_season_id(conn=conn)

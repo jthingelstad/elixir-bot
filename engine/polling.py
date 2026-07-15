@@ -120,17 +120,41 @@ def note_poll_succeeded(conn, player_tag, endpoint: str, now=None) -> None:
 note_polled = note_poll_succeeded
 
 
-def plan(conn, now=None, budget: int = POLL_BUDGET_PER_TICK) -> list[tuple[str, str]]:
+def plan(
+    conn,
+    now=None,
+    budget: int = POLL_BUDGET_PER_TICK,
+    *,
+    roster_tags=None,
+) -> list[tuple[str, str]]:
     """Spend the per-player budget hottest-first with fairness floors
     (runtime.md §4): priority = floor-starved first (most overdue), then heat,
     then longest-overdue. Returns ordered [(endpoint, player_tag)]."""
     now = now or utcnow()
     now_dt = _parse(now)
-    rows = conn.execute(
-        """SELECT ps.* FROM poll_state ps
-           WHERE EXISTS (SELECT 1 FROM clan_memberships cm
-                         WHERE cm.player_tag = ps.player_tag AND cm.left_at IS NULL)"""
-    ).fetchall()
+    current_roster = {canon_tag(tag) for tag in (roster_tags or []) if tag}
+    current_roster.update(
+        row["player_tag"]
+        for row in conn.execute(
+            "SELECT player_tag FROM clan_memberships WHERE left_at IS NULL"
+        ).fetchall()
+    )
+    persisted = {
+        row["player_tag"]: dict(row)
+        for row in conn.execute("SELECT * FROM poll_state").fetchall()
+        if row["player_tag"] in current_roster
+    }
+    rows = []
+    for tag in sorted(current_roster):
+        rows.append(
+            persisted.get(tag)
+            or {
+                "player_tag": tag,
+                "heat": 2,
+                "last_battlelog_poll": None,
+                "last_profile_poll": None,
+            }
+        )
     candidates: list[tuple[int, int, float, str, str]] = []
     for r in rows:
         temp = _temp(int(r["heat"]))

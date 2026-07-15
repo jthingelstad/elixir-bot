@@ -213,6 +213,27 @@ def test_run_awareness_loop_records_silence(monkeypatch):
     assert thoughts[0]["skipped_reason"] == "nothing material changed"
 
 
+def test_silent_turn_still_invokes_delivery_to_drain_durable_outbox(monkeypatch):
+    monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "0")
+    from runtime.awareness import loop as loop_mod
+
+    calls = []
+
+    def _deliver(read, plan):
+        calls.append(plan)
+        return {"delivered": 0, "replayed": 0, "failed": False}
+
+    with patch(
+        "agent.workflows.run_awareness_tick",
+        return_value={"posts": [], "skipped_reason": "quiet"},
+    ):
+        counters = loop_mod.run_awareness_loop(deliver_fn=_deliver)
+
+    assert len(calls) == 1
+    assert counters["posts_replayed"] == 0
+    assert counters["chose_silence"] is True
+
+
 def test_classify_plan_distinguishes_failure_from_silence():
     """A None / _error / posts-less result is a FAILURE, never silence."""
     from runtime.awareness.store import classify_plan

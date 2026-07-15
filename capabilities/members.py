@@ -90,6 +90,22 @@ def get_member_intelligence(
     conn=None,
 ) -> MemberIntelligenceResult:
     """Return selected facets under one stable member contract."""
+    if conn is None and source in (None, db_facade):
+        active_source = source or db_facade
+        with _connection(active_source) as active:
+            active.execute("BEGIN")
+            return get_member_intelligence(
+                player_tag,
+                facets=facets,
+                days=days,
+                scope=scope,
+                battles_scope=battles_scope,
+                battles_limit=battles_limit,
+                losses_limit=losses_limit,
+                event_limit=event_limit,
+                source=active_source,
+                conn=active,
+            )
     source = _source(source)
     tag = _tag(player_tag)
     requested = tuple(dict.fromkeys(facets or DEFAULT_FACETS))
@@ -106,7 +122,12 @@ def get_member_intelligence(
             "player_events",
             "clan_memberships",
         ],
+        "data_generation": None,
     }
+    if conn is not None:
+        from engine.readiness import generation_snapshot
+
+        result["data_generation"] = generation_snapshot(conn)
 
     if "profile" in requested:
         result["profile"] = _invoke(source, "get_member_profile", tag, conn=conn)

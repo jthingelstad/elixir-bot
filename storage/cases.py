@@ -253,7 +253,6 @@ def upsert_decision_case(
             now,
         ),
     )
-    conn.commit()
     return get_decision_case(clean_case_key, conn=conn) or {}
 
 
@@ -353,7 +352,6 @@ def resolve_decision_case(
         """,
         (clean_status, now, _clean_text(resolution), now, int(case_id)),
     )
-    conn.commit()
     return get_decision_case_by_id(case_id, conn=conn)
 
 
@@ -550,7 +548,6 @@ def raise_departure_verification_cards(
         raised.append(
             {"player_tag": tag, "player_name": name, "left_at": row["left_at"]}
         )
-    conn.commit()
     return raised
 
 
@@ -615,7 +612,6 @@ def expire_departure_verification_cards(
             ),
         )
         expired.append({"action_id": row["action_id"], "target_player_tag": tag})
-    conn.commit()
     return expired
 
 
@@ -992,7 +988,6 @@ def link_leader_action_to_case(
         "UPDATE leader_action_recommendations SET case_id = ?, updated_at = ? WHERE action_id = ?",
         (int(case_id), _db._utcnow(), int(action_id)),
     )
-    conn.commit()
 
 
 def _member_case_priority(member: dict) -> int:
