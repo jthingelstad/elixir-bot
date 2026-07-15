@@ -31,6 +31,14 @@ def insert_stream_event(
 ) -> int:
     """INSERT OR IGNORE one event row into player_events / clan_events /
     war_events (shared §8 envelope). Returns rows inserted (0 on dedup)."""
+    from engine.event_contracts import validate_event
+
+    _, observed_at = validate_event(
+        table=table,
+        event_type=event_type,
+        payload=payload,
+        observed_at=observed_at,
+    )
     cols = {
         "dedup_key": dedup_key,
         "event_type": event_type,

@@ -73,7 +73,7 @@ tables unchanged and is not redesigned here.
 | Bounded stream: war | `war_seasons`, `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days` | 5 |
 | Bounded stream: tournaments | `tournaments`, `tournament_battles`, `tournament_participants` | 3 |
 | Awards (durable) | `awards` | 1 |
-| Engine control | `stream_cursors` (durable), `runtime_job_status`, `poll_state` (runtime.md §4) | 3 |
+| Engine control | `stream_cursors` (durable), `runtime_job_status`, `poll_state` (runtime.md §4), `materialization_runs` | 4 |
 | Ops singletons (carried) | `llm_calls`, `prompt_failures`, `prompt_feedback`, `system_signals`, `api_sentinel_observations`, `arena_relay_screenshot_observations`, `discord_channels`, `channel_state`, `game_mode_contexts`, `card_catalog`, `elixir_improvement_suggestions` | 11 |
 | **Engine total** | | **49** |
 | Deferred pass (carried unchanged) | `clan_memories` + 9 satellites + FTS/vec, `conversation_threads`, `messages`, `memory_facts`, `memory_episodes` | ~19 designed |
@@ -380,7 +380,11 @@ CREATE TABLE member_management (
     kick_state    TEXT NOT NULL DEFAULT 'none',   -- none|watch|at_risk|recommended
     promote_qualifying_weeks INTEGER NOT NULL DEFAULT 0,
     kick_state_since TEXT,
-    state_json TEXT NOT NULL DEFAULT '{}'   -- evaluator internals for auto-withdraw (§13.4)
+    state_json TEXT NOT NULL DEFAULT '{}',  -- evaluator internals for auto-withdraw (§13.4)
+    judgment_status TEXT NOT NULL DEFAULT 'unknown', -- unknown|ready|held
+    judgment_reason TEXT,                   -- why a held verdict was withheld
+    evidence_as_of TEXT,                    -- battle evidence freshness boundary
+    materialization_id INTEGER REFERENCES materialization_runs(materialization_id)
 );
 ```
 
@@ -388,6 +392,9 @@ Thresholds and windows live in `CLAN.md` (§13.3; precedent: `CLAN.md:120–127`
 the evaluator and candidacy **transition rules** are specified in
 `management.md`. Kick-risk transitions (`kick_state` → `recommended`) fire the
 Q1 reactive path; everything else waits for the weekly review.
+`judgment_status != 'ready'` is a capability-level fail-closed boundary:
+actionable states remain durable for audit, but are not presented as current
+recommendations until a ready materialization evaluates them again.
 
 ## 7. Recognition, delivery, clan management, war, awards
 
@@ -559,6 +566,11 @@ constraint.
   last-successful-observation timestamps). Rejected/missing responses do not
   advance freshness. DDL and semantics in `runtime.md` §4; listed here so the
   layer map is complete. Rebuildable (seeds warm), not durable-precious.
+- `materialization_runs` — one generation per production tick: start/completion,
+  complete/partial/failed status, poll/apply/manage gates, source-freshness JSON,
+  counters, and errors. It is the provenance target for
+  `member_management.materialization_id` and makes partial data products
+  queryable instead of implicit in logs.
 - Tournaments star (`tournaments`, `tournament_battles`, `tournament_participants`) —
   carried; `tournament_battles.player1_member_id`/`player2_member_id` drop (tags
   already present in the same rows; verified DDL).

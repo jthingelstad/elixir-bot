@@ -35,6 +35,18 @@
 > external API refresh remains ingress work, and deterministic engine policy
 > (especially `member_management`) remains authoritative rather than being
 > re-evaluated in the capability layer.
+>
+> **Materialization-contract amendment (2026-07-15):** every admitted CR response
+> becomes a canonical `Observation` and is applied through `engine.materialize`
+> in production polling, interactive tool refreshes, and offline replay. The
+> service deliberately owns both sides of the hybrid model: semantic deltas go
+> to event streams while current snapshots refresh projections from the same
+> observation and transaction. Production commits ingest, emit/baseline,
+> projection/rollup, and poll-freshness writes atomically; a failure rolls the
+> group back and skips management. `materialization_runs` and per-member
+> readiness fields make incomplete or stale evidence explicit to capability
+> consumers. `engine.event_contracts` is the single event vocabulary and owns
+> stream, payload floor, time semantics, awareness lane, and hard-post policy.
 
 ---
 

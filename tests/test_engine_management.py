@@ -1083,8 +1083,8 @@ def test_management_read_summary_reflects_engine_states():
             )
             conn.execute(
                 "INSERT INTO member_management (player_tag, role, kick_state, promote_state, "
-                "demote_state, computed_at, week_anchor, promote_qualifying_weeks, state_json) "
-                "VALUES (?,?,?,?,?,?,?,0,'{}')",
+                "demote_state, computed_at, week_anchor, promote_qualifying_weeks, state_json, "
+                "judgment_status) VALUES (?,?,?,?,?,?,?,0,'{}','ready')",
                 (tag, role, kick, promote, demote, NOW, "2026-06-28"),
             )
 

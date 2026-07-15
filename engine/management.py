@@ -158,6 +158,8 @@ def management_read_summary(conn) -> dict:
     """
     rows = conn.execute(
         """SELECT mm.player_tag, mm.role, mm.kick_state, mm.promote_state, mm.demote_state,
+                  mm.judgment_status, mm.judgment_reason, mm.evidence_as_of,
+                  mm.materialization_id,
                   COALESCE(p.display_name, p.current_name) AS current_name
            FROM member_management mm
            LEFT JOIN players p ON p.player_tag = mm.player_tag
@@ -166,7 +168,23 @@ def management_read_summary(conn) -> dict:
     ).fetchall()
     actionable: dict[str, list] = {"kick": [], "promote": [], "demote": []}
     building = {"kick": 0, "promote": 0, "demote": 0}
+    readiness_counts = {"ready": 0, "held": 0, "unknown": 0}
+    held: list[dict] = []
     for row in rows:
+        judgment_status = row["judgment_status"] or "unknown"
+        readiness_counts[judgment_status] += 1
+        if judgment_status != "ready":
+            held.append(
+                {
+                    "player_tag": row["player_tag"],
+                    "player_name": row["current_name"] or row["player_tag"],
+                    "status": judgment_status,
+                    "reason": row["judgment_reason"],
+                    "evidence_as_of": row["evidence_as_of"],
+                    "materialization_id": row["materialization_id"],
+                }
+            )
+            continue
         for action, col in _MGMT_STATE_COL.items():
             state = row[col] or "none"
             if state in _MGMT_ACTIONABLE[action]:
@@ -180,10 +198,18 @@ def management_read_summary(conn) -> dict:
                 )
             elif state in _MGMT_BUILDING[action]:
                 building[action] += 1
+    from engine.readiness import latest_materialization
+
+    materialization = latest_materialization(conn)
     return {
         "actionable": actionable,
         "building_counts": building,
         "members_evaluated": len(rows),
+        "readiness": {
+            "counts": readiness_counts,
+            "held_members": held,
+        },
+        "materialization": materialization,
     }
 
 
@@ -585,16 +611,18 @@ def elder_evidence(conn, tag: str, now: str | None = None) -> dict | None:
 # ------------------------------------------------------ kick path (§3.3)
 
 
-def run_tick_evaluators(conn, now: str | None = None) -> list[dict]:
+def run_tick_evaluators(
+    conn,
+    now: str | None = None,
+    *,
+    readiness: dict | None = None,
+    materialization_id: int | None = None,
+) -> list[dict]:
     """Continuous kick_state evaluation (Q1 reactive path). Returns the
     transitions that crossed into 'recommended' this run — the caller raises
     the leader actions. States only; the weekly grain never moves here."""
     now = now or utcnow()
     now_dt = _parse_ts(now)
-    epoch_row = conn.execute("SELECT MIN(observed_at) FROM battle_events").fetchone()
-    if not epoch_row or not epoch_row[0]:
-        return []  # stream empty (fresh cut warm-up) — no data, no judgment
-    fired: list[dict] = []
     members = conn.execute(
         """SELECT mm.player_tag, mm.tenure_days, mm.role, mm.kick_state,
                   mm.kick_state_since, mm.state_json, p.last_seen_at,
@@ -607,6 +635,51 @@ def run_tick_evaluators(conn, now: str | None = None) -> list[dict]:
            WHERE EXISTS (SELECT 1 FROM clan_memberships cm
                          WHERE cm.player_tag = mm.player_tag AND cm.left_at IS NULL)"""
     ).fetchall()
+    epoch_row = conn.execute("SELECT MIN(observed_at) FROM battle_events").fetchone()
+    if not epoch_row or not epoch_row[0]:
+        if readiness is not None:
+            conn.execute(
+                """UPDATE member_management SET
+                       judgment_status = 'held',
+                       judgment_reason = 'battle_stream_empty',
+                       evidence_as_of = NULL,
+                       materialization_id = ?
+                   WHERE EXISTS (SELECT 1 FROM clan_memberships cm
+                                 WHERE cm.player_tag = member_management.player_tag
+                                   AND cm.left_at IS NULL)""",
+                (materialization_id,),
+            )
+        return []  # fresh-cut warm-up — no data, explicitly no judgment
+
+    if readiness is not None:
+        ready_members = []
+        member_readiness = readiness.get("members") or {}
+        for member in members:
+            state = member_readiness.get(member["player_tag"]) or {
+                "status": "held",
+                "reasons": ["freshness_unknown"],
+                "evidence_as_of": None,
+            }
+            status = state.get("status") or "held"
+            reasons = state.get("reasons") or []
+            conn.execute(
+                """UPDATE member_management SET
+                       judgment_status = ?, judgment_reason = ?,
+                       evidence_as_of = ?, materialization_id = ?
+                   WHERE player_tag = ?""",
+                (
+                    status,
+                    ",".join(reasons) if reasons else None,
+                    state.get("evidence_as_of"),
+                    materialization_id,
+                    member["player_tag"],
+                ),
+            )
+            if status == "ready":
+                ready_members.append(member)
+        members = ready_members
+
+    fired: list[dict] = []
     # Slot scarcity: an idle member only costs a slot when the clan is full, so
     # the contribution grace fades with open slots — full grace when empty, zero
     # at 50/50. members are exactly the active roster (open-membership rows above).

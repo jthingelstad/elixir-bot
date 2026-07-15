@@ -23,70 +23,20 @@ from capabilities import awards as awards_capability
 from capabilities import game_modes as game_mode_capability
 from capabilities import management as management_capability
 from capabilities import war as war_capability
+from engine.event_contracts import hard_post_event_types, lane_by_event_type
 from storage import cases, events_read, leader_actions, revisits
 
 log = logging.getLogger("elixir")
 
 
-# Signals the awareness loop is REQUIRED to address (awareness.md "Hard-Post
-# Floors"). Both the doc names and the concrete v5.1 event_types are listed so
-# the derivation works regardless of which vocabulary the stream carries.
-HARD_POST_EVENT_TYPES = frozenset(
-    {
-        "war_battle_rank_change",
-        "war_week_complete",
-        "war_season_complete",
-        "capability_unlock",
-        "member_join",
-        "member_leave",
-        # concrete v5.1 event_stream types
-        "member_joined",
-        # NB: raw "member_left" is deliberately NOT a hard-post — a departure's public
-        # goodbye is HELD until a leader verifies it was an organic leave (vs a kick).
-        # The verified-leave signal below is what earns a farewell; a kick earns none.
-        "member_left_verified",
-        "week_finished",
-        "season_closed",
-        "pol_season_podium",
-        # The clan's OWN founding anniversary is a can't-miss celebration (unlike
-        # member birthdays / join anniversaries, which stay discretionary). It fires
-        # once a year and ages out of the delta feed after one covered tick, so it
-        # won't repeat-fail; cake_days_today keeps it visible all day as backup.
-        "clan_birthday",
-    }
-)
+# The event registry is the sole hard-post vocabulary. Raw ``member_left`` is
+# intentionally absent: only ``member_left_verified`` earns a public farewell.
+HARD_POST_EVENT_TYPES = hard_post_event_types()
 
 
 # event_type → lane. Player-stream events default to "milestone"; the streams
 # themselves (player/clan/war) give the fallback lane.
-_LANE_BY_EVENT_TYPE: dict[str, str] = {
-    # war
-    "season_closed": "war",
-    "season_started": "war",
-    "war_day_opened": "war",
-    "week_finished": "war",
-    "war_battle_rank_change": "war",
-    # clan_event
-    "member_joined": "clan_event",
-    "member_left": "clan_event",
-    "member_left_verified": "clan_event",
-    "role_changed": "clan_event",
-    "weekly_donation_leader": "clan_event",
-    # award-race lead changes (War Champ / Rookie MVP) — see award_races block
-    "war_champ_lead_change": "clan_event",
-    "rookie_mvp_lead_change": "clan_event",
-    # clan_event — calendar "cake days" (also surfaced all-day via cake_days_today)
-    "member_birthday": "clan_event",
-    "clan_birthday": "clan_event",
-    "join_anniversary": "clan_event",
-    "cr_account_anniversary": "clan_event",
-    # battle_mode
-    "pol_promotion": "battle_mode",
-    "pol_season_closed": "battle_mode",
-    "pol_season_podium": "battle_mode",
-    # system
-    "capability_unlock": "system",
-}
+_LANE_BY_EVENT_TYPE: dict[str, str] = lane_by_event_type()
 
 _LANE_BY_STREAM: dict[str, str] = {
     "war": "war",

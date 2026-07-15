@@ -16,7 +16,7 @@ from capabilities.contracts import ManagementDecisionResult
 from engine.management import management_read_summary
 
 CAPABILITY_ID = "management_decisions"
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2
 
 
 def _source(source):
@@ -67,6 +67,22 @@ def _board(source, *, conn=None) -> dict:
     open_actions = _invoke(
         source, "list_leader_actions", status="proposed", limit=25, conn=conn
     )
+    held_tags = {
+        member.get("player_tag")
+        for member in (summary.get("readiness") or {}).get("held_members") or []
+    }
+    management_action_types = {
+        "kick_recommendation",
+        "promotion_recommendation",
+        "demotion_recommendation",
+    }
+    held_actions = [
+        action
+        for action in open_actions
+        if action.get("target_player_tag") in held_tags
+        and action.get("action_type") in management_action_types
+    ]
+    open_actions = [action for action in open_actions if action not in held_actions]
     recent_actions = _invoke(source, "list_leader_actions", limit=15, conn=conn)
     cases = _invoke(
         source,
@@ -86,6 +102,7 @@ def _board(source, *, conn=None) -> dict:
         },
         "workflow": {
             "open_actions": open_actions,
+            "held_actions": held_actions,
             "recent_actions": recent_actions,
             "decision_cases": cases,
             "pending_revisits": revisits,
@@ -99,8 +116,9 @@ def get_management_decisions(
     """Return an authoritative leadership-only management view."""
     source = _source(source)
     arguments = dict(arguments or {})
+    summary = _summary(source, conn=conn)
     if view == "summary":
-        data = _summary(source, conn=conn)
+        data = summary
     elif view == "at_risk":
         data = _at_risk(source, arguments, conn=conn)
     elif view == "promotion_candidates":
@@ -111,6 +129,7 @@ def get_management_decisions(
         data = _board(source, conn=conn)
     else:
         data = {"error": f"Unknown management view: {view}"}
+    materialization = summary.get("materialization") or {}
     return {
         "capability": CAPABILITY_ID,
         "contract_version": CONTRACT_VERSION,
@@ -119,7 +138,14 @@ def get_management_decisions(
         "policy": {
             "authority": "engine.management member_management state machines",
             "rescored": False,
+            "fail_closed_on_stale_evidence": True,
         },
+        "readiness": summary.get("readiness")
+        or {
+            "counts": {"ready": 0, "held": 0, "unknown": 0},
+            "held_members": [],
+        },
+        "freshness": materialization.get("source_freshness") or {},
         "sources": [
             "member_management",
             "leader_action_recommendations",

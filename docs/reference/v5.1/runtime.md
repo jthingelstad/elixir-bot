@@ -39,37 +39,44 @@ not the tick rate, controls API spend). Single process, single writer; APSchedul
 tick(now):
   1. POLL      — spend the per-tick API budget per the §4 scheduler.
                  Every response → raw_api_payloads (L1). Nothing else touches the API.
-                 Before durable mutation, engine.observations admits the decoded
+                 engine.observations admits and canonically envelopes the decoded
                  response against its endpoint shape and requested entity identity.
                  Rejection leaves baselines/projections/events and success freshness
                  unchanged; counters + contract incidents explain the silence.
-  2. INGEST    — battle mirror: new battles → battle_events (dedup-keyed inserts).
+  2. APPLY     — engine.materialize applies all admitted observations in one
+                 transaction shared by production, interactive refresh, and replay.
+                 The transaction includes the following three logical sublayers:
+       INGEST    battle mirror: new battles → battle_events (dedup-keyed inserts).
                  War keys are resolved from the battle's OWN battle_time against
                  the season/section calendar (war_weeks + the live race baseline),
                  NOT the tick-time clock — the battlelog returns battles hours old,
                  and a late-mirrored battle from a previous war day must land in
-                 that day, not this one.
-  3. EMIT      — for each polled (entity, aspect): diff against state_baselines,
+                 that day, not this one. A duplicate row enriches previously-missing
+                 war context rather than freezing a thinner first observation.
+       EMIT      for each polled (entity, aspect): diff against state_baselines,
                  emit player_events / clan_events / war_events, then write the new
                  baseline in the same transaction. First sight emits nothing (§8).
                  On the first tick of each America/Chicago day, the calendar
                  emitter also runs here (birthdays/anniversaries — events.md §4;
                  clock-driven, no API call, date-embedded dedup keys).
-  4. PROJECT   — refresh what the polls touched: player_current_state,
+       PROJECT   refresh what the polls touched: player_current_state,
                  player_card_collection, player_recent_form (subjects with new
                  battles), rollups (upsert today's rows), war_weeks /
                  war_week_clans / war_participation / war_attendance_days,
-                 member_management inputs (metrics only; evaluators run in step 5).
-  5. MANAGE    — run Layer-1 evaluators + Layer-2 candidacy machines for members
-                 whose inputs changed. kick_state transitions fire the Q1 reactive
+                 member_management inputs, and successful-poll freshness.
+                 Any failure rolls the whole APPLY group back.
+  3. MANAGE    — evaluate source freshness, persist the materialization generation,
+                 then run Layer-1 evaluators + Layer-2 candidacy machines only for
+                 members whose evidence is ready. Stale/missing evidence writes a
+                 held judgment and cannot surface as actionable. kick_state transitions fire the Q1 reactive
                  path (a leader action through the existing policy gate).
                  State updates only — the weekly grain (week_anchor,
                  promote_qualifying_weeks) rolls in weekly-leadership-review (§3),
                  never mid-week.
 ```
 
-**Current production amendment (2026-07-14):** `run_tick` exposes only steps
-1–5. It accepts no compose/send callback and cannot enable the retired poster.
+**Current production amendment (2026-07-15):** `run_tick` exposes only the data
+path above. It accepts no compose/send callback and cannot enable the retired poster.
 The unified awareness loop is the sole proactive owner: it reads the emitted
 streams and projections by durable per-stream cursors, makes one whole-situation
 editorial decision, validates the complete plan in deterministic code, and
@@ -85,9 +92,9 @@ per stream:** `cursor_int` = the last processed insertion id — `event_id` for
 for `battle_events` (its PK is a TEXT dedup key; the table is *not*
 `WITHOUT ROWID`, precisely so insertion order gives consumers a monotonic
 cursor — never order by `battle_time`, which arrives out of order across
-players). A step that throws logs,
-**does not advance its cursor**, and the tick continues — idempotent dedup keys
-make re-processing safe. A consumer that fails on the same position **3 ticks
+players). A failed materialization does not advance any of its coupled outputs;
+the transaction rolls back and management is skipped. Independent consumers
+still rely on idempotent keys for safe replay. A consumer that fails on the same position **3 ticks
 running** skips it, records the poison event to `prompt_failures`
 (`failure_type='engine_poison'`), and moves on — one bad payload must not stall
 the stream (new guard; today a bad notification can wedge a follower).

@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 
 _V1_STATEMENTS = (
@@ -221,6 +221,21 @@ REQUIRED_SCHEMA = {
     "memories": {"memory_id", "kind", "scope"},
     "memory_tags": {"memory_id", "tag"},
     "memory_log": {"log_id", "memory_id"},
+    "materialization_runs": {
+        "materialization_id",
+        "status",
+        "poll_ok",
+        "apply_ok",
+        "manage_ok",
+        "source_freshness_json",
+    },
+    "member_management": {
+        "player_tag",
+        "judgment_status",
+        "judgment_reason",
+        "evidence_as_of",
+        "materialization_id",
+    },
 }
 
 
@@ -354,6 +369,49 @@ def _apply_v2(conn: sqlite3.Connection) -> None:
         )
 
 
+def _apply_v3(conn: sqlite3.Connection) -> None:
+    """Make data-readiness a durable part of the management contract."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS materialization_runs (
+            materialization_id INTEGER PRIMARY KEY,
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            status TEXT NOT NULL DEFAULT 'running'
+                CHECK (status IN ('running','complete','partial','failed')),
+            poll_ok INTEGER NOT NULL DEFAULT 0,
+            apply_ok INTEGER NOT NULL DEFAULT 0,
+            manage_ok INTEGER NOT NULL DEFAULT 0,
+            source_freshness_json TEXT NOT NULL DEFAULT '{}',
+            counters_json TEXT NOT NULL DEFAULT '{}',
+            error_json TEXT NOT NULL DEFAULT '{}'
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_materialization_runs_started "
+        "ON materialization_runs(started_at DESC)"
+    )
+    columns = _columns(conn, "member_management")
+    additions = (
+        (
+            "judgment_status",
+            "TEXT NOT NULL DEFAULT 'unknown' "
+            "CHECK (judgment_status IN ('unknown','ready','held'))",
+        ),
+        ("judgment_reason", "TEXT"),
+        ("evidence_as_of", "TEXT"),
+        (
+            "materialization_id",
+            "INTEGER REFERENCES materialization_runs(materialization_id)",
+        ),
+    )
+    for column, declaration in additions:
+        if column not in columns:
+            conn.execute(
+                f"ALTER TABLE member_management ADD COLUMN {column} {declaration}"
+            )
+            columns.add(column)
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -382,6 +440,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         try:
             _apply_v2(conn)
             conn.execute("PRAGMA user_version = 2")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        version = 2
+    if version < 3:
+        try:
+            _apply_v3(conn)
+            conn.execute("PRAGMA user_version = 3")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -445,7 +512,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 # Updated deliberately whenever the fresh-build schema changes.
 CURRENT_SCHEMA_FINGERPRINT = (
-    "a359f4eae62a8aba4a6bba6c0bef3e7341d9260369fb6f3c9298c18c453745a4"
+    "380ac5a52d02902de11694d85de3195be37f51ad61d1a2384fed96327d846228"
 )
 
 

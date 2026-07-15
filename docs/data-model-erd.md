@@ -32,6 +32,7 @@ erDiagram
     players ||--o| player_current_state : projects
     players ||--o| player_recent_form : projects
     players ||--o| member_management : evaluates
+    materialization_runs ||--o{ member_management : qualifies
     players ||--o{ leader_action_recommendations : concerns
     decision_cases ||--o{ leader_action_recommendations : produces
 
@@ -61,7 +62,7 @@ erDiagram
 | War and awards | `war_seasons`, `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days`, `awards` | Bounded war truth plus durable honors. |
 | Awareness and leadership | `awareness_thoughts`, `awareness_posts`, `watches`, `decision_cases`, `leader_action_recommendations`, `revisits` | Deliberation, confirmed delivery, standing concerns, and policy outcomes. |
 | Conversation and memory | `conversation_threads`, `messages`, `memories`, `memory_tags`, `memory_log`, `memories_fts` | Channel-scoped conversation and public/leadership durable memory. |
-| Runtime control | `stream_cursors`, `poll_state`, `runtime_job_status`, `runtime_incidents` | Progress, adaptive polling, job health, and best-effort failure visibility. |
+| Runtime control | `stream_cursors`, `poll_state`, `materialization_runs`, `runtime_job_status`, `runtime_incidents` | Progress, adaptive polling, data-product readiness/provenance, job health, and best-effort failure visibility. |
 
 ## Invariants
 
@@ -69,6 +70,8 @@ erDiagram
   the v5.1 engine.
 - Current membership means exactly one open `clan_memberships` row.
 - Stream and ledger keys are deterministic so replay is idempotent.
+- Management judgments are actionable only when their materialization and
+  source-freshness contract says `ready`.
 - Suffixless internal timestamps are UTC; reporting-day rollups use
   America/Chicago.
 - Projections may be rebuilt. Identity, tenure, streams, rollups, awards,

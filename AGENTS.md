@@ -25,7 +25,7 @@ Rollback before close-out = old git ref + copy the archive back + relaunch.
 - `elixir.py` — Main bot: Discord events, APScheduler, channel routing
 - `elixir_agent.py` — Stable public LLM entrypoint; routes observation, channel replies, and content generation through the `agent/` package
 - `cr_api.py` — Clash Royale API client (clan roster, war status, river race log). The **only** API ingress; every response is appended to `raw_api_payloads` under its true endpoint name
-- `engine/` — The v5.1 data engine (spec: `docs/reference/v5.1/`): `tick.py` (the five-step production materializer), `clock.py` (war clock), `ingest.py` (battle mirror), `baselines.py` + `emitters/` (state-diff event emission), `change_sets.py` (invariant-checked multi-table transitions), `management.py` (clan-management state machines), `polling.py` (adaptive budget scheduler), `projections.py` (read models), `offline.py` (rehearsal/replay engine — no API, no Discord). `recognition/` + `delivery.py` are retired proactive machinery, reachable only through `legacy_proactive.py` in explicit offline rehearsals.
+- `engine/` — The v5.1 data engine (spec: `docs/reference/v5.1/`): `tick.py` (production orchestrator), `observations.py` (admission + canonical envelopes), `materialize.py` (the shared observation application path used by production, interactive refresh, and replay), `readiness.py` (source freshness + durable materialization generations), `event_contracts.py` (event vocabulary/routing), `clock.py`, `ingest.py`, `baselines.py` + `emitters/`, `change_sets.py`, `management.py`, `polling.py`, `projections.py`, and `offline.py`. `recognition/` + `delivery.py` are retired proactive machinery, reachable only through `legacy_proactive.py` in explicit offline rehearsals.
 - `capabilities/` — Canonical domain answers shared by agent tools, awareness, scheduled reports, memory synthesis, and admin surfaces. Consumers may compact or present these facts differently, but do not recalculate them. Versioned contracts currently cover `game_modes.py`, `war.py`, `members.py`, `management.py`, and `awards.py`; management answers are explicitly leadership-scoped, while the other contracts are audience-neutral facts.
 - `db/` — SQLite access package: connection discipline, identity helpers, and the storage facade
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
@@ -45,19 +45,23 @@ Rollback before close-out = old git ref + copy the archive back + relaunch.
 One data flow, spec'd in `docs/reference/v5.1/`:
 
 - **One ingress:** `cr_api` → `raw_api_payloads` (14-day rolling analysis buffer, never the system of record).
-- **Four event streams:** `battle_events` (native — battles mirror in with exact timestamps; war keys resolved from the battle's own time), `player_events`, `clan_events`, `war_events` (emitted — each poll diffs against its `state_baselines` row; first sight emits nothing; dedup keys make re-processing safe).
+- **Four event streams:** `battle_events` (native — battles mirror in with exact timestamps; war keys resolved from the battle's own time), `player_events`, `clan_events`, `war_events` (emitted — each poll diffs against its `state_baselines` row; first sight emits nothing; dedup keys make re-processing safe). `engine/event_contracts.py` is the single vocabulary for event ownership, payload floors, time semantics, awareness lanes, and hard-post policy.
 - **One proactive owner:** the unified awareness loop reads the event streams and current projections, decides worthiness and framing in one turn, and posts with hard-floor coverage. The ported deterministic recognizers/delivery consumer remain an explicit offline comparison seam only; production `run_tick` does not import or run them.
 - **Composition policy:** the awareness workflow owns voice and routing. Deterministic code validates the complete plan before any send (including member pronouns and unranked-war claims), permits one wording-only repair, then fails closed so the event resurfaces next loop. There is no member-facing template fallback.
 - **Delivery:** awareness sends first, then records the post in `awareness_posts` as channel-memory/dedup context. A send or hard-floor miss fails the turn without advancing its per-stream cursor checkpoints. The retired at-least-once consumer creates `communication_intents` as a connection-local TEMP table only when an offline rehearsal explicitly enables `legacy_proactive=True`; the table is absent from the operational schema.
-- **Clan management:** `engine/management.py` per `docs/reference/v5.1/management.md` — Layer-1 evaluators (sustained donor / war-reliable / battle-active, 3-of-4-week hysteresis) feed promote/demote/kick candidacy machines. Kick-risk is reactive (fires a leader action through the policy gate mid-tick); promote/demote surface in the Monday 7:00 CT weekly review, which is also the only place the weekly counters roll. Engagement is measured from battles — `lastSeen`/logins are deliberately ignored.
+- **Clan management:** `engine/management.py` per `docs/reference/v5.1/management.md` — Layer-1 evaluators (sustained donor / war-reliable / battle-active, 3-of-4-week hysteresis) feed promote/demote/kick candidacy machines. Kick-risk is reactive (fires a leader action through the policy gate mid-tick); promote/demote surface in the Monday 7:00 CT weekly review, which is also the only place the weekly counters roll. Engagement is measured from battles — `lastSeen`/logins are deliberately ignored. Every verdict carries `judgment_status` (`ready` / `held` / `unknown`), its evidence timestamp/reason, and the `materialization_id` that produced it; stale evidence fails closed and is excluded from actionable capability reads.
 - **Adaptive polling:** `poll_state` temperatures (battles → hot; clan-poll deltas → warm; decay to cold) drive a budget of 40 per-player calls/tick, hottest first, with fairness floors (battlelog ≤6 h, profile ≤24 h for everyone). The clan and riverrace calls are cheap fixed overhead outside the budget.
 
 ### Engine Tick Contract
 
-`engine.tick.run_tick(conn, api=…)` runs the production five-step data path
-(poll → ingest → emit → project → manage) with per-step guards — a failing step
-logs, records its error in the counters, and the tick continues. The emitted
-streams and projections are the awareness loop's read. The production
+`engine.tick.run_tick(conn, api=…)` runs poll → atomic apply → manage. Poll
+admission produces canonical `Observation` envelopes. Atomic apply uses
+`engine.materialize` to advance battle rows, emitted deltas/baselines,
+projections, rollups, and successful-poll freshness together; if it fails, all
+of those writes roll back and management is skipped. Every tick records a
+`materialization_runs` generation and per-member judgment readiness. The emitted
+streams and projections are the awareness loop's read. Production, interactive
+tool refreshes, and offline replay all use the same application service. The production
 entrypoint has no compose/send arguments and cannot enable the retired poster.
 The offline engine follows the
 same awareness-only default, with `legacy_proactive=True` as its explicit
@@ -170,7 +174,7 @@ The engine DB follows the layered retention model (`docs/reference/v5.1/schema.m
 - Clan management: `leader_action_recommendations`, `decision_cases`, `revisits`
 - Bounded war stream: `war_seasons` (durable), `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days`
 - Awards (durable): `awards` — `war_champ` is a ranked podium (season points); `iron_king` is PARTICIPATION (4/4 decks every battle day — unranked, any number earn it, never crown one); `rookie_mvp` = members in their FIRST war season; `free_pass` rotates to the highest-ranked War Champ who did NOT win it last month (`engine/emitters/war.py:close_season`). The LIVE in-progress races are computed on demand via `storage.awards.get_award_races` (top-10, points, tie-aware) and surfaced in the awareness read as `award_races`; `war_champ_lead_change` / `rookie_mvp_lead_change` events emit on a leader change.
-- Engine control: `stream_cursors` (durable), `poll_state`, `runtime_job_status`
+- Engine control: `stream_cursors` (durable), `poll_state`, `runtime_job_status`, `materialization_runs`
 - Ops singletons + tournaments star + the conversation set (`conversation_threads`, `messages`, `memory_facts`, `memory_episodes`)
 
 All `db` module functions accept an optional `conn` parameter — pass one in tests, omit in production.
@@ -236,7 +240,7 @@ Each activity declares:
 
 Read the exact, current list (keys, schedules, executors, enabled state) from `runtime/activities.py` — don't trust a hand-maintained copy here, which drifts. The shape today:
 
-- **The engine heartbeat is `engine-tick`** (`_engine_tick`, every 10 minutes, `max_instances=1`): one `engine.tick.run_tick` pass — poll → ingest → emit → project → manage — plus leader-action card posting. It replaced the deleted `v5-reactive-tick`, `war-poll`, `player-progression`, and `award-detection` activities (awards now grant on the war stream's `season_closed` event; polling is the adaptive scheduler's job). The separate awareness activity consumes events and owns proactive posting.
+- **The engine heartbeat is `engine-tick`** (`_engine_tick`, every 10 minutes, `max_instances=1`): one `engine.tick.run_tick` pass — poll → atomic observation apply → readiness-gated manage — plus leader-action card posting. It replaced the deleted `v5-reactive-tick`, `war-poll`, `player-progression`, and `award-detection` activities (awards now grant on the war stream's `season_closed` event; polling is the adaptive scheduler's job). The separate awareness activity consumes events and owns proactive posting.
 - **Clan management:** `weekly-leadership-review` (Mon 7:00 CT — rolls the weekly hysteresis grain, surfaces promote/demote candidacies as leader actions, posts one review) and `action-outcome-refresh` (daily 9:30 CT — leader-action outcome evaluation + feedback-synthesis re-queue). The old `leadership-action-scan` is **gone**; its scan/creation role lives in the engine's reactive kick path.
 - **War:** `war-attendance-snapshot` (daily 4:15 CT — finalizes `war_attendance_days` just before the ~09:15 UTC war-day boundary; evaluators read finalized days only).
 - **Scheduled posts / reports:** `daily-clan-insight` (`#ask-elixir` hidden fact), `weekly-recap` (public recap), `weekly-discord-invite-relay`, `promotion-content` (`#recruiting`), `clan-wars-intel`.
