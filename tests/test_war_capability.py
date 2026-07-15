@@ -89,3 +89,13 @@ def test_war_season_view_wraps_the_shared_contract():
         "top_n": 5,
         "current_week_top": [],
     }
+
+
+def test_default_war_sources_use_db_facade_for_snapshot_connection():
+    live = get_war_intelligence()
+    season = get_war_season_view(view="summary", limit=5)
+
+    assert live["capability"] == "war_intelligence"
+    assert live["available"] is False
+    assert season["capability"] == "war_intelligence"
+    assert season["view"] == "summary"

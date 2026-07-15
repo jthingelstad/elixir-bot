@@ -105,7 +105,10 @@ def get_war_intelligence(*, source=None, conn=None) -> WarIntelligenceResult:
     """Return the canonical live-war contract, or ``available=False``."""
     if conn is None and source in (None, db_facade, war_storage):
         active_source = source or war_storage
-        with _connection(active_source) as active:
+        # Storage owns war queries; the db facade owns connection lifecycle.
+        # The dynamic storage.war aggregator deliberately has no
+        # ``get_connection`` public API.
+        with _connection(db_facade) as active:
             active.execute("BEGIN")
             return get_war_intelligence(source=active_source, conn=active)
     source = _source(source)
@@ -312,7 +315,7 @@ def get_war_season_view(
     """Return one versioned war-season facet under the ``data`` key."""
     if conn is None and source in (None, db_facade, war_storage):
         active_source = source or war_storage
-        with _connection(active_source) as active:
+        with _connection(db_facade) as active:
             active.execute("BEGIN")
             return get_war_season_view(
                 view=view,
