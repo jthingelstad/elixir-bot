@@ -1,2 +1,4 @@
+# Development-only tools; install alongside requirements.lock in CI.
 pytest>=9.1.1,<10
-ruff>=0.15.21
+ruff>=0.15.21,<1
+packaging>=26.0,<27

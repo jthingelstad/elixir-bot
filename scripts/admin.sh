@@ -80,7 +80,7 @@ upgrade_bot() {
 
     echo "==> Updating dependencies..."
     source venv/bin/activate
-    pip install -q -r requirements.txt
+    pip install -q -r requirements.lock
 
     start_bot
 }
