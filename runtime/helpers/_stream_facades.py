@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from capabilities import game_modes as game_mode_capability
+
 
 def _connect() -> sqlite3.Connection:
     from engine import db as engine_db
@@ -107,42 +109,32 @@ def summarize_battle_modes(
     min_battles: int = 3,
     **_ignored,
 ) -> dict:
-    """Per-mode battle activity from battle_events (game-mode pulse)."""
-    conn = _connect()
-    try:
-        out: dict = {}
-        for days in windows:
-            modes: dict[str, dict] = {}
-            for row in conn.execute(
-                """SELECT mode_group, COUNT(*) AS battles,
-                          SUM(CASE WHEN outcome = 'W' THEN 1 ELSE 0 END) AS wins,
-                          COUNT(DISTINCT player_tag) AS players
-                   FROM battle_events
-                   WHERE battle_time >= strftime('%Y%m%dT%H%M%S', 'now', ?)
-                     AND mode_group IS NOT NULL
-                   GROUP BY mode_group ORDER BY battles DESC""",
-                (f"-{days} days",),
-            ):
-                if int(row["battles"]) < min_battles:
-                    continue
-                top = conn.execute(
-                    """SELECT b.player_tag, p.current_name, COUNT(*) AS battles
-                       FROM battle_events b LEFT JOIN players p ON p.player_tag = b.player_tag
-                       WHERE b.mode_group = ?
-                         AND b.battle_time >= strftime('%Y%m%dT%H%M%S', 'now', ?)
-                       GROUP BY b.player_tag ORDER BY battles DESC LIMIT ?""",
-                    (row["mode_group"], f"-{days} days", top_members),
-                ).fetchall()
-                modes[row["mode_group"]] = {
-                    "battles": int(row["battles"]),
-                    "wins": int(row["wins"] or 0),
-                    "players": int(row["players"]),
-                    "top_members": [
-                        {"tag": t["player_tag"], "name": t["current_name"], "battles": int(t["battles"])}
-                        for t in top
-                    ],
-                }
-            out[f"{days}d"] = modes
-        return out
-    finally:
-        conn.close()
+    """Compatibility view over the canonical game-mode capability."""
+    result = game_mode_capability.get_clan_game_mode_windows(
+        windows=windows,
+        top_members=top_members,
+    )
+    out = {}
+    for window, snapshot in (result.get("windows") or {}).items():
+        modes = {}
+        for mode_key, mode in (snapshot.get("modes") or {}).items():
+            if int(mode.get("battles") or 0) < min_battles:
+                continue
+            modes[mode_key] = {
+                "label": mode.get("label"),
+                "battles": int(mode.get("battles") or 0),
+                "wins": int(mode.get("wins") or 0),
+                "losses": int(mode.get("losses") or 0),
+                "win_rate": mode.get("win_rate"),
+                "active_members": int(mode.get("members_active") or 0),
+                "top_members": [
+                    {
+                        "tag": member.get("player_tag") or member.get("tag"),
+                        "name": member.get("member_ref") or member.get("name"),
+                        "battles": int(member.get("battles") or 0),
+                    }
+                    for member in (mode.get("top_members") or [])
+                ],
+            }
+        out[window] = modes
+    return out
