@@ -586,6 +586,24 @@ def get_award_races(
     outcome = compute_season_award_outcome(conn, season_id)
     champ = outcome["standings"][: max(1, war_champ_limit)]
 
+    # How many distinct war days each member has actually attacked this season.
+    # War Champ points accumulate per battle day, so a member ahead on TOTAL
+    # points but with MORE battle_days than those behind is leading on volume/
+    # timing (first through today's day), not pace — this lets Elixir narrate a
+    # lead change honestly instead of overstating a raw-points overtake. Sourced
+    # from war_attendance_days (distinct section+day where a deck was used), so
+    # partial attendance counts correctly (decks_used/4 would not).
+    day_rows = conn.execute(
+        "SELECT player_tag, "
+        "COUNT(DISTINCT section_index || ':' || war_day_index) AS days "
+        "FROM war_attendance_days WHERE season_id = ? AND decks_used > 0 "
+        "GROUP BY player_tag",
+        (season_id,),
+    ).fetchall()
+    battle_days_by_tag = {_canon_tag(r["player_tag"]): r["days"] for r in day_rows}
+    for entry in champ:
+        entry["battle_days"] = battle_days_by_tag.get(_canon_tag(entry.get("tag")))
+
     iron_king = [
         {
             "tag": _canon_tag(c["tag"]),
@@ -624,9 +642,15 @@ def get_award_races(
         "rookie_mvp": rookie,
         "note": (
             "War Champ = season POINTS race (ranked; the free pass is built on it). "
-            "TIES on War Champ #1 break on cards DONATED (see each entry's `donations`) — "
-            "so equal points are a real tie to name, but the leader/free-pass pick is the "
-            "higher donor. free_pass_last_season = who held it last month (ineligible now); "
+            "Each entry's `battle_days` = distinct war days that member has actually "
+            "played this season; points accumulate per battle day, so a leader with MORE "
+            "battle_days than those behind is ahead on volume/timing (first through "
+            "today's day), not necessarily pace — narrate a lead change honestly (e.g. "
+            "'first through today, ahead on an extra day; the field tightens as the rest "
+            "attack'), don't overstate a raw-points overtake when the chasers have a day "
+            "in hand. TIES on War Champ #1 break on cards DONATED (see each entry's "
+            "`donations`) — so equal points are a real tie to name, but the leader/"
+            "free-pass pick is the higher donor. free_pass_last_season = who held it last month (ineligible now); "
             "free_pass_in_line = who'd get it if the season closed now (highest War Champ "
             "who didn't hold it last month). Iron King = PARTICIPATION (4/4 decks every "
             "battle day; unranked — anyone who qualifies earns it, could be many; never "

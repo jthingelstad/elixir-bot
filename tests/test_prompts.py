@@ -224,6 +224,16 @@ def test_awareness_prompt_grounds_current_award_status_in_live_races():
     assert "trophy case" in agent_prompts._awareness_system().lower()
 
 
+def test_awareness_prompt_is_battle_day_aware_on_war_champ_lead():
+    """A War Champ 'new leader' mid-week is often just whoever's first through
+    today's battle day (more battle_days than the field), not a pace overtake.
+    The prompt must tell the brain to read battle_days and frame volume/timing
+    leads honestly."""
+    agent_md = prompts.agent_prompt("awareness").lower()
+    assert "battle_days" in agent_md
+    assert "volume" in agent_md and "pace" in agent_md
+
+
 def test_thresholds():
     """Thresholds are parsed from CLAN.md."""
     t = prompts.thresholds()
