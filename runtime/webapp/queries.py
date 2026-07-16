@@ -168,6 +168,70 @@ def ticks_page() -> dict:
         conn.close()
 
 
+# Per-call USD cost, in micro-dollars (÷1e6 for USD). Extends the canonical
+# storage/identity.py formula (Sonnet/Haiku weights per million) with an Opus
+# branch — the intensive workflows run Opus, which the canonical formula prices
+# at $0 (a pre-existing undercount worth unifying later).
+_LLM_COST_CASE = """
+    CASE
+        WHEN model LIKE 'claude-opus%' OR model LIKE 'Codex-opus%'
+        THEN COALESCE(prompt_tokens,0)*15 + COALESCE(cache_read_tokens,0)*1.5
+             + COALESCE(cache_creation_tokens,0)*18.75 + COALESCE(completion_tokens,0)*75
+        WHEN model LIKE 'claude-sonnet%' OR model LIKE 'Codex-sonnet%'
+        THEN COALESCE(prompt_tokens,0)*3 + COALESCE(cache_read_tokens,0)*0.3
+             + COALESCE(cache_creation_tokens,0)*3.75 + COALESCE(completion_tokens,0)*15
+        WHEN model LIKE 'claude-haiku%' OR model LIKE 'Codex-haiku%'
+        THEN COALESCE(prompt_tokens,0)*1 + COALESCE(cache_read_tokens,0)*0.1
+             + COALESCE(cache_creation_tokens,0)*1.25 + COALESCE(completion_tokens,0)*5
+        ELSE 0 END
+"""
+
+
+def llm_cost_page() -> dict:
+    """LLM spend by workflow (7d + 30d) and by model — cost was tracked per call
+    but never surfaced; only a single 7-day total existed in the status report."""
+    conn = db.get_connection()
+
+    def _by_workflow(days: int) -> list:
+        return _rows(
+            conn,
+            f"""
+            SELECT workflow,
+                   COUNT(*) AS calls,
+                   SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures,
+                   SUM(COALESCE(total_tokens, 0)) AS tokens,
+                   ROUND(COALESCE(SUM({_LLM_COST_CASE}), 0) / 1000000.0, 4) AS cost_usd
+            FROM llm_calls
+            WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)
+            GROUP BY workflow ORDER BY cost_usd DESC, calls DESC
+            """,
+            (f"-{days} days",),
+        )
+
+    try:
+        wf_7d = _by_workflow(7)
+        wf_30d = _by_workflow(30)
+        by_model = _rows(
+            conn,
+            f"""
+            SELECT model, COUNT(*) AS calls,
+                   ROUND(COALESCE(SUM({_LLM_COST_CASE}), 0) / 1000000.0, 4) AS cost_usd
+            FROM llm_calls
+            WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-7 days')
+            GROUP BY model ORDER BY cost_usd DESC
+            """,
+        )
+        return {
+            "workflows_7d": wf_7d,
+            "workflows_30d": wf_30d,
+            "by_model": by_model,
+            "total_7d": round(sum(w["cost_usd"] or 0 for w in wf_7d), 2),
+            "total_30d": round(sum(w["cost_usd"] or 0 for w in wf_30d), 2),
+        }
+    finally:
+        conn.close()
+
+
 def api_sentinel_page() -> dict:
     """API ingestion health: the admission ledger (every HTTP response's
     accept/reject verdict) and the schema-drift sentinel (first-seen CR API
