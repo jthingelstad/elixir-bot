@@ -28,6 +28,28 @@ def test_event_registry_is_the_routing_and_hard_post_authority():
     assert "member_left" not in hard_post_event_types()
 
 
+def test_hard_post_set_is_the_expected_member_facing_floor():
+    """Audit guard: the hard-post floor is the exact set of member-facing event
+    classes a leader expects Elixir to always surface. Adding or dropping a
+    hard_post event is a deliberate editorial decision — it must update this
+    list too, so an accidental registry edit can't silently widen or shrink the
+    floor (a dropped floor = a silently muteable member event; an added one =
+    an unreviewed mandatory post). See elixir-hard-post-registry-v51."""
+    assert hard_post_event_types() == frozenset(
+        {
+            # → #announcements
+            "member_joined",
+            "member_left_verified",  # verified leave only; raw member_left is held
+            "role_changed",
+            "clan_birthday",
+            "pol_season_podium",
+            # → #elixir
+            "week_finished",
+            "season_closed",
+        }
+    )
+
+
 def test_event_boundary_rejects_undeclared_or_incomplete_events(engine_conn):
     with pytest.raises(ValueError, match="undeclared event type"):
         insert_stream_event(

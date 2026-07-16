@@ -35,6 +35,34 @@ def test_ratified_constants():
     )  # 3-season fame grace removed
 
 
+def test_state_reset_on_corruption_is_logged(caplog):
+    # A well-formed object round-trips untouched, no warning.
+    good = management._state(
+        {"state_json": '{"weeks": [true, false]}', "player_tag": "#A"}
+    )
+    assert good == {"weeks": [True, False]}
+
+    # Unparseable JSON resets to {} AND logs (so a wiped history leaves a trace).
+    with caplog.at_level("WARNING"):
+        bad = management._state({"state_json": "{not json", "player_tag": "#B"})
+    assert bad == {}
+    assert any("unparseable" in r.message and "#B" in r.message for r in caplog.records)
+
+    # A valid-JSON non-object (e.g. a bare number) also resets and logs.
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        wrong = management._state({"state_json": "5", "player_tag": "#C"})
+    assert wrong == {}
+    assert any("not object" in r.message and "#C" in r.message for r in caplog.records)
+
+    # Empty/absent state is the normal default — no warning.
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        empty = management._state({"state_json": None, "player_tag": "#D"})
+    assert empty == {}
+    assert not caplog.records
+
+
 def test_one_good_week_never_holding():
     assert advance_layer1("none", [True]) == "building"
     assert advance_layer1("building", [True]) == "building"  # window < 4
