@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}API sentinel{% endblock %}
+{% block content %}
+<h1>API sentinel</h1>
+<p class="muted">Ingestion health: the admission ledger (every CR API response's accept/reject
+verdict) and the schema-drift sentinel ({{ total_paths }} first-seen paths). A rejection is a
+contract failure worth reading; a new schema path is CR changing its API shape.</p>
+
+<h2>Admission ledger</h2>
+<div class="cards">
+  {% for status, n in status_counts.items() %}
+  <div class="card">
+    <div class="badge {{ 'bad' if status == 'rejected' else ('good' if status == 'accepted' else '') }}">{{ status }}</div>
+    <div class="num" style="font-size:1.4rem;margin-top:.3rem">{{ n }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<h2>Rejections</h2>
+{% if rejections %}
+<table>
+  <thead><tr><th>When</th><th>Endpoint</th><th>Entity</th><th>Errors</th></tr></thead>
+  <tbody>
+  {% for r in rejections %}
+    <tr>
+      <td>{{ r.fetched_at | reltime }}</td>
+      <td><code>{{ r.endpoint }}</code></td>
+      <td><code>{{ r.entity_key }}</code></td>
+      <td class="err">{% for e in r.errors %}<div>{{ e }}</div>{% endfor %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No admission rejections on record — every response cleared its contract. :)</p>
+{% endif %}
+
+<h2>Schema paths by endpoint</h2>
+<table>
+  <thead><tr><th>Endpoint</th><th class="num">Paths seen</th><th>Last seen</th></tr></thead>
+  <tbody>
+  {% for e in by_endpoint %}
+    <tr><td><code>{{ e.endpoint }}</code></td><td class="num">{{ e.n }}</td><td>{{ e.last_seen | reltime }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>Newest first-seen paths <span class="muted">(schema drift)</span></h2>
+<table>
+  <thead><tr><th>First seen</th><th>Endpoint</th><th>Path</th><th>Type</th></tr></thead>
+  <tbody>
+  {% for p in recent_paths %}
+    <tr>
+      <td>{{ p.first_seen_at | reltime }}</td>
+      <td><code>{{ p.endpoint }}</code></td>
+      <td><code>{{ p.name }}</code></td>
+      <td class="muted">{{ p.sentinel_type }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

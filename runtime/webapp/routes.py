@@ -164,6 +164,11 @@ async def activities_page(request: web.Request) -> web.Response:
     return render("activities.html", request, nav="activities", **data)
 
 
+async def api_sentinel_page(request: web.Request) -> web.Response:
+    data = await asyncio.to_thread(queries.api_sentinel_page)
+    return render("api_sentinel.html", request, nav="api", **data)
+
+
 async def editorial_page(request: web.Request) -> web.Response:
     data = await asyncio.to_thread(queries.editorial_page)
     return render("editorial.html", request, nav="editorial", **data)
@@ -317,6 +322,7 @@ def add_routes(app: web.Application) -> None:
             web.get("/baseline", baseline_page),
             web.get("/ticks", ticks_page),
             web.get("/streams", streams_page),
+            web.get("/api-sentinel", api_sentinel_page),
             web.get("/raw/{payload_id}", raw_payload_page),
             web.get("/recognition", recognition_page),
             web.get("/awareness", awareness_page),
