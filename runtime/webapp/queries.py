@@ -168,6 +168,83 @@ def ticks_page() -> dict:
         conn.close()
 
 
+def _resolve_activity_defaults(value):
+    """Resolve a schedule_config's RuntimeAttrRefs to their DEFAULTS (no
+    runtime.app import — the display schedule; the live scheduler's next_run
+    reflects any env overrides)."""
+    from runtime.activities import RuntimeAttrRef
+
+    if isinstance(value, RuntimeAttrRef):
+        return value.default
+    if isinstance(value, dict):
+        return {k: _resolve_activity_defaults(v) for k, v in value.items()}
+    return value
+
+
+def activities_page() -> dict:
+    """The scheduled-activity registry: every recurring job with its schedule,
+    purpose, lane, and last-run outcome + next run. Previously only next-run
+    times were visible (buried on Overview); ~18 jobs had no registry view."""
+    from runtime import activities as activities_mod
+
+    specs = []
+    for act in activities_mod.list_registered_activities():
+        resolved = {
+            "schedule_kind": act.schedule_kind,
+            "schedule_config": _resolve_activity_defaults(act.schedule_config),
+            "active_window": _resolve_activity_defaults(act.active_window),
+        }
+        specs.append(
+            {
+                "activity_key": act.activity_key,
+                "activity_role": act.activity_role,
+                "owner_lane": act.owner_lane,
+                "purpose": act.purpose,
+                "job_id": act.job_id,
+                "schedule": activities_mod._format_schedule_description(resolved),
+                "delivery_targets": list(act.delivery_targets),
+                "manual_trigger_allowed": act.manual_trigger_allowed,
+                "enabled_by_default": act.enabled_by_default,
+            }
+        )
+
+    next_runs: dict[str, str] = {}
+    try:
+        from runtime.helpers._common import _job_next_runs
+
+        for item in _job_next_runs():
+            next_runs[item["id"]] = item["next_run"]
+            next_runs[item["id"].replace("-", "_")] = item["next_run"]
+    except Exception:
+        log.debug("activities_page: scheduler next-runs unavailable", exc_info=True)
+
+    conn = db.get_connection()
+    try:
+        statuses = runtime_status.list_runtime_job_status(conn=conn)
+    finally:
+        conn.close()
+
+    rows = []
+    for s in specs:
+        skey = (s["activity_key"] or "").replace("-", "_")
+        st = statuses.get(skey) or statuses.get(s["job_id"] or "") or {}
+        rows.append(
+            {
+                **s,
+                "run_count": st.get("run_count"),
+                "success_count": st.get("success_count"),
+                "failure_count": st.get("failure_count"),
+                "last_error": st.get("last_error"),
+                "last_success_at": st.get("last_success_at"),
+                "last_finished_at": st.get("last_finished_at"),
+                "last_summary": st.get("last_summary"),
+                "running": bool(st.get("running")),
+                "next_run": next_runs.get(s["job_id"] or "") or next_runs.get(skey),
+            }
+        )
+    return {"activities": rows}
+
+
 def _thought_outcome(row: dict) -> str:
     if (row.get("skipped_reason") or "").startswith("⚠️ tick failed"):
         return "failed"

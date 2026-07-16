@@ -86,7 +86,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/system_status_post.py": 1,
     "runtime/threads.py": 3,
     "runtime/webapp/chat.py": 2,
-    "runtime/webapp/queries.py": 3,
+    "runtime/webapp/queries.py": 4,  # +1: activities_page guards the live scheduler lookup (best-effort next_run)
     "runtime/webapp/routes.py": 4,
     "runtime/webapp/ticks.py": 2,
     "storage/_formatting.py": 2,

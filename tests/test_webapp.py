@@ -72,6 +72,7 @@ def test_pages_render_on_empty_db():
             "/streams",
             "/recognition",
             "/awareness",
+            "/activities",
             "/polling",
             "/management",
             "/war",
@@ -82,6 +83,43 @@ def test_pages_render_on_empty_db():
             assert r.status == 200, path
             text = await r.text()
             assert "Elixir" in text, path
+
+    _client_run(body)
+
+
+def test_activities_page_lists_the_registry_with_status():
+    """The /activities registry lists every scheduled job (static registry) and
+    joins its last-run outcome from runtime_job_status."""
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO runtime_job_status (job_name, status_json, updated_at) VALUES "
+            "('engine_tick', ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+            (
+                json.dumps(
+                    {
+                        "run_count": 42,
+                        "failure_count": 0,
+                        "last_finished_at": "2026-07-16T17:00:00Z",
+                    }
+                ),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    async def body(client):
+        r = await client.get("/activities", headers=LOGIN)
+        assert r.status == 200
+        text = await r.text()
+        assert "Scheduled activities" in text
+        # static registry always present
+        assert "engine-tick" in text and "awareness-loop" in text
+        # schedule descriptions render
+        assert "Every 10 minutes" in text
+        # joined status (run count) shows
+        assert "42" in text
 
     _client_run(body)
 
