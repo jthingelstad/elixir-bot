@@ -1,19 +1,24 @@
-"""Elixir's active editorial-learning loop.
+"""Elixir's editorial-learning loop and post-compose critic.
 
-Reduced 2026-07-10: the inline gate/critic/judge, the living-rubric builder, the
-daily feedback sweep, and the weekly self-review were retired when the awareness
-brain became the sole proactive poster. The old second-LLM per-post critic stays
-retired; current quality control is deterministic and evidence-bound.
+Two halves work together:
 
-What remains is live:
-- the auto-feeders that turn human actions into editorial rubric memories:
-  ``record_deleted_post`` (an admin deletes an Elixir post) and
-  ``record_copy_edit_pair`` (a leader rewrites action-card copy);
-- immediate repetition feedback from the awareness delivery path;
-- retrospective active-output feedback from ``scripts/eval_post_quality.py``.
+1. **Feeders (always live).** Human actions become editorial rubric memories:
+   ``record_deleted_post`` (an admin deletes an Elixir post),
+   ``record_copy_edit_pair`` (a leader rewrites action-card copy), immediate
+   repetition feedback from the awareness delivery path, and retrospective
+   feedback from ``scripts/eval_post_quality.py``. Each becomes composition
+   guidance on the next awareness read.
 
-All feedback is stored as editorial memory and becomes composition guidance on
-the next awareness read.
+2. **The critic (rebuilt 2026-07-16, gated by ``ELIXIR_EDITOR_GATE``).**
+   ``judge`` scores a composed awareness post before it is sent — grounding,
+   substance, freshness, lane-fit — reading the same 'editorial' memory pool as
+   its rubric. It is **fail-open by contract**: any error, timeout, or malformed
+   verdict returns ``error`` and the original copy ships unchanged. The critic
+   can only improve a post or defer to the deterministic fallback; it never
+   blocks delivery. Verdicts persist to ``editor_verdicts`` for the Observatory.
+   (The original 2026-07-10 critic was retired with the old proactive-delivery
+   path; this one keys to the live awareness delivery — see the migration note
+   in db/schema.py ``_apply_v5``.)
 """
 
 from __future__ import annotations
@@ -21,10 +26,16 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
+import sqlite3
 from difflib import SequenceMatcher
 
 log = logging.getLogger("elixir.engine.editor")
+
+_EDITOR_WORKFLOW = "awareness_editor"
+_VALID_VERDICTS = ("pass", "revise", "fallback", "error")
+_EDITOR_DIMENSIONS = ("grounding", "substance", "freshness", "lane_fit")
 
 
 # ------------------------------------------------- editorial rubric memories
@@ -295,3 +306,176 @@ def record_post_quality_feedback(
         created_by="editor-post-quality",
         extra_tags=("quality-eval", f"lane:{lane}", f"source:{source}"),
     )
+
+
+# --------------------------------------------- post-compose editorial critic
+
+
+def editor_enabled() -> bool:
+    """The critic runs unless explicitly disabled (mirrors the
+    ELIXIR_AWARENESS_GATE toggle). This only controls whether ``judge`` is
+    invoked; delivery is fail-open regardless."""
+    return os.getenv("ELIXIR_EDITOR_GATE", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def build_rubric_context(
+    conn, *, lane: str | None = None, limit: int = 6
+) -> list[dict]:
+    """Ranked editorial exemplars + anti-patterns for the judge's rubric.
+
+    Reuses the exact memory pool the awareness brain reads (tag ``editorial``),
+    split by kind so the judge sees both what good looks like and what to avoid.
+    Ranking (confidence + recency) is memory_store's; we just take the top few
+    of each. ``lane`` is accepted for future lane-scoped pools; today the pool
+    is shared and lane-fit is judged from the post itself.
+    """
+    import memory_store
+
+    rubric: list[dict] = []
+    for kind in ("exemplar", "anti-pattern"):
+        for mem in memory_store.select_memories(
+            viewer_scope="leadership",
+            tags=["editorial", kind],
+            limit=limit,
+            conn=conn,
+        ):
+            rubric.append(
+                {
+                    "kind": kind,
+                    "title": mem.get("title") or "",
+                    "lesson": str(mem.get("body") or "")[:500],
+                    "confidence": mem.get("confidence"),
+                }
+            )
+    return rubric
+
+
+def _editor_system() -> str:
+    import prompts
+
+    return prompts.agent_prompt("editor")
+
+
+def _parse_verdict(raw: str | None) -> dict:
+    """Tolerant parse of the judge's JSON verdict. Anything unparseable or
+    off-contract resolves to ``error`` so delivery fails open to original copy."""
+    err = lambda why: {"verdict": "error", "critique": why, "dimensions": {}}  # noqa: E731
+    if not raw or not raw.strip():
+        return err("empty editor response")
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?", "", text).rstrip("`").strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        text = text[start : end + 1]
+    try:
+        obj = json.loads(text)
+    except (TypeError, ValueError):
+        return err("unparseable editor verdict")
+    if not isinstance(obj, dict):
+        return err("editor verdict was not an object")
+    verdict = str(obj.get("verdict") or "").strip().lower()
+    if verdict not in _VALID_VERDICTS:
+        return err(f"unknown verdict {verdict!r}")
+    dims = obj.get("dimensions")
+    return {
+        "verdict": verdict,
+        "critique": str(obj.get("critique") or "").strip(),
+        "dimensions": dims if isinstance(dims, dict) else {},
+    }
+
+
+def judge(
+    *,
+    copy: str,
+    facts: dict | None,
+    recent_copies: list[str] | None = None,
+    rubric: list[dict] | None = None,
+    lane: str | None = None,
+    llm_fn=None,
+) -> dict:
+    """Post-compose editorial verdict on one awareness post.
+
+    Returns ``{"verdict": pass|revise|fallback|error, "critique": str,
+    "dimensions": {...}}``. **Fail-open**: any error, timeout, or malformed
+    response returns ``error`` and the caller ships the original copy unchanged.
+    ``llm_fn`` is a test seam (given a user string, returns the raw verdict text)
+    so the engine never touches the network under test.
+    """
+    payload = {
+        "lane": lane,
+        "post_copy": copy,
+        "facts": facts or {},
+        "recent_copies": (recent_copies or [])[-5:],
+        "rubric": rubric or [],
+    }
+    user = (
+        "Judge this awareness post before it is sent. Return ONLY the JSON "
+        "verdict object.\n\n" + json.dumps(payload, indent=2, default=str)
+    )
+    try:
+        if llm_fn is not None:
+            raw = llm_fn(user)
+        else:
+            from agent.core import _create_chat_completion, response_text
+
+            resp = _create_chat_completion(
+                workflow=_EDITOR_WORKFLOW,
+                system=_editor_system(),
+                messages=[{"role": "user", "content": user}],
+                temperature=0.0,
+                max_tokens=700,
+                timeout=45,
+            )
+            raw = response_text(resp)
+    except Exception:  # fail-open: nothing the critic does may block a post
+        log.exception("editor judge failed; failing open to original copy")
+        return {"verdict": "error", "critique": "editor call raised", "dimensions": {}}
+    return _parse_verdict(raw)
+
+
+def record_verdict(
+    conn,
+    *,
+    result: dict,
+    intent_key: str | None,
+    loop_number: int | None,
+    lane: str,
+    original_copy: str,
+    final_copy: str,
+    covers: list | None = None,
+    model: str | None = None,
+) -> int | None:
+    """Persist one editor verdict to the ledger. Best-effort — a failed write
+    never blocks a post that already shipped or is about to."""
+    try:
+        cur = conn.execute(
+            "INSERT INTO editor_verdicts (intent_key, loop_number, lane, verdict, "
+            "dimensions_json, critique, original_copy, final_copy, covers_json, "
+            "model, at) VALUES (?,?,?,?,?,?,?,?,?,?, "
+            "strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+            (
+                intent_key,
+                loop_number,
+                lane,
+                str(result.get("verdict") or "error"),
+                json.dumps(result.get("dimensions") or {}, default=str),
+                (result.get("critique") or None),
+                original_copy,
+                final_copy,
+                json.dumps(covers or []),
+                model,
+            ),
+        )
+        conn.commit()
+        return cur.lastrowid
+    except sqlite3.Error:
+        log.exception(
+            "failed to record editor verdict (lane=%s loop=%s)", lane, loop_number
+        )
+        return None
