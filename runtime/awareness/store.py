@@ -288,10 +288,7 @@ def record_awareness_post(
             ),
         )
         if post is not None:
-            from engine.editor import (
-                judge_delivered_post,
-                record_active_awareness_quality,
-            )
+            from engine.editor import record_active_awareness_quality
 
             record_active_awareness_quality(
                 conn,
@@ -301,20 +298,14 @@ def record_awareness_post(
                 content=content,
                 discord_message_id=message_id,
             )
-            # Observe-and-learn editorial critic: judge the post that just
-            # shipped, record the verdict (editor_verdicts), and feed a lesson
-            # on a downgrade. Self-isolated/fail-open — never blocks or alters
-            # the delivered post; gated by ELIXIR_EDITOR_GATE.
-            judge_delivered_post(
-                conn,
-                post=post,
-                evidence=evidence or {},
-                lane=lane,
-                content=content,
-                discord_message_id=message_id,
-                loop_number=loop_number,
-                intent_key=intent_key,
-            )
+            # NOTE: the observe-and-learn editorial critic is intentionally NOT
+            # invoked here. Running its LLM call inside this delivery write path
+            # held the DB write lock for the call's duration (lock contention;
+            # #172 2026-07-16), and it only received awareness_post_facts — not
+            # the brain's tool-derived numbers — so it false-flagged grounding.
+            # It must run OUTSIDE the delivery transaction (post-commit, fresh
+            # conn) with the full facts before it is re-enabled. See
+            # engine.editor.judge_delivered_post.
     except Exception as exc:
         log.exception("record_awareness_post: failed to record %s post", lane)
         # The post is already visible in Discord, so this remains fail-soft to
