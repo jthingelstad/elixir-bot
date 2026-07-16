@@ -70,6 +70,7 @@ def test_pages_render_on_empty_db():
             "/awards",
             "/ticks",
             "/streams",
+            "/api-sentinel",
             "/recognition",
             "/awareness",
             "/activities",
@@ -83,6 +84,39 @@ def test_pages_render_on_empty_db():
             assert r.status == 200, path
             text = await r.text()
             assert "Elixir" in text, path
+
+    _client_run(body)
+
+
+def test_api_sentinel_page_shows_admission_and_drift():
+    """The API-sentinel view surfaces admission verdicts (rejections prominent)
+    and first-seen schema paths — neither had a UI before."""
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO api_observation_receipts (endpoint, entity_key, fetched_at, "
+            "payload_hash, admission_status, admission_errors_json) VALUES "
+            "('clan', '#J2RGCRVG', '2026-07-16T18:00:00Z', 'h1', 'rejected', "
+            "'[\"memberList:missing\"]')",
+        )
+        conn.execute(
+            "INSERT INTO api_sentinel_observations (sentinel_type, scope, name, "
+            "endpoint, entity_key, first_seen_at, last_seen_at, created_at, "
+            "updated_at) VALUES ('schema_path', 'field', 'newMysteryField', "
+            "'player', '#X', '2026-07-16T18:00:00Z', '2026-07-16T18:00:00Z', "
+            "'2026-07-16T18:00:00Z', '2026-07-16T18:00:00Z')",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    async def body(client):
+        r = await client.get("/api-sentinel", headers=LOGIN)
+        assert r.status == 200
+        text = await r.text()
+        assert "API sentinel" in text
+        assert "rejected" in text and "memberList:missing" in text
+        assert "newMysteryField" in text
 
     _client_run(body)
 

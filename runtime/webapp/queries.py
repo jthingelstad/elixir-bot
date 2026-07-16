@@ -168,6 +168,50 @@ def ticks_page() -> dict:
         conn.close()
 
 
+def api_sentinel_page() -> dict:
+    """API ingestion health: the admission ledger (every HTTP response's
+    accept/reject verdict) and the schema-drift sentinel (first-seen CR API
+    paths). Neither had a UI — schema drift was only visible via #leaders posts."""
+    conn = db.get_connection()
+    try:
+        status_counts = {
+            r["admission_status"]: r["n"]
+            for r in _rows(
+                conn,
+                "SELECT admission_status, COUNT(*) n FROM api_observation_receipts "
+                "GROUP BY admission_status ORDER BY n DESC",
+            )
+        }
+        rejections = _rows(
+            conn,
+            "SELECT endpoint, entity_key, fetched_at, admission_status, "
+            "admission_errors_json FROM api_observation_receipts "
+            "WHERE admission_status = 'rejected' ORDER BY receipt_id DESC LIMIT 30",
+        )
+        for r in rejections:
+            r["errors"] = _parse_json(r.get("admission_errors_json"), []) or []
+        recent_paths = _rows(
+            conn,
+            "SELECT sentinel_type, endpoint, name, entity_key, first_seen_at, "
+            "last_seen_at FROM api_sentinel_observations "
+            "ORDER BY first_seen_at DESC, observation_id DESC LIMIT 40",
+        )
+        by_endpoint = _rows(
+            conn,
+            "SELECT endpoint, COUNT(*) n, MAX(last_seen_at) last_seen "
+            "FROM api_sentinel_observations GROUP BY endpoint ORDER BY n DESC",
+        )
+        return {
+            "status_counts": status_counts,
+            "rejections": rejections,
+            "recent_paths": recent_paths,
+            "by_endpoint": by_endpoint,
+            "total_paths": sum(e["n"] for e in by_endpoint),
+        }
+    finally:
+        conn.close()
+
+
 def _resolve_activity_defaults(value):
     """Resolve a schedule_config's RuntimeAttrRefs to their DEFAULTS (no
     runtime.app import — the display schedule; the live scheduler's next_run
