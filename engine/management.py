@@ -14,9 +14,12 @@ answerable (management.md §4).
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta
 
 from engine.db import utcnow
+
+log = logging.getLogger("engine.management")
 
 # management.md §5 — ratified defaults (move into CLAN.md at the cut).
 
@@ -102,10 +105,35 @@ def _parse_ts(value: str) -> datetime:
 
 
 def _state(row) -> dict:
+    """Load a member's Layer-1 state-machine history. Corruption resets to the
+    default empty state (so one bad row can't fail the tick) but is now logged
+    rather than swallowed silently — a member whose qualifying-week history
+    vanishes would otherwise re-accrue from zero with no trace."""
+    raw = row["state_json"] or "{}"
     try:
-        return json.loads(row["state_json"] or "{}")
+        loaded = json.loads(raw)
     except (TypeError, ValueError):
+        tag = _row_tag(row)
+        log.warning(
+            "member_management.state_json unparseable, resetting to {} (tag=%s)", tag
+        )
         return {}
+    if not isinstance(loaded, dict):
+        tag = _row_tag(row)
+        log.warning(
+            "member_management.state_json is %s not object, resetting to {} (tag=%s)",
+            type(loaded).__name__,
+            tag,
+        )
+        return {}
+    return loaded
+
+
+def _row_tag(row) -> str | None:
+    try:
+        return row["player_tag"]
+    except (KeyError, IndexError):
+        return None
 
 
 def _row_name(row) -> str | None:

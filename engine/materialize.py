@@ -16,7 +16,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from engine import baselines, ingest, polling, projections
-from engine.clock import infer_season_id, period_anchor_from_events, war_clock
+from engine.clock import (
+    PERIOD_BOUNDARY_HOUR_UTC,
+    infer_season_id,
+    period_anchor_from_events,
+    war_clock,
+)
 from engine.db import canon_tag, chicago_today, ensure_clan, ensure_player
 from engine.emitters import emit
 from engine.emitters.clan import (
@@ -65,6 +70,21 @@ def anchored_clock(conn, cr_shaped: dict, now: datetime, season_id):
         conn, prelim.season_id, prelim.section_index, prelim.war_day_index
     )
     if anchor is None:
+        # No war_day_opened anchor → the clock falls back to the fixed
+        # PERIOD_BOUNDARY_HOUR_UTC (10:00) approximation. On training days that's
+        # expected (no battle period to anchor). On a scored battle day it means
+        # war-day math may drift from CR's real reset hour (cr-war-reset-drift)
+        # with no other trace — so surface it instead of degrading silently.
+        if prelim.phase in ("war_day", "colosseum"):
+            log.warning(
+                "war clock un-anchored on a battle day (season=%s section=%s war_day=%s "
+                "phase=%s) — missing war_day_opened event; using fixed %02d:00 UTC boundary",
+                prelim.season_id,
+                prelim.section_index,
+                prelim.war_day_index,
+                prelim.phase,
+                PERIOD_BOUNDARY_HOUR_UTC,
+            )
         return prelim
     return war_clock(cr_shaped, now, season_id=season_id, period_anchor=anchor)
 
