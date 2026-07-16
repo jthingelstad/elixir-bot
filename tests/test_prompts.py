@@ -234,6 +234,34 @@ def test_awareness_prompt_is_battle_day_aware_on_war_champ_lead():
     assert "volume" in agent_md and "pace" in agent_md
 
 
+def test_awareness_prompt_thresholds_track_the_gate_code():
+    """Drift guard (harness eval item 2): the awareness prompt restates several
+    thresholds that the gate/read code ENFORCES — the 48h spotlight cooldown, the
+    ~10h quiet-stretch heartbeat, and the notable-tier definition (legendary badge
+    + arena climb). The code is the single source of truth; the prompt only tells
+    the brain the rule exists so it composes accordingly. But a number stated in
+    both can silently diverge. Pin the prompt text to the LIVE constants so a code
+    change that isn't mirrored into the prompt fails here instead of drifting."""
+    from runtime.awareness import gate, read
+
+    agent_md = prompts.agent_prompt("awareness")
+
+    # 48h per-member spotlight cooldown (read._SPOTLIGHT_LOOKBACK_HOURS).
+    assert f"{read._SPOTLIGHT_LOOKBACK_HOURS}h" in agent_md, (
+        "spotlight-cooldown hours changed in code but not in awareness.md"
+    )
+    # ~10h quiet-stretch heartbeat threshold (read._HEARTBEAT_QUIET_HOURS).
+    assert f"{read._HEARTBEAT_QUIET_HOURS}h" in agent_md, (
+        "quiet-stretch hours changed in code but not in awareness.md"
+    )
+    # Notable-tier soft signals the gate escalates unconditionally
+    # (gate._notable_soft_signals): a legendary badge and an arena change. If the
+    # gate's definition changes, the prompt's NOTABLE tier must move with it.
+    assert 'badge_tier: "legendary"' in agent_md
+    assert "arena_changed" in agent_md
+    assert "arena_changed" in gate._ARENA_EVENT_TYPES
+
+
 def test_thresholds():
     """Thresholds are parsed from CLAN.md."""
     t = prompts.thresholds()
