@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 
 _V1_STATEMENTS = (
@@ -270,6 +270,13 @@ REQUIRED_SCHEMA = {
         "judgment_reason",
         "evidence_as_of",
         "materialization_id",
+    },
+    "editor_verdicts": {
+        "verdict_id",
+        "loop_number",
+        "lane",
+        "verdict",
+        "at",
     },
 }
 
@@ -587,6 +594,45 @@ def _apply_v4(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v5(conn: sqlite3.Connection) -> None:
+    """Add the editorial-critic verdict ledger.
+
+    ``editor_verdicts`` records the post-compose editor's judgment on each
+    awareness post before it is sent: the verdict (pass/revise/fallback/error),
+    the per-dimension notes, and the original vs. final copy. It is an
+    observability ledger, not decision-critical — the deliver path is fail-open,
+    so a missing row never blocks a post. Keyed to the live awareness delivery
+    (``awareness_delivery_intents.intent_key`` + ``loop_number`` + ``lane``);
+    the retired ``editor_verdicts`` table (an old proactive-delivery artifact,
+    dropped in V2) shared only the name.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS editor_verdicts (
+            verdict_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            intent_key TEXT REFERENCES awareness_delivery_intents(intent_key),
+            loop_number INTEGER,
+            lane TEXT NOT NULL,
+            verdict TEXT NOT NULL DEFAULT 'pass'
+                CHECK (verdict IN ('pass','revise','fallback','error')),
+            dimensions_json TEXT NOT NULL DEFAULT '{}',
+            critique TEXT,
+            original_copy TEXT,
+            final_copy TEXT,
+            covers_json TEXT NOT NULL DEFAULT '[]',
+            model TEXT,
+            at TEXT NOT NULL
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_editor_verdicts_intent "
+        "ON editor_verdicts(intent_key) WHERE intent_key IS NOT NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_editor_verdicts_loop "
+        "ON editor_verdicts(loop_number DESC, verdict_id DESC)"
+    )
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -633,6 +679,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         try:
             _apply_v4(conn)
             conn.execute("PRAGMA user_version = 4")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        version = 4
+    if version < 5:
+        try:
+            _apply_v5(conn)
+            conn.execute("PRAGMA user_version = 5")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -696,7 +751,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 # Updated deliberately whenever the fresh-build schema changes.
 CURRENT_SCHEMA_FINGERPRINT = (
-    "97a95f1f186fe515f7bd0113bb4e1ececa55d4a7ad91b262185adda67b14687e"
+    "08eac3ade2c1d70772c2389ee0ed2e453c9fdebf0c7e699ed23f703dae1615f4"
 )
 
 

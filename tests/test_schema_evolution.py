@@ -127,6 +127,47 @@ def test_empty_get_connection_builds_complete_current_schema(tmp_path):
         conn.close()
 
 
+def test_v5_migration_adds_editor_verdicts_forward_from_v4(tmp_path):
+    """A live v4 database (no editor_verdicts) migrates forward to v5, gaining
+    the editorial-critic verdict ledger. The migration is idempotent and the
+    result matches the committed fingerprint."""
+    path = tmp_path / "v4.db"
+    build(str(path), None)
+    conn = sqlite3.connect(path)
+    try:
+        # Simulate a pre-V5 database: drop the table, roll user_version back.
+        conn.execute("DROP TABLE editor_verdicts")
+        conn.execute("PRAGMA user_version = 4")
+        conn.commit()
+        assert not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='editor_verdicts'"
+        ).fetchone()
+
+        apply_schema_migrations(conn)
+
+        assert (
+            conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        )
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='editor_verdicts'"
+        ).fetchone()
+        # Verdict CHECK constraint is enforced.
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(editor_verdicts)")}
+        assert {
+            "verdict_id",
+            "intent_key",
+            "loop_number",
+            "lane",
+            "verdict",
+            "at",
+        } <= cols
+        # Re-running is a no-op (idempotent) and stays on the committed fingerprint.
+        apply_schema_migrations(conn)
+        assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
+    finally:
+        conn.close()
+
+
 def test_wrong_generation_database_is_refused_without_enabling_wal(tmp_path):
     path = tmp_path / "old.db"
     conn = sqlite3.connect(path)
