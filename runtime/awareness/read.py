@@ -310,6 +310,13 @@ def _compact_signal(event: dict) -> dict:
     elif et == "pol_season_podium":
         compact["pol_season_id"] = payload.get("pol_season_id")
         compact["podium"] = payload.get("podium") or []
+    elif et == "member_left_verified":
+        # A confirmed organic leave — the goodbye signal. `leader_context` is the
+        # free-text note the leader added on the departure card (e.g. "alt account
+        # of X"); carry it ON the signal so the farewell is composed WITH it.
+        for key in ("name", "tenure_days", "leader_context"):
+            if payload.get(key) is not None:
+                compact[key] = payload[key]
     elif et in _CAKE_DAY_TYPES:
         for key in ("years", "months", "is_annual"):
             if payload.get(key) is not None:

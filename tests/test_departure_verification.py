@@ -174,3 +174,67 @@ def test_unanswered_card_times_out_to_leave(engine_conn, _isolate_default_sqlite
     assert len(expired) == 1
     assert _leave_source(engine_conn) == "leave_unverified"
     assert _open_departure_card(engine_conn) is None
+
+
+def test_verified_leave_carries_leader_context(engine_conn, _isolate_default_sqlite_db):
+    """The note a leader adds when confirming the LEAVE rides on
+    member_left_verified as `leader_context`, so the goodbye is composed WITH it
+    (e.g. "alt account of X" → fold in / skip) instead of the note sitting unread
+    on the card. Regression: #168 posted p2w_gtr0410's goodbye as a distinct
+    member when the leader's "Alt account" note should have reshaped it."""
+    import json
+
+    _seed_departure(engine_conn)
+    raise_departure_verification_cards(now=NOW, conn=engine_conn)
+    card = _open_departure_card(engine_conn)
+    classify_departure(
+        card["action_id"],
+        classification="leave",
+        discord_user_id=42,
+        comment="Alt account of Bob",
+        conn=engine_conn,
+    )
+    assert emit_verified_leave_events(engine_conn, "#J2RGCRVG", NOW) == 1
+    row = engine_conn.execute(
+        "SELECT payload_json FROM clan_events WHERE subject_tag='#A' "
+        "AND event_type='member_left_verified'"
+    ).fetchone()
+    assert json.loads(row[0])["leader_context"] == "Alt account of Bob"
+
+
+def test_verified_leave_without_note_omits_leader_context(
+    engine_conn, _isolate_default_sqlite_db
+):
+    """No leader note → no leader_context key at all (not an empty string)."""
+    import json
+
+    _seed_departure(engine_conn, leave_source="leader_verified_leave")
+    emit_verified_leave_events(engine_conn, "#J2RGCRVG", NOW)
+    row = engine_conn.execute(
+        "SELECT payload_json FROM clan_events WHERE subject_tag='#A' "
+        "AND event_type='member_left_verified'"
+    ).fetchone()
+    assert "leader_context" not in json.loads(row[0])
+
+
+def test_compact_signal_surfaces_leader_context_on_goodbye_signal():
+    """The read carries leader_context ON the member_left_verified hard-post
+    signal (co-located with the signal the brain composes the farewell from),
+    not buried in a separate leader-action block."""
+    from runtime.awareness.read import _compact_signal
+
+    compact = _compact_signal(
+        {
+            "event_type": "member_left_verified",
+            "subject_tag": "#A",
+            "observed_at": NOW,
+            "payload": {
+                "name": "Alice",
+                "tenure_days": 30,
+                "leader_context": "Alt account of Bob",
+            },
+        }
+    )
+    assert compact["leader_context"] == "Alt account of Bob"
+    assert compact["name"] == "Alice"
+    assert compact["tenure_days"] == 30

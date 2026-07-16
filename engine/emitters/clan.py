@@ -325,7 +325,14 @@ def emit_verified_leave_events(conn, clan_tag, observed_at) -> int:
     rows = conn.execute(
         """SELECT cm.player_tag, cm.left_at,
                   COALESCE(p.display_name, p.current_name, cm.player_tag) AS name,
-                  CAST(julianday(cm.left_at) - julianday(cm.joined_at) AS INTEGER) AS tenure_days
+                  CAST(julianday(cm.left_at) - julianday(cm.joined_at) AS INTEGER) AS tenure_days,
+                  (SELECT lar.decision_note
+                     FROM leader_action_recommendations lar
+                    WHERE lar.action_type = 'departure_verification'
+                      AND lar.source_signal_key =
+                          'engine:departure:' || cm.player_tag || ':' || cm.left_at
+                      AND lar.decision_note IS NOT NULL
+                    ORDER BY lar.decided_at DESC LIMIT 1) AS leader_context
            FROM clan_memberships cm
            LEFT JOIN players p ON p.player_tag = cm.player_tag
            WHERE cm.leave_source = 'leader_verified_leave' AND cm.left_at >= ?""",
@@ -333,6 +340,13 @@ def emit_verified_leave_events(conn, clan_tag, observed_at) -> int:
     ).fetchall()
     n = 0
     for row in rows:
+        # The note a leader added when confirming the LEAVE rides with the signal
+        # so Elixir composes the goodbye WITH that context (e.g. "alt account of
+        # X" → fold in / skip), rather than the note sitting unread on the card.
+        payload = {"name": row["name"], "tenure_days": row["tenure_days"]}
+        note = (row["leader_context"] or "").strip()
+        if note:
+            payload["leader_context"] = note
         n += _emit(
             conn,
             clan_tag,
@@ -341,7 +355,7 @@ def emit_verified_leave_events(conn, clan_tag, observed_at) -> int:
             None,
             "member_left_verified",
             f"member_left_verified:{row['player_tag']}:{row['left_at']}",
-            {"name": row["name"], "tenure_days": row["tenure_days"]},
+            payload,
         )
     return n
 
