@@ -439,6 +439,109 @@ def judge(
     return _parse_verdict(raw)
 
 
+def _recent_lane_copies(
+    conn, lane: str, *, exclude_message_id: str | None = None, limit: int = 8
+) -> list[str]:
+    """Recent delivered copy in this lane (for the judge's freshness check),
+    newest first, excluding the post just recorded."""
+    rows = conn.execute(
+        "SELECT content_preview FROM awareness_posts WHERE lane = ? "
+        "AND (? IS NULL OR discord_message_id != ?) "
+        "ORDER BY posted_at DESC LIMIT ?",
+        (lane, exclude_message_id, exclude_message_id, limit),
+    ).fetchall()
+    return [row[0] for row in rows if row[0]]
+
+
+def _editor_model() -> str | None:
+    from agent.core import _model_for_workflow
+
+    return _model_for_workflow(_EDITOR_WORKFLOW)
+
+
+def judge_delivered_post(
+    conn,
+    *,
+    post: dict,
+    evidence: dict | None,
+    lane: str,
+    content: str,
+    discord_message_id: str | int | None,
+    loop_number: int | None = None,
+    intent_key: str | None = None,
+) -> dict | None:
+    """Observe-and-learn critic (Jamie, 2026-07-16): judge a post that has
+    ALREADY been delivered, record the verdict, and — on a revise/fallback —
+    feed an editorial anti-pattern memory so the next compose improves. It never
+    changes or blocks what shipped; the awareness deliver path stays fail-hard
+    and untouched. Fully isolated and fail-open: any error here is swallowed so
+    a quality read can never disturb the delivery record. Returns the verdict
+    dict, or None when disabled or on error.
+    """
+    if not editor_enabled():
+        return None
+    message_id = str(discord_message_id) if discord_message_id is not None else None
+    try:
+        rubric = build_rubric_context(conn, lane=lane)
+        recent = _recent_lane_copies(conn, lane, exclude_message_id=message_id)
+        result = judge(
+            copy=content,
+            facts=evidence or {},
+            recent_copies=recent,
+            rubric=rubric,
+            lane=lane,
+        )
+        record_verdict(
+            conn,
+            result=result,
+            intent_key=intent_key,
+            loop_number=loop_number,
+            lane=lane,
+            original_copy=content,
+            final_copy=content,  # observe-only: nothing was rewritten
+            covers=post.get("covers_signal_keys"),
+            model=_editor_model(),
+        )
+        if result.get("verdict") in ("revise", "fallback"):
+            _feed_editor_lesson(conn, result, lane, content, message_id)
+        return result
+    except Exception:  # fully isolated: a quality read may never disturb delivery
+        log.exception("editor judge_delivered_post failed (non-fatal)")
+        return None
+
+
+def _feed_editor_lesson(
+    conn, result: dict, lane: str, content: str, message_id: str | None
+) -> None:
+    """Turn a downgraded verdict into an editorial anti-pattern memory — the
+    learning half of the observe-and-learn loop. Deduped on the message id."""
+    verdict = result.get("verdict")
+    critique = (result.get("critique") or "").strip() or "(no critique given)"
+    failed_dims = [
+        dim
+        for dim, detail in (result.get("dimensions") or {}).items()
+        if isinstance(detail, dict) and detail.get("ok") is False
+    ]
+    stable_id = message_id or hashlib.sha1(content.encode("utf-8")).hexdigest()[:16]
+    _add_editorial_memory(
+        conn,
+        title=f"Anti-pattern: editor flagged a live post ({verdict})",
+        body=(
+            f"The editorial critic returned '{verdict}' on a live #{lane} post. "
+            "Future composition should heed this.\n\n"
+            f"- Critique: {critique}\n"
+            + (f"- Weak dimensions: {', '.join(failed_dims)}\n" if failed_dims else "")
+            + f"\nPOST: {content[:600]}"
+        ),
+        kind_tag="anti-pattern",
+        event_key=f"editor_verdict:{stable_id}",
+        confidence=0.8 if verdict == "fallback" else 0.7,
+        created_by="editor-critic",
+        extra_tags=("quality-eval", f"lane:{lane}"),
+    )
+    conn.commit()
+
+
 def record_verdict(
     conn,
     *,

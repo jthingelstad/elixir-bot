@@ -288,7 +288,10 @@ def record_awareness_post(
             ),
         )
         if post is not None:
-            from engine.editor import record_active_awareness_quality
+            from engine.editor import (
+                judge_delivered_post,
+                record_active_awareness_quality,
+            )
 
             record_active_awareness_quality(
                 conn,
@@ -297,6 +300,20 @@ def record_awareness_post(
                 lane=lane,
                 content=content,
                 discord_message_id=message_id,
+            )
+            # Observe-and-learn editorial critic: judge the post that just
+            # shipped, record the verdict (editor_verdicts), and feed a lesson
+            # on a downgrade. Self-isolated/fail-open — never blocks or alters
+            # the delivered post; gated by ELIXIR_EDITOR_GATE.
+            judge_delivered_post(
+                conn,
+                post=post,
+                evidence=evidence or {},
+                lane=lane,
+                content=content,
+                discord_message_id=message_id,
+                loop_number=loop_number,
+                intent_key=intent_key,
             )
     except Exception as exc:
         log.exception("record_awareness_post: failed to record %s post", lane)
