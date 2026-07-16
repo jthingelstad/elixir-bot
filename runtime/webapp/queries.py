@@ -805,6 +805,18 @@ def member_page(tag: str) -> dict | None:
             )
             or {}
         )
+        # Leadership trail for this member: every card that named them, from
+        # nomination through the leader's decision (kick/promote/demote/departure).
+        leader_actions = _rows(
+            conn,
+            """
+            SELECT action_type, objective, status, rationale, proposed_at,
+                   decided_at, decision_emoji, decision_note
+            FROM leader_action_recommendations
+            WHERE target_player_tag = ?
+            ORDER BY proposed_at DESC LIMIT 25""",
+            (tag,),
+        )
         return {
             "player": player,
             "state": state,
@@ -818,6 +830,7 @@ def member_page(tag: str) -> dict | None:
             "links": links,
             "aliases": aliases,
             "contact": contact,
+            "leader_actions": leader_actions,
         }
     finally:
         conn.close()

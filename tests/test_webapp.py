@@ -304,6 +304,40 @@ def test_members_awards_baseline_render_seeded():
     _client_run(body)
 
 
+def test_member_page_shows_leader_action_trail():
+    """A member's page threads their leadership trail — every #actions card that
+    named them, nomination → decision (traceability for the leader flow)."""
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO players (player_tag, current_name, first_seen_at, "
+            "last_seen_at) VALUES ('#LATRAIL', 'Trailmark', '2026-06-01T00:00:00Z', "
+            "'2026-07-16T00:00:00Z')"
+        )
+        conn.execute(
+            "INSERT INTO leader_action_recommendations (action_key, action_type, "
+            "objective, status, prompt_text, target_player_tag, target_player_name, "
+            "decision_note, proposed_at, decided_at, created_at, updated_at, is_test) "
+            "VALUES ('k1', 'kick_recommendation', 'Idle 9 days', 'done', 'card copy', "
+            "'#LATRAIL', 'Trailmark', 'agreed, kicked', '2026-07-15T00:00:00Z', "
+            "'2026-07-15T02:00:00Z', '2026-07-15T00:00:00Z', '2026-07-15T02:00:00Z', 0)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    async def body(client):
+        r = await client.get("/member/LATRAIL", headers=LOGIN)
+        assert r.status == 200
+        text = await r.text()
+        assert "Leader actions" in text
+        assert "kick_recommendation" in text
+        assert "Idle 9 days" in text
+        assert "agreed, kicked" in text
+
+    _client_run(body)
+
+
 def _seed_claims():
     conn = db.get_connection()
     try:

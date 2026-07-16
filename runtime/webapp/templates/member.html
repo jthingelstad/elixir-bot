@@ -69,6 +69,33 @@
   </div>
 </div>
 
+<h2>Leader actions</h2>
+<p class="muted">Every #actions card that named this member — nomination → the leader's decision.</p>
+<div class="card" style="overflow-x:auto;">
+{% if leader_actions %}
+  <table>
+    <tr><th>proposed</th><th>type</th><th>objective</th><th>status</th><th>decided</th><th>note</th></tr>
+    {% for a in leader_actions %}
+      <tr>
+        <td>{{ a.proposed_at | reltime }}</td>
+        <td><code>{{ a.action_type }}</code></td>
+        <td>{{ a.objective or a.rationale or '' }}</td>
+        <td>
+          {% if a.status == 'done' or a.status == 'decided' %}<span class="badge good">{{ a.status }}</span>
+          {% elif a.status in ('rejected','withdrawn') %}<span class="badge bad">{{ a.status }}</span>
+          {% else %}<span class="badge">{{ a.status }}</span>{% endif %}
+          {{ a.decision_emoji or '' }}
+        </td>
+        <td>{% if a.decided_at %}{{ a.decided_at | reltime }}{% else %}—{% endif %}</td>
+        <td class="muted">{{ a.decision_note or '' }}</td>
+      </tr>
+    {% endfor %}
+  </table>
+{% else %}
+  <p class="muted">No leader-action cards have named this member.</p>
+{% endif %}
+</div>
+
 <h2>Decision trail — claims & posts</h2>
 <div class="card" style="overflow-x:auto;">
   <table>
