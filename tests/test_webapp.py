@@ -9,6 +9,7 @@ from aiohttp.test_utils import TestClient, TestServer
 import db
 from runtime.webapp import chat as webapp_chat
 from runtime.webapp import ops as webapp_ops
+from runtime.webapp import queries
 from runtime.webapp import ticks as webapp_ticks
 from runtime.webapp.server import build_app
 
@@ -78,12 +79,51 @@ def test_pages_render_on_empty_db():
             "/management",
             "/war",
             "/llm",
+            "/cost",
             "/chat",
         ):
             r = await client.get(path, headers=LOGIN)
             assert r.status == 200, path
             text = await r.text()
             assert "Elixir" in text, path
+
+    _client_run(body)
+
+
+def test_llm_cost_page_aggregates_by_workflow_and_prices_models():
+    """The cost panel sums spend per workflow and prices Sonnet/Haiku/Opus (the
+    Opus branch fixes a $0 undercount in the canonical formula)."""
+    conn = db.get_connection()
+    try:
+        # 1M completion tokens: sonnet → $15, opus → $75.
+        conn.execute(
+            "INSERT INTO llm_calls (recorded_at, workflow, model, ok, "
+            "completion_tokens, total_tokens) VALUES "
+            "(strftime('%Y-%m-%dT%H:%M:%S','now'), 'awareness', 'claude-sonnet-5', 1, "
+            "1000000, 1000000)",
+        )
+        conn.execute(
+            "INSERT INTO llm_calls (recorded_at, workflow, model, ok, "
+            "completion_tokens, total_tokens) VALUES "
+            "(strftime('%Y-%m-%dT%H:%M:%S','now'), 'memory_synthesis', 'claude-opus-4-8', "
+            "1, 1000000, 1000000)",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    data = queries.llm_cost_page()
+    by_wf = {w["workflow"]: w for w in data["workflows_7d"]}
+    assert abs(by_wf["awareness"]["cost_usd"] - 15.0) < 0.01
+    assert (
+        abs(by_wf["memory_synthesis"]["cost_usd"] - 75.0) < 0.01
+    )  # opus priced, not $0
+
+    async def body(client):
+        r = await client.get("/cost", headers=LOGIN)
+        assert r.status == 200
+        text = await r.text()
+        assert "LLM cost" in text and "awareness" in text and "memory_synthesis" in text
 
     _client_run(body)
 

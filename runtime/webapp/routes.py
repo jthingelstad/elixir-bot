@@ -229,6 +229,11 @@ async def llm_page(request: web.Request) -> web.Response:
     return render("llm.html", request, nav="llm", **data)
 
 
+async def llm_cost_page(request: web.Request) -> web.Response:
+    data = await asyncio.to_thread(queries.llm_cost_page)
+    return render("llm_cost.html", request, nav="cost", **data)
+
+
 async def llm_call_detail_page(request: web.Request) -> web.Response:
     try:
         call_id = int(request.match_info["call_id"])
@@ -336,6 +341,7 @@ def add_routes(app: web.Application) -> None:
             web.get("/management", management_page),
             web.get("/war", war_page),
             web.get("/llm", llm_page),
+            web.get("/cost", llm_cost_page),
             web.get("/llm/{call_id}", llm_call_detail_page),
             web.get("/chat", chat_page),
             web.get("/chat/messages", chat_get),
