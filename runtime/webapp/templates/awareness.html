@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Awareness{% endblock %}
+{% block content %}
+<h1>Awareness loop</h1>
+<p class="muted">Elixir's hourly brain: it builds the read, the cost gate picks a tier,
+and on a deliberate tick it composes posts for #announcements / #elixir. Every loop is
+recorded here; the full prompt + response is in <a href="/llm?workflow=awareness">LLM · awareness</a>.</p>
+
+<div class="cards">
+  <div class="card">
+    <div class="badge">last 24h</div>
+    <div class="kv" style="margin-top:.5rem">
+      <dt>Loops</dt><dd>{{ summary.thoughts_24h }}</dd>
+      <dt>Posts</dt><dd>{{ summary.posts_24h }}</dd>
+      <dt>Failures</dt><dd class="{{ 'err' if summary.failures_24h else '' }}">{{ summary.failures_24h }}</dd>
+    </div>
+  </div>
+  {% if summary.latest_thought %}
+  <div class="card">
+    <div class="badge">latest loop</div>
+    <div class="kv" style="margin-top:.5rem">
+      <dt>Loop</dt><dd>#{{ summary.latest_thought.loop_number }}</dd>
+      <dt>When</dt><dd>{{ summary.latest_thought.at | reltime }}</dd>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<h2>Recent posts</h2>
+{% if posts %}
+<table>
+  <thead><tr><th>When</th><th>Lane</th><th>Loop</th><th>Covers</th><th>Post</th></tr></thead>
+  <tbody>
+  {% for p in posts %}
+    <tr>
+      <td>{{ p.posted_at | reltime }}</td>
+      <td><code>#{{ p.lane }}</code></td>
+      <td class="num">{{ p.loop_number if p.loop_number is not none else '—' }}</td>
+      <td>{% for c in p.covers %}<div><code>{{ c }}</code></div>{% endfor %}</td>
+      <td>{{ p.content_preview }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No posts recorded yet.</p>
+{% endif %}
+
+<h2>Recent loops</h2>
+<table>
+  <thead><tr>
+    <th>Loop</th><th>When</th><th>Decision</th><th>Tier</th>
+    <th class="num">Signals</th><th>Hard-posts</th><th class="num">Tools</th><th>Why</th>
+  </tr></thead>
+  <tbody>
+  {% for l in loops %}
+    <tr>
+      <td class="num">#{{ l.loop_number }}</td>
+      <td>{{ l.at | reltime }}</td>
+      <td>
+        {% if l.outcome == 'posted' %}<span class="badge good">posted {{ l.post_count }}</span>
+        {% elif l.outcome == 'failed' %}<span class="badge bad">failed</span>
+        {% else %}<span class="badge">silence</span>{% endif %}
+      </td>
+      <td><code>{{ l.tier }}</code>{% if l.quiet_stretch %} <span class="badge">quiet</span>{% endif %}</td>
+      <td class="num">{{ l.signal_total }}</td>
+      <td>
+        {% for h in l.hard_posts %}<span class="badge">{{ h }}</span> {% endfor %}
+        {% if l.degraded %}<span class="badge bad">degraded: {{ l.degraded | join(', ') }}</span>{% endif %}
+      </td>
+      <td class="num">{{ l.tool_calls or '' }}</td>
+      <td class="muted">{{ l.reason }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

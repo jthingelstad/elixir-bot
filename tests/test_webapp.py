@@ -71,6 +71,7 @@ def test_pages_render_on_empty_db():
             "/ticks",
             "/streams",
             "/recognition",
+            "/awareness",
             "/polling",
             "/management",
             "/war",
@@ -81,6 +82,42 @@ def test_pages_render_on_empty_db():
             assert r.status == 200, path
             text = await r.text()
             assert "Elixir" in text, path
+
+    _client_run(body)
+
+
+def test_awareness_page_renders_loops_and_posts():
+    """The dedicated awareness view surfaces recent loops (tier + decision) and
+    the posts they produced — the hourly brain, previously only a card on
+    Overview and two dead /awareness links."""
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO awareness_thoughts (thought_id, loop_number, at, read_json, "
+            "plan_json, chose_silence, post_count, skipped_reason, model) VALUES "
+            "('t-post', 900, strftime('%Y-%m-%dT%H:%M:%SZ','now'), ?, '{}', 0, 1, '', NULL), "
+            "('t-silence', 899, strftime('%Y-%m-%dT%H:%M:%SZ','now'), '{}', '{}', 1, 0, "
+            "'quiet', 'gate:triage')",
+            (json.dumps({"signals_by_lane": {"milestone": [{"k": "a"}, {"k": "b"}]}}),),
+        )
+        conn.execute(
+            "INSERT INTO awareness_posts (lane, content_preview, covers_json, "
+            "loop_number, posted_at, discord_message_id) VALUES "
+            "('elixir', 'A grounded war post', '[\"war_champ:1\"]', 900, "
+            "strftime('%Y-%m-%dT%H:%M:%SZ','now'), '123')",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    async def body(client):
+        r = await client.get("/awareness", headers=LOGIN)
+        assert r.status == 200
+        text = await r.text()
+        assert "Awareness loop" in text
+        assert "#900" in text and "#899" in text
+        assert "A grounded war post" in text
+        assert "deliberate" in text and "triage" in text
 
     _client_run(body)
 

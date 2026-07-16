@@ -168,6 +168,80 @@ def ticks_page() -> dict:
         conn.close()
 
 
+def _thought_outcome(row: dict) -> str:
+    if (row.get("skipped_reason") or "").startswith("⚠️ tick failed"):
+        return "failed"
+    return "silence" if row.get("chose_silence") else "posted"
+
+
+def _thought_tier(model: str | None) -> str:
+    """The gate tier that decided this loop: gate:skip/gate:triage → skip/triage;
+    a null model means the Sonnet brain deliberated."""
+    if not model:
+        return "deliberate"
+    return str(model).replace("gate:", "")
+
+
+def awareness_page() -> dict:
+    """The awareness loop's own view: recent loops with their gate tier, the
+    signals they saw, the decision, and the posts that resulted. This is the
+    hourly brain — previously visible only as a buried card on Overview."""
+    conn = db.get_connection()
+    try:
+        raw = _rows(
+            conn,
+            """
+            SELECT thought_id, loop_number, at, chose_silence, post_count,
+                   model, skipped_reason, read_json, tool_trace_json
+            FROM awareness_thoughts ORDER BY loop_number DESC LIMIT 60""",
+        )
+        loops = []
+        for t in raw:
+            read = _parse_json(t.get("read_json"), {}) or {}
+            sbl = read.get("signals_by_lane") or {}
+            hard = read.get("hard_post_signals") or []
+            trace = _parse_json(t.get("tool_trace_json"), []) or []
+            pulse = read.get("posting_pulse") or {}
+            loops.append(
+                {
+                    "loop_number": t.get("loop_number"),
+                    "at": t.get("at"),
+                    "outcome": _thought_outcome(t),
+                    "post_count": t.get("post_count") or 0,
+                    "tier": _thought_tier(t.get("model")),
+                    "signal_counts": {
+                        lane: len(items) for lane, items in sbl.items() if items
+                    },
+                    "signal_total": sum(len(v) for v in sbl.values() if v),
+                    "hard_posts": [
+                        h.get("event_type")
+                        for h in hard
+                        if isinstance(h, dict) and h.get("event_type")
+                    ],
+                    "degraded": read.get("_degraded") or [],
+                    "tool_calls": len(trace),
+                    "quiet_stretch": bool(pulse.get("is_quiet_stretch")),
+                    "reason": (t.get("skipped_reason") or "")[:300],
+                }
+            )
+        posts = _rows(
+            conn,
+            """
+            SELECT lane, content_preview, covers_json, loop_number, posted_at,
+                   discord_message_id
+            FROM awareness_posts ORDER BY posted_at DESC LIMIT 20""",
+        )
+        for p in posts:
+            p["covers"] = _parse_json(p.get("covers_json"), []) or []
+        return {
+            "summary": _awareness_summary(conn),
+            "loops": loops,
+            "posts": posts,
+        }
+    finally:
+        conn.close()
+
+
 def members_page() -> dict:
     conn = db.get_connection()
     try:
