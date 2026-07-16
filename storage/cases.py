@@ -535,8 +535,10 @@ def raise_departure_verification_cards(
             objective=f"Confirm departure: did {name} leave or get kicked?",
             prompt_text=(
                 f"{name} is no longer in the clan (tenure {tenure_txt}). Elixir can't tell "
-                f"if they LEFT on their own or were KICKED — click one, and add a brief note "
-                f"if you know why. No public goodbye is posted until this is verified."
+                f"if they LEFT on their own or were KICKED — click one. On a LEAVE, add a "
+                f"note with any context for the farewell (e.g. “alt account of X”, or a "
+                f"detail worth a mention) and I'll compose the goodbye with it. No public "
+                f"goodbye is posted until this is verified; a KICK is never announced."
             ),
             rationale=f"Departure detected {row['left_at']}; leave_source unverified (roster_diff).",
             target_player_tag=tag,
