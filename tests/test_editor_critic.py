@@ -134,6 +134,126 @@ def test_record_verdict_persists_to_the_ledger(engine_conn):
     assert "war_champ_lead_change" in row["covers_json"]
 
 
+def test_judge_delivered_post_records_verdict_and_feeds_lesson(
+    engine_conn, monkeypatch
+):
+    """Observe-and-learn: a fallback verdict on a delivered post is recorded to
+    editor_verdicts AND becomes an editorial anti-pattern memory for next time —
+    without altering anything that shipped."""
+    monkeypatch.setenv("ELIXIR_EDITOR_GATE", "1")
+    monkeypatch.setattr(editor, "_editor_model", lambda: "test-model")
+    # No network: feed a fixed fallback verdict through the judge seam.
+    monkeypatch.setattr(
+        editor,
+        "judge",
+        lambda **kw: {
+            "verdict": "fallback",
+            "critique": "claims a rank not in facts",
+            "dimensions": {"grounding": {"ok": False, "note": "invented #1"}},
+        },
+    )
+    result = editor.judge_delivered_post(
+        engine_conn,
+        post={"covers_signal_keys": ["war_champ:1"], "channel": "elixir"},
+        evidence={"our_fame": 0},
+        lane="elixir",
+        content="We're #1 in the race!",
+        discord_message_id="555",
+        loop_number=200,
+    )
+    assert result["verdict"] == "fallback"
+    # Verdict persisted, keyed to the live delivery.
+    row = engine_conn.execute(
+        "SELECT verdict, loop_number, lane, model FROM editor_verdicts "
+        "WHERE loop_number=200"
+    ).fetchone()
+    assert row["verdict"] == "fallback"
+    assert row["lane"] == "elixir"
+    assert row["model"] == "test-model"
+    # Lesson fed to the editorial rubric for the next compose.
+    mem = engine_conn.execute(
+        "SELECT title, body FROM memories WHERE source_event_key = 'editor_verdict:555'"
+    ).fetchone()
+    assert mem is not None
+    assert "fallback" in mem["title"]
+    assert "claims a rank not in facts" in mem["body"]
+
+
+def test_judge_delivered_post_pass_records_no_lesson(engine_conn, monkeypatch):
+    monkeypatch.setenv("ELIXIR_EDITOR_GATE", "1")
+    monkeypatch.setattr(editor, "_editor_model", lambda: None)
+    monkeypatch.setattr(
+        editor, "judge", lambda **kw: {"verdict": "pass", "critique": "grounded"}
+    )
+    editor.judge_delivered_post(
+        engine_conn,
+        post={"covers_signal_keys": [], "channel": "elixir"},
+        evidence={},
+        lane="elixir",
+        content="A grounded post about the war.",
+        discord_message_id="777",
+        loop_number=201,
+    )
+    assert (
+        engine_conn.execute(
+            "SELECT verdict FROM editor_verdicts WHERE loop_number=201"
+        ).fetchone()["verdict"]
+        == "pass"
+    )
+    # A pass feeds no anti-pattern memory.
+    assert (
+        engine_conn.execute(
+            "SELECT 1 FROM memories WHERE source_event_key = 'editor_verdict:777'"
+        ).fetchone()
+        is None
+    )
+
+
+def test_judge_delivered_post_is_noop_when_disabled(engine_conn, monkeypatch):
+    monkeypatch.setenv("ELIXIR_EDITOR_GATE", "0")
+    called = {"judge": False}
+
+    def _should_not_run(**kw):
+        called["judge"] = True
+        return {"verdict": "pass"}
+
+    monkeypatch.setattr(editor, "judge", _should_not_run)
+    out = editor.judge_delivered_post(
+        engine_conn,
+        post={"covers_signal_keys": []},
+        evidence={},
+        lane="elixir",
+        content="anything",
+        discord_message_id="888",
+        loop_number=202,
+    )
+    assert out is None
+    assert called["judge"] is False
+    assert (
+        engine_conn.execute("SELECT COUNT(*) FROM editor_verdicts").fetchone()[0] == 0
+    )
+
+
+def test_judge_delivered_post_swallows_errors(engine_conn, monkeypatch):
+    monkeypatch.setenv("ELIXIR_EDITOR_GATE", "1")
+
+    def boom(**kw):
+        raise RuntimeError("rubric query blew up")
+
+    monkeypatch.setattr(editor, "build_rubric_context", boom)
+    # Must not raise — the delivery record may never be disturbed by a quality read.
+    out = editor.judge_delivered_post(
+        engine_conn,
+        post={"covers_signal_keys": []},
+        evidence={},
+        lane="elixir",
+        content="anything",
+        discord_message_id="999",
+        loop_number=203,
+    )
+    assert out is None
+
+
 def test_record_verdict_rejects_off_contract_verdict(engine_conn):
     # The CHECK constraint is the last backstop; an off-contract verdict string
     # is caught and logged, not raised (best-effort ledger write).

@@ -41,7 +41,7 @@ BROAD_EXCEPTION_BASELINE = {
     "db/schema.py": 5,  # +1: V5 migration rollback/re-raise (same pattern as v2-v4)
     "engine/chronicles.py": 1,
     "engine/delivery.py": 3,
-    "engine/editor.py": 1,  # judge() fail-open: the critic may never block a post
+    "engine/editor.py": 2,  # judge()/judge_delivered_post fail-open: the critic may never block a post
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
     "engine/management.py": 2,
