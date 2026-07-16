@@ -579,3 +579,32 @@ def test_refresh_player_state_enforces_profile_and_roster_field_ownership():
         assert (row["exp_level"], row["clan_rank"]) == (44, 7)
     finally:
         conn.close()
+
+
+def test_award_races_war_champ_carries_battle_days():
+    """War Champ entries carry `battle_days` (distinct war days actually played),
+    so Elixir can tell a volume/timing lead (first through today's day) from a
+    genuine pace lead. Sourced from war_attendance_days, so a PARTIAL day still
+    counts — decks_used/4 would undercount it. Feedback: pax "took the lead"
+    reading oddly because pax simply had one more battle day than the field."""
+    conn = db.get_connection()
+    try:
+        _seed_season(conn, full_attendance=True)  # #A/#B/#C: 4 distinct war days each
+        # #B is first through the next battle day (only 2 of 4 decks so far) — the
+        # pax case: ahead on an extra day, not necessarily pace.
+        conn.execute(
+            "INSERT INTO war_attendance_days (season_id, section_index, war_day_index, "
+            "player_tag, decks_used, decks_available, observed_at) "
+            "VALUES (?, 4, 2, '#B', 2, 4, ?)",
+            (SEASON, AT),
+        )
+        conn.commit()
+        champ = {
+            e["tag"]: e
+            for e in db.get_award_races(season_id=SEASON, conn=conn)["war_champ"]
+        }
+        assert champ["#A"]["battle_days"] == 4
+        assert champ["#B"]["battle_days"] == 5  # extra day counted despite partial
+        assert champ["#C"]["battle_days"] == 4
+    finally:
+        conn.close()
