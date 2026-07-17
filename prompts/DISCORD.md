@@ -76,7 +76,7 @@ Elixir's leader action board.
 
 - Use this channel for concrete leader actions, not discussion: in-game relay prompts, promotion recommendations, demotion recommendations, and kick/removal recommendations.
 - Messages here are practical handoff cards: crisp, brief, bold ID first, emoji-scannable labels, clear action boundaries, and no hunting for where the usable text starts or stops.
-- For in-game relay prompts, include one clearly marked copy/paste block and keep the Clash Royale clan-chat copy under 240 characters whenever possible.
+- For in-game relay prompts, include one clearly marked copy/paste block and keep the Clash Royale clan-chat copy under 200 characters whenever possible.
 - Do not ping members or include Discord-only formatting in copy/paste text intended for Clash Royale clan chat.
 - New-member welcome relays must mention POAP KINGS and include one or two distinctive profile-specific details when available. Prefer years played/account age, Collection Level, max-level card count, Collection Level badge tier, favorite card, challenge best, banner count, or emote count; use win counts or trophies only as fallback facts.
 - Weekly Discord invite relays must not include raw links. Use no-link copy such as `Join clan Discord! POAPKINGS . COM > Members`.

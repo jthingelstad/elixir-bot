@@ -53,6 +53,47 @@ def test_role_action_clan_chat_copy_uses_public_reason_and_word_boundary():
     assert "...." not in copy
 
 
+def test_clip_ends_on_complete_sentence_not_mid_word():
+    # Two sentences that overflow the limit: the clip should drop the whole
+    # trailing sentence and end on the first sentence's period — never a
+    # dangling "...word".
+    text = (
+        "POAP KINGS clinched the war week early. Every deck got played and "
+        "the boat is basically home already tonight."
+    )
+    clipped = clan_chat_copy.clip_clan_chat_text(text, limit=45)
+    assert clipped == "POAP KINGS clinched the war week early."
+    assert "..." not in clipped
+
+
+def test_clip_falls_back_to_ellipsis_without_sentence_break():
+    # A single run-on with no early sentence break still clips with an ellipsis
+    # (the safety net), rather than returning an empty/tiny fragment.
+    text = (
+        "sniperhendo keeps climbing and climbing and climbing all the way up the ladder"
+    )
+    clipped = clan_chat_copy.clip_clan_chat_text(text, limit=30)
+    assert clipped.endswith("...")
+    assert len(clipped) <= 30
+
+
+def test_relay_copy_keeps_final_word_within_200_regression_r158():
+    # R158: the brain authored a complete 181-char line ending "still climbing."
+    # The old 180-char relay limit chopped it to "still... - E". At 200 it
+    # survives intact, signature and all.
+    brain = (
+        "sniperhendo just hit a new personal best - 13,750 trophies in Spirit "
+        "Square! Up 433 trophies this week alone, vs just 61 the week before. "
+        "6 years on this account and still climbing."
+    )
+    signed = clan_chat_copy.sign_clan_chat_text(
+        brain, limit=clan_chat_copy.CLAN_CHAT_DEFAULT_MAX_CHARS
+    )
+    assert signed.endswith("still climbing. - E")
+    assert "still... - E" not in signed
+    assert len(signed) <= clan_chat_copy.CLAN_CHAT_DEFAULT_MAX_CHARS
+
+
 def test_sign_clan_chat_text_appends_signature_inside_limit():
     copy = clan_chat_copy.sign_clan_chat_text(
         "POAP KINGS had a huge war push from the middle of the roster tonight.",
