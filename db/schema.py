@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 
 
 _V1_STATEMENTS = (
@@ -213,6 +213,7 @@ REQUIRED_SCHEMA = {
     "llm_calls": {"call_id", "prompt_json", "response_json"},
     "runtime_incidents": {"incident_id", "component", "resolved_at"},
     "game_events": {"event_id", "dedup_key", "change_key"},
+    "member_outreach": {"outreach_id", "player_tag", "field", "status", "consent"},
     "evergreen_nudges": {"nudge_key", "last_sent_at"},
     "email_verifications": {"player_tag", "code_hash", "expires_at"},
     "tick_history": {"tick_id", "counters_json"},
@@ -633,6 +634,50 @@ def _apply_v5(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v6(conn: sqlite3.Connection) -> None:
+    """Add ``member_outreach`` — per-member state for Elixir's DM outreach to
+    collect missing profile info (email first).
+
+    One row per (player_tag, field). Tracks the outreach lifecycle
+    (eligible → proposed → sent → awaiting_reply → verifying → fulfilled, with
+    opted_out / failed / skipped terminals), explicit consent, attempt count,
+    cooldown (``next_eligible_at``), and the link to the leader-gate #actions card
+    (``leader_action_id``) so a member is DMed only after a human approves. No
+    member is ever contacted from this table alone; it is the durable state the
+    send/receive phases build on.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS member_outreach (
+            outreach_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_tag TEXT NOT NULL,
+            field TEXT NOT NULL DEFAULT 'email',
+            status TEXT NOT NULL DEFAULT 'eligible'
+                CHECK (status IN ('eligible','proposed','sent','awaiting_reply',
+                    'verifying','fulfilled','opted_out','failed','skipped')),
+            consent TEXT
+                CHECK (consent IS NULL OR consent IN ('pending','opted_in','opted_out')),
+            attempts INTEGER NOT NULL DEFAULT 0,
+            discord_user_id TEXT,
+            leader_action_id INTEGER,
+            pending_email TEXT,
+            last_asked_at TEXT,
+            next_eligible_at TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(player_tag, field)
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_member_outreach_status "
+        "ON member_outreach(status, next_eligible_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_member_outreach_player "
+        "ON member_outreach(player_tag)"
+    )
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -688,6 +733,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         try:
             _apply_v5(conn)
             conn.execute("PRAGMA user_version = 5")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        version = 5
+    if version < 6:
+        try:
+            _apply_v6(conn)
+            conn.execute("PRAGMA user_version = 6")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -751,7 +805,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 # Updated deliberately whenever the fresh-build schema changes.
 CURRENT_SCHEMA_FINGERPRINT = (
-    "08eac3ade2c1d70772c2389ee0ed2e453c9fdebf0c7e699ed23f703dae1615f4"
+    "1163995b4a31042509d221fa98227c035427c8a742560dc5ea8ebd2f0db401b9"
 )
 
 
