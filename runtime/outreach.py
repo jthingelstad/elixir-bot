@@ -16,10 +16,21 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
+import db
 from storage import member_outreach as mo
+
+# A member DMing us mid-flow either declines, sends an email, or sends the code.
+_OPT_OUT_RE = re.compile(
+    r"\b(no\s*thanks|no\s*thank\s*you|not\s*interested|unsubscribe|stop|"
+    r"leave\s*me|don'?t\s*ask|do\s*not\s*ask|no)\b",
+    re.IGNORECASE,
+)
+_CODE_RE = re.compile(r"\b(\d{6})\b")
+_ACTIVE_DM_STATUSES = ("awaiting_reply", "verifying")
 
 log = logging.getLogger("elixir.outreach")
 
@@ -177,4 +188,88 @@ def on_decision(
         next_eligible_at=_cooldown_from(now),
         now=now,
         conn=conn,
+    )
+
+
+# -- Phase 2: DM-receive reply state machine -------------------------------
+
+
+def classify_reply(text: str) -> tuple[str, str]:
+    """Read a member's DM reply → ('opt_out'|'email'|'code'|'other', value)."""
+    body = (text or "").strip()
+    if not body:
+        return ("other", "")
+    # Opt-out first, but never mistake an address ("no-reply@x.com") for a 'no'.
+    if "@" not in body and _OPT_OUT_RE.search(body):
+        return ("opt_out", body)
+    for token in re.split(r"\s+", body):
+        token = token.strip(".,;:<>()[]\"'!?")
+        if db.is_valid_email(token):
+            return ("email", token)
+    match = _CODE_RE.search(body)
+    if match:
+        return ("code", match.group(1))
+    return ("other", body)
+
+
+def handle_dm_reply(
+    member_tag: str,
+    text: str,
+    *,
+    start_verification: Callable[[str, str], dict],
+    check_code: Callable[[str, str], dict],
+    now: Optional[str] = None,
+    conn=None,
+) -> Optional[str]:
+    """Advance a member's outreach conversation from their DM reply. Returns the
+    text Elixir should DM back, or None to stay silent (member isn't mid-flow).
+
+    ``start_verification(tag, email) -> {ok, email?, error?}`` mails the 6-digit
+    code; ``check_code(tag, code) -> {ok, email?, error?}`` verifies it. Both are
+    injected (runtime.email_verification) so this stays unit-testable."""
+    row = mo.get_outreach(member_tag, conn=conn)
+    if not row or row.get("status") not in _ACTIVE_DM_STATUSES:
+        return None  # not mid-outreach — Elixir is not a general DM bot
+    now = _now(now)
+    kind, value = classify_reply(text)
+
+    if kind == "opt_out":
+        mo.opt_out(member_tag, reason="declined via DM", now=now, conn=conn)
+        return "No worries at all — I won't ask again. Thanks for letting me know! \U0001f44d"
+
+    if kind == "email":
+        result = start_verification(member_tag, value)
+        if result.get("ok"):
+            mo.upsert_outreach(
+                member_tag,
+                status="verifying",
+                pending_email=result.get("email") or value,
+                now=now,
+                conn=conn,
+            )
+            return (
+                f"Great — I've emailed a 6-digit code to **{result.get('email') or value}**. "
+                "Reply here with it to confirm (it expires in 15 minutes)."
+            )
+        return result.get("error") or "Hmm, that didn't work — mind trying again?"
+
+    if kind == "code" and row.get("status") == "verifying":
+        result = check_code(member_tag, value)
+        if result.get("ok"):
+            mo.upsert_outreach(member_tag, status="fulfilled", now=now, conn=conn)
+            return (
+                f"You're all set — **{result.get('email')}** is verified and on your "
+                "profile. Thank you! \U0001f389"
+            )
+        return result.get("error") or "That code didn't work — mind trying again?"
+
+    # Anything else: a gentle nudge appropriate to where they are.
+    if row.get("status") == "verifying":
+        return (
+            "Reply with the 6-digit code I emailed you, or send a different email "
+            "address to try again."
+        )
+    return (
+        "Just reply with your email and I'll send a quick code to confirm it — or "
+        'reply "no thanks" and I\'ll stop asking.'
     )

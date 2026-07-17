@@ -1470,6 +1470,20 @@ async def route_message(message):
         global_name=getattr(message.author, "global_name", None),
         display_name=message.author.display_name,
     )
+    # Direct messages: the only DM flow is profile outreach (Phase 2), and only
+    # when the feature is enabled. Everything else in a DM is ignored — Elixir is
+    # not a general DM bot. A DM channel carries a `recipient`; guild channels do
+    # not, which is the reliable signal here.
+    if (
+        getattr(message, "guild", None) is None
+        and getattr(message.channel, "recipient", None) is not None
+    ):
+        from runtime import outreach
+
+        if outreach.outreach_enabled():
+            await app._handle_outreach_dm(message)
+        return
+
     channel_config = app._get_channel_behavior(message.channel.id)
     mentioned = app._is_bot_mentioned(message)
 
