@@ -168,6 +168,34 @@ def test_v5_migration_adds_editor_verdicts_forward_from_v4(tmp_path):
         conn.close()
 
 
+def test_v6_migration_adds_member_outreach_forward_from_v5(tmp_path):
+    """A live v5 database (no member_outreach) migrates forward to v6, gaining the
+    DM-outreach state table. Idempotent, and the result matches the fingerprint."""
+    path = tmp_path / "v5.db"
+    build(str(path), None)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("DROP TABLE member_outreach")
+        conn.execute("PRAGMA user_version = 5")
+        conn.commit()
+        assert not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='member_outreach'"
+        ).fetchone()
+
+        apply_schema_migrations(conn)
+
+        assert (
+            conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        )
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(member_outreach)")}
+        assert {"outreach_id", "player_tag", "field", "status", "consent"} <= cols
+        # Re-running is a no-op and stays on the committed fingerprint.
+        apply_schema_migrations(conn)
+        assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
+    finally:
+        conn.close()
+
+
 def test_wrong_generation_database_is_refused_without_enabling_wal(tmp_path):
     path = tmp_path / "old.db"
     conn = sqlite3.connect(path)

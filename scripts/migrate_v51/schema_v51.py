@@ -670,7 +670,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 71  # +editor_verdicts (schema V5)
+EXPECTED_TABLE_COUNT = 72  # +member_outreach (schema V6)
 
 
 _DEAD_MEMBERS_FK = re.compile(
