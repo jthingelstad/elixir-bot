@@ -55,6 +55,54 @@ def test_propose_raises_cards_and_marks_proposed(tmp_path, monkeypatch):
         conn.close()
 
 
+def test_propose_uses_injected_agent_compose(tmp_path, monkeypatch):
+    conn = db.get_connection(str(tmp_path / "t.db"))
+    try:
+        _seed(conn)
+        monkeypatch.setenv("ELIXIR_DM_OUTREACH", "1")
+        seen = []
+        outreach.propose_cards(
+            raise_card=lambda t, c: seen.append(c) or {"action_id": 1},
+            compose=lambda t: (
+                f"Hey {t['member_name']}, Elixir here — mind sharing your email?"
+            ),
+            conn=conn,
+        )
+        assert seen == ["Hey Alpha, Elixir here — mind sharing your email?"]
+    finally:
+        conn.close()
+
+
+def test_propose_falls_back_to_template_when_compose_empty_or_raises(
+    tmp_path, monkeypatch
+):
+    conn = db.get_connection(str(tmp_path / "t.db"))
+    try:
+        _seed(conn)
+        monkeypatch.setenv("ELIXIR_DM_OUTREACH", "1")
+        # Empty compose -> template.
+        seen = []
+        outreach.propose_cards(
+            raise_card=lambda t, c: seen.append(c) or {"action_id": 1},
+            compose=lambda t: "",
+            conn=conn,
+        )
+        assert seen and "Alpha" in seen[0] and "no thanks" in seen[0].lower()
+        # Reset the row so the member is targetable again.
+        conn.execute("DELETE FROM member_outreach")
+        conn.commit()
+        # Raising compose -> template (never crashes the run).
+        seen2 = []
+        outreach.propose_cards(
+            raise_card=lambda t, c: seen2.append(c) or {"action_id": 2},
+            compose=lambda t: (_ for _ in ()).throw(RuntimeError("llm down")),
+            conn=conn,
+        )
+        assert seen2 and "Alpha" in seen2[0]
+    finally:
+        conn.close()
+
+
 def _card(tag, copy="Hey Alpha, share your email?"):
     return {
         "action_type": "member_outreach",

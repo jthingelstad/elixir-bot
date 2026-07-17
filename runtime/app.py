@@ -1185,9 +1185,22 @@ async def _member_outreach_propose():
         fut = asyncio.run_coroutine_threadsafe(_raise_outreach_card(target, copy), loop)
         return fut.result(timeout=60)
 
+    def _compose(target):
+        # Elixir writes the ask in its own voice from a small facts brief; the flow
+        # falls back to the deterministic template if this returns "" / raises.
+        from agent.workflows import generate_outreach_ask
+
+        name = target.get("member_name") or target.get("player_tag") or "there"
+        facts = (
+            f"Member name: {name}\n"
+            "Context: a current POAP KINGS clan member. You do not have their email "
+            "on file yet — this DM asks for it to build a fuller profile."
+        )
+        return generate_outreach_ask(facts)
+
     try:
         proposed = await asyncio.to_thread(
-            outreach.propose_cards, raise_card=_raise_sync
+            outreach.propose_cards, raise_card=_raise_sync, compose=_compose
         )
     except Exception:
         log.exception("member outreach propose failed")

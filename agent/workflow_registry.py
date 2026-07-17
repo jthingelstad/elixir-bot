@@ -267,6 +267,12 @@ _WORKFLOW_SPECS = (
     WorkflowSpec(
         "elder_standing", tools=[], tools_allowed=False, model_family="intensive"
     ),
+    # DM outreach ask (runtime.outreach via app): a short warm profile-outreach DM
+    # composed in Elixir's voice from a member facts brief. No tools; a leader
+    # approves the draft before it sends.
+    WorkflowSpec(
+        "member_outreach_ask", tools=[], tools_allowed=False, model_family="chat"
+    ),
     # Awareness cost gate (runtime.awareness.gate): a lightweight (Haiku) binary
     # post-vs-silence triage that runs before the expensive Sonnet brain on
     # soft-signal ticks. No tools, tiny prompt — it only gates, never posts.

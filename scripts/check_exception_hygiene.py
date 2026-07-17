@@ -79,7 +79,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/leader_action_feedback.py": 1,
     "runtime/leader_action_ui.py": 8,
     "runtime/onboarding.py": 3,
-    "runtime/outreach.py": 2,  # raise_card + send_dm fail-soft in the flow loop
+    "runtime/outreach.py": 3,  # raise_card + send_dm + compose fail-soft in the flow loop
     "runtime/prompt_feedback.py": 5,  # +1: member_outreach decision handling
     "runtime/startup.py": 3,
     "runtime/status.py": 3,
