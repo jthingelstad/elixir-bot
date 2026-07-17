@@ -28,7 +28,7 @@ autonomous fix + deploy (2026-07-05) for the unattended window.
 1. Run `AGENT-TEAM/scripts/preflight.sh` (git preflight).
 2. **Run the confidence report** — the single source of truth:
    ```
-   ./venv/bin/python scripts/confidence_report.py --quick --json
+   uv run python scripts/confidence_report.py --quick --json
    ```
    Exit 0 = healthy, stop after a one-line note. Non-zero = findings; the JSON
    has `incidents`, `liveness`, `tests`, `quality`.
@@ -43,8 +43,8 @@ autonomous fix + deploy (2026-07-05) for the unattended window.
    lane registration, an FK regression. For each, read the traceback / the
    named failure, then:
    - **If it's a small, obvious, test-backed fix — DO IT and DEPLOY it:**
-     (a) branch or edit; (b) `./venv/bin/pytest -q` AND
-     `./venv/bin/python scripts/confidence_report.py` — BOTH must pass;
+     (a) branch or edit; (b) `uv run pytest -q` AND
+     `uv run python scripts/confidence_report.py` — BOTH must pass;
      (c) if green, commit + push to `main` and deploy atomically:
      `launchctl kickstart -k gui/$(id -u)/com.poapkings.elixir`, then confirm
      one clean tick + `healthz` ok; (d) mark the incident resolved:

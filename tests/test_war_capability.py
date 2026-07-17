@@ -15,9 +15,7 @@ class _WarSource:
             "primary_metric": "fame",
             "boat_scored": False,
             "race_rank": 3,
-            "race_standings": [
-                {"rank": 1, "clan_name": "POAP KINGS", "fame": 0, "is_us": True}
-            ],
+            "race_standings": [{"rank": 1, "clan_name": "POAP KINGS", "fame": 0, "is_us": True}],
             "day_scored": True,
             "day_rank": 1,
             "day_standings": [

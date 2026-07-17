@@ -151,13 +151,9 @@ def cursor_note_failure(
     cursor_int = int(row["cursor_int"] or 0) if row else 0
     try:
         metadata = json.loads(row["metadata_json"] or "{}") if row else {}
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         metadata = {}
-    poison = (
-        metadata.get("poison_event")
-        if isinstance(metadata.get("poison_event"), dict)
-        else {}
-    )
+    poison = metadata.get("poison_event") if isinstance(metadata.get("poison_event"), dict) else {}
     if int(poison.get("cursor_int") or -1) != int(failed_cursor):
         poison = {"cursor_int": int(failed_cursor), "count": 0}
     poison["count"] = int(poison.get("count") or 0) + 1
@@ -185,7 +181,7 @@ def cursor_clear_failure(conn, consumer_key: str, scope_key: str = "") -> None:
         return
     try:
         metadata = json.loads(row["metadata_json"] or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         metadata = {}
     if not metadata.pop("poison_event", None):
         return

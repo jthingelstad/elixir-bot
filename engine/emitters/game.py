@@ -23,7 +23,7 @@ from storage import game_events as ge
 def _sample(obs) -> dict:
     try:
         return json.loads(obs["sample_json"] or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {}
 
 
@@ -103,8 +103,7 @@ def emit_game_from_sentinel(conn, now: str) -> int:
         cursor_set(conn, "emit:game", max_id)
         return 0
     rows = conn.execute(
-        "SELECT * FROM api_sentinel_observations WHERE observation_id > ? "
-        "ORDER BY observation_id",
+        "SELECT * FROM api_sentinel_observations WHERE observation_id > ? ORDER BY observation_id",
         (pos,),
     ).fetchall()
     written = 0

@@ -108,9 +108,7 @@ def current_clock(conn, now: datetime, *, home_clan: str | None = None):
     return anchored_clock(conn, cr_shaped, now, payload.get("season_id"))
 
 
-def _ensure_open_membership(
-    conn, player_tag: str, clan_tag: str, observed_at: str
-) -> None:
+def _ensure_open_membership(conn, player_tag: str, clan_tag: str, observed_at: str) -> None:
     # Membership is temporal. Offline replay applies old observations against a
     # database that may already contain later leave/rejoin tenures, so checking
     # only today's open row can manufacture a second tenure at the historical
@@ -174,9 +172,7 @@ def _apply_clan(conn, observation: Observation, now: datetime) -> ApplyResult:
             observation.observed_at,
         )
     for tag, roster_state in roster.items():
-        projections.refresh_player_state(
-            conn, tag, None, roster_state, observation.observed_at
-        )
+        projections.refresh_player_state(conn, tag, None, roster_state, observation.observed_at)
         projections.refresh_management_inputs(conn, tag, now=observation.observed_at)
     projections.refresh_clan_rollups(
         conn,
@@ -192,9 +188,7 @@ def _apply_clan(conn, observation: Observation, now: datetime) -> ApplyResult:
     )
 
 
-def _apply_player(
-    conn, observation: Observation, *, track_poll_freshness: bool
-) -> ApplyResult:
+def _apply_player(conn, observation: Observation, *, track_poll_freshness: bool) -> ApplyResult:
     payload = observation.payload
     if not isinstance(payload, dict):
         raise TypeError("player observation payload must be an object")
@@ -275,9 +269,7 @@ def _apply_race(
     if not isinstance(payload, dict):
         raise TypeError("current-race observation payload must be an object")
     season_id = (
-        season_id_override
-        if season_id_override is not None
-        else infer_season_id(conn, payload)
+        season_id_override if season_id_override is not None else infer_season_id(conn, payload)
     )
     clock = anchored_clock(conn, payload, now, season_id)
     emitted = 0
@@ -324,9 +316,7 @@ def apply_observation(
             season_id_override=season_id_override,
         )
     if observation.endpoint == "player":
-        return _apply_player(
-            conn, observation, track_poll_freshness=track_poll_freshness
-        )
+        return _apply_player(conn, observation, track_poll_freshness=track_poll_freshness)
     if observation.endpoint == "player_battlelog":
         return _apply_battlelog(
             conn,
@@ -383,9 +373,7 @@ def apply_tick_derivations(conn, *, clock, observed_at: str) -> ApplyResult:
     if not calendar_already_ran(conn, today):
         result.events_emitted += emit_calendar(conn, today)
         mark_calendar_ran(conn, today)
-    result.events_emitted += emit_verified_leave_events(
-        conn, configured_home_clan(), observed_at
-    )
+    result.events_emitted += emit_verified_leave_events(conn, configured_home_clan(), observed_at)
 
     if clock and clock.season_id is not None:
         try:
@@ -396,14 +384,10 @@ def apply_tick_derivations(conn, *, clock, observed_at: str) -> ApplyResult:
             rookie = (races.get("rookie_mvp") or [None])[0]
             payload = {
                 "season_id": clock.season_id,
-                "war_champ_leader": {
-                    key: champ.get(key) for key in ("tag", "name", "points")
-                }
+                "war_champ_leader": {key: champ.get(key) for key in ("tag", "name", "points")}
                 if champ
                 else None,
-                "rookie_mvp_leader": {
-                    key: rookie.get(key) for key in ("tag", "name", "points")
-                }
+                "rookie_mvp_leader": {key: rookie.get(key) for key in ("tag", "name", "points")}
                 if rookie
                 else None,
             }

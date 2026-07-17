@@ -10,9 +10,7 @@ from runtime.awareness.read import build_read
 NOW = "2026-07-01T00:00:00Z"
 
 
-def _insert_cake_event(
-    conn, *, event_type, subject_tag, dedup_key, observed_at, payload_json
-):
+def _insert_cake_event(conn, *, event_type, subject_tag, dedup_key, observed_at, payload_json):
     conn.execute(
         "INSERT INTO clan_events (dedup_key, event_type, clan_tag, subject_tag, "
         "observed_at, payload_json, created_at) VALUES (?, ?, '#J2RGCRVG', ?, ?, ?, ?)",

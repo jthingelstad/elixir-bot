@@ -1,8 +1,8 @@
 """Preview one member's Arena Dispatch (the personalized weekly report).
 
-    ./venv/bin/python scripts/preview_member_report.py --tag '#20JJJ2CCRU'
-    ./venv/bin/python scripts/preview_member_report.py --tag '#X' --html /tmp/report.html
-    ./venv/bin/python scripts/preview_member_report.py --tag '#X' --to jamie@thingelstad.com
+    uv run python scripts/preview_member_report.py --tag '#20JJJ2CCRU'
+    uv run python scripts/preview_member_report.py --tag '#X' --html /tmp/report.html
+    uv run python scripts/preview_member_report.py --tag '#X' --to jamie@thingelstad.com
 
 Builds the fact context, generates the narrative, renders the email, and either
 prints it, writes the HTML, or sends a single test email. The tuning tool for the
@@ -43,20 +43,14 @@ def main() -> int:
     ap.add_argument("--tag", required=True, help="player tag, e.g. '#20JJJ2CCRU'")
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--now", default=None, help="pin window end (ISO) for determinism")
-    ap.add_argument(
-        "--facts", action="store_true", help="print only the model facts brief"
-    )
+    ap.add_argument("--facts", action="store_true", help="print only the model facts brief")
     ap.add_argument("--html", metavar="PATH", help="write the rendered HTML email here")
-    ap.add_argument(
-        "--to", metavar="ADDR", help="send a single test email to this address"
-    )
+    ap.add_argument("--to", metavar="ADDR", help="send a single test email to this address")
     args = ap.parse_args()
 
     tag = args.tag if args.tag.startswith("#") else f"#{args.tag}"
     name = _member_name(tag)
-    ctx = member_report.build_member_report_context(
-        tag, name, days=args.days, now=args.now
-    )
+    ctx = member_report.build_member_report_context(tag, name, days=args.days, now=args.now)
 
     print(f"=== FACTS BRIEF — {ctx['name']} ({tag}) ===")
     print(member_report.facts_for_model(ctx))

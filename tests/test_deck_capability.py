@@ -161,9 +161,7 @@ def test_clan_and_card_impact_views_are_explicitly_local():
     source = _Source(rows)
 
     clan = get_deck_intelligence(view="clan", source=source)
-    impact = get_deck_intelligence(
-        view="card_impact", cards=["Hog Rider"], source=source
-    )
+    impact = get_deck_intelligence(view="card_impact", cards=["Hog Rider"], source=source)
 
     assert {item["archetype"] for item in clan["archetype_spread"]} == {
         "cycle",
@@ -361,9 +359,7 @@ def test_storage_splits_duel_decks_and_excludes_boat_defense_shape(engine_conn):
         "VALUES ('#GEM', 'Gem', ?, ?)",
         (now, now),
     )
-    duel = [
-        {"id": card["id"], "name": card["name"], "level": 15} for card in [*HOG, *GOLEM]
-    ]
+    duel = [{"id": card["id"], "name": card["name"], "level": 15} for card in [*HOG, *GOLEM]]
     engine_conn.execute(
         "INSERT INTO battle_events "
         "(dedup_key, player_tag, battle_time, observed_at, outcome, mode_group, "

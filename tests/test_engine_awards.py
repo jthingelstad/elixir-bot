@@ -105,9 +105,7 @@ def test_grant_season_awards_full_slate():
         assert podium[0]["metric_value"] == 6000  # 3000 × 2 sections
 
         fp = grants["free_pass"]
-        assert (
-            len(fp) == 1 and fp[0]["tag"] == "#B" and fp[0]["rotation_applied"] is True
-        )
+        assert len(fp) == 1 and fp[0]["tag"] == "#B" and fp[0]["rotation_applied"] is True
         fp_rows = conn.execute(
             "SELECT COUNT(*) FROM awards WHERE award_type='free_pass' AND season_id=?",
             (SEASON,),
@@ -119,9 +117,7 @@ def test_grant_season_awards_full_slate():
         assert grants["iron_king_skipped"] == "insufficient attendance data"
 
         assert [e["tag"] for e in grants["donation_champs"]] == ["#C", "#A", "#B"]
-        assert [e["tag"] for e in grants["rookie_mvps"]] == [
-            "#R"
-        ]  # first-war-season only
+        assert [e["tag"] for e in grants["rookie_mvps"]] == ["#R"]  # first-war-season only
         assert grants["war_participants"] == 4  # A, B, C, R (fame > 0)
 
         # ledger keys claimed per recognition.md §5
@@ -144,9 +140,7 @@ def test_season_close_award_failure_rolls_back_as_one_transition(
     from engine.emitters.war import close_season
 
     _seed_season(engine_conn)
-    engine_conn.execute(
-        "UPDATE war_seasons SET ended_at = NULL WHERE season_id = ?", (SEASON,)
-    )
+    engine_conn.execute("UPDATE war_seasons SET ended_at = NULL WHERE season_id = ?", (SEASON,))
     engine_conn.commit()
 
     def fail_awards(*args, **kwargs):
@@ -175,13 +169,9 @@ def test_season_close_invariant_catches_silent_award_omission(
     from engine.emitters.war import close_season
 
     _seed_season(engine_conn)
-    engine_conn.execute(
-        "UPDATE war_seasons SET ended_at = NULL WHERE season_id = ?", (SEASON,)
-    )
+    engine_conn.execute("UPDATE war_seasons SET ended_at = NULL WHERE season_id = ?", (SEASON,))
     engine_conn.commit()
-    monkeypatch.setattr(
-        engine_awards, "grant_season_awards", lambda *args, **kwargs: {}
-    )
+    monkeypatch.setattr(engine_awards, "grant_season_awards", lambda *args, **kwargs: {})
 
     with pytest.raises(ChangeSetInvariantError, match="awards missing"):
         close_season(engine_conn, SEASON, {}, AT)
@@ -198,9 +188,7 @@ def test_replayed_season_close_preserves_recorded_outcome(engine_conn):
     from engine.emitters.war import close_season
 
     _seed_season(engine_conn)
-    engine_conn.execute(
-        "UPDATE war_seasons SET ended_at = NULL WHERE season_id = ?", (SEASON,)
-    )
+    engine_conn.execute("UPDATE war_seasons SET ended_at = NULL WHERE season_id = ?", (SEASON,))
     close_season(engine_conn, SEASON, {}, AT)
     recorded = engine_conn.execute(
         "SELECT player_tag, rank FROM awards "
@@ -321,9 +309,10 @@ def test_war_season_history_is_the_free_pass_lineage(engine_conn):
 
     # rolling window caps the lineage
     assert get_war_season_history(limit=2, conn=c)["seasons_shown"] == 2
-    assert [
-        s["season_id"] for s in get_war_season_history(limit=2, conn=c)["seasons"]
-    ] == [133, 132]
+    assert [s["season_id"] for s in get_war_season_history(limit=2, conn=c)["seasons"]] == [
+        133,
+        132,
+    ]
 
 
 def test_war_champ_tie_breaks_on_cards_donated(engine_conn):
@@ -334,9 +323,7 @@ def test_war_champ_tie_breaks_on_cards_donated(engine_conn):
         "INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
         "VALUES ('#J2RGCRVG','POAP KINGS','2026-02-04','2026-07-06',1)"
     )
-    c.execute(
-        "INSERT INTO war_seasons (season_id, started_at) VALUES (150, '2026-06-10')"
-    )
+    c.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (150, '2026-06-10')")
     c.execute(
         "INSERT INTO war_weeks (season_id, section_index, created_date, finish_time) "
         "VALUES (150, 0, '2026-06-11', '2026-06-18')"
@@ -367,10 +354,7 @@ def test_war_champ_tie_breaks_on_cards_donated(engine_conn):
     assert (
         champ[0]["rank"] == champ[1]["rank"] and champ[0]["tied"] and champ[1]["tied"]
     )  # still a points tie
-    assert (
-        db.get_award_races(season_id=150, conn=c)["war_champ_leader"]["name"]
-        == "HiDonor"
-    )
+    assert db.get_award_races(season_id=150, conn=c)["war_champ_leader"]["name"] == "HiDonor"
 
     # Season close consumes the exact same outcome: no second implementation
     # can silently choose the low donor after the live race showed HiDonor.
@@ -400,9 +384,7 @@ def test_award_outcome_excludes_departed_members_everywhere(engine_conn):
         "(clan_tag, name, first_seen_at, last_seen_at, is_home) "
         "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-01-01', '2026-07-06', 1)"
     )
-    c.execute(
-        "INSERT INTO war_seasons (season_id, started_at) VALUES (151, '2026-07-01')"
-    )
+    c.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (151, '2026-07-01')")
     c.execute(
         "INSERT INTO war_weeks (season_id, section_index, created_date) VALUES (151, 0, '2026-07-01')"
     )
@@ -430,9 +412,7 @@ def test_award_outcome_excludes_departed_members_everywhere(engine_conn):
     preview = compute_season_award_outcome(c, 151)
     assert [entry["tag"] for entry in preview["standings"]] == ["#ACTIVE"]
     close_season(c, 151, {}, "2026-07-06T10:00:00Z")
-    official = c.execute(
-        "SELECT war_champ_tag FROM war_seasons WHERE season_id=151"
-    ).fetchone()
+    official = c.execute("SELECT war_champ_tag FROM war_seasons WHERE season_id=151").fetchone()
     assert official["war_champ_tag"] == "#ACTIVE"
 
 
@@ -447,12 +427,8 @@ def test_award_preview_and_grant_share_rookie_and_donation_outcomes(engine_conn)
         "(clan_tag, name, first_seen_at, last_seen_at, is_home) "
         "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-01-01', '2026-07-06', 1)"
     )
-    c.execute(
-        "INSERT INTO war_seasons (season_id, started_at) VALUES (160, '2026-06-01')"
-    )
-    c.execute(
-        "INSERT INTO war_seasons (season_id, started_at) VALUES (161, '2026-07-01')"
-    )
+    c.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (160, '2026-06-01')")
+    c.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (161, '2026-07-01')")
     c.execute(
         "INSERT INTO war_weeks (season_id, section_index, created_date, finish_time) "
         "VALUES (161, 0, '2026-07-01', '2026-07-08')"
@@ -518,9 +494,7 @@ def test_award_leaderboard_accepts_rank_and_limit():
         assert len(top) <= 2
         # the tool path no longer raises
         out = _execute_get_awards({"mode": "leaderboard", "award_type": "war_champ"})
-        assert (
-            isinstance(out, dict) and out["mode"] == "leaderboard" and out["count"] >= 1
-        )
+        assert isinstance(out, dict) and out["mode"] == "leaderboard" and out["count"] >= 1
     finally:
         conn.close()
 
@@ -573,8 +547,7 @@ def test_refresh_player_state_enforces_profile_and_roster_field_ownership():
         projections.refresh_player_state(conn, "#X", {"expLevel": 44}, None, AT)
         projections.refresh_player_state(conn, "#X", None, {"trophies": 5150}, AT)
         row = conn.execute(
-            "SELECT exp_level, clan_rank FROM player_current_state "
-            "WHERE player_tag='#X'"
+            "SELECT exp_level, clan_rank FROM player_current_state WHERE player_tag='#X'"
         ).fetchone()
         assert (row["exp_level"], row["clan_rank"]) == (44, 7)
     finally:
@@ -599,10 +572,7 @@ def test_award_races_war_champ_carries_battle_days():
             (SEASON, AT),
         )
         conn.commit()
-        champ = {
-            e["tag"]: e
-            for e in db.get_award_races(season_id=SEASON, conn=conn)["war_champ"]
-        }
+        champ = {e["tag"]: e for e in db.get_award_races(season_id=SEASON, conn=conn)["war_champ"]}
         assert champ["#A"]["battle_days"] == 4
         assert champ["#B"]["battle_days"] == 5  # extra day counted despite partial
         assert champ["#C"]["battle_days"] == 4

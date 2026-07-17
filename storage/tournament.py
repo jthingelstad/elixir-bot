@@ -59,9 +59,7 @@ _GAME_MODE_LABELS = {
 }
 
 
-def game_mode_label(
-    game_mode_id: Optional[int], api_name: Optional[str] = None
-) -> Optional[str]:
+def game_mode_label(game_mode_id: Optional[int], api_name: Optional[str] = None) -> Optional[str]:
     """Translate a CR ``gameMode.id`` to the in-game player-facing name.
 
     Falls back to the raw API ``name`` (an internal code like
@@ -325,9 +323,7 @@ def poll_tournament(
     ends_time = _compute_ends_time(started_time, duration_seconds)
     timing_fields = {
         "duration_seconds": duration_seconds,
-        "duration_minutes": (duration_seconds // 60)
-        if isinstance(duration_seconds, int)
-        else None,
+        "duration_minutes": (duration_seconds // 60) if isinstance(duration_seconds, int) else None,
         "started_time": started_time,
         "ends_time": ends_time,
     }
@@ -358,9 +354,7 @@ def poll_tournament(
         if new_status == "in_progress":
             max_capacity = api_data.get("maxCapacity")
             spots_remaining = (
-                max(0, max_capacity - participant_count)
-                if isinstance(max_capacity, int)
-                else None
+                max(0, max_capacity - participant_count) if isinstance(max_capacity, int) else None
             )
             live_signals.append(
                 {
@@ -376,9 +370,7 @@ def poll_tournament(
                         (api_data.get("gameMode") or {}).get("id"),
                         (api_data.get("gameMode") or {}).get("name"),
                     ),
-                    "deck_selection": deck_selection_label(
-                        api_data.get("deckSelection")
-                    ),
+                    "deck_selection": deck_selection_label(api_data.get("deckSelection")),
                     **timing_fields,
                 }
             )
@@ -409,11 +401,7 @@ def poll_tournament(
         new_leader = sorted(members_list, key=lambda m: m.get("rank") or 999)[0]
         new_leader_tag = _canon_tag(new_leader.get("tag") or "")
         new_leader_score = new_leader.get("score") or 0
-        if (
-            prev_leader
-            and new_leader_tag != prev_leader["player_tag"]
-            and new_leader_score > 0
-        ):
+        if prev_leader and new_leader_tag != prev_leader["player_tag"] and new_leader_score > 0:
             live_signals.append(
                 {
                     "type": "tournament_lead_change",
@@ -442,9 +430,7 @@ def _card_names_from_deck(cards: list[dict] | None) -> list[str]:
     return names
 
 
-def _enrich_deck_from_catalog(
-    conn, card_names: list[str]
-) -> tuple[list[dict], Optional[float]]:
+def _enrich_deck_from_catalog(conn, card_names: list[str]) -> tuple[list[dict], Optional[float]]:
     """Join card names against card_catalog to get elixir cost, rarity, and
     type per card. Returns (enriched_list, avg_elixir_or_None).
 
@@ -761,9 +747,7 @@ def get_tournament_by_tag(
 ) -> Optional[dict]:
     """Return a tournament row by tag or None."""
     tag = _canon_tag(tournament_tag)
-    row = conn.execute(
-        "SELECT * FROM tournaments WHERE tournament_tag = ?", (tag,)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM tournaments WHERE tournament_tag = ?", (tag,)).fetchone()
     return dict(row) if row else None
 
 
@@ -800,9 +784,7 @@ def get_recent_tournaments_for_recap(
     days: int = 7, conn: Optional[sqlite3.Connection] = None
 ) -> list[dict]:
     """Return recent ended tournaments with summary data for weekly recap integration."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
-        "%Y-%m-%dT%H:%M:%S"
-    )
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
     rows = conn.execute(
         """SELECT t.*,
             (SELECT COUNT(*) FROM tournament_participants WHERE tournament_id = t.tournament_id) AS participant_count
@@ -911,9 +893,7 @@ def get_tournament_card_stats(
 
     # Build sorted card list
     card_list = []
-    for cname, stats in sorted(
-        card_stats.items(), key=lambda x: x[1]["picks"], reverse=True
-    ):
+    for cname, stats in sorted(card_stats.items(), key=lambda x: x[1]["picks"], reverse=True):
         win_rate = stats["wins"] / stats["picks"] if stats["picks"] > 0 else 0
         card_list.append(
             {
@@ -1001,11 +981,7 @@ def build_tournament_recap_context(
     # --- Final standings ---
     standings_lines = []
     for p in participants:
-        clan_member = (
-            " (clan)"
-            if _is_current_clan_member(conn, p.get("player_tag") or "")
-            else ""
-        )
+        clan_member = " (clan)" if _is_current_clan_member(conn, p.get("player_tag") or "") else ""
         enrichment = _player_enrichment(conn, p.get("player_tag") or "")
         extras = []
         if enrichment.get("trophies") is not None:
@@ -1063,14 +1039,10 @@ def build_tournament_recap_context(
 
         # Extract card names for battle summary
         p1_cards = [
-            c.get("name")
-            for c in json.loads(b["player1_deck_json"] or "[]")
-            if c.get("name")
+            c.get("name") for c in json.loads(b["player1_deck_json"] or "[]") if c.get("name")
         ]
         p2_cards = [
-            c.get("name")
-            for c in json.loads(b["player2_deck_json"] or "[]")
-            if c.get("name")
+            c.get("name") for c in json.loads(b["player2_deck_json"] or "[]") if c.get("name")
         ]
         p1_enriched, p1_avg = _enrich_deck_from_catalog(conn, p1_cards)
         p2_enriched, p2_avg = _enrich_deck_from_catalog(conn, p2_cards)
@@ -1116,9 +1088,7 @@ def build_tournament_recap_context(
                 p1_avg = f" avg {b['p1_avg']}e" if b.get("p1_avg") is not None else ""
                 p2_avg = f" avg {b['p2_avg']}e" if b.get("p2_avg") is not None else ""
                 shared_note = (
-                    f" | shared: {', '.join(b['shared_cards'])}"
-                    if b["shared_cards"]
-                    else ""
+                    f" | shared: {', '.join(b['shared_cards'])}" if b["shared_cards"] else ""
                 )
                 h2h_lines.append(
                     f"  {b['p1_crowns']}-{b['p2_crowns']} ({winner} wins){shared_note}\n"

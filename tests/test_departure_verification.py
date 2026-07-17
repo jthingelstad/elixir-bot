@@ -76,9 +76,7 @@ def test_card_raised_for_ambiguous_departure(engine_conn, _isolate_default_sqlit
     assert raise_departure_verification_cards(now=NOW, conn=engine_conn) == []
 
 
-def test_confirmed_kick_settles_silently_no_card(
-    engine_conn, _isolate_default_sqlite_db
-):
+def test_confirmed_kick_settles_silently_no_card(engine_conn, _isolate_default_sqlite_db):
     _seed_departure(engine_conn)
     _seed_done_kick(engine_conn)  # a done kick card already explains the departure
     raised = raise_departure_verification_cards(now=NOW, conn=engine_conn)
@@ -122,9 +120,7 @@ def test_classify_kick_sets_verified_kick(engine_conn, _isolate_default_sqlite_d
     assert _leave_source(engine_conn) == "leader_verified_kick"
 
 
-def test_departure_was_kick_prefers_verified_source(
-    engine_conn, _isolate_default_sqlite_db
-):
+def test_departure_was_kick_prefers_verified_source(engine_conn, _isolate_default_sqlite_db):
     # A done kick card would infer "kick", but a leader-verified LEAVE overrides it.
     _seed_departure(engine_conn, leave_source="leader_verified_leave")
     _seed_done_kick(engine_conn)
@@ -135,9 +131,7 @@ def test_departure_was_kick_prefers_verified_source(
     assert _departure_was_kick(engine_conn, "#A", "2026-07-12T11:00:00Z") is True
 
 
-def test_verified_leave_emits_event_kick_does_not(
-    engine_conn, _isolate_default_sqlite_db
-):
+def test_verified_leave_emits_event_kick_does_not(engine_conn, _isolate_default_sqlite_db):
     _seed_departure(engine_conn, leave_source="leader_verified_leave")
     n = emit_verified_leave_events(engine_conn, "#J2RGCRVG", NOW)
     assert n == 1
@@ -147,16 +141,11 @@ def test_verified_leave_emits_event_kick_does_not(
     ).fetchone()
     assert ev is not None
     # a confirmed kick emits nothing
-    _seed_departure(
-        engine_conn, tag="#B", name="Bob", leave_source="leader_verified_kick"
-    )
+    _seed_departure(engine_conn, tag="#B", name="Bob", leave_source="leader_verified_kick")
     engine_conn.commit()
     emit_verified_leave_events(engine_conn, "#J2RGCRVG", NOW)
     assert (
-        engine_conn.execute(
-            "SELECT 1 FROM clan_events WHERE subject_tag='#B'"
-        ).fetchone()
-        is None
+        engine_conn.execute("SELECT 1 FROM clan_events WHERE subject_tag='#B'").fetchone() is None
     )
 
 
@@ -202,9 +191,7 @@ def test_verified_leave_carries_leader_context(engine_conn, _isolate_default_sql
     assert json.loads(row[0])["leader_context"] == "Alt account of Bob"
 
 
-def test_verified_leave_without_note_omits_leader_context(
-    engine_conn, _isolate_default_sqlite_db
-):
+def test_verified_leave_without_note_omits_leader_context(engine_conn, _isolate_default_sqlite_db):
     """No leader note → no leader_context key at all (not an empty string)."""
     import json
 

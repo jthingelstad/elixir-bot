@@ -133,9 +133,7 @@ def clear_stale_running_jobs() -> list[str]:
     now = _utcnow()
     cleared: list[str] = []
     with _LOCK:
-        active_current_jobs = {
-            name for name, state in _JOB_STATUS.items() if state.get("running")
-        }
+        active_current_jobs = {name for name, state in _JOB_STATUS.items() if state.get("running")}
 
     for name, state in statuses.items():
         if not state.get("running") or name in active_current_jobs:

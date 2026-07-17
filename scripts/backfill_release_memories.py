@@ -1,7 +1,7 @@
 """Backfill durable clan memories for every past Elixir release in RELEASES.md.
 
-    ./venv/bin/python scripts/backfill_release_memories.py --dry-run
-    ./venv/bin/python scripts/backfill_release_memories.py --apply
+    uv run python scripts/backfill_release_memories.py --dry-run
+    uv run python scripts/backfill_release_memories.py --apply
 
 Idempotent: each memory is keyed by the release tag (name-slug for the current
 scheme, the version for legacy vX.Y entries), so re-running upserts rather than
@@ -45,12 +45,8 @@ def parse_releases(text: str) -> list[dict]:
             name = m.group(3).strip()
             date = m.group(4)
             tag = rn.slugify_release(name)
-        body = re.sub(
-            r"^\s*\*\*Date:\*\*[^\n]*\n+", "", section.lstrip(), count=1
-        ).strip()
-        out.append(
-            {"name": name, "date": date, "tag": tag, "body": body, "version": version}
-        )
+        body = re.sub(r"^\s*\*\*Date:\*\*[^\n]*\n+", "", section.lstrip(), count=1).strip()
+        out.append({"name": name, "date": date, "tag": tag, "body": body, "version": version})
     return out
 
 
@@ -59,9 +55,7 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     g = parser.add_mutually_exclusive_group()
-    g.add_argument(
-        "--dry-run", action="store_true", help="list what would be recorded (default)"
-    )
+    g.add_argument("--dry-run", action="store_true", help="list what would be recorded (default)")
     g.add_argument("--apply", action="store_true", help="write the memories")
     args = parser.parse_args()
     apply = args.apply and not args.dry_run
@@ -71,9 +65,7 @@ def main() -> int:
     for r in releases:
         label = f"{r['name']} ({r['date']})" if r["date"] else r["name"]
         if not apply:
-            print(
-                f"  would record: {label:<42} tag={r['tag']:<24} body={len(r['body'])} chars"
-            )
+            print(f"  would record: {label:<42} tag={r['tag']:<24} body={len(r['body'])} chars")
             continue
         meta = {"legacy_version": r["version"]} if r["version"] else {}
         url = (

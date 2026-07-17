@@ -86,9 +86,7 @@ def _noncanonical_war_timestamp_count(conn) -> int:
 
 def audit(conn) -> dict[str, int]:
     return {
-        "foreign_key_violations": len(
-            conn.execute("PRAGMA foreign_key_check").fetchall()
-        ),
+        "foreign_key_violations": len(conn.execute("PRAGMA foreign_key_check").fetchall()),
         "membership_overlaps": _membership_overlap_count(conn),
         "profile_best_projection_mismatches": _count(
             conn,
@@ -143,7 +141,7 @@ def repair_current_player_projection(conn) -> int:
     for row in rows:
         try:
             payload = json.loads(row["payload_json"] or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         best = payload.get("best_trophies")
         exp = payload.get("exp_level")
@@ -180,7 +178,7 @@ def _raw_profile_history(conn) -> dict[str, list[tuple[str, int | None, int | No
             continue
         try:
             payload = json.loads(row["payload_json"] or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         best = payload.get("bestTrophies")
         exp = payload.get("expLevel")

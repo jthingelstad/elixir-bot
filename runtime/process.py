@@ -40,7 +40,7 @@ def _read_pid_file(pid_file: str | None = None) -> int | None:
         pid = payload
     try:
         return int(pid)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -73,7 +73,7 @@ def _process_command(pid: int) -> str:
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except (subprocess.SubprocessError, OSError):
+    except subprocess.SubprocessError, OSError:
         return ""
 
 

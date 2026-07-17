@@ -44,9 +44,7 @@ def update_heat(conn, player_tag, *, new_battles=False, roster_delta=False, now=
     """Heat rules (runtime.md §4): battles → 3; roster delta → max(heat, 2)."""
     tag = canon_tag(player_tag)
     now = now or utcnow()
-    row = conn.execute(
-        "SELECT heat FROM poll_state WHERE player_tag = ?", (tag,)
-    ).fetchone()
+    row = conn.execute("SELECT heat FROM poll_state WHERE player_tag = ?", (tag,)).fetchone()
     heat = int(row["heat"]) if row else 0
     if new_battles:
         heat = 3
@@ -160,9 +158,7 @@ def plan(
         temp = _temp(int(r["heat"]))
         for endpoint, cad in CADENCE.items():
             last = _parse(r[_LAST_COL[endpoint]])
-            overdue_min = (
-                (now_dt - last).total_seconds() / 60.0 if last else float("inf")
-            )
+            overdue_min = (now_dt - last).total_seconds() / 60.0 if last else float("inf")
             due = overdue_min >= cad[temp]
             starved = overdue_min >= cad["floor"]
             if due or starved:

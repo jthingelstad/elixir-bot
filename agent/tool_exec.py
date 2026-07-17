@@ -65,18 +65,12 @@ def _enrich_member_profile(result):
 
     enriched = dict(result)
     role = enriched.get("role")
-    member_name = (
-        enriched.get("member_name") or enriched.get("current_name") or "This member"
-    )
+    member_name = enriched.get("member_name") or enriched.get("current_name") or "This member"
     if role:
         if role == "leader":
-            enriched["current_role_summary"] = (
-                f"{member_name} is currently the clan leader."
-            )
+            enriched["current_role_summary"] = f"{member_name} is currently the clan leader."
         elif role == "coLeader":
-            enriched["current_role_summary"] = (
-                f"{member_name} is currently a co-leader."
-            )
+            enriched["current_role_summary"] = f"{member_name} is currently a co-leader."
         elif role == "elder":
             enriched["current_role_summary"] = f"{member_name} is currently an Elder."
         else:
@@ -110,7 +104,7 @@ def _enrich_member_profile(result):
     def _parse_json_object(field):
         try:
             value = json.loads(enriched.get(field) or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return value if isinstance(value, dict) and value else None
 
@@ -159,9 +153,7 @@ def _enrich_member_profile(result):
 
     progress = _parse_json_object("progress_json")
     if progress:
-        enriched["side_mode_progress_keys"] = sorted(
-            str(key) for key in progress.keys()
-        )
+        enriched["side_mode_progress_keys"] = sorted(str(key) for key in progress.keys())
 
     enriched.update(_resource_constraints_note())
     return enriched
@@ -406,9 +398,7 @@ def _execute_get_member(arguments, workflow=None):
         if isinstance(current_deck, dict):
             current_deck = dict(current_deck)
             current_deck["cards"] = _slim_card_list(current_deck.get("cards"))
-            current_deck["support_cards"] = _slim_card_list(
-                current_deck.get("support_cards")
-            )
+            current_deck["support_cards"] = _slim_card_list(current_deck.get("support_cards"))
         result["current_deck"] = current_deck
         result["signature_cards"] = loadout.get("signature_cards")
 
@@ -484,9 +474,7 @@ def _execute_get_deck_intelligence(arguments, workflow=None):
         "clanops",
         "channel_update_leadership",
     }:
-        return {
-            "error": "The 'card_impact' analysis is only available in leadership channels."
-        }
+        return {"error": "The 'card_impact' analysis is only available in leadership channels."}
     if view == "member" or (view == "card_impact" and member_tag):
         if not member_tag:
             return {"error": "member_tag_required", "view": view}
@@ -649,15 +637,9 @@ def _execute_get_river_race(arguments):
                 "participants_with_decks_left_count": remaining.get("total"),
                 "remaining_deck_participants": remaining,
                 "top_points_total": engagement.get("top_points_total"),
-                "used_all_4": [
-                    _legacy_member(m) for m in engagement.get("used_all_4") or []
-                ],
-                "used_some": [
-                    _legacy_member(m) for m in engagement.get("used_some") or []
-                ],
-                "used_none": [
-                    _legacy_member(m) for m in engagement.get("used_none") or []
-                ],
+                "used_all_4": [_legacy_member(m) for m in engagement.get("used_all_4") or []],
+                "used_some": [_legacy_member(m) for m in engagement.get("used_some") or []],
+                "used_none": [_legacy_member(m) for m in engagement.get("used_none") or []],
             }
         )
         return data
@@ -679,12 +661,7 @@ def _execute_get_war_season(arguments):
         source=db,
     )["data"]
     if aspect == "standings" and isinstance(result, dict):
-        members = (
-            result.get("members")
-            or result.get("standings")
-            or result.get("results")
-            or []
-        )
+        members = result.get("members") or result.get("standings") or result.get("results") or []
         _enrich_war_player_types(members)
     return result
 
@@ -807,9 +784,7 @@ def _execute_get_clan_health(arguments, workflow=None):
     sensitive_aspects = {"at_risk", "promotion_candidates"}
     allowed_workflows = {"clanops", "channel_update_leadership"}
     if aspect in sensitive_aspects and workflow not in allowed_workflows:
-        return {
-            "error": f"The '{aspect}' analysis is only available in leadership channels."
-        }
+        return {"error": f"The '{aspect}' analysis is only available in leadership channels."}
 
     if aspect == "at_risk":
         return management_capability.get_management_decisions(
@@ -924,7 +899,7 @@ _ELIXIR_STATE_WINDOWS = (7, 28, 56, 90)
 def _state_limit(arguments, *, default: int = 25, maximum: int = 100) -> int:
     try:
         value = int(arguments.get("limit", default))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
     if value < 1:
         return default
@@ -939,7 +914,7 @@ def _state_windows(arguments) -> tuple[int, ...]:
     for item in raw:
         try:
             days = int(item)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if 1 <= days <= 90:
             windows.append(days)
@@ -949,7 +924,7 @@ def _state_windows(arguments) -> tuple[int, ...]:
 def _state_days(arguments) -> int:
     try:
         days = int(arguments.get("days", 7))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 7
     return min(max(days, 1), 90)
 
@@ -1043,9 +1018,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
 
     if aspect == "war_season":
         return {
-            "war_season": war_capability.get_war_season_view(
-                view="snapshot", source=db
-            )["data"]
+            "war_season": war_capability.get_war_season_view(view="snapshot", source=db)["data"]
         }
 
     if aspect == "awareness_activity":
@@ -1079,9 +1052,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
             ),
             "recent_events": event_facades.list_recent_events(days=7, limit=10),
             "game_modes": game_mode_capability.get_clan_game_mode_windows(windows=(7,)),
-            "war_season": war_capability.get_war_season_view(
-                view="snapshot", source=db
-            )["data"],
+            "war_season": war_capability.get_war_season_view(view="snapshot", source=db)["data"],
             "decision_cases": db.decision_case_snapshot(
                 open_limit=case_limit, due_limit=case_limit, dedupe=True
             ),
@@ -1157,11 +1128,7 @@ def _execute_get_clan_intel_report(arguments):
 
     target_tag_hash = f"#{clan_tag}"
     target_entry = next(
-        (
-            c
-            for c in war_clans
-            if (c.get("tag") or "").upper() == target_tag_hash.upper()
-        ),
+        (c for c in war_clans if (c.get("tag") or "").upper() == target_tag_hash.upper()),
         None,
     )
     if target_entry is None:
@@ -1515,8 +1482,7 @@ def _execute_lookup_reference(arguments, workflow=None):
             "target_tag": action.get("target_player_tag"),
             "objective": action.get("objective"),
             "rationale": action.get("rationale"),
-            "clan_chat_copy": action.get("copy_current_text")
-            or action.get("copy_original_text"),
+            "clan_chat_copy": action.get("copy_current_text") or action.get("copy_original_text"),
             "proposed_at": action.get("proposed_at"),
             "decided_at": action.get("decided_at"),
             "decided_by_discord_user_id": action.get("decided_by_discord_user_id"),

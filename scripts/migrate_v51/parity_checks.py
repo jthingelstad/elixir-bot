@@ -10,8 +10,8 @@ Two modes:
               per check. Usable from Phase 3 onward.
 
 Usage:
-    ./venv/bin/python scripts/migrate_v51/parity_checks.py baseline --old elixir-v5.db
-    ./venv/bin/python scripts/migrate_v51/parity_checks.py verify \
+    uv run python scripts/migrate_v51/parity_checks.py baseline --old elixir-v5.db
+    uv run python scripts/migrate_v51/parity_checks.py verify \
         --old elixir-v5-archive-2026H2.db --new elixir-v51.db
 
 Checks (migration.md Phase 6):
@@ -121,9 +121,7 @@ def old_war_history(old):
 
 
 def _sample_tags(old):
-    tags = [
-        r[0] for r in _rows(old, "SELECT player_tag FROM members ORDER BY player_tag")
-    ]
+    tags = [r[0] for r in _rows(old, "SELECT player_tag FROM members ORDER BY player_tag")]
     rng = random.Random(ROLLUP_SAMPLE_SEED)
     return sorted(rng.sample(tags, min(ROLLUP_SAMPLE_SIZE, len(tags))))
 
@@ -284,9 +282,7 @@ def run_baseline(old_path: str) -> int:
             result = fn(old)
             summary = _summarize(result)
             print(f"[baseline] {name:14s} OK   {summary}")
-        except (
-            Exception
-        ) as exc:  # a query that can't run on the old schema is a Phase-0 failure
+        except Exception as exc:  # a query that can't run on the old schema is a Phase-0 failure
             failures += 1
             print(f"[baseline] {name:14s} FAIL {exc}")
     if failures:
@@ -335,18 +331,14 @@ def run_verify(old_path: str, new_path: str) -> int:
         print(f"[verify] calendar_seed  FAIL missing={seed['missing']}")
     else:
         print(f"[verify] calendar_seed  PASS keys={len(expected_calendar)}")
-    print(
-        f"\n{'ALL PARITY CHECKS PASS' if not failures else f'{failures} check(s) FAILED'}"
-    )
+    print(f"\n{'ALL PARITY CHECKS PASS' if not failures else f'{failures} check(s) FAILED'}")
     return 1 if failures else 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
-    base = sub.add_parser(
-        "baseline", help="prove the old-side queries on the current DB"
-    )
+    base = sub.add_parser("baseline", help="prove the old-side queries on the current DB")
     base.add_argument("--old", default="elixir-v5.db")
     ver = sub.add_parser("verify", help="compare archive vs new DB")
     ver.add_argument("--old", required=True)

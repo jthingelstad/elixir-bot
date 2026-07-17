@@ -141,9 +141,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "max_instances": 1,
             "coalesce": True,
         },
-        delivery_targets=(
-            "Discord: #actions in-game-relay nudge card (quiet periods only)",
-        ),
+        delivery_targets=("Discord: #actions in-game-relay nudge card (quiet periods only)",),
         activity_role="communicator",
     ),
     ActivityDefinition(
@@ -162,9 +160,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "max_instances": 1,
             "coalesce": True,
         },
-        delivery_targets=(
-            "Discord: #actions Profile Outreach card (leader-gated + flag-gated)",
-        ),
+        delivery_targets=("Discord: #actions Profile Outreach card (leader-gated + flag-gated)",),
         activity_role="communicator",
     ),
     ActivityDefinition(
@@ -418,9 +414,7 @@ def _resolve_runtime_value(value: Any, runtime_module: Any) -> Any:
     return value
 
 
-def _resolve_mapping(
-    values: dict[str, Any] | None, runtime_module: Any
-) -> dict[str, Any]:
+def _resolve_mapping(values: dict[str, Any] | None, runtime_module: Any) -> dict[str, Any]:
     resolved: dict[str, Any] = {}
     for key, value in (values or {}).items():
         resolved[key] = _resolve_runtime_value(value, runtime_module)
@@ -509,11 +503,7 @@ def schedule_specs_from_registry(runtime_module: Any) -> list[dict[str, Any]]:
 
 
 def manual_activity_commands() -> list[str]:
-    return [
-        activity.activity_key
-        for activity in _ACTIVITIES
-        if activity.manual_trigger_allowed
-    ]
+    return [activity.activity_key for activity in _ACTIVITIES if activity.manual_trigger_allowed]
 
 
 def manual_activity_choices() -> list[tuple[str, str]]:

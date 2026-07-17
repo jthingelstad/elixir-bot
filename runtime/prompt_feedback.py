@@ -86,15 +86,11 @@ async def _acknowledge_feedback(payload):
     except Exception:
         import runtime.app as app
 
-        app.log.warning(
-            "Failed to add ask-elixir feedback acknowledgement reaction", exc_info=True
-        )
+        app.log.warning("Failed to add ask-elixir feedback acknowledgement reaction", exc_info=True)
     return message
 
 
-async def _post_retry_invitation(
-    payload, *, prompt_feedback_id: int | None, message=None
-) -> None:
+async def _post_retry_invitation(payload, *, prompt_feedback_id: int | None, message=None) -> None:
     if message is None:
         _channel, message = await _fetch_channel_and_message(payload)
     if message is None:
@@ -125,12 +121,7 @@ async def _post_retry_invitation(
 async def handle_raw_reaction_add(payload) -> None:
     import runtime.app as app
 
-    if (
-        not payload
-        or not payload.channel_id
-        or not payload.message_id
-        or not payload.user_id
-    ):
+    if not payload or not payload.channel_id or not payload.message_id or not payload.user_id:
         return
     if app.bot.user and int(payload.user_id) == int(app.bot.user.id):
         return
@@ -170,9 +161,7 @@ async def handle_raw_reaction_add(payload) -> None:
     if not feedback_value:
         return
 
-    channel_config, assistant = await asyncio.to_thread(
-        _assistant_message_lookup, payload
-    )
+    channel_config, assistant = await asyncio.to_thread(_assistant_message_lookup, payload)
     if not channel_config or not assistant:
         return
     if assistant.get("author_type") != "assistant":
@@ -220,12 +209,7 @@ async def handle_raw_reaction_add(payload) -> None:
 async def handle_raw_reaction_remove(payload) -> None:
     import runtime.app as app
 
-    if (
-        not payload
-        or not payload.channel_id
-        or not payload.message_id
-        or not payload.user_id
-    ):
+    if not payload or not payload.channel_id or not payload.message_id or not payload.user_id:
         return
     if app.bot.user and int(payload.user_id) == int(app.bot.user.id):
         return
@@ -254,9 +238,7 @@ async def handle_raw_reaction_remove(payload) -> None:
     if not feedback_value:
         return
 
-    channel_config, assistant = await asyncio.to_thread(
-        _assistant_message_lookup, payload
-    )
+    channel_config, assistant = await asyncio.to_thread(_assistant_message_lookup, payload)
     if not channel_config or not assistant:
         return
     if assistant.get("author_type") != "assistant":

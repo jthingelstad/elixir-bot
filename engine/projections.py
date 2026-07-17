@@ -50,9 +50,7 @@ def _form_label(wins: int, losses: int, sample_size: int) -> str:
     return "mixed"
 
 
-def _form_summary(
-    wins: int, losses: int, draws: int, sample_size: int, label: str
-) -> str:
+def _form_summary(wins: int, losses: int, draws: int, sample_size: int, label: str) -> str:
     if sample_size == 0:
         return "No recent battles recorded."
     return f"{wins}-{losses}-{draws} over the last {sample_size} battles ({label})."
@@ -104,19 +102,14 @@ def refresh_player_state(conn, player_tag, profile_payload, roster_entry, observ
     vals = {
         "role": r.get("role"),
         "exp_level": p.get("expLevel") or None,
-        "trophies": r.get("trophies")
-        if r.get("trophies") is not None
-        else p.get("trophies"),
+        "trophies": r.get("trophies") if r.get("trophies") is not None else p.get("trophies"),
         "best_trophies": p.get("bestTrophies"),
         "clan_rank": r.get("clan_rank") or r.get("clanRank"),
         "previous_clan_rank": r.get("previous_clan_rank") or r.get("previousClanRank"),
         "donations_week": r.get("donations"),
-        "donations_received_week": r.get("donations_received")
-        or r.get("donationsReceived"),
+        "donations_received_week": r.get("donations_received") or r.get("donationsReceived"),
         "arena_id": arena.get("id") if arena else (r.get("arena") or {}).get("id"),
-        "arena_name": arena.get("name")
-        if arena
-        else (r.get("arena") or {}).get("name"),
+        "arena_name": arena.get("name") if arena else (r.get("arena") or {}).get("name"),
         "ranked_league": ranked_league,
         "ranked_trophies": ranked_trophies,
         "current_deck_json": json.dumps(deck, ensure_ascii=False) if deck else None,
@@ -124,9 +117,7 @@ def refresh_player_state(conn, player_tag, profile_payload, roster_entry, observ
     }
     cols = ", ".join(vals)
     placeholders = ", ".join("?" for _ in vals)
-    updates = ", ".join(
-        f"{c} = COALESCE(excluded.{c}, player_current_state.{c})" for c in vals
-    )
+    updates = ", ".join(f"{c} = COALESCE(excluded.{c}, player_current_state.{c})" for c in vals)
     conn.execute(
         f"""INSERT INTO player_current_state (player_tag, observed_at, {cols})
             VALUES (?, ?, {placeholders})

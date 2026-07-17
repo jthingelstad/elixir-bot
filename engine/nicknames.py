@@ -125,8 +125,7 @@ def ensure_nickname(
     from db import set_member_nickname
 
     existing = conn.execute(
-        "SELECT preferred_nickname, nickname_source FROM player_metadata "
-        "WHERE player_tag = ?",
+        "SELECT preferred_nickname, nickname_source FROM player_metadata WHERE player_tag = ?",
         (tag,),
     ).fetchone()
     cur_nick = existing["preferred_nickname"] if existing else None
@@ -139,9 +138,7 @@ def ensure_nickname(
         if cur_nick:
             return cur_nick  # already resolved (idempotent)
         nickname, source = generate_nickname(name, llm_fn=llm_fn)
-        set_member_nickname(
-            tag, nickname, source=source, observed_at=observed_at, conn=conn
-        )
+        set_member_nickname(tag, nickname, source=source, observed_at=observed_at, conn=conn)
         log.info("nickname for %s (%r) -> %r [%s]", tag, name, nickname, source)
         return nickname
 

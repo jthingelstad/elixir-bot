@@ -17,9 +17,7 @@ import os
 import prompts
 from engine.recognition.compose import FAIL_CLOSED_LANE, PREFIX_LANE
 
-_LANES_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "prompts", "lanes"
-)
+_LANES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts", "lanes")
 
 
 def _routed_lanes() -> set[str]:
@@ -65,8 +63,7 @@ def test_every_config_lane_has_a_discord_md_section():
     }
     orphans = set(prompts.CHANNEL_LANE_CONFIG) - lanes_in_md
     assert not orphans, (
-        f"CHANNEL_LANE_CONFIG lanes with no `Lane:` mapping in DISCORD.md: "
-        f"{sorted(orphans)}"
+        f"CHANNEL_LANE_CONFIG lanes with no `Lane:` mapping in DISCORD.md: {sorted(orphans)}"
     )
 
 

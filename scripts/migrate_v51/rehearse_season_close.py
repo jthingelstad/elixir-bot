@@ -106,16 +106,13 @@ def main() -> int:
         "season finalized": bool(season and season["ended_at"]),
         "war champ recorded": bool(season and season["war_champ_tag"]),
         "free pass recorded": bool(season and season["free_pass_tag"]),
-        "season_closed emitted once": first_events == 1
-        and second_events == 0
-        and event_count == 1,
+        "season_closed emitted once": first_events == 1 and second_events == 0 and event_count == 1,
         "war champ podium present": 1 <= awards.get("war_champ", 0) <= 3,
         "free pass exactly once": awards.get("free_pass", 0) == 1,
         "awards idempotent": after_first_awards >= before_awards
         and after_second_awards == after_first_awards,
         "retired delivery queue absent": conn.execute(
-            "SELECT 1 FROM sqlite_master "
-            "WHERE type='table' AND name='communication_intents'"
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='communication_intents'"
         ).fetchone()
         is None,
         "awareness read sees season close": bool(surfaced),

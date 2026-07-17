@@ -333,7 +333,7 @@ Create separate implementation issues so each can land safely:
 For each implementation issue:
 
 - targeted tests for the changed boundary
-- `./venv/bin/pytest tests/ -q`
+- `uv run pytest tests/ -q`
 - no runtime restart until code is committed
 - restart only for runtime behavior changes
 - after restart:

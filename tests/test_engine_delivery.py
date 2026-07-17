@@ -29,9 +29,7 @@ def _raise(conn, n=1, now=NOW):
 def _statuses(conn):
     return [
         r["status"]
-        for r in conn.execute(
-            "SELECT status FROM communication_intents ORDER BY intent_id"
-        )
+        for r in conn.execute("SELECT status FROM communication_intents ORDER BY intent_id")
     ]
 
 
@@ -80,9 +78,7 @@ def test_six_hour_expiry(legacy_engine_conn):
 
 def test_delivered_message_id_recorded(legacy_engine_conn):
     _raise(legacy_engine_conn)
-    delivery.consume(
-        legacy_engine_conn, lambda lane, c: "msg-123", lambda i: "copy", NOW
-    )
+    delivery.consume(legacy_engine_conn, lambda lane, c: "msg-123", lambda i: "copy", NOW)
     row = legacy_engine_conn.execute(
         "SELECT status, discord_message_id FROM communication_intents"
     ).fetchone()
@@ -102,9 +98,7 @@ def test_meta_marker_copy_falls_back_to_render(legacy_engine_conn):
         return "m1"
 
     # compose returns meta-text → delivery must fall back, never post the meta
-    delivery.consume(
-        legacy_engine_conn, send, lambda i: "skipping post — data inconsistent", NOW
-    )
+    delivery.consume(legacy_engine_conn, send, lambda i: "skipping post — data inconsistent", NOW)
     assert sent, "fallback copy should still post"
     assert not looks_like_meta(sent[0])
 
@@ -145,9 +139,7 @@ def test_lane_failure_does_not_block_other_lanes(legacy_engine_conn):
             raise RuntimeError("lane down")
         return "msg-ok"
 
-    counters = delivery.consume(
-        legacy_engine_conn, send_highlights_broken, lambda i: "copy", NOW
-    )
+    counters = delivery.consume(legacy_engine_conn, send_highlights_broken, lambda i: "copy", NOW)
     rows = {
         r["lane"]: r["status"]
         for r in legacy_engine_conn.execute(

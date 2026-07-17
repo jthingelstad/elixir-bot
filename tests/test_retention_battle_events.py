@@ -42,8 +42,7 @@ def test_purge_removes_old_battle_events_keeps_recent():
 
         assert stats["battle_events"] == 1  # exactly the ancient row
         remaining = {
-            r["dedup_key"]
-            for r in conn.execute("SELECT dedup_key FROM battle_events").fetchall()
+            r["dedup_key"] for r in conn.execute("SELECT dedup_key FROM battle_events").fetchall()
         }
         assert remaining == {"new"}
     finally:

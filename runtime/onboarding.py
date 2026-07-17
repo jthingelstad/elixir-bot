@@ -106,29 +106,21 @@ async def _send_onboarding_message(event_type: str, prompt_text: str, fallback: 
         return
     import runtime.app as app
 
-    msg = await asyncio.to_thread(
-        elixir_agent.generate_message, event_type, prompt_text
-    )
+    msg = await asyncio.to_thread(elixir_agent.generate_message, event_type, prompt_text)
     await app._post_to_elixir(channel, {"content": msg or fallback})
 
 
-async def refresh_clan_roster_from_clan_data(
-    clan_data: dict | None, *, reason: str = ""
-) -> bool:
+async def refresh_clan_roster_from_clan_data(clan_data: dict | None, *, reason: str = "") -> bool:
     member_list = (clan_data or {}).get("memberList") or []
     if not member_list:
         return False
     try:
-        await asyncio.to_thread(
-            db.snapshot_members, member_list, create_if_missing=False
-        )
+        await asyncio.to_thread(db.snapshot_members, member_list, create_if_missing=False)
         return True
     except Exception as exc:
         import runtime.app as app
 
-        app.log.warning(
-            "Onboarding roster refresh failed during %s: %s", reason or "unknown", exc
-        )
+        app.log.warning("Onboarding roster refresh failed during %s: %s", reason or "unknown", exc)
         return False
 
 
@@ -138,9 +130,7 @@ async def refresh_clan_roster_from_api(*, reason: str = "") -> bool:
     try:
         clan = await asyncio.to_thread(cr_api.get_clan)
     except Exception as exc:
-        app.log.warning(
-            "Onboarding clan fetch failed during %s: %s", reason or "unknown", exc
-        )
+        app.log.warning("Onboarding clan fetch failed during %s: %s", reason or "unknown", exc)
         return False
     return await refresh_clan_roster_from_clan_data(clan, reason=reason)
 
@@ -176,9 +166,7 @@ async def _ensure_member_role(
         return False, "Couldn't assign the Member role due to Discord permissions."
 
 
-async def remove_member_role_for_tag(
-    member_tag: str, *, reason: str
-) -> tuple[bool, str]:
+async def remove_member_role_for_tag(member_tag: str, *, reason: str) -> tuple[bool, str]:
     """Remove the Member role from the Discord user linked to a clan member.
 
     Called when a clan member leaves (kicked or quit). Keeps the discord_links
@@ -216,9 +204,7 @@ async def remove_member_role_for_tag(
         await guild_member.remove_roles(member_role, reason=reason)
         return True, f"Removed Member role from {guild_member.display_name}."
     except discord.Forbidden:
-        app.log.error(
-            "Cannot remove member role from %s — check bot permissions", guild_member.id
-        )
+        app.log.error("Cannot remove member role from %s — check bot permissions", guild_member.id)
         return False, "Couldn't remove the Member role due to Discord permissions."
 
 

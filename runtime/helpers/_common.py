@@ -74,9 +74,7 @@ def _chicago():
 
 
 def _leader_role_id():
-    return (
-        LEADER_ROLE_ID if LEADER_ROLE_ID is not None else _runtime_app().LEADER_ROLE_ID
-    )
+    return LEADER_ROLE_ID if LEADER_ROLE_ID is not None else _runtime_app().LEADER_ROLE_ID
 
 
 def _bot_role_id():
@@ -138,9 +136,7 @@ def _safe_create_task(coro, *, name=None):
         try:
             await coro
         except Exception:
-            _bg_log.warning(
-                "background task %s failed", name or "unnamed", exc_info=True
-            )
+            _bg_log.warning("background task %s failed", name or "unnamed", exc_info=True)
 
     return asyncio.get_event_loop().create_task(_wrapper(), name=name)
 

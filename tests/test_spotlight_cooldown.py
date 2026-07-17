@@ -18,9 +18,7 @@ def _thought(conn, loop, at, posts):
     conn.commit()
 
 
-def test_spotlights_report_solo_and_newest_per_member(
-    engine_conn, _isolate_default_sqlite_db
-):
+def test_spotlights_report_solo_and_newest_per_member(engine_conn, _isolate_default_sqlite_db):
     from runtime.awareness.store import ensure_awareness_schema
 
     ensure_awareness_schema(engine_conn)
@@ -64,9 +62,7 @@ def test_spotlights_report_solo_and_newest_per_member(
     assert out["#B"]["solo"] is False
 
 
-def test_spotlights_ignore_silence_and_non_milestone(
-    engine_conn, _isolate_default_sqlite_db
-):
+def test_spotlights_ignore_silence_and_non_milestone(engine_conn, _isolate_default_sqlite_db):
     from runtime.awareness.store import ensure_awareness_schema
 
     ensure_awareness_schema(engine_conn)

@@ -43,9 +43,7 @@ def _active(conn, tag: str) -> bool:
 
 
 def _name(conn, tag: str) -> str | None:
-    row = conn.execute(
-        "SELECT current_name FROM players WHERE player_tag = ?", (tag,)
-    ).fetchone()
+    row = conn.execute("SELECT current_name FROM players WHERE player_tag = ?", (tag,)).fetchone()
     return row[0] if row else None
 
 
@@ -93,9 +91,7 @@ def _grant(
     return bool(cur.rowcount)
 
 
-def _war_champ_podium(
-    conn, season_id: int, awarded_at: str, outcome: dict
-) -> list[dict]:
+def _war_champ_podium(conn, season_id: int, awarded_at: str, outcome: dict) -> list[dict]:
     rows = outcome["standings"][:PODIUM]
     out = []
     for r in rows:
@@ -231,9 +227,7 @@ def _iron_king(conn, season_id: int, awarded_at: str) -> tuple[list[dict], str |
     return out, None
 
 
-def _donation_champs(
-    conn, season_id: int, awarded_at: str, outcome: dict
-) -> list[dict]:
+def _donation_champs(conn, season_id: int, awarded_at: str, outcome: dict) -> list[dict]:
     out = []
     for entry in outcome["donation_champs"][:PODIUM]:
         tag = entry["tag"]
@@ -339,10 +333,5 @@ def grant_season_awards(
         "donation_champs": donations,
         "rookie_mvps": rookies,
         "war_participants": participants,
-        "granted": len(champ)
-        + len(fp)
-        + len(iron)
-        + len(donations)
-        + len(rookies)
-        + participants,
+        "granted": len(champ) + len(fp) + len(iron) + len(donations) + len(rookies) + participants,
     }

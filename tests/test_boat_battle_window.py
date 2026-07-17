@@ -40,9 +40,7 @@ def test_boat_record_scopes_to_recent_wars():
         one = db.get_clan_boat_battle_record(weeks=1, conn=conn)
         assert one["boat_battles"] == 3 and one["wins"] == 2 and one["losses"] == 1
         # unit is a war WEEK (section within a season), reported as season+week
-        assert one["weeks_covered"] == [
-            {"season_id": 134, "week": 3, "section_index": 2}
-        ]
+        assert one["weeks_covered"] == [{"season_id": 134, "week": 3, "section_index": 2}]
 
         both = db.get_clan_boat_battle_record(weeks=5, conn=conn)
         assert both["boat_battles"] == 8  # both weeks now in window

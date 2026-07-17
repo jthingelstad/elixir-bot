@@ -16,10 +16,7 @@ def test_colosseum_truth_is_one_contract():
     assert mechanics["finish_line"] is None
     assert mechanics["every_battle_counts_for_standings"] is True
     assert river_race_finish_line("colosseum") is None
-    assert (
-        river_race_completed_from_score("colosseum", 40200, active_battle_phase=True)
-        is False
-    )
+    assert river_race_completed_from_score("colosseum", 40200, active_battle_phase=True) is False
 
 
 def test_live_claim_facts_and_fallback_are_grounded():

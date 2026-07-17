@@ -54,13 +54,9 @@ async def post_leader_action_skip(
     if reason:
         lines.append(f"Reason: `{_clip(reason, 140)}`")
     if signal_types:
-        clean_types = sorted(
-            {_clip(item, 60) for item in signal_types if _clip(item, 60)}
-        )
+        clean_types = sorted({_clip(item, 60) for item in signal_types if _clip(item, 60)})
         if clean_types:
-            lines.append(
-                f"Signals: {', '.join(f'`{item}`' for item in clean_types[:6])}"
-            )
+            lines.append(f"Signals: {', '.join(f'`{item}`' for item in clean_types[:6])}")
     if rationale:
         lines.append(f"Evidence: {_clip(rationale)}")
     return await elixir_log.post_event_async("\n".join(lines))

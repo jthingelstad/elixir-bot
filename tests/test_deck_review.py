@@ -29,9 +29,7 @@ def _seed_identity(engine_conn):
     engine_conn.commit()
 
 
-def _make_card(
-    name, level=14, max_level=14, elixir=3, rarity="common", evolution_level=None
-):
+def _make_card(name, level=14, max_level=14, elixir=3, rarity="common", evolution_level=None):
     card = {
         "name": name,
         "id": hash(name) & 0xFFFFFFF,
@@ -97,9 +95,7 @@ def _battle(
 def test_opponent_deck_is_not_claimed_by_v51_battle_ingest():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members(
-            [{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn
-        )
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
         opp_cards = _deck(
             "Hog Rider",
             "Musketeer",
@@ -124,13 +120,9 @@ def test_opponent_deck_is_not_claimed_by_v51_battle_ingest():
             ],
             conn=conn,
         )
-        columns = {
-            row["name"] for row in conn.execute("PRAGMA table_info(battle_events)")
-        }
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(battle_events)")}
         assert "opponent_deck_json" not in columns
-        result = db.get_member_recent_losses(
-            "#PLAYER", scope="ladder_ranked_10", conn=conn
-        )
+        result = db.get_member_recent_losses("#PLAYER", scope="ladder_ranked_10", conn=conn)
         assert result["opponent_decks_captured"] is False
     finally:
         conn.close()
@@ -142,9 +134,7 @@ def test_opponent_deck_is_not_claimed_by_v51_battle_ingest():
 def test_get_member_recent_losses_reports_opponent_deck_limit_honestly():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members(
-            [{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn
-        )
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
         # 3 losses where Mega Knight appears every time
         battles = []
         for i in range(3):
@@ -181,9 +171,7 @@ def test_get_member_recent_losses_reports_opponent_deck_limit_honestly():
         )
         db.snapshot_player_battlelog("#PLAYER", battles, conn=conn)
 
-        out = db.get_member_recent_losses(
-            "#PLAYER", scope="ladder_ranked_10", limit=10, conn=conn
-        )
+        out = db.get_member_recent_losses("#PLAYER", scope="ladder_ranked_10", limit=10, conn=conn)
         assert out["losses_examined"] == 3
         # Most recent battle was a win, so current loss streak is 0.
         assert out["current_loss_streak"] == 0
@@ -201,9 +189,7 @@ def test_get_member_recent_losses_reports_opponent_deck_limit_honestly():
 def test_get_member_recent_losses_returns_empty_when_no_battles():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members(
-            [{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn
-        )
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
         out = db.get_member_recent_losses("#PLAYER", scope="war_10", conn=conn)
         assert out["losses_examined"] == 0
         # QA H3: opponent deck lists aren't captured, so the tool no longer
@@ -219,9 +205,7 @@ def test_get_member_recent_losses_does_not_infer_opponent_card_modes():
     """The v5.1 event stream does not persist opponent decks or card modes."""
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members(
-            [{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn
-        )
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
         # Two losses where the opponent played Evo Knight, one loss where Knight was vanilla
         evo_knight = _make_card("Knight", evolution_level=1)
         plain_knight = _make_card("Knight")
@@ -232,9 +216,7 @@ def test_get_member_recent_losses_does_not_infer_opponent_card_modes():
                 outcome_crowns=(0, 2),
                 team_cards=_deck("Archers"),
                 opp_cards=[evo_knight]
-                + _deck(
-                    "Bats", "Skeletons", "Zap", "Arrows", "Fireball", "Tornado", "Log"
-                ),
+                + _deck("Bats", "Skeletons", "Zap", "Arrows", "Fireball", "Tornado", "Log"),
                 deck_selection="collection",
             ),
             _battle(
@@ -243,9 +225,7 @@ def test_get_member_recent_losses_does_not_infer_opponent_card_modes():
                 outcome_crowns=(0, 2),
                 team_cards=_deck("Archers"),
                 opp_cards=[evo_knight]
-                + _deck(
-                    "Bats", "Skeletons", "Zap", "Arrows", "Fireball", "Tornado", "Log"
-                ),
+                + _deck("Bats", "Skeletons", "Zap", "Arrows", "Fireball", "Tornado", "Log"),
                 deck_selection="collection",
             ),
             _battle(
@@ -254,17 +234,13 @@ def test_get_member_recent_losses_does_not_infer_opponent_card_modes():
                 outcome_crowns=(0, 2),
                 team_cards=_deck("Archers"),
                 opp_cards=[plain_knight]
-                + _deck(
-                    "Bats", "Skeletons", "Zap", "Arrows", "Fireball", "Tornado", "Log"
-                ),
+                + _deck("Bats", "Skeletons", "Zap", "Arrows", "Fireball", "Tornado", "Log"),
                 deck_selection="collection",
             ),
         ]
         db.snapshot_player_battlelog("#PLAYER", battles, conn=conn)
 
-        out = db.get_member_recent_losses(
-            "#PLAYER", scope="ladder_ranked_10", limit=10, conn=conn
-        )
+        out = db.get_member_recent_losses("#PLAYER", scope="ladder_ranked_10", limit=10, conn=conn)
         assert out["losses_examined"] == 3
         assert out["opponent_decks_captured"] is False
         assert "top_opponent_cards" not in out
@@ -275,9 +251,7 @@ def test_get_member_recent_losses_does_not_infer_opponent_card_modes():
 def test_signature_cards_aggregate_by_card_name():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members(
-            [{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn
-        )
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
         evo_archers = _make_card("Archers", evolution_level=1)
         battles = [
             _battle(
@@ -312,9 +286,7 @@ def test_signature_cards_aggregate_by_card_name():
 def test_signature_cards_do_not_invent_variant_precision():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members(
-            [{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn
-        )
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
         evo_archers = _make_card("Archers", evolution_level=1)
         plain_archers = _make_card("Archers")
         # 5 battles evo Archers, 5 battles vanilla Archers — both variants should survive top-8
@@ -431,9 +403,7 @@ def _war_duel_battle(battle_time, deck_names_per_round, *, outcome_crowns=(2, 1)
 def test_reconstruct_war_decks_insufficient_data():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members(
-            [{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn
-        )
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
         db.snapshot_player_battlelog(
             "#PLAYER",
             [
@@ -464,9 +434,7 @@ def test_reconstruct_war_decks_insufficient_data():
 def test_reconstruct_war_decks_no_overlap_with_distinct_decks():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members(
-            [{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn
-        )
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
         # Build 4 distinct 8-card decks with NO shared cards (32 unique cards)
         deck1 = [
             "Knight",
@@ -523,9 +491,7 @@ def test_reconstruct_war_decks_no_overlap_with_distinct_decks():
             assert len(names) == 8
             all_cards.extend(names)
         assert len(all_cards) == 32
-        assert len(set(all_cards)) == 32, (
-            "no-overlap regression: cards repeat across decks"
-        )
+        assert len(set(all_cards)) == 32, "no-overlap regression: cards repeat across decks"
     finally:
         conn.close()
 
@@ -533,9 +499,7 @@ def test_reconstruct_war_decks_no_overlap_with_distinct_decks():
 def test_reconstruct_war_decks_does_not_infer_unstored_duel_rounds():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members(
-            [{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn
-        )
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
         round1 = [
             "Knight",
             "Archers",
@@ -592,9 +556,7 @@ def test_reconstruct_war_decks_does_not_infer_unstored_duel_rounds():
 def test_reconstruct_war_decks_partial_when_under_4_distinct():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members(
-            [{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn
-        )
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
         deck1 = [
             "Knight",
             "Archers",
@@ -697,9 +659,7 @@ def test_respond_in_deck_review_war_review_for_new_player_injects_offer_instruct
 
     with (
         patch.object(workflows, "_chat_with_tools", side_effect=fake_chat),
-        patch.object(
-            workflows.db, "reconstruct_member_war_decks", return_value=fake_war_decks
-        ),
+        patch.object(workflows.db, "reconstruct_member_war_decks", return_value=fake_war_decks),
     ):
         result = workflows.respond_in_deck_review(
             question="review my war decks",
@@ -749,9 +709,7 @@ def test_respond_in_deck_review_injects_full_card_collection_with_levels():
     with (
         patch.object(workflows, "_chat_with_tools", side_effect=fake_chat),
         patch.object(workflows.db, "get_member_current_deck", return_value=None),
-        patch.object(
-            workflows.db, "get_member_card_collection", return_value=fake_collection
-        ),
+        patch.object(workflows.db, "get_member_card_collection", return_value=fake_collection),
     ):
         workflows.respond_in_deck_review(
             question="review my deck",
@@ -802,9 +760,7 @@ def test_respond_in_deck_review_war_review_with_decks_does_not_inject_new_player
 
     with (
         patch.object(workflows, "_chat_with_tools", side_effect=fake_chat),
-        patch.object(
-            workflows.db, "reconstruct_member_war_decks", return_value=fake_war_decks
-        ),
+        patch.object(workflows.db, "reconstruct_member_war_decks", return_value=fake_war_decks),
     ):
         workflows.respond_in_deck_review(
             question="review my war decks",

@@ -65,8 +65,7 @@ def test_distinct_topics_open_distinct_cases_for_same_member():
     )
     assert r1["case_key"] != r2["case_key"]
     keys = {
-        c["case_key"]
-        for c in db.list_decision_cases(case_type="leadership_followup", limit=20)
+        c["case_key"] for c in db.list_decision_cases(case_type="leadership_followup", limit=20)
     }
     assert r1["case_key"] in keys and r2["case_key"] in keys
 

@@ -87,9 +87,7 @@ def test_display_prefers_stored_then_callable(engine_conn):
     set_member_nickname("#B", "Ellipsis", source="generated", conn=c)
     assert preferred_display_name(c, "#B") == "Ellipsis"
     # raw_name path (no DB row)
-    assert (
-        preferred_display_name(c, "#Z", "Ｓｈａｆｉｔｈ Ｎｉｈａｌ♥️") == "Shafith Nihal"
-    )
+    assert preferred_display_name(c, "#Z", "Ｓｈａｆｉｔｈ Ｎｉｈａｌ♥️") == "Shafith Nihal"
 
 
 # --- ensure_nickname lifecycle

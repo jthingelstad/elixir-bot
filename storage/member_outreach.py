@@ -108,8 +108,7 @@ def list_outreach(
     ensure_schema(conn)
     if status:
         rows = conn.execute(
-            "SELECT * FROM member_outreach WHERE status = ? "
-            "ORDER BY updated_at DESC LIMIT ?",
+            "SELECT * FROM member_outreach WHERE status = ? ORDER BY updated_at DESC LIMIT ?",
             (status, int(limit)),
         ).fetchall()
     else:
@@ -181,17 +180,11 @@ def upsert_outreach(
                 status if status is not None else cur["status"],
                 consent if consent is not None else cur["consent"],
                 cur["attempts"] + 1 if bump_attempts else cur["attempts"],
-                discord_user_id
-                if discord_user_id is not None
-                else cur["discord_user_id"],
-                leader_action_id
-                if leader_action_id is not None
-                else cur["leader_action_id"],
+                discord_user_id if discord_user_id is not None else cur["discord_user_id"],
+                leader_action_id if leader_action_id is not None else cur["leader_action_id"],
                 pending_email if pending_email is not None else cur["pending_email"],
                 last_asked_at if last_asked_at is not None else cur["last_asked_at"],
-                next_eligible_at
-                if next_eligible_at is not None
-                else cur["next_eligible_at"],
+                next_eligible_at if next_eligible_at is not None else cur["next_eligible_at"],
                 last_error if last_error is not None else cur["last_error"],
                 now,
                 tag,

@@ -19,9 +19,7 @@ CONTRACT_VERSION = 1
 def _live_period_type(live_war: dict | None) -> str | None:
     live = live_war or {}
     period = live.get("period") if isinstance(live.get("period"), dict) else {}
-    state = (
-        live.get("current_state") if isinstance(live.get("current_state"), dict) else {}
-    )
+    state = live.get("current_state") if isinstance(live.get("current_state"), dict) else {}
     clock = live.get("clock") if isinstance(live.get("clock"), dict) else {}
     if (
         period.get("is_colosseum_week")
@@ -29,16 +27,10 @@ def _live_period_type(live_war: dict | None) -> str | None:
         or clock.get("is_colosseum_week")
     ):
         return "colosseum"
-    return (
-        period.get("period_type")
-        or state.get("period_type")
-        or clock.get("period_type")
-    )
+    return period.get("period_type") or state.get("period_type") or clock.get("period_type")
 
 
-def get_game_truth(
-    *, topic: str = "river_race", live_war: dict | None = None
-) -> GameTruthResult:
+def get_game_truth(*, topic: str = "river_race", live_war: dict | None = None) -> GameTruthResult:
     """Return one versioned mechanics contract.
 
     Unsupported topics fail explicitly rather than inviting a caller to infer
@@ -72,9 +64,7 @@ def live_war_claim_facts(live_war: dict | None) -> dict:
         "period_type": mechanics.get("period_type"),
         "finish_line": mechanics.get("finish_line"),
         "battle_day_total": mechanics.get("battle_days"),
-        "every_battle_counts_for_standings": mechanics.get(
-            "every_battle_counts_for_standings"
-        ),
+        "every_battle_counts_for_standings": mechanics.get("every_battle_counts_for_standings"),
         "canonical_game_truth": truth,
     }
 
@@ -106,11 +96,7 @@ def _war_from_awareness_read(read: dict) -> dict:
     time = read.get("time") if isinstance(read.get("time"), dict) else {}
     standing = read.get("standing") if isinstance(read.get("standing"), dict) else {}
     season = read.get("war_season") if isinstance(read.get("war_season"), dict) else {}
-    race = (
-        ((season.get("state") or {}).get("race") or {})
-        if isinstance(season, dict)
-        else {}
-    )
+    race = ((season.get("state") or {}).get("race") or {}) if isinstance(season, dict) else {}
     colosseum = bool(
         time.get("is_colosseum_week")
         or race.get("colosseum_week")
@@ -134,9 +120,7 @@ def awareness_post_facts(read: dict, post: dict) -> dict:
         signal for signal in _signals(read or {}) if signal.get("signal_key") in covered
     ]
     for signal in covered_signals:
-        payload = (
-            signal.get("payload") if isinstance(signal.get("payload"), dict) else {}
-        )
+        payload = signal.get("payload") if isinstance(signal.get("payload"), dict) else {}
         for key, value in {**payload, **signal}.items():
             if key not in facts and value is not None:
                 facts[key] = value

@@ -35,9 +35,7 @@ def _cards_payload(collection_level: int, knight_level: int = 14):
                 "maxLevel": 14,
             }
         ],
-        "badges": [
-            {"name": "CollectionLevel", "level": 8, "progress": collection_level}
-        ],
+        "badges": [{"name": "CollectionLevel", "level": 8, "progress": collection_level}],
     }
 
 
@@ -88,10 +86,7 @@ def test_crosses_two_boundaries_at_once(engine_conn):
     _emit_cards(engine_conn, 1905, LATER)  # 1712 -> 1905 crosses 1800 and 1900
     events = _milestone_events(engine_conn)
     milestones = {
-        m
-        for e in events
-        for m in (1800, 1900)
-        if f'"milestone":{m}' in e.replace(" ", "")
+        m for e in events for m in (1800, 1900) if f'"milestone":{m}' in e.replace(" ", "")
     }
     assert milestones == {1800, 1900}
 

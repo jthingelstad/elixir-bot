@@ -27,9 +27,7 @@ SUBMISSION = "urn:ietf:params:jmap:submission"
 
 # ── Config (env-driven; .env is loaded by the runtime and cut_release.py) ──
 JMAP_TOKEN = os.getenv("FASTMAIL_JMAP_TOKEN")
-JMAP_SESSION_URL = os.getenv(
-    "FASTMAIL_JMAP_SESSION_URL", "https://api.fastmail.com/jmap/session"
-)
+JMAP_SESSION_URL = os.getenv("FASTMAIL_JMAP_SESSION_URL", "https://api.fastmail.com/jmap/session")
 EMAIL_ADDRESS = os.getenv("ELIXIR_EMAIL_ADDRESS", "elixir@poapkings.com")
 EMAIL_FROM_NAME = os.getenv("ELIXIR_EMAIL_FROM_NAME", "Elixir")
 SENT_PARENT = os.getenv("ELIXIR_EMAIL_SENT_PARENT", "Sent")
@@ -162,9 +160,7 @@ class JMAPClient:
         return responses[0][1]["list"]
 
     @staticmethod
-    def _find_parent(
-        rows: list[dict[str, Any]], name: str, role: str
-    ) -> dict[str, Any]:
+    def _find_parent(rows: list[dict[str, Any]], name: str, role: str) -> dict[str, Any]:
         role_match = next((m for m in rows if m.get("role") == role), None)
         if role_match:
             return role_match
@@ -185,11 +181,7 @@ class JMAPClient:
         path: str,
     ) -> dict[str, Any]:
         child = next(
-            (
-                m
-                for m in rows
-                if m.get("parentId") == parent_id and m.get("name") == name
-            ),
+            (m for m in rows if m.get("parentId") == parent_id and m.get("name") == name),
             None,
         )
         if child:
@@ -217,13 +209,9 @@ class JMAPClient:
         )
         identities = responses[0][1]["list"]
         wanted = EMAIL_ADDRESS.lower()
-        match = next(
-            (i for i in identities if (i.get("email") or "").lower() == wanted), None
-        )
+        match = next((i for i in identities if (i.get("email") or "").lower() == wanted), None)
         if not match and identities:
-            log.warning(
-                "No identity for %s; using first configured Fastmail identity", wanted
-            )
+            log.warning("No identity for %s; using first configured Fastmail identity", wanted)
             match = identities[0]
         if not match:
             raise JMAPError("No JMAP sending identities are configured")
@@ -335,9 +323,7 @@ class JMAPClient:
         create_payload = responses[0][1]
         submit_payload = responses[1][1]
         if create_payload.get("notCreated"):
-            raise JMAPError(
-                f"Email draft was not created: {create_payload['notCreated']}"
-            )
+            raise JMAPError(f"Email draft was not created: {create_payload['notCreated']}")
         if submit_payload.get("notCreated"):
             raise JMAPError(f"Email was not submitted: {submit_payload['notCreated']}")
         created_email = (create_payload.get("created") or {}).get(create_id) or {}

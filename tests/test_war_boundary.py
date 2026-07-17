@@ -44,9 +44,7 @@ def _seed_free_pass_case(conn, *, last_free_pass):
     conn.execute(
         "INSERT OR IGNORE INTO war_seasons (season_id, started_at) VALUES (140, '2026-02-01')"
     )
-    conn.execute(
-        "INSERT INTO war_weeks (season_id, section_index, our_rank) VALUES (140, 0, 1)"
-    )
+    conn.execute("INSERT INTO war_weeks (season_id, section_index, our_rank) VALUES (140, 0, 1)")
     for tag, pts in (("#ACE", 6000), ("#BEE", 4000), ("#CID", 2000)):
         conn.execute(
             "INSERT INTO war_participation (season_id, section_index, player_tag, fame, decks_used, observed_at) "
@@ -56,9 +54,7 @@ def _seed_free_pass_case(conn, *, last_free_pass):
     if last_free_pass:
         from storage.awards import insert_award
 
-        insert_award(
-            award_type="free_pass", season_id=139, player_tag=last_free_pass, conn=conn
-        )
+        insert_award(award_type="free_pass", season_id=139, player_tag=last_free_pass, conn=conn)
         conn.execute(
             "UPDATE war_seasons SET free_pass_tag = ? WHERE season_id = 139",
             (last_free_pass,),
@@ -234,9 +230,7 @@ def test_reset_then_rollover_finalizes_from_peak(engine_conn):
     ).fetchone()
     assert wk["our_fame"] == 42600, "week finalized from the reset, not the peak"
     assert wk["our_rank"] == 1
-    season = c.execute(
-        "SELECT final_rank FROM war_seasons WHERE season_id=133"
-    ).fetchone()
+    season = c.execute("SELECT final_rank FROM war_seasons WHERE season_id=133").fetchone()
     assert season["final_rank"] == 1, "season recorded a bogus finish rank"
 
 

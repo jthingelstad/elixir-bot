@@ -83,18 +83,12 @@ def _validate_promote_content_or_raise(promote, required_trophies=2000) -> None:
     discord = (promote or {}).get("discord") or {}
     discord_body = (discord.get("body") or "").strip()
     if discord_body:
-        first_line = next(
-            (line.strip() for line in discord_body.splitlines() if line.strip()), ""
-        )
+        first_line = next((line.strip() for line in discord_body.splitlines() if line.strip()), "")
         first_line = _unwrap_outer_bold(first_line)
         if discord_text not in first_line:
-            raise ValueError(
-                f"discord.body first line must include exact text `{discord_text}`"
-            )
+            raise ValueError(f"discord.body first line must include exact text `{discord_text}`")
         if not first_line.endswith(discord_text):
-            raise ValueError(
-                f"discord.body first line must end with exact text `{discord_text}`"
-            )
+            raise ValueError(f"discord.body first line must end with exact text `{discord_text}`")
 
     reddit = (promote or {}).get("reddit") or {}
     reddit_title = (reddit.get("title") or "").strip()
@@ -115,18 +109,14 @@ async def _promotion_content_cycle():
 
     channel = _bot().get_channel(promotion_channel_id)
     if not channel:
-        runtime_status.mark_job_failure(
-            "promotion_content_cycle", "promotion channel not found"
-        )
+        runtime_status.mark_job_failure("promotion_content_cycle", "promotion channel not found")
         return
 
     try:
         clan, war = await _load_live_clan_context()
     except Exception as exc:
         log.error("Promotion content refresh failed: %s", exc, exc_info=True)
-        runtime_status.mark_job_failure(
-            "promotion_content_cycle", f"refresh failed: {exc}"
-        )
+        runtime_status.mark_job_failure("promotion_content_cycle", f"refresh failed: {exc}")
         return
 
     if not clan.get("memberList"):
@@ -140,9 +130,7 @@ async def _promotion_content_cycle():
         roster_data=None,
     )
     if not promote:
-        runtime_status.mark_job_success(
-            "promotion_content_cycle", "no promotion content"
-        )
+        runtime_status.mark_job_success("promotion_content_cycle", "no promotion content")
         return
     try:
         _validate_promote_content_or_raise(
@@ -157,9 +145,7 @@ async def _promotion_content_cycle():
 
     channel_posts = _promotion_channel_posts(promote)
     if not channel_posts:
-        runtime_status.mark_job_success(
-            "promotion_content_cycle", "no promotion channel copy"
-        )
+        runtime_status.mark_job_success("promotion_content_cycle", "no promotion channel copy")
         return
 
     await _post_to_elixir(channel, {"content": channel_posts})
@@ -172,9 +158,7 @@ async def _promotion_content_cycle():
             post,
             **ch,
             workflow="promotion",
-            event_type="promotion_content_cycle"
-            if index == 0
-            else "promotion_content_cycle_part",
+            event_type="promotion_content_cycle" if index == 0 else "promotion_content_cycle_part",
         )
     runtime_status.mark_job_success(
         "promotion_content_cycle", "Discord promotion content published"

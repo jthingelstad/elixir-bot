@@ -31,7 +31,7 @@ Every run:
    * Prefer extending an existing harness over creating a new one.
    * Add a deterministic regression test to `tests/` when the behavior can be pinned without a live API call.
 5. Convert recurring quality findings into permanent guards: when the Quality Manager reports the same failure twice, add a regression scenario so it can't silently return.
-6. Verify your own work: `./venv/bin/pytest tests/ -v` passes; new harnesses run clean and write JSON to `scripts/<name>_results.json` (gitignored per the scripts README).
+6. Verify your own work: `uv run pytest tests/ -v` passes; new harnesses run clean and write JSON to `scripts/<name>_results.json` (gitignored per the scripts README).
 7. Commit datasets, scoring rules, and tests to main referencing the issue. Push only when the shared git preflight says doing so will not publish unrelated existing commits. Comment the baseline numbers on the issue so other roles can use them.
 8. If there are no open `eval` requests and baselines are current: take one small step to widen coverage of an under-measured workflow, otherwise report "baselines current" and stop.
 

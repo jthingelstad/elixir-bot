@@ -9,7 +9,7 @@ This module is the `_migration_0` source of truth for the new engine. Explicit
 forward changes live in ``db.schema`` and are applied after this baseline.
 
 Usage:
-    ./venv/bin/python scripts/migrate_v51/schema_v51.py \
+    uv run python scripts/migrate_v51/schema_v51.py \
         --db elixir-v51.db --archive elixir-v5-archive-2026H2.db
 
 Expected table count: 68 designed tables after the current forward migration.
@@ -23,9 +23,7 @@ import re
 import sqlite3
 import sys
 
-PROJECT_ROOT = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -670,9 +668,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = (
-    71  # +member_outreach (V6); -editor_verdicts (V8, critic removed)
-)
+EXPECTED_TABLE_COUNT = 71  # +member_outreach (V6); -editor_verdicts (V8, critic removed)
 
 
 _DEAD_MEMBERS_FK = re.compile(
@@ -716,9 +712,7 @@ def carried_ddl(archive_path: str | None) -> list[str]:
         finally:
             archive.close()
         if frozen is not None and [s.strip() for s in live] != frozen:
-            raise SystemExit(
-                "carried_ddl.sql has drifted from the archive export — regenerate it"
-            )
+            raise SystemExit("carried_ddl.sql has drifted from the archive export — regenerate it")
         return live
     if frozen is None:
         raise SystemExit(
@@ -745,13 +739,9 @@ def build(db_path: str, archive_path: str | None) -> None:
         ).fetchone()[0]
     finally:
         new.close()
-    print(
-        f"created {db_path}: {count} designed tables (expected {EXPECTED_TABLE_COUNT})"
-    )
+    print(f"created {db_path}: {count} designed tables (expected {EXPECTED_TABLE_COUNT})")
     if count != EXPECTED_TABLE_COUNT:
-        raise SystemExit(
-            "table count mismatch — reconcile with schema.md §2 before proceeding"
-        )
+        raise SystemExit("table count mismatch — reconcile with schema.md §2 before proceeding")
 
 
 def main() -> int:

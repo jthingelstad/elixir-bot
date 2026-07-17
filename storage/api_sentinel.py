@@ -64,9 +64,7 @@ def _observation_key(observation: dict) -> tuple[str, str, str]:
     )
 
 
-def build_api_sentinel_observations(
-    endpoint: str, entity_key: str | None, payload
-) -> list[dict]:
+def build_api_sentinel_observations(endpoint: str, entity_key: str | None, payload) -> list[dict]:
     endpoint = (endpoint or "unknown").strip() or "unknown"
     entity_key = (entity_key or "global").strip() or "global"
     observations: dict[tuple[str, str, str], dict] = {}
@@ -110,9 +108,7 @@ def build_api_sentinel_observations(
                     "badge_name",
                     "player.badges",
                     badge.get("name"),
-                    _sample_payload(
-                        endpoint=endpoint, entity_key=entity_key, badge=badge
-                    ),
+                    _sample_payload(endpoint=endpoint, entity_key=entity_key, badge=badge),
                 )
 
         progress = item.get("progress")
@@ -122,9 +118,7 @@ def build_api_sentinel_observations(
                     "progress_key",
                     "player.progress",
                     progress_key,
-                    _sample_payload(
-                        endpoint=endpoint, entity_key=entity_key, value=progress_value
-                    ),
+                    _sample_payload(endpoint=endpoint, entity_key=entity_key, value=progress_value),
                 )
 
         game_mode = item.get("gameMode")
@@ -280,9 +274,9 @@ def record_api_payload_sentinel_observations(
 
 @managed_connection
 def bootstrap_api_sentinel_baseline(conn=None) -> dict:
-    existing = conn.execute(
-        "SELECT COUNT(*) AS count FROM api_sentinel_observations"
-    ).fetchone()["count"]
+    existing = conn.execute("SELECT COUNT(*) AS count FROM api_sentinel_observations").fetchone()[
+        "count"
+    ]
     if existing:
         return {"bootstrapped": False, "payloads": 0, "observations": 0}
 
@@ -297,7 +291,7 @@ def bootstrap_api_sentinel_baseline(conn=None) -> dict:
     for row in rows:
         try:
             payload = json.loads(row["payload_json"])
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except TypeError, ValueError, json.JSONDecodeError:
             continue
         observation_count += len(
             _record_api_sentinel_observations(
@@ -345,6 +339,6 @@ def list_api_sentinel_observations(
     for item in result:
         try:
             item["sample"] = json.loads(item.pop("sample_json") or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except TypeError, ValueError, json.JSONDecodeError:
             item["sample"] = {}
     return result

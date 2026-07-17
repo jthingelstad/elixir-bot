@@ -53,9 +53,7 @@ def test_member_trend_window_reads_full_battle_events():
         _seed_player(conn, "#TREND1", "Andy")
         # previous 7d window: a busy week the lossy rollup would have undercounted
         _seed_battles(conn, "#TREND1", today - timedelta(days=9), wins=9, losses=6)
-        _seed_battles(
-            conn, "#TREND1", today - timedelta(days=8), wins=6, losses=4
-        )  # 25 total prev
+        _seed_battles(conn, "#TREND1", today - timedelta(days=8), wins=6, losses=4)  # 25 total prev
         # current 7d window
         _seed_battles(conn, "#TREND1", today - timedelta(days=2), wins=5, losses=5)
         conn.commit()

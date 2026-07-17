@@ -123,9 +123,7 @@ def war_day(period_index) -> WarDay | None:
             f"training day {day + 1} of {TRAINING_DAYS}",
         )
     wdi = day - TRAINING_DAYS
-    return WarDay(
-        period_index, day, wdi, "battle", f"battle day {wdi + 1} of {WAR_DAYS}"
-    )
+    return WarDay(period_index, day, wdi, "battle", f"battle day {wdi + 1} of {WAR_DAYS}")
 
 
 def arena_kind(arena_id) -> str | None:
@@ -202,11 +200,7 @@ def mastery_card(badge_name) -> str | None:
     camelCase split — `MasteryRonin` → `Ronin`, `MasterySuspiciousBush` →
     `Suspicious Bush`. Catalog canonicalization is the caller's job (this module
     stays DB-free); the split alone is human-readable for every current value."""
-    if (
-        isinstance(badge_name, str)
-        and badge_name.startswith("Mastery")
-        and len(badge_name) > 7
-    ):
+    if isinstance(badge_name, str) and badge_name.startswith("Mastery") and len(badge_name) > 7:
         return _split_camel(badge_name[7:]) or None
     return None
 
@@ -239,9 +233,7 @@ def humanize_badge(badge_name) -> str:
         return f"Card Mastery: {card}"
     if badge_name in _BADGE_LABELS:
         return _BADGE_LABELS[badge_name]
-    label = " ".join(
-        _humanize_badge_token(t) for t in badge_name.split("_") if t
-    ).strip()
+    label = " ".join(_humanize_badge_token(t) for t in badge_name.split("_") if t).strip()
     return label or badge_name
 
 

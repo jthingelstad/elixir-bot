@@ -11,9 +11,7 @@ from typing import Any
 from agent.mail import email_jmap, email_render
 
 _TEXT_SIG = "— Elixir · POAP KINGS"
-_HTML_SIG = (
-    '<div class="elixir-sig"><p>— <strong>Elixir</strong> · POAP KINGS</p></div>'
-)
+_HTML_SIG = '<div class="elixir-sig"><p>— <strong>Elixir</strong> · POAP KINGS</p></div>'
 
 
 def send(

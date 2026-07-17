@@ -72,7 +72,7 @@ def _loads(value, default):
     try:
         parsed = json.loads(value or "")
         return parsed if isinstance(parsed, type(default)) else default
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 
@@ -124,9 +124,7 @@ def _historical_thought_match(thoughts: list[dict], posted_at, covers, preview):
 
 
 def _sample(conn, *, days, lane):
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     awareness_rows = conn.execute(
         """SELECT ap.post_id, ap.lane, ap.content_preview, ap.covers_json,
                   ap.posted_at, ap.discord_message_id, at.read_json, at.plan_json
@@ -210,9 +208,7 @@ def _sample(conn, *, days, lane):
 
 
 def _normalized(value: str) -> str:
-    return " ".join(
-        "".join(ch if ch.isalnum() else " " for ch in (value or "").lower()).split()
-    )
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in (value or "").lower()).split())
 
 
 def _repetition_findings(posts: list[dict]) -> dict[str, dict]:
@@ -252,9 +248,7 @@ def run_eval(
         posts = _sample(conn, days=days, lane=lane)
         repetitions = _repetition_findings(posts)
         game_findings = {
-            str(post["message_id"]): game_check.check_post(
-                post["copy"], post["facts"], conn
-            )
+            str(post["message_id"]): game_check.check_post(post["copy"], post["facts"], conn)
             for post in posts
         }
         # No SQLite connection or transaction spans an LLM/network call.
@@ -270,9 +264,7 @@ def run_eval(
             repetition = repetitions.get(str(p["message_id"]))
             clean = not findings
             game_ok += 1 if clean else 0
-            lane_stat = by_lane.setdefault(
-                p["lane"], {"count": 0, "game_ok": 0, "depths": []}
-            )
+            lane_stat = by_lane.setdefault(p["lane"], {"count": 0, "game_ok": 0, "depths": []})
             lane_stat["count"] += 1
             lane_stat["game_ok"] += 1 if clean else 0
             depth = reason = None
@@ -325,9 +317,7 @@ def run_eval(
             "by_lane": {
                 ln: {
                     "count": s["count"],
-                    "game_accuracy": round(s["game_ok"] / s["count"], 3)
-                    if s["count"]
-                    else None,
+                    "game_accuracy": round(s["game_ok"] / s["count"], 3) if s["count"] else None,
                     "avg_depth": round(sum(s["depths"]) / len(s["depths"]), 2)
                     if s["depths"]
                     else None,
@@ -373,19 +363,11 @@ def _print_scorecard(r):
         f"({r['run_at']}) ==="
     )
     ga = r["game_accuracy_rate"]
-    print(
-        f"game accuracy: {ga * 100:.0f}%"
-        if ga is not None
-        else "game accuracy: (no posts)"
-    )
+    print(f"game accuracy: {ga * 100:.0f}%" if ga is not None else "game accuracy: (no posts)")
     if r["avg_depth"] is not None:
         print(f"avg depth: {r['avg_depth']}/5")
     for ln, s in r["by_lane"].items():
-        acc = (
-            f"{s['game_accuracy'] * 100:.0f}%"
-            if s["game_accuracy"] is not None
-            else "-"
-        )
+        acc = f"{s['game_accuracy'] * 100:.0f}%" if s["game_accuracy"] is not None else "-"
         dep = f"{s['avg_depth']}/5" if s["avg_depth"] is not None else "-"
         print(f"  {ln:20} n={s['count']:<3} accuracy={acc:<5} depth={dep}")
     if r["flagged"]:
@@ -411,9 +393,7 @@ def main() -> int:
     ap.add_argument("--lane", default=None)
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--no-llm", action="store_true", help="game-check only (headless)")
-    ap.add_argument(
-        "--no-feedback", action="store_true", help="do not write editorial memories"
-    )
+    ap.add_argument("--no-feedback", action="store_true", help="do not write editorial memories")
     args = ap.parse_args()
     r = run_eval(
         args.days,

@@ -1,7 +1,7 @@
 """Email Elixir's release notes (the detailed tier) via Fastmail JMAP.
 
-    ./venv/bin/python scripts/email_release_notes.py --dry-run
-    ./venv/bin/python scripts/email_release_notes.py --to jamie@thingelstad.com
+    uv run python scripts/email_release_notes.py --dry-run
+    uv run python scripts/email_release_notes.py --to jamie@thingelstad.com
 
 Generates the first-person release-notes draft (same machinery cut_release.py
 uses) and emails it from elixir@poapkings.com. Scope defaults to everything since
@@ -38,9 +38,7 @@ def main() -> int:
         help="override: email ONLY this address (testing). Default broadcasts "
         "to every clan member with a verified email.",
     )
-    parser.add_argument(
-        "--days", type=int, default=None, help="scope: look back N days"
-    )
+    parser.add_argument("--days", type=int, default=None, help="scope: look back N days")
     parser.add_argument("--since", metavar="REF", help="scope: changes since this ref")
     parser.add_argument("--dry-run", action="store_true", help="print, send nothing")
     args = parser.parse_args()
@@ -71,9 +69,7 @@ def main() -> int:
         print("=" * 72)
         print(draft["body"])
         print("=" * 72)
-        print(
-            f"\n[dry-run] would email to {len(recipients)} recipient(s) from {EMAIL_ADDRESS}"
-        )
+        print(f"\n[dry-run] would email to {len(recipients)} recipient(s) from {EMAIL_ADDRESS}")
         return 0
 
     if not recipients:

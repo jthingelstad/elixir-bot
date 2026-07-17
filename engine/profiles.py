@@ -36,9 +36,7 @@ MODE_DISPLAY = {
 }
 
 
-def player_mode_profile(
-    conn, tag: str, days: int = 28, today: str | None = None
-) -> dict:
+def player_mode_profile(conn, tag: str, days: int = 28, today: str | None = None) -> dict:
     """Mode mix + identity over the trailing `days` Chicago days.
 
     Returns {total_battles, window_days, modes: {mode: {battles, wins, share}},

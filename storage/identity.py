@@ -236,9 +236,7 @@ def link_discord_user_to_member(
     is_primary: bool = True,
     conn: Optional[sqlite3.Connection] = None,
 ) -> int:
-    upsert_discord_user(
-        discord_user_id, username=username, display_name=display_name, conn=conn
-    )
+    upsert_discord_user(discord_user_id, username=username, display_name=display_name, conn=conn)
     member_id = _apply_discord_link(
         conn,
         discord_user_id,
@@ -254,21 +252,15 @@ def link_discord_user_to_member(
 
 
 @managed_connection
-def clear_member_discord_link(
-    member_tag: str, conn: Optional[sqlite3.Connection] = None
-) -> str:
+def clear_member_discord_link(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> str:
     player_tag = _ensure_member(conn, member_tag)
-    conn.execute(
-        "UPDATE discord_links SET is_primary = 0 WHERE player_tag = ?", (player_tag,)
-    )
+    conn.execute("UPDATE discord_links SET is_primary = 0 WHERE player_tag = ?", (player_tag,))
     conn.commit()
     return player_tag
 
 
 @managed_connection
-def get_discord_link(
-    member_tag: str, conn: Optional[sqlite3.Connection] = None
-) -> Optional[dict]:
+def get_discord_link(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
         "SELECT m.player_tag, m.current_name, du.discord_user_id, du.username AS discord_username, du.display_name AS discord_display_name "
         "FROM players m "
@@ -377,14 +369,10 @@ def set_member_email(
 
 
 @managed_connection
-def clear_member_email(
-    member_tag: str, conn: Optional[sqlite3.Connection] = None
-) -> None:
+def clear_member_email(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> None:
     _ensure_email_schema(conn)
     tag = _canon_tag(member_tag)
-    _upsert_member_metadata(
-        conn, tag, email=None, email_verified_at=None, email_source=None
-    )
+    _upsert_member_metadata(conn, tag, email=None, email_verified_at=None, email_source=None)
     conn.execute("DELETE FROM email_verifications WHERE player_tag = ?", (tag,))
     conn.commit()
 
@@ -442,9 +430,7 @@ def bump_email_challenge_attempts(
 
 
 @managed_connection
-def clear_email_challenge(
-    member_tag: str, conn: Optional[sqlite3.Connection] = None
-) -> None:
+def clear_email_challenge(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> None:
     conn.execute(
         "DELETE FROM email_verifications WHERE player_tag = ?",
         (_canon_tag(member_tag),),
@@ -493,9 +479,7 @@ def format_member_reference(
         if dn:
             return dn
     if member is None:
-        member = (
-            get_member_identity(member_or_tag, conn=conn) if conn is not None else None
-        )
+        member = get_member_identity(member_or_tag, conn=conn) if conn is not None else None
     raw = (
         (member or {}).get("member_name")
         or (member or {}).get("current_name")
@@ -636,9 +620,7 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         ).fetchall()
     )
     current_season_id = get_current_season_id(conn=conn)
-    stale_targets = len(
-        get_player_intel_refresh_targets(limit=500, stale_after_hours=6, conn=conn)
-    )
+    stale_targets = len(get_player_intel_refresh_targets(limit=500, stale_after_hours=6, conn=conn))
     llm_cost_7d = conn.execute(
         """
         SELECT COUNT(*) AS calls,

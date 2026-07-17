@@ -83,9 +83,7 @@ def test_war_day_intent_carries_thread_and_week_finished_does_not():
         _seed_week(conn, finished=False)
         conn.execute("UPDATE war_weeks SET thread_id = 777 WHERE season_id = 133")
         conn.commit()
-        wk = conn.execute(
-            "SELECT thread_id FROM war_weeks WHERE season_id=133"
-        ).fetchone()
+        wk = conn.execute("SELECT thread_id FROM war_weeks WHERE season_id=133").fetchone()
         iid = delivery.raise_intent(
             conn,
             None,
@@ -180,19 +178,13 @@ def test_close_war_week_threads_locks_once():
     intents = [
         {
             "intent_type": "war:week_finished",
-            "payload_json": json.dumps(
-                {"week_thread_id": 777, "our_rank": 1, "our_fame": 30000}
-            ),
+            "payload_json": json.dumps({"week_thread_id": 777, "our_rank": 1, "our_fame": 30000}),
         },
     ]
-    closed = asyncio.run(
-        rt_threads.close_war_week_threads(bot, db.get_connection, intents)
-    )
+    closed = asyncio.run(rt_threads.close_war_week_threads(bot, db.get_connection, intents))
     assert closed == 1 and th.locked and any("record stands" in s for s in th.sent)
     # rescan within the 15-min window: already locked -> no double post
-    closed2 = asyncio.run(
-        rt_threads.close_war_week_threads(bot, db.get_connection, intents)
-    )
+    closed2 = asyncio.run(rt_threads.close_war_week_threads(bot, db.get_connection, intents))
     assert closed2 == 0 and len(th.sent) == 1
 
 
@@ -206,17 +198,11 @@ def test_create_failure_means_no_row_and_channel_fallback():
         _seed_week(conn, season=140, section=0, period="training", finished=False)
     finally:
         conn.close()
-    tid = asyncio.run(
-        rt_threads.ensure_war_week_thread(_Broken(), db.get_connection, 111)
-    )
+    tid = asyncio.run(rt_threads.ensure_war_week_thread(_Broken(), db.get_connection, 111))
     assert tid is None
     conn = db.get_connection()
     try:
-        row = conn.execute(
-            "SELECT thread_id FROM war_weeks WHERE season_id=140"
-        ).fetchone()
-        assert (
-            row["thread_id"] is None
-        )  # need stays pending; posts fall back to channel
+        row = conn.execute("SELECT thread_id FROM war_weeks WHERE season_id=140").fetchone()
+        assert row["thread_id"] is None  # need stays pending; posts fall back to channel
     finally:
         conn.close()

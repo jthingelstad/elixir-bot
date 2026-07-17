@@ -10,9 +10,9 @@ Exit code is NON-ZERO when there are findings, so a cron/launchd wrapper or the
 unattended `confidence-monitor` routine knows to act. `--json` emits a machine
 object for an agent to triage.
 
-    ./venv/bin/python scripts/confidence_report.py           # human summary
-    ./venv/bin/python scripts/confidence_report.py --json    # agent-readable
-    ./venv/bin/python scripts/confidence_report.py --quick   # skip the LLM eval
+    uv run python scripts/confidence_report.py           # human summary
+    uv run python scripts/confidence_report.py --json    # agent-readable
+    uv run python scripts/confidence_report.py --quick   # skip the LLM eval
 """
 
 from __future__ import annotations
@@ -140,12 +140,8 @@ def main() -> int:
             print()
         print(f"Open incidents: {len(incidents)}")
         for i in incidents[:15]:
-            print(
-                f"  [{i['at'][5:16]}] {i['severity']:5} {i['component']}: {i['summary'][:80]}"
-            )
-        print(
-            f"\nConfidence tests: {'PASS' if tests['ok'] else 'FAIL'} — {tests['summary']}"
-        )
+            print(f"  [{i['at'][5:16]}] {i['severity']:5} {i['component']}: {i['summary'][:80]}")
+        print(f"\nConfidence tests: {'PASS' if tests['ok'] else 'FAIL'} — {tests['summary']}")
         for f in tests["failures"]:
             print(f"  {f}")
         if quality.get("available"):

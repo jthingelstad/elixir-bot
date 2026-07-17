@@ -48,7 +48,9 @@ def _run_daily_with(generated):
 def test_daily_posts_brain_composed_hook():
     """The daily posts exactly the brain's composed text — no editor gate,
     no template rotation."""
-    post_text = "🔥 dez42 is on an 11-win Path of Legends run. Try asking:\n> Show dez42's ranked decks"
+    post_text = (
+        "🔥 dez42 is on an 11-win Path of Legends run. Try asking:\n> Show dez42's ranked decks"
+    )
     mock_post, saved = _run_daily_with({"post": post_text, "topic": "ranked-run"})
 
     assert mock_post.await_count == 1

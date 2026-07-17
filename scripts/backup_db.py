@@ -54,9 +54,7 @@ def _filename_re(prefix: str) -> re.Pattern:
     """Match `<prefix>-<timestamp>.db.gz`. Anchored so prefixes don't collide:
     the literal `-` before the 4-digit year stops "elixir" matching
     "elixir-v5-…" files (and "elixir-v5" matching "elixir-v5-events-…")."""
-    return re.compile(
-        rf"^{re.escape(prefix)}-(\d{{4}}-\d{{2}}-\d{{2}}-\d{{6}})\.db\.gz$"
-    )
+    return re.compile(rf"^{re.escape(prefix)}-(\d{{4}}-\d{{2}}-\d{{2}}-\d{{6}})\.db\.gz$")
 
 
 def _databases() -> list[tuple[str, Path, bool]]:
@@ -85,9 +83,7 @@ def _timestamp_from_name(name: str, prefix: str = _DEFAULT_PREFIX) -> datetime |
     if not m:
         return None
     try:
-        return datetime.strptime(m.group(1), _TIMESTAMP_FMT).replace(
-            tzinfo=timezone.utc
-        )
+        return datetime.strptime(m.group(1), _TIMESTAMP_FMT).replace(tzinfo=timezone.utc)
     except ValueError:
         return None
 
@@ -148,9 +144,7 @@ def create_backup(
                 # Integrity check on the backup copy.
                 check_conn = sqlite3.connect(tmp_path)
                 try:
-                    check_result = check_conn.execute(
-                        "PRAGMA integrity_check"
-                    ).fetchone()[0]
+                    check_result = check_conn.execute("PRAGMA integrity_check").fetchone()[0]
                     if check_result != "ok":
                         result["error"] = f"integrity check failed: {check_result}"
                         return result
@@ -167,9 +161,7 @@ def create_backup(
                         if not chunk:
                             break
                         f_out.write(chunk)
-                os.replace(
-                    stage_gz, dest
-                )  # atomic move into (possibly iCloud) dest_dir
+                os.replace(stage_gz, dest)  # atomic move into (possibly iCloud) dest_dir
 
                 result["size_compressed"] = os.path.getsize(dest)
                 result["ok"] = True
@@ -204,9 +196,7 @@ def _quarter(dt: datetime) -> tuple[int, int]:
     return dt.year, (dt.month - 1) // 3
 
 
-def prune_backups(
-    backup_dir: Path | None = None, prefix: str = _DEFAULT_PREFIX
-) -> list[str]:
+def prune_backups(backup_dir: Path | None = None, prefix: str = _DEFAULT_PREFIX) -> list[str]:
     """Delete backups of one prefix family that exceed the retention policy.
 
     Only files matching `<prefix>-<timestamp>.db.gz` are considered, so each

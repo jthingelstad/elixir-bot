@@ -57,10 +57,7 @@ def _chat_with_tools(*args, **kwargs):
 
 def _clan_trend_prompt_context(days=30, window_days=7):
     try:
-        return (
-            db.build_clan_trend_summary_context(days=days, window_days=window_days)
-            or ""
-        )
+        return db.build_clan_trend_summary_context(days=days, window_days=window_days) or ""
     except sqlite3.Error as exc:
         log.warning("Clan trend summary context unavailable: %s", exc)
         return ""
@@ -326,9 +323,7 @@ def _promotion_context(clan_data, war_data, roster_data=None):
         spotlight_candidates = sorted(
             roster_data.get("members", []),
             key=lambda member: (
-                {"Leader": 3, "Co-Leader": 3, "Elder": 2, "Member": 1}.get(
-                    member.get("role"), 0
-                ),
+                {"Leader": 3, "Co-Leader": 3, "Elder": 2, "Member": 1}.get(member.get("role"), 0),
                 len(member.get("favorite_cards") or []),
                 member.get("trophies") or 0,
                 member.get("donations") or 0,
@@ -359,9 +354,9 @@ def _promotion_context(clan_data, war_data, roster_data=None):
                 lines.append(line)
 
     try:
-        season_summary = war_capability.get_war_season_view(
-            view="summary", limit=5, source=db
-        )["data"]
+        season_summary = war_capability.get_war_season_view(view="summary", limit=5, source=db)[
+            "data"
+        ]
     except sqlite3.Error:
         season_summary = None
     if season_summary:
@@ -401,9 +396,7 @@ def generate_channel_update(
 
 def generate_clan_chat_copy(request: dict):
     """Generate copy intended for Clash Royale in-game clan chat only."""
-    public_request = {
-        k: v for k, v in (request or {}).items() if not str(k).startswith("_")
-    }
+    public_request = {k: v for k, v in (request or {}).items() if not str(k).startswith("_")}
     user_msg = (
         "Generate Clash Royale in-game clan chat copy for this request. "
         "Follow the system guardrails exactly and return only the JSON object.\n\n"
@@ -539,9 +532,7 @@ def generate_ask_elixir_daily(
     return {"post": post, "topic": result.get("topic")}
 
 
-def run_awareness_tick(
-    situation: dict, *, tool_stats: dict | None = None, on_event=None
-):
+def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None, on_event=None):
     """Run one awareness-loop turn. Receives the assembled Situation, returns
     a structured post plan: ``{"posts": [...], "skipped_reason": "..."}``.
 
@@ -560,9 +551,7 @@ def run_awareness_tick(
     """
     # Strip `_`-prefixed internal fields (e.g., _raw_signal_count, _clan_tag)
     # before serializing — the agent does not need runtime bookkeeping.
-    public_situation = {
-        k: v for k, v in (situation or {}).items() if not k.startswith("_")
-    }
+    public_situation = {k: v for k, v in (situation or {}).items() if not k.startswith("_")}
     base_user_msg = (
         "Here is the current Situation. Decide what, if anything, to post and "
         "where, following the lane rules in your system prompt. Silence is an "
@@ -695,9 +684,7 @@ def respond_in_reception(question, author_name, clan_data, memory_context=None):
         "\n".join(f"  {m.get('name', '?')} ({m.get('tag', '?')})" for m in members)
         or "  (roster unavailable)"
     )
-    user_msg = (
-        f"New member '{author_name}' asks: {question}\n\n=== CLAN ROSTER ===\n{roster}"
-    )
+    user_msg = f"New member '{author_name}' asks: {question}\n\n=== CLAN ROSTER ===\n{roster}"
     user_msg += _format_memory_context(memory_context)
     return _chat_with_tools(
         _reception_system(),
@@ -737,7 +724,9 @@ def _validate_war_deck_suggestion(result):
             seen_total[name] = seen_total.get(name, 0) + 1
     duplicates = sorted([name for name, count in seen_total.items() if count > 1])
     if duplicates:
-        return f"These cards appear in more than one deck (no-overlap rule): {', '.join(duplicates)}."
+        return (
+            f"These cards appear in more than one deck (no-overlap rule): {', '.join(duplicates)}."
+        )
     return None
 
 
@@ -851,9 +840,7 @@ def respond_in_deck_review(
                 or {}
             ).get("current_deck")
         except Exception as exc:
-            log.warning(
-                "current_deck pre-fetch failed for %s: %s", target_member_tag, exc
-            )
+            log.warning("current_deck pre-fetch failed for %s: %s", target_member_tag, exc)
             current_deck = None
         if isinstance(current_deck, dict) and current_deck.get("cards"):
             deck_card_names = [
@@ -908,9 +895,7 @@ def respond_in_deck_review(
                 include_support=True,
             )
         except Exception as exc:
-            log.warning(
-                "collection pre-fetch failed for %s: %s", target_member_tag, exc
-            )
+            log.warning("collection pre-fetch failed for %s: %s", target_member_tag, exc)
             collection = None
         if isinstance(collection, dict):
             owned = list(collection.get("cards") or []) + list(
@@ -1124,9 +1109,7 @@ def respond_in_channel(
     # Determine whether war context is relevant for this conversation
     channel_lower = (channel_name or "").strip().lower()
     war_relevant = (
-        workflow == "clanops"
-        or channel_lower == "#river-race"
-        or _mentions_war(question)
+        workflow == "clanops" or channel_lower == "#river-race" or _mentions_war(question)
     )
 
     context = (
@@ -1207,11 +1190,7 @@ def respond_in_channel(
         strict_json=True,
         return_errors=True,
     )
-    if (
-        war_relevant
-        and isinstance(war_snapshot, dict)
-        and war_snapshot.get("available")
-    ):
+    if war_relevant and isinstance(war_snapshot, dict) and war_snapshot.get("available"):
         from agent.factual_admission import admit_structured_response
         from capabilities.game_truth import live_war_claim_facts
 
@@ -1296,9 +1275,7 @@ def generate_promote_content(clan_data, war_data=None, roster_data=None):
         roster_data=roster_data,
         max_members=MAX_CONTEXT_MEMBERS_FULL,
     )
-    promotion_context = _promotion_context(
-        clan_data, war_data or {}, roster_data=roster_data
-    )
+    promotion_context = _promotion_context(clan_data, war_data or {}, roster_data=roster_data)
     required_trophies = clan_data.get("requiredTrophies", 2000)
     user_msg = (
         f"{context}\n\n"
@@ -1509,9 +1486,7 @@ def generate_tournament_recap(recap_context):
     return text or None
 
 
-def generate_intel_report(
-    our_tag, competitor_tags, *, season_id=None, memory_context=None
-):
+def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_context=None):
     """Run the Clan Wars Intel Report workflow.
 
     The LLM fetches intel on each competitor via cr_api + get_clan_intel_report,
@@ -1524,8 +1499,7 @@ def generate_intel_report(
         else "A new river race has started."
     )
     opponents_line = (
-        ", ".join(f"#{t.lstrip('#').upper()}" for t in competitor_tags)
-        or "(none listed)"
+        ", ".join(f"#{t.lstrip('#').upper()}" for t in competitor_tags) or "(none listed)"
     )
     user_msg = (
         f"{season_line}\n"
@@ -1536,9 +1510,7 @@ def generate_intel_report(
     )
     our_state_lines = []
     try:
-        snapshot = war_capability.get_war_season_view(view="snapshot", source=db)[
-            "data"
-        ]
+        snapshot = war_capability.get_war_season_view(view="snapshot", source=db)["data"]
         if snapshot:
             state = snapshot.get("state") or {}
             health = state.get("participation_health") or {}

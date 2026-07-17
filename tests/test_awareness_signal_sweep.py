@@ -24,9 +24,7 @@ def _seed_player_event(dedup, event_type, observed_at, *, backfilled=0, conn=Non
 
 
 @managed_connection
-def _seed_game_event(
-    dedup, event_type, observed_at, payload, *, backfilled=0, conn=None
-):
+def _seed_game_event(dedup, event_type, observed_at, payload, *, backfilled=0, conn=None):
     from storage import game_events as ge
 
     ge.insert_game_event(
@@ -62,9 +60,7 @@ def test_list_recent_events_can_include_game_and_drop_backfilled():
     assert not any(e["stream"] == "game" for e in default)
 
     # Opt-in to game, dropping backfilled → only the real event, not the seed card.
-    got = events_read.list_recent_events(
-        days=30, streams=("game",), exclude_backfilled=True
-    )
+    got = events_read.list_recent_events(days=30, streams=("game",), exclude_backfilled=True)
     types = {e["event_type"] for e in got}
     assert types == {"event_started"}
     assert all(e["timing"] is None for e in got)  # game has no `timing` column
@@ -78,12 +74,8 @@ def test_signals_are_since_last_tick_not_a_window():
     store.persist_thought({"t": 1}, {"posts": []})
     last = store.last_tick_at()
     assert last  # cursor is set from the persisted thought
-    _seed_player_event(
-        "old:1", "badge_earned", "2026-01-01T00:00:00Z"
-    )  # long before cursor
-    _seed_player_event(
-        "new:1", "badge_earned", "2999-01-01T00:00:00Z"
-    )  # after the cursor
+    _seed_player_event("old:1", "badge_earned", "2026-01-01T00:00:00Z")  # long before cursor
+    _seed_player_event("new:1", "badge_earned", "2999-01-01T00:00:00Z")  # after the cursor
 
     conn = db.get_connection()
     try:
@@ -119,9 +111,7 @@ def test_game_context_keeps_recent_card_as_background_with_is_new():
     assert ronin["rarity"] == "legendary"
 
 
-def _seed_many_player_events(
-    conn, count: int, *, prefix: str = "burst", start_hours_ago=0
-):
+def _seed_many_player_events(conn, count: int, *, prefix: str = "burst", start_hours_ago=0):
     conn.execute("PRAGMA foreign_keys=OFF")
     base = datetime.now(timezone.utc) - timedelta(hours=start_hours_ago)
     conn.executemany(
@@ -149,9 +139,7 @@ def test_awareness_backlog_is_oldest_first_and_drains_past_batch_limit(engine_co
     _seed_many_player_events(engine_conn, 100)
 
     first = read_mod._pending_event_batch(engine_conn)
-    assert [e["dedup_key"] for e in first["events"]] == [
-        f"burst:{i:03d}" for i in range(80)
-    ]
+    assert [e["dedup_key"] for e in first["events"]] == [f"burst:{i:03d}" for i in range(80)]
     assert first["has_more"] is True
 
     store.persist_thought(
@@ -161,9 +149,7 @@ def test_awareness_backlog_is_oldest_first_and_drains_past_batch_limit(engine_co
         conn=engine_conn,
     )
     second = read_mod._pending_event_batch(engine_conn)
-    assert [e["dedup_key"] for e in second["events"]] == [
-        f"burst:{i:03d}" for i in range(80, 100)
-    ]
+    assert [e["dedup_key"] for e in second["events"]] == [f"burst:{i:03d}" for i in range(80, 100)]
     assert second["has_more"] is False
 
 

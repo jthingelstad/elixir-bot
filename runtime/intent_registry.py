@@ -138,8 +138,7 @@ ROUTES: list[dict] = [
         "key": "top_war_contributors",
         "label": "Top war contributors this season",
         "router_description": (
-            "User wants the leaderboard of top contributors to clan wars for "
-            "the current season."
+            "User wants the leaderboard of top contributors to clan wars for the current season."
         ),
         "help_summary": "List the top war contributors this season.",
         "examples": [
@@ -153,9 +152,7 @@ ROUTES: list[dict] = [
     {
         "key": "roster_join_dates",
         "label": "Roster join dates",
-        "router_description": (
-            "User wants the roster sorted by when each member joined the clan."
-        ),
+        "router_description": ("User wants the roster sorted by when each member joined the clan."),
         "help_summary": "Show the roster ordered by join date.",
         "examples": [
             "show join dates",
@@ -227,9 +224,7 @@ ROUTES: list[dict] = [
             "request that needs the full LLM chat workflow with tools. This is "
             "the default when nothing else fits."
         ),
-        "help_summary": (
-            "Open Q&A on members, war, donations, trophies, recent form, and more."
-        ),
+        "help_summary": ("Open Q&A on members, war, donations, trophies, recent form, and more."),
         "examples": [
             "what's jamie's war participation rate",
             "who has the most donations this week",
@@ -280,9 +275,7 @@ def help_routes_for_workflow(workflow: str) -> list[dict]:
     return [
         r
         for r in ROUTES
-        if workflow in r["workflows"]
-        and r["key"] not in excluded
-        and r.get("help_summary")
+        if workflow in r["workflows"] and r["key"] not in excluded and r.get("help_summary")
     ]
 
 
@@ -295,9 +288,7 @@ def router_route_summaries(workflows: Iterable[str] | None = None) -> str:
             continue
         modes = r.get("mode_choices")
         mode_note = f" (modes: {', '.join(modes)})" if modes else ""
-        mention_note = (
-            " — requires bot to be mentioned" if r.get("requires_mention") else ""
-        )
+        mention_note = " — requires bot to be mentioned" if r.get("requires_mention") else ""
         examples = "; ".join(f'"{e}"' for e in r["examples"][:4])
         lines.append(
             f"- **{r['key']}** — {r['label']}{mode_note}{mention_note}\n"

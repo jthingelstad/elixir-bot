@@ -5,7 +5,7 @@ extractor and fills battle_events.teammate_tag where it is NULL — rescuing
 the 2v2 duo data that predates the column. Idempotent: rows already filled
 are left alone; re-running is a no-op.
 
-Usage: ./venv/bin/python scripts/migrate_v51/backfill_teammates.py [db_path]
+Usage: uv run python scripts/migrate_v51/backfill_teammates.py [db_path]
 """
 
 from __future__ import annotations
@@ -15,9 +15,7 @@ import os
 import sqlite3
 import sys
 
-sys.path.insert(
-    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from engine.ingest import extract_battles  # noqa: E402
 
@@ -39,7 +37,7 @@ def main(db_path: str | None = None) -> None:
     for row in payloads:
         try:
             battlelog = json.loads(row["payload_json"])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         for bt in extract_battles(row["entity_key"], battlelog or []):
             if not bt.get("teammate_tag"):

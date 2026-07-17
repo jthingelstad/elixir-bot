@@ -94,9 +94,9 @@ def _proposed_card(conn, tag="#RAT", action_type="promotion_recommendation"):
 
 
 def _status(conn, case_id):
-    return conn.execute(
-        "SELECT status FROM decision_cases WHERE case_id=?", (case_id,)
-    ).fetchone()["status"]
+    return conn.execute("SELECT status FROM decision_cases WHERE case_id=?", (case_id,)).fetchone()[
+        "status"
+    ]
 
 
 def test_dismisses_stale_uncorroborated_promotion_case(engine_conn):

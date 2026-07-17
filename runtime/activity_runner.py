@@ -55,7 +55,7 @@ class _ChannelLookup:
     def get_channel(self, channel_id: int | str):
         try:
             return self._channels.get(int(channel_id))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
 
@@ -70,9 +70,7 @@ def _validate_manual_activity(activity_key: str):
     return activity
 
 
-async def run_activity_once(
-    activity_key: str, *, runtime_module: Any
-) -> ActivityRunResult:
+async def run_activity_once(activity_key: str, *, runtime_module: Any) -> ActivityRunResult:
     activity = _validate_manual_activity(activity_key)
     resolved = resolve_activity(activity.activity_key, runtime_module)
     job_callable = resolved["job_callable"]
@@ -144,9 +142,7 @@ async def run_shell_activity(activity_key: str) -> ActivityRunResult:
 
 
 def _print_json(payload: dict[str, Any], *, stream=None) -> None:
-    print(
-        json.dumps(payload, ensure_ascii=False, default=str), file=stream or sys.stdout
-    )
+    print(json.dumps(payload, ensure_ascii=False, default=str), file=stream or sys.stdout)
 
 
 async def _run_cli(args: argparse.Namespace) -> int:
@@ -176,14 +172,10 @@ async def _run_cli(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Run a registered Elixir activity once."
-    )
+    parser = argparse.ArgumentParser(description="Run a registered Elixir activity once.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    run_parser = subparsers.add_parser(
-        "run", help="Run one manual-triggerable activity."
-    )
+    run_parser = subparsers.add_parser("run", help="Run one manual-triggerable activity.")
     run_parser.add_argument("activity", help="Activity key or registry alias.")
 
     args = parser.parse_args(argv)

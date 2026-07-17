@@ -36,10 +36,7 @@ def _preauthored_system_signal_result(signal):
     if not content:
         return None
     summary = (
-        payload.get("title")
-        or signal.get("title")
-        or signal.get("signal_key")
-        or "System update"
+        payload.get("title") or signal.get("title") or signal.get("signal_key") or "System update"
     )
     return {
         "event_type": "channel_update",
@@ -51,11 +48,7 @@ def _preauthored_system_signal_result(signal):
 def _preauthored_system_signal_target(signal):
     signal_type = (signal or {}).get("signal_type") or (signal or {}).get("type")
     payload = (signal or {}).get("payload") or {}
-    audience = (
-        (payload.get("audience") or (signal or {}).get("audience") or "")
-        .strip()
-        .lower()
-    )
+    audience = (payload.get("audience") or (signal or {}).get("audience") or "").strip().lower()
     if audience == "leadership" or signal_type in {
         "api_event_sentinel",
         "api_schema_sentinel",
@@ -115,14 +108,10 @@ async def _post_system_signal_updates(signals, clan, war):
             event_type=result.get("event_type") or "channel_update",
         )
         if signal.get("signal_key"):
-            await asyncio.to_thread(
-                db.mark_system_signal_announced, signal["signal_key"]
-            )
+            await asyncio.to_thread(db.mark_system_signal_announced, signal["signal_key"])
 
 
-async def _publish_pending_system_signal_updates(
-    *, seed_startup_signals: bool = False
-) -> int:
+async def _publish_pending_system_signal_updates(*, seed_startup_signals: bool = False) -> int:
     if seed_startup_signals:
         await asyncio.to_thread(queue_startup_system_signals)
     pending = await asyncio.to_thread(db.list_pending_system_signals)

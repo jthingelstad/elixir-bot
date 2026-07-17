@@ -132,15 +132,11 @@ def get_member_intelligence(
     if "profile" in requested:
         result["profile"] = _invoke(source, "get_member_profile", tag, conn=conn)
     if "form" in requested:
-        result["form"] = _invoke(
-            source, "get_member_recent_form", tag, scope=scope, conn=conn
-        )
+        result["form"] = _invoke(source, "get_member_recent_form", tag, scope=scope, conn=conn)
     if "playstyle" in requested:
         result["playstyle"] = _playstyle(source, tag, days, conn=conn)
     if "war" in requested:
-        result["war"] = _invoke(
-            source, "get_member_war_status", tag, season_id=None, conn=conn
-        )
+        result["war"] = _invoke(source, "get_member_war_status", tag, season_id=None, conn=conn)
     if "trend" in requested:
         result["trend"] = _invoke(
             source,
@@ -180,13 +176,9 @@ def get_member_intelligence(
             conn=conn,
         )
     if "history" in requested:
-        result["history"] = _invoke(
-            source, "get_member_history", tag, days=days, conn=conn
-        )
+        result["history"] = _invoke(source, "get_member_history", tag, days=days, conn=conn)
     if "ranked" in requested:
-        result["ranked"] = _invoke(
-            source, "get_member_ranked_status", tag, days=days, conn=conn
-        )
+        result["ranked"] = _invoke(source, "get_member_ranked_status", tag, days=days, conn=conn)
     if "mode_activity" in requested:
         result["mode_activity"] = _invoke(
             source, "get_member_mode_activity", tag, days=days, conn=conn

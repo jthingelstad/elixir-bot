@@ -60,10 +60,8 @@ def _now(now: Optional[str]) -> str:
 
 def _cooldown_from(now: str) -> str:
     try:
-        base = datetime.strptime(now[:19], "%Y-%m-%dT%H:%M:%S").replace(
-            tzinfo=timezone.utc
-        )
-    except (TypeError, ValueError):
+        base = datetime.strptime(now[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    except TypeError, ValueError:
         base = datetime.now(timezone.utc)
     return (base + timedelta(days=COOLDOWN_DAYS)).strftime(_ISO)
 
@@ -166,9 +164,7 @@ def on_decision(
     ).strip()
     copy = action.get("copy_current_text") or action.get("copy_original_text") or ""
     if not discord_user_id or not copy.strip():
-        log.warning(
-            "outreach: missing discord_user_id/copy for %s; marking failed", tag
-        )
+        log.warning("outreach: missing discord_user_id/copy for %s; marking failed", tag)
         return mo.upsert_outreach(
             tag,
             status="failed",

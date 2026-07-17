@@ -63,7 +63,7 @@ DAILY_RANK_FAME = {1: 3_000, 2: 1_800, 3: 1_000, 4: 600, 5: 400}
 def _coerce_int(value) -> int:
     try:
         return int(value or 0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0
 
 
@@ -78,7 +78,7 @@ def _live_race(conn) -> Optional[tuple[dict, str]]:
         return None
     try:
         return json.loads(row["payload_json"]), row["observed_at"]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -183,9 +183,7 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
     # What we'd bank at day close if our current daily rank holds — PLACEMENT
     # fame. Mirrors the in-game boat projection; only meaningful once today has
     # scored, and there is no fame in Colosseum.
-    projected_day_fame = (
-        DAILY_RANK_FAME.get(day_rank) if (day_scored and not colosseum) else None
-    )
+    projected_day_fame = DAILY_RANK_FAME.get(day_rank) if (day_scored and not colosseum) else None
     # Boat defenses ALSO add fame at day close (survival award) — read directly
     # from the API's periodLogs (our_defense.defense_fame_recent), NOT
     # back-calculated. Project the recent per-day rate when defenses still stand.
@@ -198,14 +196,11 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
     projected_fame_at_close = None
     clinches_finish_today = False
     if not colosseum and projected_day_fame is not None:
-        projected_fame_at_close = (
-            our_fame + projected_day_fame + (projected_defense_fame or 0)
-        )
+        projected_fame_at_close = our_fame + projected_day_fame + (projected_defense_fame or 0)
         # We'd cross the finish line at TODAY's close (winning the week early) if
         # holding this rank + defenses gets us there and we're not already over.
         clinches_finish_today = (
-            finish_line is not None
-            and our_fame < finish_line <= projected_fame_at_close
+            finish_line is not None and our_fame < finish_line <= projected_fame_at_close
         )
 
     observed_dt = coerce_utc_datetime(observed_at)
@@ -250,20 +245,14 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
         "colosseum_week": colosseum,
         "battle_phase_active": phase == "battle",
         "practice_phase_active": phase == "practice",
-        "final_practice_day_active": phase == "practice"
-        and offset == FINAL_PRACTICE_PERIOD_OFFSET,
-        "final_battle_day_active": phase == "battle"
-        and offset == FINAL_BATTLE_PERIOD_OFFSET,
-        "battle_day_number": phase_day_number(phase, period_index)
-        if phase == "battle"
-        else None,
+        "final_practice_day_active": phase == "practice" and offset == FINAL_PRACTICE_PERIOD_OFFSET,
+        "final_battle_day_active": phase == "battle" and offset == FINAL_BATTLE_PERIOD_OFFSET,
+        "battle_day_number": phase_day_number(phase, period_index) if phase == "battle" else None,
         "battle_day_total": 4 if phase == "battle" else None,
         "practice_day_number": phase_day_number(phase, period_index)
         if phase == "practice"
         else None,
-        "practice_day_total": FIRST_BATTLE_PERIOD_OFFSET
-        if phase == "practice"
-        else None,
+        "practice_day_total": FIRST_BATTLE_PERIOD_OFFSET if phase == "practice" else None,
         "race_rank": race_rank,
         "race_standings": race_standings,
         "day_rank": day_rank,
@@ -277,9 +266,7 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
         ),
         "race_completed_at": None,
         "race_completed_early": False,
-        "trophy_change": int(trophy_change)
-        if isinstance(trophy_change, (int, float))
-        else None,
+        "trophy_change": int(trophy_change) if isinstance(trophy_change, (int, float)) else None,
         "trophy_stakes_known": isinstance(trophy_change, (int, float)),
         "trophy_stakes_text": (
             f"{abs(int(trophy_change))} trophies on the line"
@@ -394,15 +381,11 @@ def get_war_day_state(
     observed_dt = coerce_utc_datetime(observed_at_live)
     started_at, ends_at = war_reset_window_utc(observed_dt or observed_at_live)
     now = datetime.now(timezone.utc)
-    time_left_seconds = (
-        max(0, int((ends_at - now).total_seconds())) if ends_at else None
-    )
+    time_left_seconds = max(0, int((ends_at - now).total_seconds())) if ends_at else None
 
     phase = status.get("phase")
     day_number = (
-        status.get("battle_day_number")
-        if phase == "battle"
-        else status.get("practice_day_number")
+        status.get("battle_day_number") if phase == "battle" else status.get("practice_day_number")
     )
     return {
         "war_day_key": status.get("war_day_key"),
@@ -713,9 +696,9 @@ def get_war_season_summary(
             if cur is None:  # current week not yet a war_weeks row → count it
                 races += 1
     top = get_war_champ_standings(season_id=season_id, conn=conn)[:top_n]
-    nonparticipants = get_members_without_war_participation(
-        season_id=season_id, conn=conn
-    )["members"]
+    nonparticipants = get_members_without_war_participation(season_id=season_id, conn=conn)[
+        "members"
+    ]
     active_members = conn.execute(
         "SELECT COUNT(*) AS cnt FROM clan_memberships WHERE left_at IS NULL"
     ).fetchone()["cnt"]
@@ -723,9 +706,7 @@ def get_war_season_summary(
         "season_id": season_id,
         "races": races,
         "total_clan_fame": total_fame,
-        "fame_per_active_member": round(total_fame / active_members, 2)
-        if active_members
-        else 0,
+        "fame_per_active_member": round(total_fame / active_members, 2) if active_members else 0,
         "current_week_in_progress": in_progress,
         "top_contributors": top,
         "nonparticipants": nonparticipants,
@@ -744,9 +725,9 @@ def get_trophy_drops(
     and return only genuine declines of at least min_drop. Note: this reads
     Trophy Road (player_daily_metrics.trophies); Path-of-Legends/ranked losses
     live elsewhere and are not covered here."""
-    cutoff = (
-        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
-    ).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
+        "%Y-%m-%d"
+    )
     rows = conn.execute(
         """
         WITH ranked AS (
@@ -811,9 +792,7 @@ def get_trophy_changes(
 
 
 @managed_connection
-def get_war_history(
-    n: int = 10, conn: Optional[sqlite3.Connection] = None
-) -> list[dict]:
+def get_war_history(n: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     rows = conn.execute(
         "SELECT (season_id * 100 + section_index) AS id, season_id, section_index, our_rank, our_fame, defense_fame, "
         "finish_time, created_date, NULL AS standings_json FROM war_weeks "
@@ -859,9 +838,7 @@ def get_current_season_id(conn: Optional[sqlite3.Connection] = None) -> Optional
 
 
 @managed_connection
-def count_war_races_for_season(
-    season_id: int, conn: Optional[sqlite3.Connection] = None
-) -> int:
+def count_war_races_for_season(season_id: int, conn: Optional[sqlite3.Connection] = None) -> int:
     row = conn.execute(
         "SELECT COUNT(*) AS cnt FROM war_weeks WHERE season_id = ?", (season_id,)
     ).fetchone()
@@ -895,9 +872,7 @@ def get_latest_war_race_finish_time(
     return row["finish_time"] or row["created_date"]
 
 
-def _season_bounds(
-    conn: sqlite3.Connection, season_id: int
-) -> tuple[Optional[str], Optional[str]]:
+def _season_bounds(conn: sqlite3.Connection, season_id: int) -> tuple[Optional[str], Optional[str]]:
     first = conn.execute(
         "SELECT created_date FROM war_weeks WHERE season_id = ? "
         "AND created_date IS NOT NULL ORDER BY section_index ASC LIMIT 1",
@@ -916,9 +891,7 @@ def _season_bounds(
     if not start_dt or not end_dt:
         return None, None
     end_dt = end_dt + timedelta(days=7)
-    return start_dt.strftime("%Y%m%dT%H%M%S.000Z"), end_dt.strftime(
-        "%Y%m%dT%H%M%S.000Z"
-    )
+    return start_dt.strftime("%Y%m%dT%H%M%S.000Z"), end_dt.strftime("%Y%m%dT%H%M%S.000Z")
 
 
 @managed_connection
@@ -1025,9 +998,7 @@ def get_war_season_snapshot(conn: Optional[sqlite3.Connection] = None) -> dict |
         # The weekly fame race is only RANKED once a clan has scored. On a
         # practice day every clan sits at 0 fame, so the API's rank is an
         # arbitrary tiebreaker order (not a real standing) — don't surface it.
-        race_scored = any(
-            (s.get("fame") or 0) > 0 for s in (current.get("race_standings") or [])
-        )
+        race_scored = any((s.get("fame") or 0) > 0 for s in (current.get("race_standings") or []))
         win_streak = get_week_win_streak(conn=conn)
         summary_bits = [f"Season {season_id}"]
         if current.get("section_index") is not None:
@@ -1068,14 +1039,10 @@ def get_war_season_snapshot(conn: Optional[sqlite3.Connection] = None) -> dict |
                     "primary_metric": current.get("primary_metric"),
                     "race_ranked": race_scored,
                     "race_rank": current.get("race_rank") if race_scored else None,
-                    "race_standings": _strip_ranks(
-                        current.get("race_standings"), race_scored
-                    ),
+                    "race_standings": _strip_ranks(current.get("race_standings"), race_scored),
                     "fame": current.get("fame"),
                     "boat_scored": current.get("boat_scored"),
-                    "day_rank": current.get("day_rank")
-                    if current.get("day_scored")
-                    else None,
+                    "day_rank": current.get("day_rank") if current.get("day_scored") else None,
                     "day_standings": _strip_ranks(
                         current.get("day_standings"), bool(current.get("day_scored"))
                     ),

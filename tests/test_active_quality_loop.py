@@ -244,9 +244,7 @@ def test_editorial_admission_keeps_notable_repeat_and_roundup():
         "covers_signal_keys": ["one", "two"],
     }
 
-    admitted, suppressed = apply_editorial_admission(
-        read, {"posts": [notable_post, roundup]}
-    )
+    admitted, suppressed = apply_editorial_admission(read, {"posts": [notable_post, roundup]})
 
     assert admitted["posts"] == [notable_post, roundup]
     assert suppressed == []

@@ -39,18 +39,14 @@ def _line_items(title: str, rows: list[dict], *, empty: str) -> list[str]:
             row.get("title")
             or row.get("summary")
             or row.get("event_type")
-            or (
-                f"L{row['loop_number']}" if row.get("loop_number") is not None else None
-            )
+            or (f"L{row['loop_number']}" if row.get("loop_number") is not None else None)
             or row.get("case_key")
             or row.get("rollup_key")
             or row.get("event_key")
         )
         status = row.get("status") or row.get("scope") or row.get("workflow") or ""
         suffix = f" [{status}]" if status else ""
-        timestamp = (
-            row.get("updated_at") or row.get("observed_at") or row.get("due_at") or ""
-        )
+        timestamp = row.get("updated_at") or row.get("observed_at") or row.get("due_at") or ""
         when = f" - {timestamp}" if timestamp else ""
         lines.append(f"- {_short(label)}{suffix}{when}")
     return lines
@@ -89,9 +85,7 @@ def _print_summary(data: dict) -> None:
     war_season = data.get("war_season") or {}
     print("War Season")
     if war_season:
-        print(
-            f"- season {war_season.get('season_id')}: {_short(war_season.get('summary'))}"
-        )
+        print(f"- season {war_season.get('season_id')}: {_short(war_season.get('summary'))}")
     else:
         print("- none")
     print("")
@@ -147,11 +141,7 @@ def _war_payload(args) -> dict:
 
 def _cases_payload(args) -> dict:
     if args.status == "due":
-        return {
-            "due": db.list_due_decision_cases(
-                case_type=args.case_type, limit=args.limit
-            )
-        }
+        return {"due": db.list_due_decision_cases(case_type=args.case_type, limit=args.limit)}
     if args.status and args.status != "all":
         return {
             "cases": db.list_decision_cases(
@@ -180,9 +170,7 @@ def _print_generic(data: dict) -> None:
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--json", action="store_true", help="Emit JSON instead of text."
-    )
+    parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
     parser.add_argument("--limit", type=int, default=25, help="Maximum rows to return.")
 
 
@@ -190,9 +178,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command")
 
-    summary = sub.add_parser(
-        "summary", help="Show events, war, cases, and awareness activity."
-    )
+    summary = sub.add_parser("summary", help="Show events, war, cases, and awareness activity.")
     _add_common(summary)
     summary.add_argument("--days", type=int, default=7)
     summary.add_argument("--scope", choices=("public", "leadership"), default=None)
@@ -216,9 +202,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cases.add_argument("--case-type")
 
-    awareness = sub.add_parser(
-        "awareness", help="Show current proactive decisions and posts."
-    )
+    awareness = sub.add_parser("awareness", help="Show current proactive decisions and posts.")
     _add_common(awareness)
 
     return parser

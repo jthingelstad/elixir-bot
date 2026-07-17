@@ -216,9 +216,7 @@ def compare_member_trend_windows(
     total_days = max(window_days * 2, 2)
     trophy_history = get_member_trophy_history(tag, days=total_days, conn=conn)
     current_trophies = trophy_history[-window_days:] if window_days else trophy_history
-    previous_trophies = (
-        trophy_history[-(window_days * 2) : -window_days] if window_days else []
-    )
+    previous_trophies = trophy_history[-(window_days * 2) : -window_days] if window_days else []
 
     canon = _canon_tag(tag)
     today = datetime.fromisoformat(chicago_today()).date()
@@ -228,19 +226,13 @@ def compare_member_trend_windows(
     prev_start = (today - timedelta(days=2 * win - 1)).strftime("%Y%m%d")
     prev_end = (today - timedelta(days=win)).strftime("%Y%m%d")
     current_battle_window = _events_battle_window(conn, canon, cur_start, cur_end, win)
-    previous_battle_window = _events_battle_window(
-        conn, canon, prev_start, prev_end, win
-    )
+    previous_battle_window = _events_battle_window(conn, canon, prev_start, prev_end, win)
 
     member_row = conn.execute(
         "SELECT player_tag AS member_id, player_tag AS tag, display_name AS name FROM players WHERE player_tag = ?",
         (_canon_tag(tag),),
     ).fetchone()
-    member = (
-        dict(member_row)
-        if member_row
-        else {"tag": _canon_tag(tag), "name": _canon_tag(tag)}
-    )
+    member = dict(member_row) if member_row else {"tag": _canon_tag(tag), "name": _canon_tag(tag)}
     if member_row:
         member = _member_reference_fields(conn, member_row["member_id"], member)
 
@@ -258,9 +250,7 @@ def compare_member_trend_windows(
     }
 
 
-def _events_clan_battle_window(
-    conn, start_ymd: str, end_ymd: str, window_days: int
-) -> dict:
+def _events_clan_battle_window(conn, start_ymd: str, end_ymd: str, window_days: int) -> dict:
     """Clan-wide battle activity over a calendar window from authoritative
     battle_events (current members only). QA H1: the clan_daily_battle_rollups
     this replaced were stale (data ended a week behind), so the previous week
@@ -297,9 +287,7 @@ def compare_clan_trend_windows(
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
     total_days = max(window_days * 2, 2)
-    counts = get_clan_member_count_history(
-        days=total_days, clan_tag=clan_tag, conn=conn
-    )
+    counts = get_clan_member_count_history(days=total_days, clan_tag=clan_tag, conn=conn)
     scores = get_clan_score_history(days=total_days, clan_tag=clan_tag, conn=conn)
     trophy_totals = get_clan_total_member_trophies_history(
         days=total_days, clan_tag=clan_tag, conn=conn
@@ -402,13 +390,9 @@ def build_clan_trend_summary_context(
 ) -> str:
     counts = get_clan_member_count_history(days=days, clan_tag=clan_tag, conn=conn)
     scores = get_clan_score_history(days=days, clan_tag=clan_tag, conn=conn)
-    trophies = get_clan_total_member_trophies_history(
-        days=days, clan_tag=clan_tag, conn=conn
-    )
+    trophies = get_clan_total_member_trophies_history(days=days, clan_tag=clan_tag, conn=conn)
     battle_rows = get_clan_daily_battle_summary(days=days, clan_tag=clan_tag, conn=conn)
-    comparison = compare_clan_trend_windows(
-        window_days=window_days, clan_tag=clan_tag, conn=conn
-    )
+    comparison = compare_clan_trend_windows(window_days=window_days, clan_tag=clan_tag, conn=conn)
     latest_counts = counts[-1] if counts else {}
     latest_scores = scores[-1] if scores else {}
     latest_trophies = trophies[-1] if trophies else {}

@@ -88,10 +88,7 @@ def test_closes_departed_case_keeps_current_member():
 
     tags = {d["target_player_tag"] for d in reconciled}
     assert "#LEFT01" in tags and "#STAYS1" not in tags
-    assert (
-        db.get_decision_case("inactivity_review:member:#STAYS1")["status"]
-        == db.CASE_OPEN
-    )
+    assert db.get_decision_case("inactivity_review:member:#STAYS1")["status"] == db.CASE_OPEN
 
 
 def test_organic_leave_is_dismissed_as_member_left():
@@ -138,10 +135,7 @@ def test_member_with_no_membership_row_is_dismissed():
     out = reconcile_departed_member_cases()
 
     assert "#GHOST1" in {d["target_player_tag"] for d in out}
-    assert (
-        db.get_decision_case("promotion_review:member:#GHOST1")["status"]
-        == db.CASE_DISMISSED
-    )
+    assert db.get_decision_case("promotion_review:member:#GHOST1")["status"] == db.CASE_DISMISSED
 
 
 def test_covers_all_member_review_case_types():
@@ -180,10 +174,7 @@ def test_done_kick_resolves_inactivity_case_while_member_present():
 
     assert {c["target_player_tag"] for c in out} == {"#DONEK1"}
     assert out[0]["outcome"] == "accepted"
-    assert (
-        db.get_decision_case("inactivity_review:member:#DONEK1")["status"]
-        == db.CASE_RESOLVED
-    )
+    assert db.get_decision_case("inactivity_review:member:#DONEK1")["status"] == db.CASE_RESOLVED
 
 
 def test_done_promotion_resolves_promotion_case():
@@ -198,10 +189,7 @@ def test_done_promotion_resolves_promotion_case():
 
     out = sync_terminal_leader_action_cases()
 
-    assert (
-        db.get_decision_case("promotion_review:member:#PROMO1")["status"]
-        == db.CASE_RESOLVED
-    )
+    assert db.get_decision_case("promotion_review:member:#PROMO1")["status"] == db.CASE_RESOLVED
     assert out[0]["case_type"] == "promotion_review"
 
 
@@ -216,10 +204,7 @@ def test_rejected_action_dismisses_case():
 
     sync_terminal_leader_action_cases()
 
-    assert (
-        db.get_decision_case("inactivity_review:member:#REJ1")["status"]
-        == db.CASE_DISMISSED
-    )
+    assert db.get_decision_case("inactivity_review:member:#REJ1")["status"] == db.CASE_DISMISSED
 
 
 def test_sync_never_creates_a_case():

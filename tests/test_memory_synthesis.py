@@ -417,12 +417,9 @@ def test_reduce_memory_synthesis_context_for_retry_bounds_large_payload():
             },
             "awareness_activity": {
                 "thoughts": [
-                    {"loop_number": idx, "skipped_reason": "r" * 500}
-                    for idx in range(20)
+                    {"loop_number": idx, "skipped_reason": "r" * 500} for idx in range(20)
                 ],
-                "posts": [
-                    {"post_id": idx, "content_preview": "i" * 500} for idx in range(20)
-                ],
+                "posts": [{"post_id": idx, "content_preview": "i" * 500} for idx in range(20)],
             },
         },
     }
@@ -430,12 +427,8 @@ def test_reduce_memory_synthesis_context_for_retry_bounds_large_payload():
     reduced = _reduce_memory_synthesis_context_for_retry(context)
 
     assert reduced["retry_context"]["reason"] == "initial_response_truncated"
-    assert (
-        len(reduced["week_memories"]) == memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT
-    )
-    assert (
-        len(reduced["prior_arcs"]) == memory_job.MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT
-    )
+    assert len(reduced["week_memories"]) == memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT
+    assert len(reduced["prior_arcs"]) == memory_job.MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT
     assert (
         len(reduced["week_posts"]["leader-lounge"])
         == memory_job.MEMORY_SYNTHESIS_RETRY_POSTS_PER_CHANNEL
@@ -449,10 +442,7 @@ def test_reduce_memory_synthesis_context_for_retry_bounds_large_payload():
         <= memory_job.MEMORY_SYNTHESIS_RETRY_POST_CHARS
     )
     operations = reduced["operations_context"]
-    assert (
-        len(operations["recent_events"])
-        == memory_job.MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT
-    )
+    assert len(operations["recent_events"]) == memory_job.MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT
     assert len(operations["awareness_activity"]["thoughts"]) == (
         memory_job.MEMORY_SYNTHESIS_RETRY_AWARENESS_LIMIT
     )
@@ -464,10 +454,7 @@ def test_reduce_memory_synthesis_context_for_retry_bounds_large_payload():
         == memory_job.MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT
     )
     assert len(operations["war_season"]["state"]["race"]["standings"]) == 5
-    assert (
-        len(operations["game_modes"]["windows"]["7d"]["modes"]["ranked"]["top_members"])
-        == 3
-    )
+    assert len(operations["game_modes"]["windows"]["7d"]["modes"]["ranked"]["top_members"]) == 3
 
 
 def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
@@ -513,9 +500,7 @@ def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
             "runtime.jobs._memory._build_memory_synthesis_context",
             return_value={"week_window": {"war_week_id": "131:2"}},
         ),
-        patch(
-            "runtime.jobs._memory.elixir_agent.run_memory_synthesis", return_value=plan
-        ),
+        patch("runtime.jobs._memory.elixir_agent.run_memory_synthesis", return_value=plan),
         patch(
             "runtime.jobs._memory._apply_memory_synthesis_plan",
             return_value={
@@ -558,17 +543,12 @@ def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
     assert mock_memory.call_args.kwargs["event_type"] == "weekly_memory_synthesis"
     # One action card for the leader-judgment contradiction only.
     assert mock_create.call_args.kwargs["action_type"] == "memory_review"
-    assert (
-        mock_create.call_args.kwargs["source_signal_key"] == "memory_contradiction:42"
-    )
+    assert mock_create.call_args.kwargs["source_signal_key"] == "memory_contradiction:42"
     assert "Fullboat is a member camping" in mock_create.call_args.kwargs["prompt_text"]
     mock_card.assert_awaited_once()
     assert mock_save.call_args.kwargs["event_type"] == "memory_contradiction"
     mock_elixir_log.assert_awaited_once()
-    assert (
-        "Auto-expired metric/current-state memories: 1"
-        in mock_elixir_log.call_args.args[0]
-    )
+    assert "Auto-expired metric/current-state memories: 1" in mock_elixir_log.call_args.args[0]
     assert "contradiction_cards=1" in mock_success.call_args.args[1]
 
 
@@ -590,9 +570,7 @@ def test_memory_synthesis_cycle_quiet_week_posts_nothing():
             "runtime.jobs._memory._build_memory_synthesis_context",
             return_value={"week_window": {}},
         ),
-        patch(
-            "runtime.jobs._memory.elixir_agent.run_memory_synthesis", return_value=plan
-        ),
+        patch("runtime.jobs._memory.elixir_agent.run_memory_synthesis", return_value=plan),
         patch(
             "runtime.jobs._memory._apply_memory_synthesis_plan",
             return_value={
@@ -609,9 +587,7 @@ def test_memory_synthesis_cycle_quiet_week_posts_nothing():
         patch(
             "runtime.jobs._memory.elixir_log.post_event_async", new=AsyncMock()
         ) as mock_elixir_log,
-        patch(
-            "runtime.jobs._memory.post_leader_action_card", new=AsyncMock()
-        ) as mock_card,
+        patch("runtime.jobs._memory.post_leader_action_card", new=AsyncMock()) as mock_card,
         patch("runtime.jobs._memory.runtime_status.mark_job_start"),
         patch("runtime.jobs._memory.runtime_status.mark_job_success") as mock_success,
     ):
@@ -633,9 +609,7 @@ def test_memory_synthesis_cycle_retries_truncated_agent_with_reduced_context():
             "recent_events": [{"event_key": f"event:{idx}"} for idx in range(40)],
             "awareness_activity": {
                 "thoughts": [{"loop_number": idx} for idx in range(20)],
-                "posts": [
-                    {"post_id": idx, "content_preview": "i" * 500} for idx in range(20)
-                ],
+                "posts": [{"post_id": idx, "content_preview": "i" * 500} for idx in range(20)],
             },
         },
     }
@@ -658,9 +632,7 @@ def test_memory_synthesis_cycle_retries_truncated_agent_with_reduced_context():
 
     with (
         patch("runtime.jobs._memory.asyncio.to_thread", side_effect=fake_to_thread),
-        patch(
-            "runtime.jobs._memory._build_memory_synthesis_context", return_value=context
-        ),
+        patch("runtime.jobs._memory._build_memory_synthesis_context", return_value=context),
         patch(
             "runtime.jobs._memory.elixir_agent.run_memory_synthesis",
             side_effect=[truncation, plan],
@@ -686,10 +658,7 @@ def test_memory_synthesis_cycle_retries_truncated_agent_with_reduced_context():
     assert mock_agent.call_count == 2
     retry_context = mock_agent.call_args_list[1].args[0]
     assert retry_context["retry_context"]["reason"] == "initial_response_truncated"
-    assert (
-        len(retry_context["week_memories"])
-        == memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT
-    )
+    assert len(retry_context["week_memories"]) == memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT
     assert (
         len(retry_context["week_memories"][0]["body"])
         <= memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS

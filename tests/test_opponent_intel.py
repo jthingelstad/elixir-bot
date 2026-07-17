@@ -17,9 +17,7 @@ from storage.opponent_intel import (
 # ---------------------------------------------------------------------------
 
 
-def _make_member(
-    name, trophies=6000, exp_level=14, role="member", last_seen="20260411T120000"
-):
+def _make_member(name, trophies=6000, exp_level=14, role="member", last_seen="20260411T120000"):
     return {
         "tag": f"#{name.upper()[:6]}",
         "name": name,
@@ -178,9 +176,7 @@ class TestAnalyzeWarParticipants:
             "ABC",
             "Test",
             participants=[
-                _make_war_participant(
-                    "A", "Alpha", fame=200, decks_used=8, decks_today=4
-                ),
+                _make_war_participant("A", "Alpha", fame=200, decks_used=8, decks_today=4),
             ],
         )
         result = analyze_war_participants(entry)
@@ -195,17 +191,13 @@ class TestAnalyzeWarParticipants:
 class TestWarDayContext:
     def test_battle_day_index(self):
         # periodIndex 4 → day 4 within section → war day 2 of 4.
-        ctx = war_day_context(
-            {"sectionIndex": 2, "periodIndex": 4, "periodType": "warDay"}
-        )
+        ctx = war_day_context({"sectionIndex": 2, "periodIndex": 4, "periodType": "warDay"})
         assert ctx["war_day_index"] == 1
         assert ctx["war_day_label"] == "War day 2 of 4"
         assert ctx["week_label"] == "Week 3"
 
     def test_training_day(self):
-        ctx = war_day_context(
-            {"sectionIndex": 0, "periodIndex": 1, "periodType": "training"}
-        )
+        ctx = war_day_context({"sectionIndex": 0, "periodIndex": 1, "periodType": "training"})
         assert ctx["war_day_index"] is None
         assert "Training" in ctx["war_day_label"]
 

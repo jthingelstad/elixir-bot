@@ -26,9 +26,9 @@ rehearse_season_close.py) on the same scratch copy when the latest season is
 still open there, and the global DB invariants (tests/conftest.py).
 
 Usage:
-    ./venv/bin/python scripts/replay_gate.py            # full window since go-live
-    ./venv/bin/python scripts/replay_gate.py --days 3   # recent window only
-    ./venv/bin/python scripts/replay_gate.py --keep     # keep the scratch DB
+    uv run python scripts/replay_gate.py            # full window since go-live
+    uv run python scripts/replay_gate.py --days 3   # recent window only
+    uv run python scripts/replay_gate.py --keep     # keep the scratch DB
 """
 
 from __future__ import annotations
@@ -60,25 +60,16 @@ def engine_go_live(conn) -> str | None:
     """First moment the v5.1 engine emitted anything — replaying earlier
     payloads would 'discover' pre-engine history and flood the gate."""
     firsts = [
-        r[0]
-        for t in EVENT_TABLES
-        for r in conn.execute(f"SELECT MIN(created_at) FROM {t}")
-        if r[0]
+        r[0] for t in EVENT_TABLES for r in conn.execute(f"SELECT MIN(created_at) FROM {t}") if r[0]
     ]
     return min(firsts) if firsts else None
 
 
 def counts(conn) -> dict:
-    c = {
-        t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in EVENT_TABLES
-    }
-    c["battle_events"] = conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[
-        0
-    ]
+    c = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in EVENT_TABLES}
+    c["battle_events"] = conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0]
     c["ledger"] = conn.execute("SELECT COUNT(*) FROM recognition_ledger").fetchone()[0]
-    c["awareness_posts"] = conn.execute(
-        "SELECT COUNT(*) FROM awareness_posts"
-    ).fetchone()[0]
+    c["awareness_posts"] = conn.execute("SELECT COUNT(*) FROM awareness_posts").fetchone()[0]
     return c
 
 
@@ -120,9 +111,7 @@ def main() -> int:
         default=None,
         help="where the scratch copy lives (default: a tempdir)",
     )
-    ap.add_argument(
-        "--keep", action="store_true", help="keep the scratch DB for inspection"
-    )
+    ap.add_argument("--keep", action="store_true", help="keep the scratch DB for inspection")
     ap.add_argument("--skip-season-close", action="store_true")
     args = ap.parse_args()
 
@@ -200,9 +189,7 @@ def main() -> int:
 
     print("\n=== IDEMPOTENCE DELTAS (must all be zero) ===")
     for key in before:
-        print(
-            f"  {key:16s} {before[key]:7d} -> {after[key]:7d}  (+{after[key] - before[key]})"
-        )
+        print(f"  {key:16s} {before[key]:7d} -> {after[key]:7d}  (+{after[key] - before[key]})")
 
     new_events = sum(after[t] - before[t] for t in EVENT_TABLES)
     if new_events:
@@ -213,9 +200,7 @@ def main() -> int:
     gates["second-pass new events == 0"] = new_events == 0
     gates["new battle rows == 0"] = after["battle_events"] == before["battle_events"]
     gates["new legacy ledger claims == 0"] = after["ledger"] == before["ledger"]
-    gates["new awareness posts == 0"] = (
-        after["awareness_posts"] == before["awareness_posts"]
-    )
+    gates["new awareness posts == 0"] = after["awareness_posts"] == before["awareness_posts"]
     dupes = conn.execute(
         "SELECT COUNT(*) - COUNT(DISTINCT recognition_key) FROM recognition_ledger"
     ).fetchone()[0]

@@ -86,9 +86,7 @@ def build_elder_standing(now: str | None = None, *, conn=None) -> dict:
 
     elders = [t for t, s in scores.items() if s["role"] == "elder"]
     members = [t for t, s in scores.items() if s["role"] == "member"]
-    holding = [
-        entry(t) for t in by_rank(e for e in elders if e not in band["demotable"])
-    ]
+    holding = [entry(t) for t in by_rank(e for e in elders if e not in band["demotable"])]
     stepping = [
         entry(t, band["demote_reasons"].get(t) or "outranked")
         for t in by_rank(e for e in elders if e in band["demotable"])
@@ -107,8 +105,7 @@ def build_elder_standing(now: str | None = None, *, conn=None) -> dict:
 
 def _bullets(members: list[dict]) -> str:
     return "\n".join(
-        f"• **{m['name']}**" + (f" — {m['why']}" if m.get("why") else "")
-        for m in members
+        f"• **{m['name']}**" + (f" — {m['why']}" if m.get("why") else "") for m in members
     )
 
 
@@ -161,8 +158,7 @@ def render_elder_standing(standing: dict, *, date: str | None = None) -> str:
 def facts_for_model(standing: dict, *, date: str | None = None) -> str:
     def _fmt(members):
         return (
-            "\n".join(f"- {m['name']} ({m['why'] or 'no evidence'})" for m in members)
-            or "- (none)"
+            "\n".join(f"- {m['name']} ({m['why'] or 'no evidence'})" for m in members) or "- (none)"
         )
 
     comp = standing.get("composition", {})

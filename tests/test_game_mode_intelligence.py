@@ -31,9 +31,7 @@ def _battle(
             "cards": [],
             "supportCards": [],
             "trophyChange": 30 if battle_type in {"PvP", "pathOfLegend"} else None,
-            "startingTrophies": 1000
-            if battle_type in {"PvP", "pathOfLegend"}
-            else None,
+            "startingTrophies": 1000 if battle_type in {"PvP", "pathOfLegend"} else None,
         }
         for _ in range(team_size)
     ]
@@ -105,9 +103,7 @@ def test_classify_battle_mode_uses_docs_taxonomy_order():
 def test_battle_rollups_split_new_mode_groups():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members(
-            [{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn
-        )
+        db.snapshot_members([{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn)
         db.snapshot_player_battlelog(
             "#2P0LYQ",
             [
@@ -158,9 +154,7 @@ def test_battle_rollups_split_new_mode_groups():
 def test_ranked_and_clan_game_mode_query_helpers():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members(
-            [{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn
-        )
+        db.snapshot_members([{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn)
         db.snapshot_player_profile(
             {
                 "tag": "#2P0LYQ",
@@ -185,9 +179,7 @@ def test_ranked_and_clan_game_mode_query_helpers():
                     "trophies": 1800,
                     "rank": None,
                 },
-                "progress": {
-                    "AutoChess_2026_Season_9": {"trophies": 2100, "bestTrophies": 2200}
-                },
+                "progress": {"AutoChess_2026_Season_9": {"trophies": 2100, "bestTrophies": 2200}},
                 "currentDeck": [],
                 "cards": [
                     {
@@ -228,14 +220,9 @@ def test_ranked_and_clan_game_mode_query_helpers():
     assert summary["side_mode_progress"] == []
     # QA H12: mode_mix (by_group) and ranked_activity now share the authoritative
     # battle_events source, so their ranked counts reconcile (were 1152 vs 451).
-    ranked_group = next(
-        (g for g in summary["by_group"] if g["mode_group"] == "ranked"), None
-    )
+    ranked_group = next((g for g in summary["by_group"] if g["mode_group"] == "ranked"), None)
     assert ranked_group is not None and ranked_group["battles"] == 1
-    assert (
-        sum(m["ranked_battles"] for m in summary["ranked_activity"])
-        == ranked_group["battles"]
-    )
+    assert sum(m["ranked_battles"] for m in summary["ranked_activity"]) == ranked_group["battles"]
 
 
 def test_game_mode_contexts_capture_events_and_leaderboards():
@@ -269,9 +256,7 @@ def test_game_mode_contexts_capture_events_and_leaderboards():
 def test_special_event_activity_uses_event_context_display_names():
     conn = db.get_connection(":memory:")
     try:
-        db.snapshot_members(
-            [{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn
-        )
+        db.snapshot_members([{"tag": "#2P0LYQ", "name": "Alpha", "role": "member"}], conn=conn)
         db.upsert_game_mode_contexts_from_events(
             [
                 {
@@ -327,9 +312,7 @@ def test_special_event_activity_uses_event_context_display_names():
     assert activity_by_tag["#SEASON"]["event_name"] == "Seasonal Trophy Road"
     assert activity_by_tag["#SEASON"]["game_mode_name"] == "Ladder"
 
-    participation_by_tag = {
-        row["event_tag"]: row for row in summary["event_participation"]
-    }
+    participation_by_tag = {row["event_tag"]: row for row in summary["event_participation"]}
     assert participation_by_tag["#REST"]["event_name"] == "Restless Undead"
     assert participation_by_tag["#REST"]["member_ref"]
 

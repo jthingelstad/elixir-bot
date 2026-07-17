@@ -35,11 +35,7 @@ def get_member_war_status(tag, season_id=None, conn=None):
         season_id = get_current_season_id(conn=conn)
     current_day = None
     current_war = get_current_war_status(conn=conn)
-    if (
-        current_war
-        and season_id is not None
-        and current_war.get("section_index") is not None
-    ):
+    if current_war and season_id is not None and current_war.get("section_index") is not None:
         day_row = conn.execute(
             "SELECT war_day_index, decks_used, decks_available, fame_delta "
             "FROM war_attendance_days "
@@ -171,9 +167,7 @@ def get_member_war_attendance(tag, season_id=None, conn=None):
         "season": {
             "races_played": season_row["races_played"] if season_row else 0,
             "total_races": total_races,
-            "participation_rate": round(
-                (season_row["races_played"] or 0) / total_races, 4
-            )
+            "participation_rate": round((season_row["races_played"] or 0) / total_races, 4)
             if season_row and total_races
             else 0,
             "total_points": season_row["total_points"] if season_row else 0,
@@ -281,9 +275,7 @@ def get_member_missed_war_days(tag, season_id=None, conn=None):
         if status and (status["decks_used"] or 0) > 0:
             participated += 1
         else:
-            missed.append(
-                f"Week {row['section_index'] + 1} Battle Day {row['war_day_index'] + 1}"
-            )
+            missed.append(f"Week {row['section_index'] + 1} Battle Day {row['war_day_index'] + 1}")
     return {
         "season_id": season_id,
         "tag": canon_tag,

@@ -210,8 +210,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
         # identity, membership, or poll state. Those semantic writes belong to
         # the generation's atomic application transaction below.
         roster_tags = [
-            canon_tag(member.get("tag"))
-            for member in (clan_payload or {}).get("memberList", [])
+            canon_tag(member.get("tag")) for member in (clan_payload or {}).get("memberList", [])
         ]
         plan = polling.plan(conn, now_iso, roster_tags=roster_tags)
         counters["planned_calls"] = len(plan)
@@ -354,9 +353,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
         counters["manage_skipped"] = "materialization_not_ready"
         counters["proactive_posting"] = "awareness_only"
         counters["tick_completed_at"] = utcnow()
-        errors = {
-            key: value for key, value in counters.items() if key.endswith("_error")
-        }
+        errors = {key: value for key, value in counters.items() if key.endswith("_error")}
         readiness.update_materialization(
             conn,
             materialization_id,
@@ -381,9 +378,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
         )
         counters["kick_transitions"] = len(transitions)
         withdrawals = management.withdraw_stale_actions(conn, now=now_iso)
-        counters["management_withdrawals"] = sum(
-            int(w.get("count", 1)) for w in withdrawals
-        )
+        counters["management_withdrawals"] = sum(int(w.get("count", 1)) for w in withdrawals)
         # Propagate terminal leader-action state onto its backing decision case:
         # a done kick/promotion/demotion resolves its review the moment the leader
         # decides — before the member even leaves the roster. Nothing wired this
@@ -433,10 +428,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
             log.info(
                 "dismissed %d uncorroborated member-review case(s): %s",
                 len(uncorroborated),
-                ", ".join(
-                    f"{c['target_player_name']}({c['case_type']})"
-                    for c in uncorroborated
-                ),
+                ", ".join(f"{c['target_player_name']}({c['case_type']})" for c in uncorroborated),
             )
         # Departure verification: a leave and a kick are different signals the
         # roster diff can't tell apart. Raise a #leader-actions card for recent
@@ -482,8 +474,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
                     target_player_tag=r["player_tag"],
                     target_player_name=r.get("player_name"),
                     objective=f"Review kick candidacy for {r.get('player_name') or r['player_tag']}",
-                    rationale=r.get("rationale")
-                    or "Re-nominated after decline cooldown.",
+                    rationale=r.get("rationale") or "Re-nominated after decline cooldown.",
                     source_signal_key=f"engine:kick-renominate:{r['player_tag']}:{now_iso}",
                     source_signal_type="engine_kick_state",
                     conn=conn,

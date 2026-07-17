@@ -80,9 +80,7 @@ def _remaining_decks(day: dict) -> dict:
     untouched = int(day.get("untouched_count") or 0)
     used_some = day.get("used_some")
     partial = (
-        len(used_some)
-        if isinstance(used_some, list)
-        else max(0, total - finished - untouched)
+        len(used_some) if isinstance(used_some, list) else max(0, total - finished - untouched)
     )
     remaining = max(0, total - finished)
     if partial + untouched != remaining:
@@ -232,8 +230,7 @@ def _standings_freshness(source, season_id=None, *, conn=None) -> dict:
     current_section_finalized = False
     if target_season is not None:
         finalized_races = (
-            _invoke(source, "count_war_races_for_season", int(target_season), conn=conn)
-            or 0
+            _invoke(source, "count_war_races_for_season", int(target_season), conn=conn) or 0
         )
         if section_index is not None:
             current_section_finalized = bool(
@@ -261,9 +258,7 @@ def _standings_freshness(source, season_id=None, *, conn=None) -> dict:
             conn=conn,
         )
     if not as_of and target_season is not None:
-        as_of = _invoke(
-            source, "get_latest_war_race_finish_time", int(target_season), conn=conn
-        )
+        as_of = _invoke(source, "get_latest_war_race_finish_time", int(target_season), conn=conn)
     return {
         "as_of": as_of,
         "current_week_included": current_week_included,
@@ -406,9 +401,7 @@ def get_war_season_view(
             conn=conn,
         )
     elif view == "perfect_attendance":
-        data = _invoke(
-            source, "get_perfect_war_participants", season_id=season_id, conn=conn
-        )
+        data = _invoke(source, "get_perfect_war_participants", season_id=season_id, conn=conn)
     elif view == "no_participation":
         data = _invoke(
             source,

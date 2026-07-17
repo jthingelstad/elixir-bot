@@ -94,7 +94,7 @@ def _json_loads(value) -> dict:
         return {}
     try:
         loaded = json.loads(value)
-    except (TypeError, json.JSONDecodeError):
+    except TypeError, json.JSONDecodeError:
         return {}
     return loaded if isinstance(loaded, dict) else {}
 
@@ -115,9 +115,7 @@ def _parse_utc(value: str | None) -> datetime | None:
     return parsed
 
 
-def _case_due(
-    status: str | None, due_at: str | None, *, now: str | None = None
-) -> bool:
+def _case_due(status: str | None, due_at: str | None, *, now: str | None = None) -> bool:
     if status not in {CASE_OPEN, CASE_DEFERRED}:
         return False
     if not due_at:
@@ -181,9 +179,7 @@ def upsert_decision_case(
     if not clean_title:
         raise ValueError("title is required")
     canon_tag = _db._canon_tag(target_player_tag) if target_player_tag else None
-    clean_subject_key = _clean_text(subject_key) or (
-        f"member:{canon_tag}" if canon_tag else None
-    )
+    clean_subject_key = _clean_text(subject_key) or (f"member:{canon_tag}" if canon_tag else None)
     clean_subject_type = _clean_text(subject_type) or ("member" if canon_tag else None)
     clean_case_key = _clean_text(case_key) or _case_key(
         clean_type,
@@ -257,9 +253,7 @@ def upsert_decision_case(
 
 
 @managed_connection
-def get_decision_case(
-    case_key: str, conn: Optional[sqlite3.Connection] = None
-) -> dict | None:
+def get_decision_case(case_key: str, conn: Optional[sqlite3.Connection] = None) -> dict | None:
     row = conn.execute(
         "SELECT * FROM decision_cases WHERE case_key = ?",
         (_clean_text(case_key),),
@@ -268,9 +262,7 @@ def get_decision_case(
 
 
 @managed_connection
-def get_decision_case_by_id(
-    case_id: int, conn: Optional[sqlite3.Connection] = None
-) -> dict | None:
+def get_decision_case_by_id(case_id: int, conn: Optional[sqlite3.Connection] = None) -> dict | None:
     row = conn.execute(
         "SELECT * FROM decision_cases WHERE case_id = ?",
         (int(case_id),),
@@ -387,9 +379,7 @@ def _departure_was_kick(conn, tag: str, left_at: str | None) -> bool:
     window = ""
     anchor = _parse_utc(left_at) if left_at else None
     if anchor:
-        cutoff = (anchor - timedelta(days=_KICK_ATTRIBUTION_DAYS)).strftime(
-            "%Y-%m-%dT%H:%M:%S"
-        )
+        cutoff = (anchor - timedelta(days=_KICK_ATTRIBUTION_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
         window = "AND COALESCE(decided_at, proposed_at) >= ?"
         params.append(cutoff)
     row = conn.execute(
@@ -490,9 +480,7 @@ def raise_departure_verification_cards(
 
     current = _clean_text(now) or _db._utcnow()
     anchor = _parse_utc(current) or datetime.now(timezone.utc).replace(tzinfo=None)
-    cutoff = (anchor - timedelta(days=_DEPARTURE_CARD_LOOKBACK_DAYS)).strftime(
-        "%Y-%m-%dT%H:%M:%S"
-    )
+    cutoff = (anchor - timedelta(days=_DEPARTURE_CARD_LOOKBACK_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
     rows = conn.execute(
         """SELECT cm.membership_id, cm.player_tag, cm.left_at,
                   COALESCE(p.display_name, p.current_name, cm.player_tag) AS name,
@@ -547,9 +535,7 @@ def raise_departure_verification_cards(
             source_signal_type="engine_departure",
             conn=conn,
         )
-        raised.append(
-            {"player_tag": tag, "player_name": name, "left_at": row["left_at"]}
-        )
+        raised.append({"player_tag": tag, "player_name": name, "left_at": row["left_at"]})
     return raised
 
 
@@ -571,9 +557,7 @@ def expire_departure_verification_cards(
     timely and honest."""
     current = _clean_text(now) or _db._utcnow()
     anchor = _parse_utc(current) or datetime.now(timezone.utc).replace(tzinfo=None)
-    cutoff = (anchor - timedelta(days=_DEPARTURE_CARD_TIMEOUT_DAYS)).strftime(
-        "%Y-%m-%dT%H:%M:%S"
-    )
+    cutoff = (anchor - timedelta(days=_DEPARTURE_CARD_TIMEOUT_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
     rows = conn.execute(
         """SELECT action_id, target_player_tag FROM leader_action_recommendations
            WHERE action_type = 'departure_verification' AND status = 'proposed'
@@ -606,9 +590,7 @@ def expire_departure_verification_cards(
                 current,
                 "Auto-settled: no leader verification within the window; treated as "
                 "an organic leave. No public goodbye was posted.",
-                _json_dumps(
-                    {"classification": "leave_unverified", "auto_settled": True}
-                ),
+                _json_dumps({"classification": "leave_unverified", "auto_settled": True}),
                 current,
                 row["action_id"],
             ),
@@ -643,11 +625,9 @@ def reconcile_uncorroborated_member_cases(
     current = _clean_text(now) or _db._utcnow()
     try:
         parsed = datetime.fromisoformat(current.rstrip("Z"))
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         parsed = datetime.now(timezone.utc).replace(tzinfo=None)
-    cutoff = (parsed - timedelta(days=max(0, int(grace_days)))).strftime(
-        "%Y-%m-%dT%H:%M:%S"
-    )
+    cutoff = (parsed - timedelta(days=max(0, int(grace_days)))).strftime("%Y-%m-%dT%H:%M:%S")
 
     dismissed: list[dict] = []
     for case_type, state_col, action_type in (
@@ -714,9 +694,7 @@ def _is_action_expired(action: dict, *, now: str | None = None) -> bool:
     return bool(expires_at and expires_at <= current)
 
 
-def _case_lifecycle_from_action(
-    action: dict, *, now: str | None = None
-) -> tuple[str, str]:
+def _case_lifecycle_from_action(action: dict, *, now: str | None = None) -> tuple[str, str]:
     status = (action.get("status") or "").strip()
     if _is_action_expired(action, now=now):
         return CASE_DISMISSED, "expired"
@@ -746,9 +724,7 @@ def _leader_action_resolution(action: dict, outcome: str) -> str | None:
     return None
 
 
-def _leader_action_case_state(
-    action: dict, *, outcome: str, backfilled_at: str
-) -> dict:
+def _leader_action_case_state(action: dict, *, outcome: str, backfilled_at: str) -> dict:
     return {
         "leader_action": {
             "action_id": action.get("action_id"),
@@ -863,12 +839,8 @@ def backfill_decision_cases_from_leader_actions(
             source_event_key=action.get("source_event_key"),
             source_event_type=action.get("source_event_type"),
             due_at=due_at,
-            status=case_status
-            if case_status in {CASE_OPEN, CASE_DEFERRED}
-            else CASE_OPEN,
-            state=_leader_action_case_state(
-                action, outcome=outcome, backfilled_at=backfilled_at
-            ),
+            status=case_status if case_status in {CASE_OPEN, CASE_DEFERRED} else CASE_OPEN,
+            state=_leader_action_case_state(action, outcome=outcome, backfilled_at=backfilled_at),
             case_key=case_key,
             # A live leader-action card IS the authority; reflect it even over a
             # prior closure (this reconstructs case state from the action board).
@@ -949,9 +921,7 @@ def sync_terminal_leader_action_cases(
         )
         if not config or not tag:
             continue
-        case = get_decision_case(
-            _case_key(config["case_type"], target_player_tag=tag), conn=conn
-        )
+        case = get_decision_case(_case_key(config["case_type"], target_player_tag=tag), conn=conn)
         if not case or case["status"] not in {CASE_OPEN, CASE_DEFERRED}:
             continue  # no backing case, or already closed — nothing to propagate
         _case_status, outcome = _case_lifecycle_from_action(action, now=now)
@@ -996,22 +966,18 @@ def _member_case_priority(member: dict) -> int:
     try:
         days = float(member.get("days_inactive") or member.get("battle_days_ago") or 0)
         threshold = float(member.get("threshold_days") or 0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0
     return max(0, int(round((days - threshold) * 10)))
 
 
 def _inactivity_recommendation(member: dict) -> str:
-    name = (
-        member.get("name") or member.get("member_name") or member.get("tag") or "member"
-    )
+    name = member.get("name") or member.get("member_name") or member.get("tag") or "member"
     return f"Review {name} for removal from the clan."
 
 
 def _inactivity_rationale(member: dict) -> str:
-    name = (
-        member.get("name") or member.get("member_name") or member.get("tag") or "member"
-    )
+    name = member.get("name") or member.get("member_name") or member.get("tag") or "member"
     days = member.get("days_inactive") or member.get("battle_days_ago")
     threshold = member.get("threshold_days")
     login = member.get("login_days_ago")
@@ -1050,9 +1016,7 @@ def upsert_member_review_case(
         clean_recommendation = recommendation or _inactivity_recommendation(member)
         clean_rationale = rationale or _inactivity_rationale(member)
     else:
-        clean_title = (
-            title or f"{case_type.replace('_', ' ').title()}: {name or canon_tag}"
-        )
+        clean_title = title or f"{case_type.replace('_', ' ').title()}: {name or canon_tag}"
         clean_recommendation = recommendation
         clean_rationale = rationale
     return upsert_decision_case(
@@ -1133,13 +1097,8 @@ def decision_case_snapshot(
     default ``open`` repeats the whole ``due`` list. Pass ``dedupe=True`` to
     drop that overlap — ``open`` then means "open but not currently due",
     matching "due = needs attention now; open = being monitored"."""
-    due = [
-        _compact_case(case)
-        for case in list_due_decision_cases(limit=due_limit, conn=conn)
-    ]
-    open_cases = [
-        _compact_case(case) for case in list_decision_cases(limit=open_limit, conn=conn)
-    ]
+    due = [_compact_case(case) for case in list_due_decision_cases(limit=due_limit, conn=conn)]
+    open_cases = [_compact_case(case) for case in list_decision_cases(limit=open_limit, conn=conn)]
     if dedupe:
         due_keys = {c.get("case_key") for c in due}
         open_cases = [c for c in open_cases if c.get("case_key") not in due_keys]

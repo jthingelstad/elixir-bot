@@ -116,12 +116,8 @@ def run_recognizers(conn, clock: dict | None, now: str) -> dict:
         "player_events",
         lambda: R.player_candidates(conn),
     )
-    battle_cands, battle_pos = (
-        battle_result if battle_result is not None else ([], None)
-    )
-    player_cands, player_pos = (
-        player_result if player_result is not None else ([], None)
-    )
+    battle_cands, battle_pos = battle_result if battle_result is not None else ([], None)
+    player_cands, player_pos = player_result if player_result is not None else ([], None)
     counters.update(R.run_celebrate_pipeline(conn, battle_cands + player_cands, now))
     if battle_pos:
         cursor_set(conn, "recognize:battle", battle_pos)

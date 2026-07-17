@@ -112,9 +112,7 @@ def test_handle_member_join_refreshes_roster_before_welcome():
             "runtime.onboarding.refresh_clan_roster_from_api",
             new=AsyncMock(return_value=True),
         ) as mock_refresh,
-        patch(
-            "runtime.onboarding._send_onboarding_message", new=AsyncMock()
-        ) as mock_send,
+        patch("runtime.onboarding._send_onboarding_message", new=AsyncMock()) as mock_send,
     ):
         asyncio.run(onboarding.handle_member_join(member))
 
@@ -124,9 +122,7 @@ def test_handle_member_join_refreshes_roster_before_welcome():
 
 def test_handle_member_update_refreshes_roster_only_after_initial_no_match():
     member_role = SimpleNamespace(id=777)
-    guild = SimpleNamespace(
-        get_role=lambda role_id: member_role if role_id == 777 else None
-    )
+    guild = SimpleNamespace(get_role=lambda role_id: member_role if role_id == 777 else None)
     before = SimpleNamespace(nick="Old Name")
     after = SimpleNamespace(
         id=42,
@@ -150,9 +146,7 @@ def test_handle_member_update_refreshes_roster_only_after_initial_no_match():
             "runtime.onboarding._ensure_member_role",
             new=AsyncMock(return_value=(True, "Granted")),
         ) as mock_grant,
-        patch(
-            "runtime.onboarding._send_onboarding_message", new=AsyncMock()
-        ) as mock_send,
+        patch("runtime.onboarding._send_onboarding_message", new=AsyncMock()) as mock_send,
         patch("runtime.app.MEMBER_ROLE_ID", 777),
         patch(
             "runtime.app._match_clan_member",
@@ -169,9 +163,7 @@ def test_handle_member_update_refreshes_roster_only_after_initial_no_match():
 
 def test_handle_member_update_skips_refresh_when_initial_match_succeeds():
     member_role = SimpleNamespace(id=777)
-    guild = SimpleNamespace(
-        get_role=lambda role_id: member_role if role_id == 777 else None
-    )
+    guild = SimpleNamespace(get_role=lambda role_id: member_role if role_id == 777 else None)
     before = SimpleNamespace(nick="Old Name")
     after = SimpleNamespace(
         id=42,
@@ -195,9 +187,7 @@ def test_handle_member_update_skips_refresh_when_initial_match_succeeds():
             "runtime.onboarding._ensure_member_role",
             new=AsyncMock(return_value=(True, "Granted")),
         ) as mock_grant,
-        patch(
-            "runtime.onboarding._send_onboarding_message", new=AsyncMock()
-        ) as mock_send,
+        patch("runtime.onboarding._send_onboarding_message", new=AsyncMock()) as mock_send,
         patch("runtime.app.MEMBER_ROLE_ID", 777),
         patch(
             "runtime.app._match_clan_member", return_value=("#ABC123", "King Levy")
@@ -214,9 +204,7 @@ def test_handle_member_update_skips_refresh_when_initial_match_succeeds():
 class TestRemoveMemberRoleForTag:
     """Tests for remove_member_role_for_tag called when a clan member leaves."""
 
-    def _run(
-        self, *, identity, guild_member, member_role, manage_roles=True, forbidden=False
-    ):
+    def _run(self, *, identity, guild_member, member_role, manage_roles=True, forbidden=False):
         guild = SimpleNamespace(
             get_member=lambda uid: guild_member,
             get_role=lambda rid: member_role,

@@ -26,9 +26,7 @@ import pytest
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _ARCHIVE = os.path.join(_REPO_ROOT, "elixir-v5-archive-2026H2.db")
-_CR_FIXTURES = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "fixtures", "cr"
-)
+_CR_FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "cr")
 
 
 def load_cr_fixture(name: str):
@@ -142,9 +140,7 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
         "WHERE best_trophies IS NULL AND prior IS NOT NULL"
     )
     if best_drops:
-        problems.append(
-            f"player_daily_metrics has {best_drops} best-trophy null regression(s)"
-        )
+        problems.append(f"player_daily_metrics has {best_drops} best-trophy null regression(s)")
 
     # 7) internal war timestamps use dashed ISO/date text. Battle timestamps are
     # deliberately raw CR compact and are not part of this check.
@@ -168,9 +164,8 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
         if n:
             problems.append(f"{table}.{col}: {n} noncanonical timestamp(s)")
 
-    assert not problems, (
-        f"DB invariants violated{f' ({label})' if label else ''}:\n"
-        + "\n".join(f"  - {p}" for p in problems)
+    assert not problems, f"DB invariants violated{f' ({label})' if label else ''}:\n" + "\n".join(
+        f"  - {p}" for p in problems
     )
 
 

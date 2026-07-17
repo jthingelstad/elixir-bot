@@ -36,8 +36,7 @@ def response_copy(response: dict) -> str:
 def _repair_preserves_contract(original: dict, repaired: dict) -> bool:
     mutable = {"content", "share_content"}
     return all(
-        original.get(key) == repaired.get(key)
-        for key in (set(original) | set(repaired)) - mutable
+        original.get(key) == repaired.get(key) for key in (set(original) | set(repaired)) - mutable
     )
 
 

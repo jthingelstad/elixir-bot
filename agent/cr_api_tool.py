@@ -27,7 +27,7 @@ def _clamp_limit(raw, default, maximum):
         return default
     try:
         value = int(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
     if value < 1:
         return default
@@ -52,9 +52,7 @@ def _filter_cr_player(payload):
         "donations": payload.get("donations"),
         "donationsReceived": payload.get("donationsReceived"),
         "role": payload.get("role"),
-        "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))}
-        if clan
-        else None,
+        "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))} if clan else None,
         "arena": {"name": arena.get("name")} if arena else None,
         "currentFavouriteCard": fav.get("name") if fav else None,
         "currentDeck": [
@@ -102,12 +100,9 @@ def _filter_cr_player_battles(payload, *, limit, mode):
                 "eventTag": battle.get("eventTag"),
                 "tournamentTag": battle.get("tournamentTag"),
                 "arena": (battle.get("arena") or {}).get("name"),
-                "team": [
-                    _filter_cr_battle_participant(p) for p in (battle.get("team") or [])
-                ],
+                "team": [_filter_cr_battle_participant(p) for p in (battle.get("team") or [])],
                 "opponent": [
-                    _filter_cr_battle_participant(p)
-                    for p in (battle.get("opponent") or [])
+                    _filter_cr_battle_participant(p) for p in (battle.get("opponent") or [])
                 ],
             }
         )
@@ -123,9 +118,7 @@ def _filter_cr_battle_participant(p):
         "name": _ext(p.get("name")),
         "crowns": p.get("crowns"),
         "trophyChange": p.get("trophyChange"),
-        "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))}
-        if clan
-        else None,
+        "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))} if clan else None,
     }
 
 
@@ -250,9 +243,7 @@ def _filter_cr_clan_war(payload):
                     "decksUsedToday": participant.get("decksUsedToday"),
                 }
             )
-    race_top_participants.sort(
-        key=lambda participant: participant.get("fame") or 0, reverse=True
-    )
+    race_top_participants.sort(key=lambda participant: participant.get("fame") or 0, reverse=True)
     return {
         "state": payload.get("state"),
         "sectionIndex": payload.get("sectionIndex"),
@@ -368,9 +359,7 @@ def _filter_cr_ranking_list(payload, *, limit, score_field="eloRating"):
                 "tag": item.get("tag"),
                 "name": item.get("name"),
                 score_field: item.get(score_field),
-                "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))}
-                if clan
-                else None,
+                "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))} if clan else None,
             }
         )
         if len(rows) >= limit:
@@ -402,9 +391,7 @@ def _filter_cr_leaderboard(payload, *, limit):
                 "score": item.get("score"),
                 "tag": item.get("tag"),
                 "name": _ext(item.get("name")),
-                "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))}
-                if clan
-                else None,
+                "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))} if clan else None,
             }
         )
         if len(rows) >= limit:
@@ -422,11 +409,7 @@ def _execute_cr_api(arguments):
     # QA L23: every aspect is TTL-cached (up to 600s for the river-race log) but
     # carried no fetch timestamp — stamp when the bridge returned so the brain
     # can age external data. Only on successful dict payloads (not error dicts).
-    if (
-        isinstance(result, dict)
-        and "error" not in result
-        and "observed_at" not in result
-    ):
+    if isinstance(result, dict) and "error" not in result and "observed_at" not in result:
         from datetime import datetime, timezone
 
         result["observed_at"] = datetime.now(timezone.utc).isoformat()
@@ -465,9 +448,7 @@ def _execute_cr_api_inner(arguments):
         if not season_id:
             return {"error": "season_id is required"}
         try:
-            payload = cr_api.get_pathoflegend_season_rankings(
-                season_id, limit=limit or 20
-            )
+            payload = cr_api.get_pathoflegend_season_rankings(season_id, limit=limit or 20)
         except cr_api.InvalidTagError as exc:
             return {"error": "invalid_season_id", "detail": str(exc)}
         return (
@@ -512,11 +493,7 @@ def _execute_cr_api_inner(arguments):
 
     if aspect == "player":
         payload = cr_api.get_player(normalized_tag)
-        return (
-            _filter_cr_player(payload)
-            if payload
-            else {"error": "not_found_or_unavailable"}
-        )
+        return _filter_cr_player(payload) if payload else {"error": "not_found_or_unavailable"}
     if aspect == "player_battles":
         payload = cr_api.get_player_battle_log(normalized_tag)
         return (
@@ -533,11 +510,7 @@ def _execute_cr_api_inner(arguments):
         )
     if aspect == "clan":
         payload = cr_api.get_clan_by_tag(normalized_tag)
-        return (
-            _filter_cr_clan(payload)
-            if payload
-            else {"error": "not_found_or_unavailable"}
-        )
+        return _filter_cr_clan(payload) if payload else {"error": "not_found_or_unavailable"}
     if aspect == "clan_members":
         payload = cr_api.get_clan_by_tag(normalized_tag)
         return (
@@ -547,11 +520,7 @@ def _execute_cr_api_inner(arguments):
         )
     if aspect == "clan_war":
         payload = cr_api.get_current_war(normalized_tag)
-        return (
-            _filter_cr_clan_war(payload)
-            if payload
-            else {"error": "not_found_or_unavailable"}
-        )
+        return _filter_cr_clan_war(payload) if payload else {"error": "not_found_or_unavailable"}
     if aspect == "clan_war_log":
         payload = cr_api.get_river_race_log(normalized_tag)
         return (

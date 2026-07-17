@@ -6,7 +6,7 @@ write ISO-Z — compact sorts above ISO lexicographically, mis-bucketing
 time-ordered queries (found by the 2026-07-04 live audit; catalogued in
 normalize.md). Idempotent: rows already ISO are untouched.
 
-Usage: ./venv/bin/python scripts/migrate_v51/fix_ledger_seed_ts.py
+Usage: uv run python scripts/migrate_v51/fix_ledger_seed_ts.py
 """
 
 from __future__ import annotations
@@ -15,9 +15,7 @@ import os
 import sqlite3
 import sys
 
-sys.path.insert(
-    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from engine.normalize import parse_cr_time  # noqa: E402
 

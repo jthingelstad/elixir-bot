@@ -1,7 +1,7 @@
 """Cut an Elixir release — the full ceremony (no version number).
 
-    ./venv/bin/python scripts/cut_release.py --dry-run
-    ./venv/bin/python scripts/cut_release.py
+    uv run python scripts/cut_release.py --dry-run
+    uv run python scripts/cut_release.py
 
 A release is identified by its coined NAME + DATE + build hash — no SemVer. The
 git tag is the ref-safe name-slug ("Blazing Balloon" → tag `blazing-balloon`);
@@ -101,9 +101,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument(
-        "--days", type=int, default=None, help="scope: look back N days"
-    )
+    parser.add_argument("--days", type=int, default=None, help="scope: look back N days")
     parser.add_argument(
         "--since",
         metavar="REF",
@@ -116,12 +114,8 @@ def main() -> int:
         help="override: email ONLY this address (testing). Default broadcasts "
         "the detailed tier to every clan member with a verified email.",
     )
-    parser.add_argument(
-        "--dry-run", action="store_true", help="print everything, touch nothing"
-    )
-    parser.add_argument(
-        "--no-announce", action="store_true", help="cut without the Discord post"
-    )
+    parser.add_argument("--dry-run", action="store_true", help="print everything, touch nothing")
+    parser.add_argument("--no-announce", action="store_true", help="cut without the Discord post")
     parser.add_argument("--no-email", action="store_true", help="cut without the email")
     parser.add_argument(
         "--announce-only",
@@ -171,10 +165,7 @@ def main() -> int:
     detailed = rn._extract_notes(out)
     announcement = rn._extract_tag(out, "announcement") or detailed
     clanchat = " ".join((rn._extract_tag(out, "clanchat") or "").split())
-    subject = (
-        rn._extract_subject(out)
-        or f"Under my hood: what changed ({material['window']})"
-    )
+    subject = rn._extract_subject(out) or f"Under my hood: what changed ({material['window']})"
     if name and name.lower() not in subject.lower():
         subject = f"{name} — {subject}"
     print(f"Subject: {subject}")
@@ -217,9 +208,7 @@ def main() -> int:
     print(f"Release commit: {head}")
 
     # 5. tag + GitHub release (best-effort)
-    url = rn.create_github_release(
-        name=name, date=date, tag=tag, commit=head, body=detailed
-    )
+    url = rn.create_github_release(name=name, date=date, tag=tag, commit=head, body=detailed)
     print(f"GitHub release: {url or '(failed — see log; the cut continues)'}")
 
     # 5b. Record a durable clan memory of this release (idempotent by tag).
@@ -243,19 +232,11 @@ def main() -> int:
             if not outbound.enabled():
                 print("Email skipped: FASTMAIL_JMAP_TOKEN not configured.")
             else:
-                recipients = (
-                    [args.to]
-                    if args.to
-                    else [m["email"] for m in db.list_member_emails()]
-                )
+                recipients = [args.to] if args.to else [m["email"] for m in db.list_member_emails()]
                 if not recipients:
-                    print(
-                        "Email skipped: no clan members have a verified email on file."
-                    )
+                    print("Email skipped: no clan members have a verified email on file.")
                 else:
-                    outbound.send(
-                        to=EMAIL_ADDRESS, bcc=recipients, subject=subject, body=detailed
-                    )
+                    outbound.send(to=EMAIL_ADDRESS, bcc=recipients, subject=subject, body=detailed)
                     where = args.to if args.to else f"{len(recipients)} member(s) (bcc)"
                     print(f"Emailed detailed notes to {where}.")
         except Exception as exc:
@@ -274,7 +255,7 @@ def main() -> int:
                 f"\n⚠️  Release {tag} IS cut (commit + tag + GitHub release) — "
                 f"but the #announcements post failed: {exc}\n"
                 f"Grant Elixir SEND permission in #announcements, then retry just the post:\n"
-                f"    ./venv/bin/python scripts/cut_release.py --announce-only {tag}"
+                f"    uv run python scripts/cut_release.py --announce-only {tag}"
             )
 
     # 8. Clan-chat tier — hand the blurb to the caller (the slash command posts the
@@ -294,11 +275,7 @@ def _releases_section(label_or_tag: str) -> str:
 def _announce_only(tag: str) -> int:
     """Re-post the Discord announcement for an already-cut release, found by tag slug."""
     entry = next(
-        (
-            h
-            for h in rn.release_history()
-            if rn.slugify_release(h.get("name") or "") == tag
-        ),
+        (h for h in rn.release_history() if rn.slugify_release(h.get("name") or "") == tag),
         None,
     )
     if not entry:
@@ -308,9 +285,7 @@ def _announce_only(tag: str) -> int:
     date = entry.get("date") or ""
     body = _releases_section(_label(name, date)) or _releases_section(name)
     url = f"https://github.com/jthingelstad/elixir-bot/releases/tag/{tag}"
-    chunks = rn.announcement_messages(
-        announcement=body, release_url=url, name=name, date=date
-    )
+    chunks = rn.announcement_messages(announcement=body, release_url=url, name=name, date=date)
     try:
         sent = rn.post_announcement(chunks)
         print(f"Announced {tag} in #announcements ({sent} message(s)).")

@@ -69,9 +69,7 @@ def _badge_category(name: str | None) -> str:
         "ClanDonations",
     }:
         return "collection"
-    if badge_name.startswith("SeasonalBadge_") or badge_name.startswith(
-        "MergeTacticsBadge_"
-    ):
+    if badge_name.startswith("SeasonalBadge_") or badge_name.startswith("MergeTacticsBadge_"):
         return "seasonal"
     if special_event_context_for_badge(badge_name):
         return "event"
@@ -156,9 +154,7 @@ def _indexed_items(items: list[dict] | None) -> dict[str, dict]:
 
 def _years_played_metadata_fields(player_data: dict, *, fetched_at: str) -> dict:
     badges = player_data.get("badges") or []
-    years_played = next(
-        (badge for badge in badges if badge.get("name") == "YearsPlayed"), None
-    )
+    years_played = next((badge for badge in badges if badge.get("name") == "YearsPlayed"), None)
     if not years_played:
         return {
             "cr_account_age_days": None,
@@ -168,9 +164,7 @@ def _years_played_metadata_fields(player_data: dict, *, fetched_at: str) -> dict
     age_days = years_played.get("progress")
     age_years = years_played.get("level")
     return {
-        "cr_account_age_days": age_days
-        if isinstance(age_days, int) and age_days >= 0
-        else None,
+        "cr_account_age_days": age_days if isinstance(age_days, int) and age_days >= 0 else None,
         "cr_account_age_years": age_years
         if isinstance(age_years, int) and age_years >= 0
         else None,
@@ -187,28 +181,14 @@ def _profile_badge_metadata_fields(player_data: dict, *, fetched_at: str) -> dic
     collection_level = badges.get("CollectionLevel") or {}
     return {
         "cr_collection_level": _nonnegative_int(collection_level.get("progress")),
-        "cr_collection_level_badge_tier": _nonnegative_int(
-            collection_level.get("level")
-        ),
-        "cr_collection_level_badge_max_tier": _nonnegative_int(
-            collection_level.get("maxLevel")
-        ),
+        "cr_collection_level_badge_tier": _nonnegative_int(collection_level.get("level")),
+        "cr_collection_level_badge_max_tier": _nonnegative_int(collection_level.get("maxLevel")),
         "cr_collection_level_updated_at": fetched_at,
-        "cr_clan_war_wins": _nonnegative_int(
-            (badges.get("ClanWarWins") or {}).get("progress")
-        ),
-        "cr_battle_wins": _nonnegative_int(
-            (badges.get("BattleWins") or {}).get("progress")
-        ),
-        "cr_clan_donations": _nonnegative_int(
-            (badges.get("ClanDonations") or {}).get("progress")
-        ),
-        "cr_banner_count": _nonnegative_int(
-            (badges.get("BannerCollection") or {}).get("progress")
-        ),
-        "cr_emote_count": _nonnegative_int(
-            (badges.get("EmoteCollection") or {}).get("progress")
-        ),
+        "cr_clan_war_wins": _nonnegative_int((badges.get("ClanWarWins") or {}).get("progress")),
+        "cr_battle_wins": _nonnegative_int((badges.get("BattleWins") or {}).get("progress")),
+        "cr_clan_donations": _nonnegative_int((badges.get("ClanDonations") or {}).get("progress")),
+        "cr_banner_count": _nonnegative_int((badges.get("BannerCollection") or {}).get("progress")),
+        "cr_emote_count": _nonnegative_int((badges.get("EmoteCollection") or {}).get("progress")),
         "cr_profile_badges_updated_at": fetched_at,
     }
 
@@ -317,8 +297,7 @@ def get_player_intel_refresh_targets(
     """v5.1: staleness reads poll_state (the adaptive scheduler's ledger,
     runtime.md §4) instead of profile-snapshot ages."""
     stale_cutoff = (
-        datetime.now(timezone.utc).replace(tzinfo=None)
-        - timedelta(hours=stale_after_hours)
+        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=stale_after_hours)
     ).strftime("%Y-%m-%dT%H:%M:%S")
     rows = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, "
@@ -466,9 +445,7 @@ def _expected_battle_delta_for_day(member_id: int, battle_date: str, conn=None):
     return None
 
 
-def _recompute_player_daily_battle_rollups(
-    member_id: int, battle_dates=None, conn=None
-):
+def _recompute_player_daily_battle_rollups(member_id: int, battle_dates=None, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
@@ -629,16 +606,12 @@ def _recompute_clan_daily_battle_rollups(battle_dates=None, conn=None):
             rows = conn.execute(
                 "SELECT DISTINCT battle_date FROM player_daily_battle_rollups"
             ).fetchall()
-            battle_dates = sorted(
-                row["battle_date"] for row in rows if row["battle_date"]
-            )
+            battle_dates = sorted(row["battle_date"] for row in rows if row["battle_date"])
         else:
             battle_dates = sorted({date for date in (battle_dates or []) if date})
 
         for battle_date in battle_dates:
-            clan_tag, clan_name = _current_clan_identity_for_rollups(
-                battle_date, conn=conn
-            )
+            clan_tag, clan_name = _current_clan_identity_for_rollups(battle_date, conn=conn)
             member_rows = conn.execute(
                 "SELECT member_id, mode_group, game_mode_id, game_mode_name, battles, wins, losses, draws, crowns_for, crowns_against, trophy_change_total, captured_battles, expected_battle_delta, completeness_ratio, is_complete "
                 "FROM player_daily_battle_rollups "
@@ -693,12 +666,9 @@ def _recompute_clan_daily_battle_rollups(battle_dates=None, conn=None):
 
             aggregated_at = _utcnow()
             for bucket in buckets.values():
-                contributing = [
-                    member_day_summary[member_id] for member_id in bucket["members"]
-                ]
+                contributing = [member_day_summary[member_id] for member_id in bucket["members"]]
                 expected_known = all(
-                    item.get("expected_battle_delta") is not None
-                    for item in contributing
+                    item.get("expected_battle_delta") is not None for item in contributing
                 )
                 captured_battles = None
                 expected_battle_delta = None
@@ -709,19 +679,13 @@ def _recompute_clan_daily_battle_rollups(battle_dates=None, conn=None):
                         int(item.get("captured_battles") or 0) for item in contributing
                     )
                     expected_battle_delta = sum(
-                        int(item.get("expected_battle_delta") or 0)
-                        for item in contributing
+                        int(item.get("expected_battle_delta") or 0) for item in contributing
                     )
                     denominator = max(expected_battle_delta, 1)
-                    completeness_ratio = min(
-                        1.0, round(captured_battles / denominator, 4)
-                    )
+                    completeness_ratio = min(1.0, round(captured_battles / denominator, 4))
                     is_complete = (
                         1
-                        if all(
-                            int(item.get("is_complete") or 0) == 1
-                            for item in contributing
-                        )
+                        if all(int(item.get("is_complete") or 0) == 1 for item in contributing)
                         else 0
                     )
 
@@ -789,7 +753,7 @@ def _avg_elixir_for_card_names(conn, card_names):
 def _opponent_card_names(opponent_deck_json):
     try:
         cards = json.loads(opponent_deck_json or "[]")
-    except (json.JSONDecodeError, TypeError, ValueError):
+    except json.JSONDecodeError, TypeError, ValueError:
         return []
     if not isinstance(cards, list):
         return []
@@ -828,32 +792,24 @@ def _compute_recent_opponents_summary(
     for idx, row in enumerate(rows):
         try:
             payload = json.loads(row["raw_json"] or "{}")
-        except (json.JSONDecodeError, TypeError, ValueError):
+        except json.JSONDecodeError, TypeError, ValueError:
             payload = {}
-        opp_payload = (
-            (payload.get("opponent") or [{}])[0] if isinstance(payload, dict) else {}
-        )
+        opp_payload = (payload.get("opponent") or [{}])[0] if isinstance(payload, dict) else {}
         starting_trophies = (
-            opp_payload.get("startingTrophies")
-            if isinstance(opp_payload, dict)
-            else None
+            opp_payload.get("startingTrophies") if isinstance(opp_payload, dict) else None
         )
         opponents.append(
             {
                 "name": row["opponent_name"],
                 "tag": row["opponent_tag"],
-                "trophies": starting_trophies
-                if isinstance(starting_trophies, int)
-                else None,
+                "trophies": starting_trophies if isinstance(starting_trophies, int) else None,
                 "deck_summary": _opponent_card_names(row["opponent_deck_json"]),
                 "_recency_index": idx,
             }
         )
 
     opp_block = {}
-    trophies_present = [
-        o["trophies"] for o in opponents if isinstance(o["trophies"], int)
-    ]
+    trophies_present = [o["trophies"] for o in opponents if isinstance(o["trophies"], int)]
     if trophies_present:
         sorted_trophies = sorted(trophies_present)
         median = sorted_trophies[len(sorted_trophies) // 2]
@@ -887,11 +843,9 @@ def _compute_recent_opponents_summary(
         player_cards = json.loads(rows[0]["deck_json"] or "[]")
         if isinstance(player_cards, list):
             player_card_names = [
-                c.get("name")
-                for c in player_cards
-                if isinstance(c, dict) and c.get("name")
+                c.get("name") for c in player_cards if isinstance(c, dict) and c.get("name")
             ]
-    except (json.JSONDecodeError, TypeError, ValueError):
+    except json.JSONDecodeError, TypeError, ValueError:
         pass
 
     player_deck = {
@@ -945,9 +899,7 @@ def _capture_previous_battle_state(member_id: int, conn=None) -> dict:
     on streaks that were already hot."""
     return {
         mode: {
-            "latest_battle_time": _latest_battle_time_for_mode(
-                member_id, mode, conn=conn
-            ),
+            "latest_battle_time": _latest_battle_time_for_mode(member_id, mode, conn=conn),
             "streak": _current_streak_for_mode(member_id, mode, conn=conn),
         }
         for mode in _BATTLE_MODE_PREDICATES
@@ -1037,9 +989,7 @@ def _detect_battle_pulse_signals(
                     "trophy_delta": trophy_delta,
                     "from_trophies": from_trophies,
                     "to_trophies": to_trophies,
-                    "trophies_per_battle": round(
-                        trophy_delta / max(1, len(trophy_rows)), 1
-                    ),
+                    "trophies_per_battle": round(trophy_delta / max(1, len(trophy_rows)), 1),
                     "latest_battle_type": new_rows[0]["battle_type"],
                     "latest_mode_name": new_rows[0]["game_mode_name"],
                     "recent_opponents_summary": _compute_recent_opponents_summary(
@@ -1124,9 +1074,7 @@ def get_member_recent_losses(
     and current loss-streak context. Powers the `losses` include on get_member.
     """
     member_tag = _canon_tag(tag)
-    predicate = _LOSSES_SCOPE_PREDICATES.get(
-        scope, _LOSSES_SCOPE_PREDICATES["competitive_10"]
-    )
+    predicate = _LOSSES_SCOPE_PREDICATES.get(scope, _LOSSES_SCOPE_PREDICATES["competitive_10"])
     member_row = conn.execute(
         "SELECT player_tag AS member_id, COALESCE(display_name, current_name) AS current_name FROM players WHERE player_tag = ?",
         (member_tag,),
@@ -1160,9 +1108,7 @@ def get_member_recent_losses(
         for r in losses
         if r["crowns_for"] is not None and r["crowns_against"] is not None
     ]
-    avg_crown_deficit = (
-        round(sum(crown_diffs) / len(crown_diffs), 2) if crown_diffs else None
-    )
+    avg_crown_deficit = round(sum(crown_diffs) / len(crown_diffs), 2) if crown_diffs else None
     current_loss_streak = 0
     for row in rows:
         if row["outcome"] == "L":
@@ -1212,9 +1158,7 @@ def get_member_recent_battles(
     Powers the `battles` include on get_member.
     """
     member_tag = _canon_tag(tag)
-    predicate = _LOSSES_SCOPE_PREDICATES.get(
-        scope, _LOSSES_SCOPE_PREDICATES["overall_10"]
-    )
+    predicate = _LOSSES_SCOPE_PREDICATES.get(scope, _LOSSES_SCOPE_PREDICATES["overall_10"])
     member_row = conn.execute(
         "SELECT player_tag AS member_id, COALESCE(display_name, current_name) AS current_name FROM players WHERE player_tag = ?",
         (member_tag,),
@@ -1251,13 +1195,11 @@ def get_member_recent_battles(
         ):
             try:
                 cards = json.loads(raw or "[]")
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 cards = []
             if isinstance(cards, list) and cards:
                 entry[field] = [
-                    c.get("name")
-                    for c in cards
-                    if isinstance(c, dict) and c.get("name")
+                    c.get("name") for c in cards if isinstance(c, dict) and c.get("name")
                 ]
         battles.append(entry)
     result = {
@@ -1281,7 +1223,7 @@ def get_member_recent_battles(
 def _json_object(raw) -> dict:
     try:
         value = json.loads(raw or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except TypeError, ValueError, json.JSONDecodeError:
         return {}
     return value if isinstance(value, dict) else {}
 
@@ -1421,9 +1363,7 @@ def get_member_mode_activity(
     ).fetchone()
     if not member_row:
         return None
-    rows = list_player_daily_battle_rollups(
-        member_tag, days=days, mode_group=mode_group, conn=conn
-    )
+    rows = list_player_daily_battle_rollups(member_tag, days=days, mode_group=mode_group, conn=conn)
     by_group: dict[str, dict] = {}
     by_game_mode: dict[tuple[str, Optional[int]], dict] = {}
     for row in rows:
@@ -1503,9 +1443,7 @@ def get_member_special_event_activity(
     if not member_row:
         return None
     days = max(1, int(days or 14))
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
-        "%Y%m%dT%H%M%S.000Z"
-    )
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
     where = ["bf.player_tag = ?", "bf.is_special_event = 1", "bf.battle_time >= ?"]
     params: list = [member_row["member_id"], cutoff]
     if game_mode_id is not None:
@@ -1534,9 +1472,7 @@ def get_member_special_event_activity(
         item["wins"] = int(item.get("wins") or 0)
         item["losses"] = int(item.get("losses") or 0)
         total_battles += item["battles"]
-        item["win_rate"] = (
-            round(item["wins"] / item["battles"], 4) if item["battles"] else None
-        )
+        item["win_rate"] = round(item["wins"] / item["battles"], 4) if item["battles"] else None
         _enrich_special_event_item(item, event_contexts)
         modes.append(item)
     return {
@@ -1622,7 +1558,7 @@ def _special_event_badge_completions(days: int, conn) -> dict[str, list[dict]]:
 def _event_description_from_raw(raw_json) -> str | None:
     try:
         raw = json.loads(raw_json or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except TypeError, ValueError, json.JSONDecodeError:
         return None
     if not isinstance(raw, dict):
         return None
@@ -1669,9 +1605,9 @@ def _enrich_special_event_item(item: dict, context_index: dict[str, dict]) -> di
 
 
 def _special_event_activity(days: int, limit: int, conn) -> list[dict]:
-    cutoff = (
-        datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))
-    ).strftime("%Y%m%dT%H%M%S.000Z")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).strftime(
+        "%Y%m%dT%H%M%S.000Z"
+    )
     event_contexts = _special_event_context_index(conn)
     rows = conn.execute(
         "SELECT bf.game_mode_id, bf.game_mode_name, bf.event_tag, "
@@ -1704,9 +1640,7 @@ def _special_event_activity(days: int, limit: int, conn) -> list[dict]:
             "trophy_delta": int(row["trophy_delta"] or 0),
             "latest_battle": row["latest_battle"],
         }
-        item["win_rate"] = (
-            round(item["wins"] / item["battles"], 4) if item["battles"] else None
-        )
+        item["win_rate"] = round(item["wins"] / item["battles"], 4) if item["battles"] else None
         activity.append(_enrich_special_event_item(item, event_contexts))
     return activity
 
@@ -1716,9 +1650,9 @@ def _special_event_participation(
     limit: int,
     conn,
 ) -> list[dict]:
-    cutoff = (
-        datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))
-    ).strftime("%Y%m%dT%H%M%S.000Z")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).strftime(
+        "%Y%m%dT%H%M%S.000Z"
+    )
     event_contexts = _special_event_context_index(conn)
     rows = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, "
@@ -1744,9 +1678,7 @@ def _special_event_participation(
         item["losses"] = int(item.get("losses") or 0)
         item["win_rate"] = round(wins / battles, 4) if battles else None
         _enrich_special_event_item(item, event_contexts)
-        participation.append(
-            _member_reference_fields(conn, item.pop("member_id"), item)
-        )
+        participation.append(_member_reference_fields(conn, item.pop("member_id"), item))
     return participation
 
 
@@ -1905,9 +1837,7 @@ def get_clan_game_mode_summary(
         battles = int(item.get("ranked_battles") or 0)
         wins = int(item.get("wins") or 0)
         item["win_rate"] = round(wins / battles, 4) if battles else None
-        ranked_activity.append(
-            _member_reference_fields(conn, item.pop("member_id"), item)
-        )
+        ranked_activity.append(_member_reference_fields(conn, item.pop("member_id"), item))
 
     profile_rows = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, "
@@ -1964,8 +1894,7 @@ def get_clan_game_mode_summary(
                     entry["max_trophies"] = trophies
                     entry["top_member"] = row["name"]
                 if isinstance(best, int) and (
-                    entry["max_best_trophies"] is None
-                    or best > entry["max_best_trophies"]
+                    entry["max_best_trophies"] is None or best > entry["max_best_trophies"]
                 ):
                     entry["max_best_trophies"] = best
     ranked_profiles.sort(
@@ -2036,14 +1965,10 @@ def _recompute_member_recent_form(member_id: int, conn=None):
             for r in rows
             if r["crowns_for"] is not None and r["crowns_against"] is not None
         ]
-        trophy_changes = [
-            r["trophy_change"] for r in rows if r["trophy_change"] is not None
-        ]
+        trophy_changes = [r["trophy_change"] for r in rows if r["trophy_change"] is not None]
         avg_crown_diff = round(sum(diffs) / len(diffs), 2) if diffs else None
         avg_trophy_change = (
-            round(sum(trophy_changes) / len(trophy_changes), 2)
-            if trophy_changes
-            else None
+            round(sum(trophy_changes) / len(trophy_changes), 2) if trophy_changes else None
         )
         label = _build_form_label(wins, losses, sample_size)
         summary = _build_form_summary(wins, losses, draws, sample_size, label)

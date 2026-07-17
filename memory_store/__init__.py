@@ -103,9 +103,7 @@ def ensure_memory_schema(conn: sqlite3.Connection) -> None:
     require_columns(conn, "memories", {"memory_id", "kind", "scope"})
     require_columns(conn, "memory_tags", {"memory_id", "tag"})
     require_columns(conn, "memory_log", {"log_id", "memory_id"})
-    if not conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE name = 'memories_fts'"
-    ).fetchone():
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'memories_fts'").fetchone():
         raise RuntimeError(
             "database schema contract missing memories_fts; open through db.get_connection()"
         )
@@ -168,9 +166,7 @@ def _norm_scope(scope: str) -> str:
     return "leadership" if scope == "system_internal" else scope
 
 
-def _allowed_scopes(
-    viewer_scope: str, include_system_internal: bool = False
-) -> tuple[str, ...]:
+def _allowed_scopes(viewer_scope: str, include_system_internal: bool = False) -> tuple[str, ...]:
     if viewer_scope == "public":
         return ("public",)
     if viewer_scope in ("leadership", "system_internal"):
@@ -178,16 +174,12 @@ def _allowed_scopes(
     raise MemoryValidationError(f"invalid viewer scope: {viewer_scope}")
 
 
-def _validate_provenance(
-    source_type: str, is_inference: bool, confidence: float
-) -> None:
+def _validate_provenance(source_type: str, is_inference: bool, confidence: float) -> None:
     kind = _norm_kind(source_type)
     if not (0.0 <= float(confidence) <= 1.0):
         raise MemoryValidationError("confidence must be between 0.0 and 1.0")
     if kind == "leader_note" and is_inference:
-        raise MemoryValidationError(
-            "leader_note memories cannot be marked as inference"
-        )
+        raise MemoryValidationError("leader_note memories cannot be marked as inference")
     if kind == "inference" and float(confidence) >= 1.0:
         raise MemoryValidationError("elixir_inference confidence must be less than 1.0")
 
@@ -221,9 +213,7 @@ def _event_key(event_type: Optional[str], event_id: Optional[str]) -> Optional[s
 
 
 def _fetch_memory(conn, memory_id: int) -> Optional[dict]:
-    row = conn.execute(
-        "SELECT * FROM memories WHERE memory_id = ?", (memory_id,)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,)).fetchone()
     if not row:
         return None
     item = dict(row)
@@ -248,9 +238,7 @@ def _fetch_memory(conn, memory_id: int) -> Optional[dict]:
     return item
 
 
-def _log(
-    conn, memory_id: int, action: str, actor: str, diff: Optional[dict] = None
-) -> None:
+def _log(conn, memory_id: int, action: str, actor: str, diff: Optional[dict] = None) -> None:
     conn.execute(
         "INSERT INTO memory_log (memory_id, action, actor, at, diff_json) VALUES (?, ?, ?, ?, ?)",
         (memory_id, action, actor, _utcnow(), _json_or_none(diff)),
@@ -331,9 +319,7 @@ def create_memory(
     )
     memory_id = cur.lastrowid
     if metadata:
-        _log(
-            conn, memory_id, "created", created_by, {"metadata": metadata, "kind": kind}
-        )
+        _log(conn, memory_id, "created", created_by, {"metadata": metadata, "kind": kind})
     else:
         _log(conn, memory_id, "created", created_by, {"kind": kind})
     # No conn.commit(): managed_memory_connection commits when it owns the conn;
@@ -342,9 +328,7 @@ def create_memory(
 
 
 @managed_memory_connection
-def attach_tags(
-    memory_id: int, tags: Iterable[str], *, actor: str, conn=None
-) -> list[str]:
+def attach_tags(memory_id: int, tags: Iterable[str], *, actor: str, conn=None) -> list[str]:
     clean = sorted({t.strip().lower() for t in (tags or []) if t and t.strip()})
     for tag in clean:
         conn.execute(
@@ -592,10 +576,8 @@ def list_memories(
 
 def _recency(updated_at: str, now: datetime) -> float:
     try:
-        age_days = max(
-            0.0, (now - _parse_utc_datetime(updated_at)).total_seconds() / 86400.0
-        )
-    except (TypeError, ValueError):
+        age_days = max(0.0, (now - _parse_utc_datetime(updated_at)).total_seconds() / 86400.0)
+    except TypeError, ValueError:
         return 0.0
     return 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
 
@@ -752,8 +734,7 @@ def search_memories(
                     "ORDER BY m.updated_at DESC LIMIT 400",
                     args,
                 ).fetchall()
-                if low
-                in f"{r['title'] or ''}\n{r['summary'] or ''}\n{r['body'] or ''}".lower()
+                if low in f"{r['title'] or ''}\n{r['summary'] or ''}\n{r['body'] or ''}".lower()
             ][: limit * 4]
     else:
         rows = conn.execute(
@@ -769,8 +750,7 @@ def search_memories(
         score = (
             W_MATCH * strength
             + W_CONF * float(memory.get("confidence") or 0.0)
-            + W_RECENCY
-            * _recency(memory.get("updated_at") or memory.get("created_at"), now)
+            + W_RECENCY * _recency(memory.get("updated_at") or memory.get("created_at"), now)
         )
         results.append(
             MemorySearchResult(

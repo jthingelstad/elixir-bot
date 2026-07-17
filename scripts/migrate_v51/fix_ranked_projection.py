@@ -5,7 +5,7 @@ road!) as the Ranked rating, so migrated values sat frozen and wrong
 The projection source is fixed in engine/projections.py; this repairs the
 stored rows immediately instead of waiting a poll cycle. Idempotent.
 
-Usage: ./venv/bin/python scripts/migrate_v51/fix_ranked_projection.py [db_path]
+Usage: uv run python scripts/migrate_v51/fix_ranked_projection.py [db_path]
 """
 
 import json

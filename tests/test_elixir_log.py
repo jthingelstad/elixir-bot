@@ -41,9 +41,7 @@ def test_alert_admin_prefers_elixir_log_webhook():
         ) as mock_log,
         patch("runtime.alerts.prompts.discord_channels_by_workflow") as mock_channels,
     ):
-        sent = asyncio.run(
-            alerts._alert_admin("CR API failed", "cr_api_outage", "sig-1")
-        )
+        sent = asyncio.run(alerts._alert_admin("CR API failed", "cr_api_outage", "sig-1"))
 
     assert sent is True
     mock_log.assert_awaited_once_with("CR API failed")
@@ -70,9 +68,7 @@ def test_alert_admin_strips_mentions_from_elixir_log_webhook():
 
 def test_leader_action_skip_posts_structured_elixir_log_event():
     with (
-        patch(
-            "runtime.leader_action_observability.elixir_log.enabled", return_value=True
-        ),
+        patch("runtime.leader_action_observability.elixir_log.enabled", return_value=True),
         patch(
             "runtime.leader_action_observability.elixir_log.post_event_async",
             new=AsyncMock(return_value=True),

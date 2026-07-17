@@ -32,7 +32,7 @@ _ACTOR = "leader_note_interpret"
 def _coerce_days(value) -> int:
     try:
         return max(0, int(round(float(value))))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0
 
 
@@ -99,9 +99,7 @@ def apply_leader_note_effect(action_id: int, effect: dict | None) -> dict:
             if not canon or not action_type:
                 return {"kind": "none", "applied": False, "reading": "no target member"}
             fingerprint = compute_premise_fingerprint(canon, action_type)
-            prior = db.set_leader_action_premise(
-                action_id, rejected=True, fingerprint=fingerprint
-            )
+            prior = db.set_leader_action_premise(action_id, rejected=True, fingerprint=fingerprint)
             return {
                 "kind": "invalidate_premise",
                 "applied": True,

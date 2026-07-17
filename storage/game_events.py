@@ -121,7 +121,7 @@ def recent_game_events(conn, *, days: int = 7, now: str | None = None) -> list[d
         d = dict(r)
         try:
             d["payload"] = json.loads(d.pop("payload_json") or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             d["payload"] = {}
         out.append(d)
     return out

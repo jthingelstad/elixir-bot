@@ -33,9 +33,7 @@ def ensure_incidents_schema(conn: sqlite3.Connection) -> None:
     """Compatibility assertion; db.schema owns incident-ledger creation."""
     from db.schema import require_columns
 
-    require_columns(
-        conn, "runtime_incidents", {"incident_id", "component", "resolved_at"}
-    )
+    require_columns(conn, "runtime_incidents", {"incident_id", "component", "resolved_at"})
 
 
 def record_incident(
@@ -51,9 +49,7 @@ def record_incident(
     try:
         if isinstance(error, BaseException):
             summary = f"{type(error).__name__}: {error}"
-            detail = "".join(
-                _tb.format_exception(type(error), error, error.__traceback__)
-            )
+            detail = "".join(_tb.format_exception(type(error), error, error.__traceback__))
         else:
             summary = str(error)
             detail = "".join(_tb.format_stack()[:-1])  # caller stack, sans this frame
@@ -61,7 +57,7 @@ def record_incident(
         if context:
             try:
                 ctx = json.dumps(context, default=str, ensure_ascii=False)[:4000]
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 ctx = json.dumps({"repr": repr(context)[:2000]})
 
         own = conn is None

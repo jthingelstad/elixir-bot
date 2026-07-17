@@ -31,9 +31,7 @@ log = logging.getLogger("elixir.engine.editor")
 
 def _editorial_memory_exists(conn, event_key: str) -> bool:
     return (
-        conn.execute(
-            "SELECT 1 FROM memories WHERE source_event_key = ?", (event_key,)
-        ).fetchone()
+        conn.execute("SELECT 1 FROM memories WHERE source_event_key = ?", (event_key,)).fetchone()
         is not None
     )
 
@@ -176,7 +174,7 @@ def _recent_solo_spotlight(conn, post: dict) -> dict | None:
     for row in rows:
         try:
             plan = json.loads(row["plan_json"] or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         for prior in plan.get("posts") or []:
             if not isinstance(prior, dict):
@@ -276,8 +274,7 @@ def record_post_quality_feedback(
     if not concerns:
         return None
     stable_id = (
-        message_id
-        or hashlib.sha1(f"{lane}|{source}|{copy}".encode("utf-8")).hexdigest()[:16]
+        message_id or hashlib.sha1(f"{lane}|{source}|{copy}".encode("utf-8")).hexdigest()[:16]
     )
     return _add_editorial_memory(
         conn,

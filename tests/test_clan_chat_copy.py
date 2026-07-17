@@ -31,9 +31,7 @@ def test_validate_clan_chat_messages_enforces_exact_once_route():
     )
 
     assert ok.violations == []
-    assert (
-        f"not_exactly_once:{clan_chat_copy.DISCORD_INVITE_ROUTE}" in repeated.violations
-    )
+    assert f"not_exactly_once:{clan_chat_copy.DISCORD_INVITE_ROUTE}" in repeated.violations
 
 
 def test_role_action_clan_chat_copy_uses_public_reason_and_word_boundary():
@@ -69,9 +67,7 @@ def test_clip_ends_on_complete_sentence_not_mid_word():
 def test_clip_falls_back_to_ellipsis_without_sentence_break():
     # A single run-on with no early sentence break still clips with an ellipsis
     # (the safety net), rather than returning an empty/tiny fragment.
-    text = (
-        "sniperhendo keeps climbing and climbing and climbing all the way up the ladder"
-    )
+    text = "sniperhendo keeps climbing and climbing and climbing all the way up the ladder"
     clipped = clan_chat_copy.clip_clan_chat_text(text, limit=30)
     assert clipped.endswith("...")
     assert len(clipped) <= 30
@@ -144,9 +140,7 @@ def test_signed_valid_messages_accepts_plain_brain_copy():
 
 
 def test_signed_valid_messages_accepts_single_string():
-    out = clan_chat_copy.signed_valid_messages(
-        "War week clinched — nice work everyone."
-    )
+    out = clan_chat_copy.signed_valid_messages("War week clinched — nice work everyone.")
     assert out is not None and len(out) == 1
 
 

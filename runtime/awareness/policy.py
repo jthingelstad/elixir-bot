@@ -54,9 +54,7 @@ def _race_is_explicitly_unranked(read: dict) -> bool:
     candidates = [
         (read.get("standing") or {}).get("race_ranked"),
         (read.get("war_season") or {}).get("race_ranked"),
-        (((read.get("war_season") or {}).get("state") or {}).get("race") or {}).get(
-            "race_ranked"
-        ),
+        (((read.get("war_season") or {}).get("state") or {}).get("race") or {}).get("race_ranked"),
     ]
     return any(value is False for value in candidates)
 
@@ -176,10 +174,7 @@ def validate_plan(read: dict, plan: dict) -> list[str]:
             if not isinstance(post, dict):
                 continue
             covers = {str(key) for key in (post.get("covers_signal_keys") or []) if key}
-            if (
-                covers & join_keys
-                and signed_valid_messages(post.get("clan_chat")) is None
-            ):
+            if covers & join_keys and signed_valid_messages(post.get("clan_chat")) is None:
                 violations.append(f"post[{index}].join_missing_clan_chat")
     return violations
 
@@ -197,9 +192,7 @@ def validate_repair(original: dict, repaired: dict) -> list[str]:
     for key in sorted((set(original) | set(repaired)) - {"posts"}):
         if original.get(key) != repaired.get(key):
             violations.append(f"repair.changed_{key}")
-    for index, (before, after) in enumerate(
-        zip(original_posts, repaired_posts, strict=True)
-    ):
+    for index, (before, after) in enumerate(zip(original_posts, repaired_posts, strict=True)):
         if not isinstance(before, dict) or not isinstance(after, dict):
             violations.append(f"repair.post[{index}].invalid_shape")
             continue

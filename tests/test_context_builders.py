@@ -157,15 +157,9 @@ def test_memory_war_filters_actually_filter():
     )
     mem_id = mem_id["memory_id"]  # create_memory returns the full row dict
     assert mem_id
-    hit = list_memories(
-        viewer_scope="public", filters={"war_week_id": "133:4"}, limit=10
-    )
-    miss = list_memories(
-        viewer_scope="public", filters={"war_week_id": "999:9"}, limit=10
-    )
-    season_hit = list_memories(
-        viewer_scope="public", filters={"war_season_id": "133"}, limit=10
-    )
+    hit = list_memories(viewer_scope="public", filters={"war_week_id": "133:4"}, limit=10)
+    miss = list_memories(viewer_scope="public", filters={"war_week_id": "999:9"}, limit=10)
+    season_hit = list_memories(viewer_scope="public", filters={"war_season_id": "133"}, limit=10)
     assert any(m["memory_id"] == mem_id for m in hit)
     assert not miss
     assert any(m["memory_id"] == mem_id for m in season_hit)

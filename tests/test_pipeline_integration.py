@@ -61,9 +61,7 @@ def test_pipeline_meta_copy_uses_deterministic_fallback(legacy_engine_conn):
     """Meta/blank compose output (§7 guard) renders deterministically instead of
     sending the model's meta-commentary as copy."""
     iid = _raise(legacy_engine_conn)
-    counters, sent = _run(
-        legacy_engine_conn, lambda i: "I'm unable to process this signal data."
-    )
+    counters, sent = _run(legacy_engine_conn, lambda i: "I'm unable to process this signal data.")
     assert counters["delivered"] == 1
     assert _intent_status(legacy_engine_conn, iid) == "fulfilled"
     assert "unable to" not in sent[0][1].lower()  # fell back to a grounded render

@@ -44,16 +44,12 @@ def test_member_roster_status_active_vs_departed_vs_unknown():
         dep = db.member_roster_status("#DEP", conn=conn)
         assert dep["roster_status"] == "departed"
         assert dep["left_at"] == "2026-07-05T00:00:00Z"
-        assert (
-            db.member_roster_status("#GHOST", conn=conn)["roster_status"] == "unknown"
-        )
+        assert db.member_roster_status("#GHOST", conn=conn)["roster_status"] == "unknown"
 
         # The enrichment choke point cascades the flag to member-facing rows.
         from storage._enrichment import _member_reference_fields
 
-        enriched = _member_reference_fields(
-            conn, "#DEP", {"tag": "#DEP", "name": "Departed"}
-        )
+        enriched = _member_reference_fields(conn, "#DEP", {"tag": "#DEP", "name": "Departed"})
         assert enriched["roster_status"] == "departed" and enriched["left_at"]
     finally:
         conn.close()

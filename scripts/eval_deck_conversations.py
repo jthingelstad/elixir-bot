@@ -325,12 +325,8 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
     errors = sum(1 for _, t in all_turns if t.get("error"))
     skipped = sum(1 for _, t in all_turns if t.get("skipped"))
     routes = Counter(t.get("route") for _, t in all_turns)
-    route_modes = Counter(
-        f"{t.get('route')}/{t.get('mode') or '-'}" for _, t in all_turns
-    )
-    event_types = Counter(
-        t.get("event_type") for _, t in all_turns if t.get("event_type")
-    )
+    route_modes = Counter(f"{t.get('route')}/{t.get('mode') or '-'}" for _, t in all_turns)
+    event_types = Counter(t.get("event_type") for _, t in all_turns if t.get("event_type"))
     tools = Counter()
     for _, t in all_turns:
         for name, _args in t.get("tool_calls") or []:
@@ -344,9 +340,7 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
         print("\nError details:")
         for m, t in all_turns:
             if t.get("error"):
-                print(
-                    f"  {m.get('current_name', m.get('player_tag', '?'))} — {t['error']}"
-                )
+                print(f"  {m.get('current_name', m.get('player_tag', '?'))} — {t['error']}")
 
     print("\nRoute distribution:")
     for route, n in routes.most_common():
@@ -366,8 +360,7 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
     follow_ups_with_mode = [
         (m, t)
         for m, t in all_turns
-        if t.get("mode") in {"war", "regular"}
-        and t.get("route") in {"deck_review", "deck_suggest"}
+        if t.get("mode") in {"war", "regular"} and t.get("route") in {"deck_review", "deck_suggest"}
     ]
     print(f"\nFollow-ups with concrete mode: {len(follow_ups_with_mode)}")
 
@@ -395,13 +388,9 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--members", type=int, default=6, help="Number of members to test"
-    )
+    parser.add_argument("--members", type=int, default=6, help="Number of members to test")
     parser.add_argument("--turns", type=int, default=3, help="Turns per member")
-    parser.add_argument(
-        "--seed", type=int, default=None, help="Random seed for member selection"
-    )
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for member selection")
     parser.add_argument("--out", default="scripts/deck_conversations_eval_results.json")
     args = parser.parse_args()
 
@@ -431,9 +420,7 @@ def main() -> None:
     all_turns: list[tuple[dict, dict]] = []
 
     for member in members:
-        print(
-            f"\n— Generating script for {member.get('current_name') or member['player_tag']} —"
-        )
+        print(f"\n— Generating script for {member.get('current_name') or member['player_tag']} —")
         script = generate_conversation_script(member)
         if not script:
             print("    !! no script generated, skipping member")
@@ -457,12 +444,8 @@ def main() -> None:
             assistant_content = turn.get("content")
             if assistant_content:
                 if isinstance(assistant_content, list):
-                    assistant_content = "\n\n".join(
-                        str(s) for s in assistant_content if s
-                    )
-                conversation_history.append(
-                    {"role": "assistant", "content": assistant_content}
-                )
+                    assistant_content = "\n\n".join(str(s) for s in assistant_content if s)
+                conversation_history.append({"role": "assistant", "content": assistant_content})
 
         print_member_report(member, turns)
         all_rows.append(

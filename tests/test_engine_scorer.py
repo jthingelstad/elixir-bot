@@ -160,9 +160,7 @@ def test_decide_cutoff_at_last_highlight(engine_conn):
 
 
 def test_cohort_wave_three_members_same_day():
-    cands = [
-        _cand("badge_earned", key=f"badge_earned:#{i}:x", tag=f"#{i}") for i in "ABC"
-    ]
+    cands = [_cand("badge_earned", key=f"badge_earned:#{i}:x", tag=f"#{i}") for i in "ABC"]
     waves = cohort_waves(cands)
     assert len(waves) == 1
     key = next(iter(waves))
@@ -171,11 +169,5 @@ def test_cohort_wave_three_members_same_day():
 
 
 def test_no_cohort_below_three_or_wrong_type():
-    assert (
-        cohort_waves([_cand("badge_earned", tag="#A"), _cand("badge_earned", tag="#B")])
-        == {}
-    )
-    assert (
-        cohort_waves([_cand("collection_level_milestone", tag=f"#{i}") for i in "ABC"])
-        == {}
-    )
+    assert cohort_waves([_cand("badge_earned", tag="#A"), _cand("badge_earned", tag="#B")]) == {}
+    assert cohort_waves([_cand("collection_level_milestone", tag=f"#{i}") for i in "ABC"]) == {}

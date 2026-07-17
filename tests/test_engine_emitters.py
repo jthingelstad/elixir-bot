@@ -17,9 +17,7 @@ LATER = "2026-07-01T13:00:00Z"
 TAG = "#AAA111"
 
 
-def _profile(
-    level=44, wins=4990, best=6890, badges=None, arena=(54000012, "Spooky Town")
-):
+def _profile(level=44, wins=4990, best=6890, badges=None, arena=(54000012, "Spooky Town")):
     return {
         "tag": TAG,
         "name": "Alice",
@@ -35,16 +33,12 @@ def _profile(
 def _events(conn, table="player_events"):
     return [
         (r["event_type"], r["dedup_key"])
-        for r in conn.execute(
-            f"SELECT event_type, dedup_key FROM {table} ORDER BY event_id"
-        )
+        for r in conn.execute(f"SELECT event_type, dedup_key FROM {table} ORDER BY event_id")
     ]
 
 
 def _emit_profile(conn, payload, at):
-    return emit(
-        conn, "player", TAG, "profile", project_player_aspects(payload)["profile"], at
-    )
+    return emit(conn, "player", TAG, "profile", project_player_aspects(payload)["profile"], at)
 
 
 def test_first_sight_emits_nothing(engine_conn):
@@ -69,9 +63,7 @@ def test_career_wins_golden_pair(engine_conn):
     assert all(e[0] != "level_up" for e in events)
     assert n == len(events)
     # timing honesty: estimated, window bounded by prev observation
-    row = engine_conn.execute(
-        "SELECT timing, window_start FROM player_events LIMIT 1"
-    ).fetchone()
+    row = engine_conn.execute("SELECT timing, window_start FROM player_events LIMIT 1").fetchone()
     assert row["timing"] == "estimated" and row["window_start"] == NOW
 
 
@@ -110,9 +102,7 @@ def test_card_unlock_and_level_milestone(engine_conn):
     def cards_payload(cards):
         return {"tag": TAG, "cards": cards, "badges": []}
 
-    base = [
-        {"id": 1, "name": "Knight", "rarity": "common", "level": 13, "maxLevel": 14}
-    ]
+    base = [{"id": 1, "name": "Knight", "rarity": "common", "level": 13, "maxLevel": 14}]
     emit(
         engine_conn,
         "player",
@@ -169,15 +159,11 @@ def _emit_roster(conn, payload, at):
         "is_home) VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', ?, 1)",
         (at,),
     )
-    return emit(
-        conn, "clan", "#J2RGCRVG", "roster", project_clan_aspects(payload)["roster"], at
-    )
+    return emit(conn, "clan", "#J2RGCRVG", "roster", project_clan_aspects(payload)["roster"], at)
 
 
 def test_roster_join_leave_role_change_maintain_memberships(engine_conn):
-    _emit_roster(
-        engine_conn, _roster([("#A", "Al", "member", 0), ("#B", "Bo", "elder", 0)]), NOW
-    )
+    _emit_roster(engine_conn, _roster([("#A", "Al", "member", 0), ("#B", "Bo", "elder", 0)]), NOW)
     # First-sight roster is silent (the emitter never runs — no identity
     # upserts, no membership rows); production's initial roster state comes
     # from the T1/T5 transforms. Simulate that carried state:
@@ -201,9 +187,7 @@ def test_roster_join_leave_role_change_maintain_memberships(engine_conn):
     )
     events = _events(engine_conn, "clan_events")
     types = [e[0] for e in events]
-    assert (
-        "member_joined" in types and "member_left" in types and "role_changed" in types
-    )
+    assert "member_joined" in types and "member_left" in types and "role_changed" in types
     open_tags = {
         r[0]
         for r in engine_conn.execute(
@@ -253,12 +237,9 @@ def test_historical_roster_replay_reuses_membership_interval(engine_conn):
         _emit_roster(engine_conn, empty, left)
 
     memberships = engine_conn.execute(
-        "SELECT joined_at, left_at, leave_source FROM clan_memberships "
-        "WHERE player_tag = '#REPLAY'"
+        "SELECT joined_at, left_at, leave_source FROM clan_memberships WHERE player_tag = '#REPLAY'"
     ).fetchall()
-    assert [tuple(row) for row in memberships] == [
-        (joined, left, "leader_verified_kick")
-    ]
+    assert [tuple(row) for row in memberships] == [(joined, left, "leader_verified_kick")]
 
 
 def test_roster_change_set_derivation_is_pure_and_deterministic():
@@ -365,8 +346,7 @@ def test_calendar_birthday_and_anniversary(engine_conn):
         (NOW, NOW),
     )
     engine_conn.execute(
-        "INSERT INTO player_metadata (player_tag, birth_month, birth_day) "
-        "VALUES ('#A', 7, 1)"
+        "INSERT INTO player_metadata (player_tag, birth_month, birth_day) VALUES ('#A', 7, 1)"
     )
     engine_conn.execute(
         "INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
@@ -433,9 +413,7 @@ def test_cr_account_anniversary_ticks_up(engine_conn):
 
     # First sight: baseline only — never celebrate a member's current age.
     emit_calendar(engine_conn, "2026-07-01")
-    assert "cr_account_anniversary" not in [
-        e[0] for e in _events(engine_conn, "clan_events")
-    ]
+    assert "cr_account_anniversary" not in [e[0] for e in _events(engine_conn, "clan_events")]
     assert _cr_years_celebrated(engine_conn, "#A") == 5
 
     # A year tick-up emits exactly one anniversary and advances the baseline.
@@ -443,11 +421,7 @@ def test_cr_account_anniversary_ticks_up(engine_conn):
         "UPDATE player_metadata SET cr_account_age_years = 6 WHERE player_tag = '#A'"
     )
     emit_calendar(engine_conn, "2026-07-01")
-    cr_events = [
-        e
-        for e in _events(engine_conn, "clan_events")
-        if e[0] == "cr_account_anniversary"
-    ]
+    cr_events = [e for e in _events(engine_conn, "clan_events") if e[0] == "cr_account_anniversary"]
     assert cr_events == [("cr_account_anniversary", "cr_account_anniversary:#A:6")]
     payload = json.loads(
         engine_conn.execute(
@@ -464,14 +438,10 @@ def test_cr_account_anniversary_ticks_up(engine_conn):
 def test_cr_account_anniversary_skips_departed_member(engine_conn):
     _home_clan(engine_conn)
     # A departed member whose years already rose — must never be celebrated.
-    _cake_member(
-        engine_conn, "#B", "Bo", cr_years=6, cr_celebrated=5, left_at="2026-06-20"
-    )
+    _cake_member(engine_conn, "#B", "Bo", cr_years=6, cr_celebrated=5, left_at="2026-06-20")
     engine_conn.commit()
     emit_calendar(engine_conn, "2026-07-01")
-    assert "cr_account_anniversary" not in [
-        e[0] for e in _events(engine_conn, "clan_events")
-    ]
+    assert "cr_account_anniversary" not in [e[0] for e in _events(engine_conn, "clan_events")]
 
 
 def test_join_anniversary_flags_annual_marks(engine_conn):

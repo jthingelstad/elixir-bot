@@ -42,7 +42,7 @@ def _parse_json(value, default=None):
         return default
     try:
         return json.loads(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 
@@ -394,9 +394,7 @@ def awareness_page() -> dict:
                     "outcome": _thought_outcome(t),
                     "post_count": t.get("post_count") or 0,
                     "tier": _thought_tier(t.get("model")),
-                    "signal_counts": {
-                        lane: len(items) for lane, items in sbl.items() if items
-                    },
+                    "signal_counts": {lane: len(items) for lane, items in sbl.items() if items},
                     "signal_total": sum(len(v) for v in sbl.values() if v),
                     "hard_posts": [
                         h.get("event_type")
@@ -463,9 +461,7 @@ def members_page() -> dict:
                 r["mode_mix"] = (
                     ", ".join(
                         f"{m} {v['battles']}"
-                        for m, v in sorted(
-                            p["modes"].items(), key=lambda kv: -kv[1]["battles"]
-                        )
+                        for m, v in sorted(p["modes"].items(), key=lambda kv: -kv[1]["battles"])
                     )
                     or None
                 )
@@ -575,9 +571,7 @@ def streams_page(stream: str | None, event_type: str | None, limit: int = 100) -
 def raw_payload(payload_id: int) -> dict | None:
     conn = db.get_connection()
     try:
-        return _one(
-            conn, "SELECT * FROM raw_api_payloads WHERE payload_id = ?", (payload_id,)
-        )
+        return _one(conn, "SELECT * FROM raw_api_payloads WHERE payload_id = ?", (payload_id,))
     finally:
         conn.close()
 
@@ -629,9 +623,7 @@ def awards_page() -> dict:
             )
             season["awards"].append(r)
         for sid, n in participants.items():  # seasons with only participant rows
-            seasons.setdefault(
-                sid, {"season_id": sid, "awards": [], "war_participants": n}
-            )
+            seasons.setdefault(sid, {"season_id": sid, "awards": [], "war_participants": n})
         # Rotation visibility (Q2): flag seasons where the free pass diverged
         # from the rank-1 war champ.
         for season in seasons.values():
@@ -644,11 +636,7 @@ def awards_page() -> dict:
                 None,
             )
             fp = next(
-                (
-                    a["player_tag"]
-                    for a in season["awards"]
-                    if a["award_type"] == "free_pass"
-                ),
+                (a["player_tag"] for a in season["awards"] if a["award_type"] == "free_pass"),
                 None,
             )
             season["rotation_diverged"] = bool(champ and fp and champ != fp)
@@ -727,13 +715,9 @@ def member_page(tag: str) -> dict | None:
         player = _one(conn, "SELECT * FROM players WHERE player_tag = ?", (tag,))
         if player is None:
             return None
-        state = _one(
-            conn, "SELECT * FROM player_current_state WHERE player_tag = ?", (tag,)
-        )
+        state = _one(conn, "SELECT * FROM player_current_state WHERE player_tag = ?", (tag,))
         poll = _one(conn, "SELECT * FROM poll_state WHERE player_tag = ?", (tag,))
-        management = _one(
-            conn, "SELECT * FROM member_management WHERE player_tag = ?", (tag,)
-        )
+        management = _one(conn, "SELECT * FROM member_management WHERE player_tag = ?", (tag,))
         if management:
             management["state"] = _parse_json(management.pop("state_json", None), {})
         membership = _one(
@@ -754,12 +738,8 @@ def member_page(tag: str) -> dict | None:
         )
         for c in claims:
             blob = _parse_json(c.pop("event_refs_json"), {})
-            c["suppressed_reason"] = ((blob or {}).get("suppressed") or {}).get(
-                "reason"
-            )
-        events = events_read.list_recent_events(
-            days=30, subject_key=tag, limit=60, conn=conn
-        )
+            c["suppressed_reason"] = ((blob or {}).get("suppressed") or {}).get("reason")
+        events = events_read.list_recent_events(days=30, subject_key=tag, limit=60, conn=conn)
         battles = _rows(
             conn,
             """
@@ -875,9 +855,7 @@ def command_page() -> dict:
     Elixir's subsystems. Reuses the same sources as the deeper pages."""
     conn = db.get_connection()
     try:
-        open_actions = leader_actions.list_leader_actions(
-            status="proposed", limit=25, conn=conn
-        )
+        open_actions = leader_actions.list_leader_actions(status="proposed", limit=25, conn=conn)
         open_cases = cases.list_decision_cases(limit=25, conn=conn)
         pending_revisits = revisits.list_pending_revisits(limit=15, conn=conn)
 
@@ -903,9 +881,7 @@ def command_page() -> dict:
         war_state = {}
         war_standings = []
         try:
-            snap = war_capability.get_war_season_view(view="snapshot", conn=conn)[
-                "data"
-            ]
+            snap = war_capability.get_war_season_view(view="snapshot", conn=conn)["data"]
             war_state = snap.get("state") or {}
             race = war_state.get("race") or {}
             war_standings = [
@@ -984,18 +960,14 @@ def management_page() -> dict:
         )
         for r in rows:
             r.pop("state_json", None)
-        actions = leader_actions.list_leader_actions(
-            status="proposed", limit=25, conn=conn
-        )
+        actions = leader_actions.list_leader_actions(status="proposed", limit=25, conn=conn)
         recent = leader_actions.list_leader_actions(limit=15, conn=conn)
         open_cases = cases.list_decision_cases(limit=25, conn=conn)  # open + deferred
         resolved_cases = cases.list_decision_cases(
             statuses=(cases.CASE_RESOLVED, cases.CASE_DISMISSED), limit=10, conn=conn
         )
         pending_revisits = revisits.list_pending_revisits(limit=25, conn=conn)
-        decision_contract = management_capability.get_management_decisions(
-            view="board", conn=conn
-        )
+        decision_contract = management_capability.get_management_decisions(view="board", conn=conn)
         return {
             "rows": rows,
             "open_actions": actions,
@@ -1015,9 +987,7 @@ def war_page() -> dict:
         clock = _war_clock_dict(conn)
         snapshot = None
         try:
-            snapshot = war_capability.get_war_season_view(view="snapshot", conn=conn)[
-                "data"
-            ]
+            snapshot = war_capability.get_war_season_view(view="snapshot", conn=conn)["data"]
         except Exception:
             log.debug("war snapshot unavailable", exc_info=True)
             snapshot = None
@@ -1089,9 +1059,7 @@ def llm_page(workflow: str | None = None, limit: int = 50) -> dict:
         )
         workflows = [
             r["workflow"]
-            for r in _rows(
-                conn, "SELECT DISTINCT workflow FROM llm_calls ORDER BY workflow"
-            )
+            for r in _rows(conn, "SELECT DISTINCT workflow FROM llm_calls ORDER BY workflow")
         ]
         failures = _rows(
             conn,
@@ -1129,9 +1097,7 @@ def llm_page(workflow: str | None = None, limit: int = 50) -> dict:
         conn.close()
 
 
-def memories_page(
-    kind: str | None, member: str | None, q: str | None, limit: int = 100
-) -> dict:
+def memories_page(kind: str | None, member: str | None, q: str | None, limit: int = 100) -> dict:
     """The memory half of "see what Elixir knows" (memory.md M6): browse +
     FTS search over the v5.1 memories store, kind/member filters."""
     import memory_store
@@ -1150,11 +1116,7 @@ def memories_page(
             rows = [dict(r.memory, rank_score=round(r.rank_score, 3)) for r in results]
             if member:
                 canon = member if member.startswith("#") else f"#{member}"
-                rows = [
-                    r
-                    for r in rows
-                    if (r.get("member_tag") or "").upper() == canon.upper()
-                ]
+                rows = [r for r in rows if (r.get("member_tag") or "").upper() == canon.upper()]
         else:
             filters = {}
             if kind:

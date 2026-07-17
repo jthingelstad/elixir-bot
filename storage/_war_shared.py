@@ -20,9 +20,7 @@ def get_latest_logged_race(conn: sqlite3.Connection):
     ).fetchone()
 
 
-def infer_current_season_id_from_live_state(
-    payload, latest_logged_race
-) -> Optional[int]:
+def infer_current_season_id_from_live_state(payload, latest_logged_race) -> Optional[int]:
     """Infer the current season id from a live race projection or payload.
 
     Accepts both CR-shaped payloads (seasonId/sectionIndex) and the engine's

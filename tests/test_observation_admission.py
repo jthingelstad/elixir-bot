@@ -39,17 +39,11 @@ def test_player_contract_rejects_absence_shape_loss_and_identity_mismatch():
 
     missing_wins = copy.deepcopy(player)
     del missing_wins["wins"]
-    assert (
-        "wins:not_int"
-        in observations.admit("player", player["tag"], missing_wins).errors
-    )
+    assert "wins:not_int" in observations.admit("player", player["tag"], missing_wins).errors
 
     wrong_player = copy.deepcopy(player)
     wrong_player["tag"] = "#SOMEONEELSE"
-    assert (
-        "tag:mismatch"
-        in observations.admit("player", player["tag"], wrong_player).errors
-    )
+    assert "tag:mismatch" in observations.admit("player", player["tag"], wrong_player).errors
 
 
 def test_clan_and_race_contracts_reject_wrong_entity_or_missing_state():
@@ -60,10 +54,7 @@ def test_clan_and_race_contracts_reject_wrong_entity_or_missing_state():
 
     no_roster = copy.deepcopy(clan)
     no_roster["memberList"] = []
-    assert (
-        "memberList:not_nonempty_list"
-        in observations.admit("clan", HOME_CLAN, no_roster).errors
-    )
+    assert "memberList:not_nonempty_list" in observations.admit("clan", HOME_CLAN, no_roster).errors
 
     race = load_cr_fixture("riverrace_warday")
     opponent_race = copy.deepcopy(race)
@@ -74,10 +65,7 @@ def test_clan_and_race_contracts_reject_wrong_entity_or_missing_state():
     )
 
     del race["periodIndex"]
-    assert (
-        "periodIndex:not_int"
-        in observations.admit("currentriverrace", HOME_CLAN, race).errors
-    )
+    assert "periodIndex:not_int" in observations.admit("currentriverrace", HOME_CLAN, race).errors
 
 
 def test_battlelog_distinguishes_valid_empty_from_failure_and_requires_subject():
@@ -217,14 +205,11 @@ def test_rejected_profile_does_not_mutate_baseline_or_poll_freshness(engine_conn
         "WHERE entity_kind='player' AND entity_tag='#A' AND aspect='profile'"
     ).fetchone()
     poll_after = engine_conn.execute(
-        "SELECT last_profile_poll, last_battlelog_poll FROM poll_state "
-        "WHERE player_tag='#A'"
+        "SELECT last_profile_poll, last_battlelog_poll FROM poll_state WHERE player_tag='#A'"
     ).fetchone()
     assert tuple(baseline_after) == tuple(baseline_before)
     assert poll_after["last_profile_poll"] == poll_before
-    assert poll_after["last_battlelog_poll"] == rejected_at.strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    assert poll_after["last_battlelog_poll"] == rejected_at.strftime("%Y-%m-%dT%H:%M:%SZ")
     assert engine_conn.execute("SELECT COUNT(*) FROM player_events").fetchone()[0] == 0
     assert (
         engine_conn.execute(
@@ -236,15 +221,12 @@ def test_rejected_profile_does_not_mutate_baseline_or_poll_freshness(engine_conn
 
     # Repeated contract failures stay visible in per-tick counters without
     # flooding the durable incident ledger every ten minutes.
-    engine_conn.execute(
-        "UPDATE poll_state SET heat=2, temperature='warm' WHERE player_tag='#A'"
-    )
+    engine_conn.execute("UPDATE poll_state SET heat=2, temperature='warm' WHERE player_tag='#A'")
     repeated = run_tick(engine_conn, rejected_at + timedelta(minutes=10), api=api)
     assert repeated["profile_observation_contract_rejections"] == 1
     assert (
         engine_conn.execute(
-            "SELECT COUNT(*) FROM runtime_incidents "
-            "WHERE component='engine.observation.player'"
+            "SELECT COUNT(*) FROM runtime_incidents WHERE component='engine.observation.player'"
         ).fetchone()[0]
         == 1
     )
@@ -257,9 +239,7 @@ def test_rejected_profile_does_not_mutate_baseline_or_poll_freshness(engine_conn
     assert engine_conn.execute("SELECT COUNT(*) FROM player_events").fetchone()[0] == 0
 
 
-def test_offline_replay_rejects_foreign_race_without_state_mutation(
-    tmp_path, v51_schema_template
-):
+def test_offline_replay_rejects_foreign_race_without_state_mutation(tmp_path, v51_schema_template):
     import shutil
 
     from engine.offline import OfflineEngine
@@ -315,9 +295,7 @@ def test_storage_facade_rejects_cross_entity_profile_and_bad_battlelog(engine_co
         conn=engine_conn,
     )
 
-    assert (
-        engine_conn.execute("SELECT COUNT(*) FROM state_baselines").fetchone()[0] == 0
-    )
+    assert engine_conn.execute("SELECT COUNT(*) FROM state_baselines").fetchone()[0] == 0
     assert engine_conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0] == 0
     assert (
         engine_conn.execute(

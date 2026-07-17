@@ -115,9 +115,7 @@ def test_llm_cost_page_aggregates_by_workflow_and_prices_models():
     data = queries.llm_cost_page()
     by_wf = {w["workflow"]: w for w in data["workflows_7d"]}
     assert abs(by_wf["awareness"]["cost_usd"] - 15.0) < 0.01
-    assert (
-        abs(by_wf["memory_synthesis"]["cost_usd"] - 75.0) < 0.01
-    )  # opus priced, not $0
+    assert abs(by_wf["memory_synthesis"]["cost_usd"] - 75.0) < 0.01  # opus priced, not $0
 
     async def body(client):
         r = await client.get("/cost", headers=LOGIN)
@@ -286,15 +284,11 @@ def test_members_awards_baseline_render_seeded():
         assert r.status == 200
         text = await r.text()
         assert "war_champ" in text and "Season 133" in text
-        r = await client.get(
-            "/baseline?kind=player&tag=%23ROSTER1&aspect=profile", headers=LOGIN
-        )
+        r = await client.get("/baseline?kind=player&tag=%23ROSTER1&aspect=profile", headers=LOGIN)
         assert r.status == 200
         text = await r.text()
         assert "Rosterling" in text and "first sight" in text
-        r = await client.get(
-            "/baseline?kind=player&tag=%23NOPE&aspect=profile", headers=LOGIN
-        )
+        r = await client.get("/baseline?kind=player&tag=%23NOPE&aspect=profile", headers=LOGIN)
         assert r.status == 404
         r = await client.get("/llm", headers=LOGIN)
         assert r.status == 200
@@ -375,9 +369,7 @@ def test_recognition_shows_suppression_and_archived_legacy_reference():
         text = await r.text()
         assert "player_highlight_accruing" in text
         assert "legacy post #7 (archived)" in text
-        r = await client.get(
-            "/recognition/best_trophies_peak:%23SEED1:5100", headers=LOGIN
-        )
+        r = await client.get("/recognition/best_trophies_peak:%23SEED1:5100", headers=LOGIN)
         assert r.status == 200
         assert "player_highlight_accruing" in await r.text()
         r = await client.get("/member/SEED1", headers=LOGIN)
@@ -432,9 +424,7 @@ def test_weekly_review_dryrun_rolls_back():
         )
         conn.commit()
         before = dict(
-            conn.execute(
-                "SELECT * FROM member_management WHERE player_tag = '#DRY1'"
-            ).fetchone()
+            conn.execute("SELECT * FROM member_management WHERE player_tag = '#DRY1'").fetchone()
         )
     finally:
         conn.close()
@@ -445,9 +435,7 @@ def test_weekly_review_dryrun_rolls_back():
     conn = db.get_connection()
     try:
         after = dict(
-            conn.execute(
-                "SELECT * FROM member_management WHERE player_tag = '#DRY1'"
-            ).fetchone()
+            conn.execute("SELECT * FROM member_management WHERE player_tag = '#DRY1'").fetchone()
         )
         assert after == before  # rolled back — nothing changed
     finally:
@@ -480,9 +468,7 @@ def test_chat_post_and_poll(monkeypatch):
 
 def test_ops_routes_same_origin_guard():
     async def body(client):
-        r = await client.post(
-            "/ops/tick", headers={**LOGIN, "Origin": "https://evil.example"}
-        )
+        r = await client.post("/ops/tick", headers={**LOGIN, "Origin": "https://evil.example"})
         assert r.status == 403
         # Cold review 2026-07-04 #6: prefix bypass — https://<host>.evil.com
         # must be rejected (exact host equality, not startswith).

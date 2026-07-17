@@ -13,9 +13,7 @@ import sqlite3
 from engine.db import payload_hash
 
 
-def get_baseline(
-    conn, entity_kind: str, entity_tag: str, aspect: str
-) -> sqlite3.Row | None:
+def get_baseline(conn, entity_kind: str, entity_tag: str, aspect: str) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT * FROM state_baselines WHERE entity_kind = ? AND entity_tag = ? AND aspect = ?",
         (entity_kind, entity_tag, aspect),
@@ -53,9 +51,7 @@ def set_baseline(
     )
 
 
-def payload_changed(
-    conn, entity_kind: str, entity_tag: str, aspect: str, payload: dict
-) -> bool:
+def payload_changed(conn, entity_kind: str, entity_tag: str, aspect: str, payload: dict) -> bool:
     """Cheap no-change check: hash compare against the stored baseline."""
     row = get_baseline(conn, entity_kind, entity_tag, aspect)
     if row is None:

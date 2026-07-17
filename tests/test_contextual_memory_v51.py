@@ -76,9 +76,7 @@ def test_race_streak_resets_on_real_non_first():
     """A genuine non-1st finish (rank 2) resets the streak."""
     conn = _mem_conn()
     try:
-        conn.execute(
-            "INSERT INTO war_seasons (season_id, started_at) VALUES (133,'2026-06-01')"
-        )
+        conn.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (133,'2026-06-01')")
         for season, section, rank in [(133, 0, 1), (133, 1, 2), (133, 2, 1)]:
             conn.execute(
                 "INSERT INTO war_weeks (season_id, section_index, our_rank) VALUES (?,?,?)",

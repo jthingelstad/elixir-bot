@@ -67,10 +67,8 @@ def _now(now):
 
 def _parse(ts):
     try:
-        return datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S").replace(
-            tzinfo=timezone.utc
-        )
-    except (TypeError, ValueError):
+        return datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    except TypeError, ValueError:
         return None
 
 
@@ -137,9 +135,7 @@ def due_nudge(conn, now=None, *, global_cap_days: int = 7) -> dict | None:
         return None
 
     eligible = []
-    for r in conn.execute(
-        "SELECT * FROM evergreen_nudges WHERE enabled = 1"
-    ).fetchall():
+    for r in conn.execute("SELECT * FROM evergreen_nudges WHERE enabled = 1").fetchall():
         d = dict(r)
         ls = _parse(d.get("last_sent_at")) if d.get("last_sent_at") else None
         if ls is not None and (now - ls) < timedelta(days=d.get("cooldown_days") or 30):

@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 def _admin_script_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
     project = tmp_path / "repo"
     scripts_dir = project / "scripts"
-    venv_bin = project / "venv" / "bin"
+    venv_bin = project / ".venv" / "bin"
     tools_dir = tmp_path / "tools"
     home_dir = tmp_path / "home"
     log_path = tmp_path / "admin-calls.log"
@@ -28,19 +28,11 @@ def _admin_script_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
     admin_script = scripts_dir / "admin.sh"
     shutil.copy(PROJECT_ROOT / "scripts" / "admin.sh", admin_script)
     admin_script.chmod(0o755)
-    (scripts_dir / "backup_db.py").write_text(
-        "# fake backup entrypoint\n", encoding="utf-8"
-    )
+    (scripts_dir / "backup_db.py").write_text("# fake backup entrypoint\n", encoding="utf-8")
 
-    (venv_bin / "activate").write_text(
-        'export PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd):$PATH"\n',
-        encoding="utf-8",
-    )
     python_stub = venv_bin / "python"
     python_stub.write_text(
-        "#!/bin/bash\n"
-        'echo "python $*" >> "$ADMIN_TEST_LOG"\n'
-        'exit "${ADMIN_TEST_PYTHON_EXIT:-0}"\n',
+        '#!/bin/bash\necho "python $*" >> "$ADMIN_TEST_LOG"\nexit "${ADMIN_TEST_PYTHON_EXIT:-0}"\n',
         encoding="utf-8",
     )
     python_stub.chmod(0o755)

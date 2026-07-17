@@ -5,7 +5,7 @@ idempotent: it clears its target table(s) and reloads. Run order matters
 only where noted (T3 before T9 — clans FK; T1 before everything tag-keyed).
 
 Usage:
-    ./venv/bin/python scripts/migrate_v51/transforms.py \
+    uv run python scripts/migrate_v51/transforms.py \
         --archive elixir-v5-archive-2026H2.db --db elixir-v51.db
 
 Semantics pinned here (and mirrored by parity_checks.py):

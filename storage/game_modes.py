@@ -76,7 +76,7 @@ def _int_or_none(value) -> Optional[int]:
     try:
         text = str(value).strip()
         return int(text) if text else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -114,8 +114,7 @@ def classify_battle_mode(
     hosted = bool(is_hosted_match) if is_hosted_match is not None else False
 
     if (
-        battle_type_l
-        in {"riverracepvp", "riverraceduel", "riverraceduelcolosseum", "boatbattle"}
+        battle_type_l in {"riverracepvp", "riverraceduel", "riverraceduelcolosseum", "boatbattle"}
         or mode_id in WAR_GAME_MODE_IDS
         or "clanwar" in mode_name_l
         or mode_name_l.startswith("cw_")
@@ -144,9 +143,7 @@ def classify_battle_mode(
     if event_tag or battle_type_l == "trail":
         return "special_event"
 
-    if battle_type_l == "pvp" or (
-        mode_id in LADDER_GAME_MODE_IDS and "ladder" in mode_name_l
-    ):
+    if battle_type_l == "pvp" or (mode_id in LADDER_GAME_MODE_IDS and "ladder" in mode_name_l):
         return "ladder"
 
     if (

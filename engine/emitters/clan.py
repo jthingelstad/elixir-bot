@@ -251,9 +251,7 @@ def _verify_roster_change_set(conn, clan_tag: str, changes: RosterChangeSet) -> 
             (join.player_tag, clan_tag, changes.observed_at, changes.observed_at),
         ).fetchone()[0]
         if event is None or memberships != 1:
-            failures.append(
-                f"join {join.player_tag} event={event is not None} open={memberships}"
-            )
+            failures.append(f"join {join.player_tag} event={event is not None} open={memberships}")
     for leave in changes.leaves:
         event = conn.execute(
             "SELECT 1 FROM clan_events WHERE dedup_key = ? AND event_type = 'member_left'",
@@ -277,9 +275,7 @@ def _verify_roster_change_set(conn, clan_tag: str, changes: RosterChangeSet) -> 
         if event is None:
             failures.append(f"role {role.player_tag} event=False")
     if failures:
-        raise ChangeSetInvariantError(
-            "roster change set invariant failed: " + "; ".join(failures)
-        )
+        raise ChangeSetInvariantError("roster change set invariant failed: " + "; ".join(failures))
 
 
 def emit_roster(conn, clan_tag, old, new, observed_at, window_start) -> int:
@@ -298,9 +294,7 @@ def emit_roster(conn, clan_tag, old, new, observed_at, window_start) -> int:
 
     n = _apply_roster_change_set(conn, clan_tag, changes, window_start)
 
-    n += _emit_donation_reset(
-        conn, clan_tag, old_members, new_members, observed_at, window_start
-    )
+    n += _emit_donation_reset(conn, clan_tag, old_members, new_members, observed_at, window_start)
     _verify_roster_change_set(conn, clan_tag, changes)
     return n
 
@@ -319,9 +313,7 @@ def emit_verified_leave_events(conn, clan_tag, observed_at) -> int:
     warm goodbye. This is the signal the awareness brain narrates. A confirmed
     KICK emits nothing. Idempotent via the dedup key; bounded to recent leaves."""
     base = datetime.fromisoformat(str(observed_at).replace("Z", "").replace("z", ""))
-    cutoff = (base - timedelta(days=_VERIFIED_LEAVE_WINDOW_DAYS)).strftime(
-        "%Y-%m-%dT%H:%M:%S"
-    )
+    cutoff = (base - timedelta(days=_VERIFIED_LEAVE_WINDOW_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
     rows = conn.execute(
         """SELECT cm.player_tag, cm.left_at,
                   COALESCE(p.display_name, p.current_name, cm.player_tag) AS name,
@@ -368,10 +360,7 @@ def _emit_donation_reset(
     week's top donors from the PREVIOUS baseline (events.md §4)."""
     prev_total = sum((m or {}).get("donations") or 0 for m in old_members.values())
     new_total = sum((m or {}).get("donations") or 0 for m in new_members.values())
-    if (
-        prev_total < DONATION_RESET_MIN_PREV
-        or new_total >= prev_total * DONATION_RESET_RATIO
-    ):
+    if prev_total < DONATION_RESET_MIN_PREV or new_total >= prev_total * DONATION_RESET_RATIO:
         return 0
     leaders = sorted(
         (
@@ -416,11 +405,7 @@ def emit_clan_entity(conn, clan_tag, old, new, observed_at, window_start) -> int
     n = 0
     # clan_score_milestone — every CLAN_SCORE_MILESTONE_STEP (new type, §9.3)
     old_score, new_score = old.get("clan_score"), new.get("clan_score")
-    if (
-        isinstance(old_score, int)
-        and isinstance(new_score, int)
-        and new_score > old_score > 0
-    ):
+    if isinstance(old_score, int) and isinstance(new_score, int) and new_score > old_score > 0:
         first = (old_score // CLAN_SCORE_MILESTONE_STEP + 1) * CLAN_SCORE_MILESTONE_STEP
         for milestone in range(first, new_score + 1, CLAN_SCORE_MILESTONE_STEP):
             n += _emit(

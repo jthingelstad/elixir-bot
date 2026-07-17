@@ -69,12 +69,7 @@ def _parse_time(value: str | None) -> datetime | None:
 
 
 def _format_time(value: datetime) -> str:
-    return (
-        value.astimezone(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _open_db(path: str | os.PathLike[str]) -> sqlite3.Connection:
@@ -101,7 +96,7 @@ def _json_loads(value: Any, fallback: Any) -> Any:
         return fallback
     try:
         return json.loads(value)
-    except (TypeError, json.JSONDecodeError):
+    except TypeError, json.JSONDecodeError:
         return fallback
 
 
@@ -119,9 +114,7 @@ def _copy_message_ids(row: sqlite3.Row | dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(ids))
 
 
-def _load_actions(
-    conn: sqlite3.Connection, *, since: datetime, end: datetime
-) -> list[sqlite3.Row]:
+def _load_actions(conn: sqlite3.Connection, *, since: datetime, end: datetime) -> list[sqlite3.Row]:
     if not _table_exists(conn, "leader_action_recommendations"):
         raise RuntimeError("leader_action_recommendations table is missing")
     return list(
@@ -139,9 +132,7 @@ def _load_actions(
     )
 
 
-def _load_messages(
-    conn: sqlite3.Connection, ids: set[str]
-) -> dict[str, dict[str, Any]]:
+def _load_messages(conn: sqlite3.Connection, ids: set[str]) -> dict[str, dict[str, Any]]:
     if not ids or not _table_exists(conn, "messages"):
         return {}
     placeholders = ",".join("?" for _ in ids)
@@ -157,9 +148,7 @@ def _load_messages(
     return {str(row["discord_message_id"]): dict(row) for row in rows}
 
 
-def _action_artifact(
-    row: sqlite3.Row, messages: dict[str, dict[str, Any]]
-) -> dict[str, Any]:
+def _action_artifact(row: sqlite3.Row, messages: dict[str, dict[str, Any]]) -> dict[str, Any]:
     source_id = str(row["source_message_id"]) if row["source_message_id"] else None
     copy_ids = _copy_message_ids(row)
     return {
@@ -175,9 +164,7 @@ def _action_artifact(
         "source_signal_key": row["source_signal_key"],
         "source_signal_type": row["source_signal_type"],
         "source_message_id": source_id,
-        "copy_message_id": str(row["copy_message_id"])
-        if row["copy_message_id"]
-        else None,
+        "copy_message_id": str(row["copy_message_id"]) if row["copy_message_id"] else None,
         "copy_message_ids": copy_ids,
         "prompt_text": row["prompt_text"],
         "rationale": row["rationale"],
@@ -199,9 +186,7 @@ def _action_artifact(
     }
 
 
-def _metric(
-    value: Any, threshold: dict[str, Any], passed: bool, definition: str
-) -> dict[str, Any]:
+def _metric(value: Any, threshold: dict[str, Any], passed: bool, definition: str) -> dict[str, Any]:
     return {
         "value": value,
         "threshold": threshold,
@@ -216,9 +201,7 @@ def _rate(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, 3)
 
 
-def _score(
-    actions: list[sqlite3.Row], *, now: datetime, thresholds: Thresholds
-) -> dict[str, Any]:
+def _score(actions: list[sqlite3.Row], *, now: datetime, thresholds: Thresholds) -> dict[str, Any]:
     total = len(actions)
     terminal = [row for row in actions if row["status"] in TERMINAL_STATUSES]
     traceable = [
@@ -231,15 +214,10 @@ def _score(
         row
         for row in relays
         if (
-            row["copy_current_text"]
-            or row["copy_original_text"]
-            or row["prompt_text"]
-            or ""
+            row["copy_current_text"] or row["copy_original_text"] or row["prompt_text"] or ""
         ).strip()
     ]
-    recommendation_rows = [
-        row for row in actions if row["action_type"] in RECOMMENDATION_TYPES
-    ]
+    recommendation_rows = [row for row in actions if row["action_type"] in RECOMMENDATION_TYPES]
     unaccepted_recommendations = [
         row for row in recommendation_rows if row["status"] in {"deferred", "rejected"}
     ]
@@ -251,11 +229,7 @@ def _score(
             continue
         proposed_at = _parse_time(row["proposed_at"])
         expires_at = _parse_time(row["expires_at"])
-        if (
-            proposed_at
-            and proposed_at <= stale_cutoff
-            and (expires_at is None or expires_at > now)
-        ):
+        if proposed_at and proposed_at <= stale_cutoff and (expires_at is None or expires_at > now):
             stale_open.append(row)
 
     decision_rate = _rate(len(terminal), total)
@@ -298,8 +272,7 @@ def _score(
             recommendation_unaccepted_rate,
             {"<=": thresholds.max_recommendation_unaccepted_rate},
             recommendation_unaccepted_rate is None
-            or recommendation_unaccepted_rate
-            <= thresholds.max_recommendation_unaccepted_rate,
+            or recommendation_unaccepted_rate <= thresholds.max_recommendation_unaccepted_rate,
             "Rejected or deferred promotion/kick/demotion recommendations divided by all such recommendations.",
         ),
     }
@@ -377,28 +350,20 @@ def _resolve_window(args: argparse.Namespace) -> tuple[datetime, datetime]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--db", default=os.fspath(db.DB_PATH), help="SQLite DB path or file: URI"
-    )
+    parser.add_argument("--db", default=os.fspath(db.DB_PATH), help="SQLite DB path or file: URI")
     parser.add_argument(
         "--days", type=int, default=14, help="Lookback window when --since is omitted"
     )
-    parser.add_argument(
-        "--since", help="Inclusive UTC start time, e.g. 2026-06-18T00:00:00Z"
-    )
+    parser.add_argument("--since", help="Inclusive UTC start time, e.g. 2026-06-18T00:00:00Z")
     parser.add_argument("--end", help="Inclusive UTC end time; defaults to now")
     parser.add_argument("--out", default="scripts/leader_actions_eval_results.json")
     parser.add_argument("--min-decision-rate", type=float, default=0.95)
     parser.add_argument("--min-trace-rate", type=float, default=0.95)
     parser.add_argument("--min-relay-copy-text-rate", type=float, default=0.95)
     parser.add_argument("--max-stale-open-count", type=int, default=0)
-    parser.add_argument(
-        "--max-recommendation-unaccepted-rate", type=float, default=0.80
-    )
+    parser.add_argument("--max-recommendation-unaccepted-rate", type=float, default=0.80)
     parser.add_argument("--stale-hours", type=int, default=24)
-    parser.add_argument(
-        "--strict", action="store_true", help="Exit non-zero when thresholds fail"
-    )
+    parser.add_argument("--strict", action="store_true", help="Exit non-zero when thresholds fail")
     args = parser.parse_args()
 
     since, end = _resolve_window(args)

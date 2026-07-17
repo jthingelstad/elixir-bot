@@ -140,9 +140,7 @@ def test_cohort_fallback_uses_per_member_detail_when_present():
 
 def test_cohort_fallback_specific_or_silent_never_bare_count():
     # No names available → a warm line, but never a content-free tally.
-    out = render_intent(
-        _wave("badge_earned", [{"tag": "#A"}, {"tag": "#B"}, {"tag": "#C"}])
-    )
+    out = render_intent(_wave("badge_earned", [{"tag": "#A"}, {"tag": "#B"}, {"tag": "#C"}]))
     assert "Badge wave" in out
     assert "Multiple members hit the same milestone" not in out
 

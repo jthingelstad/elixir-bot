@@ -73,10 +73,10 @@ before a baseline advances. Counters land in
 
 ## Environment
 
-- Python 3.14 via Homebrew; project venv at `venv/` (gitignored)
+- Python 3.14 managed by uv; project environment at `.venv/` (gitignored)
 - Requires `.env` with: DISCORD_TOKEN, CLAUDE_API_KEY, CR_API_KEY
 - Non-secret config (channel IDs, clan tag) lives in `prompts/DISCORD.md` and `prompts/CLAN.md`
-- Local start: `venv/bin/python elixir.py`
+- Local start: `uv run python elixir.py`
 - Production process management uses `launchd`; see `SETUP.md`
 
 ### Feature flags — dark-launch, then graduate
@@ -100,26 +100,22 @@ Rules of thumb:
 - Keep flags only for genuine kill-switches (a risky, still-watched behaviour) or
   true deploy config (paths, ports, model ids, secrets) — those are not flags.
 
-### Venv setup (one-time)
+### Environment setup (one-time)
 
 ```bash
-python3 -m venv venv
-./venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+uv sync --locked
 ```
 
-If the venv is missing or broken, recreate it with the commands above.
-
-`requirements.lock` is a `pip freeze` snapshot of the known-good production
-venv — use `pip install -r requirements.lock` to reproduce it exactly, and
-regenerate it after any deliberate dependency upgrade.
+If `.venv` is missing or broken, `uv sync --locked` recreates it from
+`pyproject.toml` and `uv.lock`. Production uses `uv sync --locked --no-dev`.
 
 ## Running Tests
 
 ```bash
-./venv/bin/pytest tests/ -v
+uv run pytest tests/ -v
 ```
 
-- **Always use `./venv/bin/pytest`** — do not use bare `pytest` or `python3 -m pytest`. The Homebrew `pytest` binary runs in its own isolated env and cannot import project dependencies.
+- **Always use `uv run pytest`** — do not use bare `pytest` or `python3 -m pytest`.
 - `pyproject.toml` configures `pythonpath = ["."]` so all project imports resolve without install.
 - Tests use temp-file/in-memory SQLite and mocked external services (no API keys needed). The suite runs green in ~8 s.
 - `tests/conftest.py` builds the v5.1 schema from `scripts/migrate_v51/schema_v51.py` (plus the archive's DDL export for carried tables) into a session template, copied per test.
@@ -130,8 +126,8 @@ regenerate it after any deliberate dependency upgrade.
 
 Unit tests target one delta with minimal dicts; these three run the engine against reality and catch what hand-built fixtures can't. Run the first two before deploying engine changes:
 
-1. **Replay gate** — `./venv/bin/python scripts/replay_gate.py`. Snapshots the live DB, clears baselines, and replays the real raw-payload window twice through the awareness-only offline engine. Pass 1 inventories historical drift (current code may derive events an older deployment missed); pass 2 is the hard gate and must add exactly zero events, battles, or legacy claims under the same code. Ends with the current-data-relative season-close rehearsal + global invariants. All gates must PASS.
-2. **Time-travel simulator** — `./venv/bin/python scripts/simulate.py`. A deterministic synthetic war week (skewed 09:37Z reset, a join, a leave, a level-up, war battles, section rollover) through the production `run_tick` path at ~2 s/simulated-week. It proves event correctness, drift anchoring, poll fairness, zero legacy claims, absence of the retired delivery queue, and that the awareness read sees hard-post stream events.
+1. **Replay gate** — `uv run python scripts/replay_gate.py`. Snapshots the live DB, clears baselines, and replays the real raw-payload window twice through the awareness-only offline engine. Pass 1 inventories historical drift (current code may derive events an older deployment missed); pass 2 is the hard gate and must add exactly zero events, battles, or legacy claims under the same code. Ends with the current-data-relative season-close rehearsal + global invariants. All gates must PASS.
+2. **Time-travel simulator** — `uv run python scripts/simulate.py`. A deterministic synthetic war week (skewed 09:37Z reset, a join, a leave, a level-up, war battles, section rollover) through the production `run_tick` path at ~2 s/simulated-week. It proves event correctness, drift anchoring, poll fairness, zero legacy claims, absence of the retired delivery queue, and that the awareness read sees hard-post stream events.
 3. **Real-payload fixtures** — `tests/fixtures/cr/*.json`, loaded via `load_cr_fixture` (tests/conftest.py) and asserted by `tests/test_cr_fixture_shapes.py`. When Supercell drifts a payload shape, these fail with a clear diff. Refresh stale fixtures by re-exporting from `raw_api_payloads` — never hand-edit them.
 
 `assert_db_invariants` (tests/conftest.py) is the shared floor under all of it — an autouse sweep after every test, plus a gate inside both scripts: unique open memberships, one ledger claim per key, FTS mirror in sync, canonical timestamps, and projection consistency.
@@ -168,8 +164,8 @@ A green suite is necessary, not sufficient. Before deploying a substantive chang
 ## Cleanup
 
 ```bash
-venv/bin/python scripts/clean.py
-venv/bin/python scripts/clean.py --db
+uv run python scripts/clean.py
+uv run python scripts/clean.py --db
 ```
 
 - default: remove cache directories like `__pycache__` and `.pytest_cache`
@@ -334,8 +330,8 @@ Important rules:
 Use the stored prompt-failure log and `#ask-elixir` feedback records when a Discord request fails, falls back, returns unusable output, or gets a thumbs-down:
 
 ```bash
-venv/bin/python scripts/review_agent_feedback.py --limit 20
-venv/bin/python scripts/review_agent_feedback.py --workflow clanops --json
+uv run python scripts/review_agent_feedback.py --limit 20
+uv run python scripts/review_agent_feedback.py --workflow clanops --json
 ```
 
 - text mode is for quick local triage

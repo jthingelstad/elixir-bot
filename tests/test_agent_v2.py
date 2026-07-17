@@ -28,19 +28,14 @@ def test_execute_tool_get_clan_roster_list():
                 "note": "",
             }
         ]
-        result = json.loads(
-            elixir_agent._execute_tool("get_clan_roster", {"aspect": "list"})
-        )
+        result = json.loads(elixir_agent._execute_tool("get_clan_roster", {"aspect": "list"}))
         # 2026-07-04 rehearsal: list is wrapped with an in-band semantics note
         # (the model misread donations_week as lifetime and refused an answer).
         member = result["members"][0]
         assert member["member_ref"] == "King Levy"
         assert member["donations_week"] == 300 and member["role"] == "leader"
         # noise dropped
-        assert (
-            "cr_banner_count" not in member
-            and "cr_account_age_updated_at" not in member
-        )
+        assert "cr_banner_count" not in member and "cr_account_age_updated_at" not in member
         assert "discord_user_id" not in member and "note" not in member
         assert "THIS WEEK" in result["note"]
         mock_db.list_members.assert_called_once_with()
@@ -51,14 +46,10 @@ def test_execute_tool_resolve_member_uses_db_query():
         mock_db.resolve_member.return_value = [
             {"player_tag": "#ABC123", "match_source": "current_name_exact"}
         ]
-        result = json.loads(
-            elixir_agent._execute_tool("resolve_member", {"query": "King Levy"})
-        )
+        result = json.loads(elixir_agent._execute_tool("resolve_member", {"query": "King Levy"}))
         assert result[0]["player_tag"] == "#ABC123"
         # status=None so departed/observed players still resolve (QA M1).
-        mock_db.resolve_member.assert_called_once_with(
-            "King Levy", status=None, limit=5
-        )
+        mock_db.resolve_member.assert_called_once_with("King Levy", status=None, limit=5)
 
 
 def test_execute_tool_get_member_profile_refreshes_member_cache():
@@ -67,9 +58,7 @@ def test_execute_tool_get_member_profile_refreshes_member_cache():
             "elixir_agent.cr_api.get_player",
             return_value={"tag": "#ABC123", "name": "King Levy"},
         ),
-        patch(
-            "elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]
-        ),
+        patch("elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
         patch("elixir_agent.db") as mock_db,
     ):
         mock_db.get_member_profile.return_value = {
@@ -78,9 +67,7 @@ def test_execute_tool_get_member_profile_refreshes_member_cache():
         }
         mock_db.get_member_recent_form.return_value = {"form": "hot"}
 
-        result = json.loads(
-            elixir_agent._execute_tool("get_member", {"member_tag": "#ABC123"})
-        )
+        result = json.loads(elixir_agent._execute_tool("get_member", {"member_tag": "#ABC123"}))
 
         assert result["profile"]["player_tag"] == "#ABC123"
         assert result["profile"]["member_name"] == "King Levy"
@@ -150,9 +137,7 @@ def test_execute_tool_get_member_profile_includes_account_age_and_activity_summa
             "elixir_agent.cr_api.get_player",
             return_value={"tag": "#ABC123", "name": "King Levy"},
         ),
-        patch(
-            "elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]
-        ),
+        patch("elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
         patch("elixir_agent.db") as mock_db,
     ):
         mock_db.get_member_profile.return_value = {
@@ -171,9 +156,7 @@ def test_execute_tool_get_member_profile_includes_account_age_and_activity_summa
         }
         mock_db.get_member_recent_form.return_value = {"form": "hot"}
 
-        result = json.loads(
-            elixir_agent._execute_tool("get_member", {"member_tag": "#ABC123"})
-        )
+        result = json.loads(elixir_agent._execute_tool("get_member", {"member_tag": "#ABC123"}))
 
         assert result["profile"]["account_age_summary"] == (
             "Derived Clash Royale account age from Years Played badge data: 4 years / 1,474 days"
@@ -193,9 +176,7 @@ def test_execute_tool_get_member_profile_includes_current_role_summary():
             "elixir_agent.cr_api.get_player",
             return_value={"tag": "#ABC123", "name": "King Thing"},
         ),
-        patch(
-            "elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]
-        ),
+        patch("elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
         patch("elixir_agent.db") as mock_db,
     ):
         mock_db.get_member_profile.return_value = {
@@ -205,13 +186,10 @@ def test_execute_tool_get_member_profile_includes_current_role_summary():
         }
         mock_db.get_member_recent_form.return_value = {"form": "hot"}
 
-        result = json.loads(
-            elixir_agent._execute_tool("get_member", {"member_tag": "#ABC123"})
-        )
+        result = json.loads(elixir_agent._execute_tool("get_member", {"member_tag": "#ABC123"}))
 
         assert (
-            result["profile"]["current_role_summary"]
-            == "King Thing is currently the clan leader."
+            result["profile"]["current_role_summary"] == "King Thing is currently the clan leader."
         )
 
 
@@ -302,9 +280,7 @@ def test_build_tool_result_envelope_drops_oversized_lists_instead_of_slicing():
 
 
 def test_build_tool_result_envelope_preserves_river_race_remaining_deck_summary_when_buckets_drop():
-    used_some = [
-        {"member_ref": f"Partial {i}", "decks_used_today": 2} for i in range(4)
-    ]
+    used_some = [{"member_ref": f"Partial {i}", "decks_used_today": 2} for i in range(4)]
     used_none = [
         {"member_ref": f"Untouched {i}", "decks_used_today": 0, "context": "x" * 800}
         for i in range(44)
@@ -329,9 +305,7 @@ def test_build_tool_result_envelope_preserves_river_race_remaining_deck_summary_
         }
     )
 
-    envelope = json.loads(
-        elixir_agent._build_tool_result_envelope("get_river_race", raw)
-    )
+    envelope = json.loads(elixir_agent._build_tool_result_envelope("get_river_race", raw))
 
     assert envelope["truncated"] is True
     assert envelope["ok"] is True
@@ -340,9 +314,7 @@ def test_build_tool_result_envelope_preserves_river_race_remaining_deck_summary_
     assert data["partial_deck_participant_count"] == 4
     assert data["untouched_count"] == 44
     assert data["remaining_deck_participants"]["total"] == 48
-    assert (
-        data["remaining_deck_participants"]["count_source"] == "used_some + used_none"
-    )
+    assert data["remaining_deck_participants"]["count_source"] == "used_some + used_none"
     assert data["used_none"]["dropped"] is True
     assert data["used_none"]["original_count"] == 44
 
@@ -358,9 +330,7 @@ def test_build_tool_result_envelope_under_limit_unchanged():
 
 
 def test_interactive_workflow_exposes_all_read_tools():
-    interactive_names = {
-        tool["name"] for tool in elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]
-    }
+    interactive_names = {tool["name"] for tool in elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]}
 
     # With consolidated tools, all read tools are visible in interactive;
     # sensitive aspects (at_risk, promotion_candidates) are gated at execution time.
@@ -375,23 +345,17 @@ def test_execute_tool_get_member_resolves_handle_before_refresh():
             "elixir_agent.cr_api.get_player",
             return_value={"tag": "#ABC123", "name": "King Levy"},
         ),
-        patch(
-            "elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]
-        ),
+        patch("elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
         patch("elixir_agent.db") as mock_db,
     ):
-        mock_db.resolve_member.return_value = [
-            {"player_tag": "#ABC123", "match_score": 875}
-        ]
+        mock_db.resolve_member.return_value = [{"player_tag": "#ABC123", "match_score": 875}]
         mock_db.get_member_profile.return_value = {
             "player_tag": "#ABC123",
             "member_name": "King Levy",
         }
         mock_db.get_member_recent_form.return_value = {"form": "hot"}
 
-        result = json.loads(
-            elixir_agent._execute_tool("get_member", {"member_tag": "@jamie"})
-        )
+        result = json.loads(elixir_agent._execute_tool("get_member", {"member_tag": "@jamie"}))
 
         assert result["profile"]["player_tag"] == "#ABC123"
         assert result["profile"]["member_name"] == "King Levy"
@@ -480,9 +444,7 @@ def test_execute_tool_get_member_chests_resolves_member_name():
         patch("elixir_agent.cr_api.get_player", return_value=None),
         patch("elixir_agent.db") as mock_db,
     ):
-        mock_db.resolve_member.return_value = [
-            {"player_tag": "#ABC123", "match_score": 950}
-        ]
+        mock_db.resolve_member.return_value = [{"player_tag": "#ABC123", "match_score": 950}]
         result = json.loads(
             elixir_agent._execute_tool(
                 "get_member", {"member_tag": "King Levy", "include": ["chests"]}
@@ -500,9 +462,7 @@ def test_execute_tool_get_member_battles_returns_recent_battle_list():
             "elixir_agent.cr_api.get_player",
             return_value={"tag": "#ABC123", "name": "King Levy"},
         ),
-        patch(
-            "elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]
-        ),
+        patch("elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
         patch("elixir_agent.db") as mock_db,
     ):
         mock_db.get_member_recent_battles.return_value = {
@@ -543,9 +503,7 @@ def test_execute_tool_get_member_battles_returns_recent_battle_list():
 def test_execute_tool_get_war_season_summary_uses_db():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_war_season_summary.return_value = {"season_id": 129, "races": 4}
-        result = json.loads(
-            elixir_agent._execute_tool("get_war_season", {"aspect": "summary"})
-        )
+        result = json.loads(elixir_agent._execute_tool("get_war_season", {"aspect": "summary"}))
         # current_week_top rides along for no-season-id summaries (fail-open
         # [] under this mocked db) — the this-week contributors fix.
         assert result["season_id"] == 129 and result["races"] == 4
@@ -558,14 +516,10 @@ def test_execute_tool_get_clan_roster_max_cards_and_clan_health_hot_streaks():
         mock_db.get_members_with_most_level_16_cards.return_value = [
             {"tag": "#ABC123", "level_16_count": 42}
         ]
-        mock_db.get_members_on_hot_streak.return_value = [
-            {"tag": "#ABC123", "current_streak": 6}
-        ]
+        mock_db.get_members_on_hot_streak.return_value = [{"tag": "#ABC123", "current_streak": 6}]
 
         elite = json.loads(
-            elixir_agent._execute_tool(
-                "get_clan_roster", {"aspect": "max_cards", "limit": 5}
-            )
+            elixir_agent._execute_tool("get_clan_roster", {"aspect": "max_cards", "limit": 5})
         )
         hot = json.loads(
             elixir_agent._execute_tool(
@@ -587,9 +541,7 @@ def test_execute_tool_get_clan_roster_trends_uses_db():
             "clan": {"clan_tag": "#J2RGCRVG"},
             "window_days": 14,
         }
-        mock_db.build_clan_trend_summary_context.return_value = (
-            "=== CLAN TREND SUMMARY ==="
-        )
+        mock_db.build_clan_trend_summary_context.return_value = "=== CLAN TREND SUMMARY ==="
 
         result = json.loads(
             elixir_agent._execute_tool(
@@ -602,9 +554,7 @@ def test_execute_tool_get_clan_roster_trends_uses_db():
         assert result["window_days"] == 14
         assert result["trend_summary"] == "=== CLAN TREND SUMMARY ==="
         mock_db.compare_clan_trend_windows.assert_called_once_with(window_days=14)
-        mock_db.build_clan_trend_summary_context.assert_called_once_with(
-            days=21, window_days=14
-        )
+        mock_db.build_clan_trend_summary_context.assert_called_once_with(days=21, window_days=14)
 
 
 def test_execute_tool_get_war_season_trending_uses_db():
@@ -613,9 +563,7 @@ def test_execute_tool_get_war_season_trending_uses_db():
             "season_id": 129,
             "members": [],
         }
-        result = json.loads(
-            elixir_agent._execute_tool("get_war_season", {"aspect": "trending"})
-        )
+        result = json.loads(elixir_agent._execute_tool("get_war_season", {"aspect": "trending"}))
         assert result == {"season_id": 129, "members": []}
         mock_db.get_trending_war_contributors.assert_called_once_with(
             season_id=None, recent_races=2, limit=10
@@ -636,9 +584,7 @@ def test_execute_tool_get_member_war_detail_vs_clan_avg():
         patch("elixir_agent.db") as mock_db,
         patch("db.get_connection") as mock_conn_fn,
     ):
-        mock_db.compare_member_war_to_clan_average.return_value = {
-            "member": {"tag": "#ABC123"}
-        }
+        mock_db.compare_member_war_to_clan_average.return_value = {"member": {"tag": "#ABC123"}}
         mock_conn_fn.return_value = _mock_war_player_type_conn()
 
         result = json.loads(
@@ -710,9 +656,7 @@ def test_execute_tool_get_clan_game_modes_events_exposes_event_participation():
             "events": {
                 "activity": [{"game_mode_name": "All_Random_Princess", "battles": 52}],
                 "participation": [{"tag": "#ABC123", "event_battles": 52}],
-                "badge_completions": [
-                    {"tag": "#ABC123", "badge_name": "AnarchyLeagueCompletion"}
-                ],
+                "badge_completions": [{"tag": "#ABC123", "badge_name": "AnarchyLeagueCompletion"}],
                 "active": [],
             },
             "ranked": {"activity": [], "profiles": [], "standings": []},
@@ -726,15 +670,11 @@ def test_execute_tool_get_clan_game_modes_events_exposes_event_participation():
             "duos": [],
         },
     ) as capability:
-        result = json.loads(
-            elixir_agent._execute_tool("get_clan_game_modes", {"aspect": "events"})
-        )
+        result = json.loads(elixir_agent._execute_tool("get_clan_game_modes", {"aspect": "events"}))
 
     assert result["event_activity"][0]["game_mode_name"] == "All_Random_Princess"
     assert result["event_participation"][0]["event_battles"] == 52
-    assert (
-        result["event_badge_completions"][0]["badge_name"] == "AnarchyLeagueCompletion"
-    )
+    assert result["event_badge_completions"][0]["badge_name"] == "AnarchyLeagueCompletion"
     capability.assert_called_once_with(days=30, mode_group="special_event", limit=10)
 
 
@@ -832,9 +772,7 @@ def test_execute_tool_get_river_race_standings():
             "season_id": 129,
             "race_rank": 1,
             "boat_scored": True,
-            "race_standings": [
-                {"rank": 1, "clan_name": "POAP KINGS", "fame": 5000, "is_us": True}
-            ],
+            "race_standings": [{"rank": 1, "clan_name": "POAP KINGS", "fame": 5000, "is_us": True}],
             "season_week_label": "Season 129 Week 1",
             "period_type": "warDay",
             "trophy_change": -20,
@@ -887,9 +825,7 @@ def test_execute_tool_get_river_race_engagement():
             "finished_count": 20,
             "untouched_count": 10,
         }
-        result = json.loads(
-            elixir_agent._execute_tool("get_river_race", {"aspect": "engagement"})
-        )
+        result = json.loads(elixir_agent._execute_tool("get_river_race", {"aspect": "engagement"}))
         assert result["phase_display"] == "Battle Day 1"
         assert result["time_left_text"] == "3h 20m"
         assert result["engaged_count"] == 30
@@ -914,12 +850,8 @@ def test_execute_tool_get_member_war_detail_attendance_resolves_member():
         patch("elixir_agent.db") as mock_db,
         patch("db.get_connection") as mock_conn_fn,
     ):
-        mock_db.resolve_member.return_value = [
-            {"player_tag": "#ABC123", "match_score": 950}
-        ]
-        mock_db.get_member_war_attendance.return_value = {
-            "season": {"participation_rate": 1.0}
-        }
+        mock_db.resolve_member.return_value = [{"player_tag": "#ABC123", "match_score": 950}]
+        mock_db.get_member_war_attendance.return_value = {"season": {"participation_rate": 1.0}}
         mock_conn_fn.return_value = _mock_war_player_type_conn()
 
         result = json.loads(
@@ -930,9 +862,7 @@ def test_execute_tool_get_member_war_detail_attendance_resolves_member():
         )
         assert result["season"]["participation_rate"] == 1.0
         assert result["war_player_type"] == "regular"
-        mock_db.get_member_war_attendance.assert_called_once_with(
-            "#ABC123", season_id=None
-        )
+        mock_db.get_member_war_attendance.assert_called_once_with("#ABC123", season_id=None)
 
 
 def test_execute_tool_get_war_season_win_rates_uses_db():
@@ -958,9 +888,7 @@ def test_execute_tool_get_war_season_standings_default_points():
         patch("agent.tool_exec._enrich_war_player_types") as mock_enrich,
         patch("capabilities.war._standings_freshness") as mock_fresh,
     ):
-        mock_db.get_war_champ_standings.return_value = [
-            {"name": "Player", "total_points": 5000}
-        ]
+        mock_db.get_war_champ_standings.return_value = [{"name": "Player", "total_points": 5000}]
         mock_fresh.return_value = {
             "as_of": "2026-05-03T10:39:00",
             "current_week_included": True,
@@ -970,9 +898,7 @@ def test_execute_tool_get_war_season_standings_default_points():
             "narration_hint": "...",
         }
         result = json.loads(
-            elixir_agent._execute_tool(
-                "get_war_season", {"aspect": "standings", "season_id": 129}
-            )
+            elixir_agent._execute_tool("get_war_season", {"aspect": "standings", "season_id": 129})
         )
         assert result["season_id"] == 129
         assert result["metric"] == "points"
@@ -1025,9 +951,7 @@ def test_execute_tool_get_war_season_standings_metric_attendance():
             )
         )
         assert result == {"season_id": 129, "members": []}
-        mock_db.get_members_without_war_participation.assert_called_once_with(
-            season_id=129
-        )
+        mock_db.get_members_without_war_participation.assert_called_once_with(season_id=129)
         mock_enrich.assert_called_once()
 
 
@@ -1037,9 +961,7 @@ def test_execute_tool_get_clan_roster_role_changes_uses_db():
             {"tag": "#ABC123", "old_role": "member", "new_role": "elder"}
         ]
         result = json.loads(
-            elixir_agent._execute_tool(
-                "get_clan_roster", {"aspect": "role_changes", "days": 14}
-            )
+            elixir_agent._execute_tool("get_clan_roster", {"aspect": "role_changes", "days": 14})
         )
         assert result[0]["new_role"] == "elder"
         mock_db.get_recent_role_changes.assert_called_once_with(days=14)
@@ -1057,12 +979,8 @@ def test_execute_tool_get_war_season_boat_battles_and_trends():
             "delta": 120.0,
         }
 
-        boat = json.loads(
-            elixir_agent._execute_tool("get_war_season", {"aspect": "boat_battles"})
-        )
-        trend = json.loads(
-            elixir_agent._execute_tool("get_war_season", {"aspect": "score_trend"})
-        )
+        boat = json.loads(elixir_agent._execute_tool("get_war_season", {"aspect": "boat_battles"}))
+        trend = json.loads(elixir_agent._execute_tool("get_war_season", {"aspect": "score_trend"}))
         fame = json.loads(
             elixir_agent._execute_tool(
                 "get_war_season", {"aspect": "season_comparison", "season_id": 129}
@@ -1074,9 +992,7 @@ def test_execute_tool_get_war_season_boat_battles_and_trends():
         assert fame["delta"] == 120.0
         mock_db.get_clan_boat_battle_record.assert_called_once_with(weeks=3)
         mock_db.get_war_score_trend.assert_called_once_with(days=30)
-        mock_db.compare_fame_per_member_to_previous_season.assert_called_once_with(
-            season_id=129
-        )
+        mock_db.compare_fame_per_member_to_previous_season.assert_called_once_with(season_id=129)
 
 
 def test_execute_tool_get_member_war_detail_missed_days():
@@ -1084,9 +1000,7 @@ def test_execute_tool_get_member_war_detail_missed_days():
         patch("elixir_agent.db") as mock_db,
         patch("db.get_connection") as mock_conn_fn,
     ):
-        mock_db.resolve_member.return_value = [
-            {"player_tag": "#ABC123", "match_score": 950}
-        ]
+        mock_db.resolve_member.return_value = [{"player_tag": "#ABC123", "match_score": 950}]
         mock_db.get_member_missed_war_days.return_value = {"days_missed": 1}
         mock_conn_fn.return_value = _mock_war_player_type_conn()
 
@@ -1098,9 +1012,7 @@ def test_execute_tool_get_member_war_detail_missed_days():
         )
         assert result["days_missed"] == 1
         assert result["war_player_type"] == "regular"
-        mock_db.get_member_missed_war_days.assert_called_once_with(
-            "#ABC123", season_id=None
-        )
+        mock_db.get_member_missed_war_days.assert_called_once_with("#ABC123", season_id=None)
 
 
 def test_respond_in_channel_uses_interactive_read_only_workflow():
@@ -1152,10 +1064,7 @@ def test_respond_in_channel_keeps_ask_elixir_lightweight_followups_focused():
         assert result["event_type"] == "channel_response"
         user_msg = mock_chat.call_args.args[1]
         assert "lightweight conversational follow-up" in user_msg
-        assert (
-            "Latest message from 'Jamie' in #ask-elixir: much smarter response"
-            in user_msg
-        )
+        assert "Latest message from 'Jamie' in #ask-elixir: much smarter response" in user_msg
         assert "=== CLAN TREND SUMMARY ===" not in user_msg
         assert "POAP KINGS" not in user_msg
 
@@ -1190,9 +1099,7 @@ def test_respond_in_channel_injects_war_context_for_war_question():
             "elixir_agent._chat_with_tools",
             return_value={"event_type": "channel_response", "content": "ok"},
         ) as mock_chat,
-        patch(
-            "agent.workflows.db.build_clan_trend_summary_context", return_value="trends"
-        ),
+        patch("agent.workflows.db.build_clan_trend_summary_context", return_value="trends"),
         patch(
             "agent.workflows.war_capability.get_war_intelligence",
             return_value={
@@ -1271,12 +1178,8 @@ def test_respond_in_channel_repairs_colosseum_contradiction_before_returning():
         },
     }
     with (
-        patch(
-            "elixir_agent._chat_with_tools", side_effect=[rejected, repaired]
-        ) as mock_chat,
-        patch(
-            "agent.workflows.db.build_clan_trend_summary_context", return_value="trends"
-        ),
+        patch("elixir_agent._chat_with_tools", side_effect=[rejected, repaired]) as mock_chat,
+        patch("agent.workflows.db.build_clan_trend_summary_context", return_value="trends"),
         patch("agent.workflows.war_capability.get_war_intelligence", return_value=war),
     ):
         result = elixir_agent.respond_in_channel(
@@ -1302,9 +1205,7 @@ def test_respond_in_channel_omits_war_context_for_non_war_question():
             "elixir_agent._chat_with_tools",
             return_value={"event_type": "channel_response", "content": "ok"},
         ) as mock_chat,
-        patch(
-            "agent.workflows.db.build_clan_trend_summary_context", return_value="trends"
-        ),
+        patch("agent.workflows.db.build_clan_trend_summary_context", return_value="trends"),
     ):
         elixir_agent.respond_in_channel(
             question="What's a good Hog Rider deck?",
@@ -1335,9 +1236,7 @@ def test_respond_in_channel_passes_screenshot_blocks_to_chat():
             "elixir_agent._chat_with_tools",
             return_value={"event_type": "channel_response", "content": "ok"},
         ) as mock_chat,
-        patch(
-            "agent.workflows.db.build_clan_trend_summary_context", return_value="trends"
-        ),
+        patch("agent.workflows.db.build_clan_trend_summary_context", return_value="trends"),
     ):
         elixir_agent.respond_in_channel(
             question="What does this screenshot show?",
@@ -1509,9 +1408,7 @@ def test_create_chat_completion_records_llm_telemetry():
     assert mock_record.call_args.args[0] == "interactive"
     assert mock_record.call_args.kwargs["ok"] is True
     assert mock_record.call_args.kwargs["total_tokens"] == 30
-    assert (
-        create.call_args.kwargs["model"] == "claude-sonnet-5"
-    )  # interactive is chat-tier
+    assert create.call_args.kwargs["model"] == "claude-sonnet-5"  # interactive is chat-tier
 
 
 def test_create_chat_completion_drops_blank_anthropic_messages():
@@ -1596,9 +1493,7 @@ def test_create_chat_completion_caches_awareness():
             workflow="awareness",
             system="sys",
             messages=[{"role": "user", "content": "the read"}],
-            tools=[
-                {"name": "noop", "description": "x", "input_schema": {"type": "object"}}
-            ],
+            tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
         )
 
     # The stable prefix (system + tools) is cached at the 5m default. Awareness
@@ -1609,9 +1504,7 @@ def test_create_chat_completion_caches_awareness():
     # which is where awareness caching earns its keep. It must still be cached.
     sys_block = create.call_args.kwargs["system"][0]
     assert sys_block.get("cache_control") == {"type": "ephemeral"}
-    assert create.call_args.kwargs["tools"][-1].get("cache_control") == {
-        "type": "ephemeral"
-    }
+    assert create.call_args.kwargs["tools"][-1].get("cache_control") == {"type": "ephemeral"}
     # The volatile message prefix (the read) always stays at the 5m default — it
     # changes every tick and is only reused across the multi-round tool loop.
     last_msg = create.call_args.kwargs["messages"][-1]
@@ -1633,15 +1526,11 @@ def test_create_chat_completion_session_workflow_uses_5m_cache():
             workflow="interactive",
             system="sys",
             messages=[{"role": "user", "content": "q"}],
-            tools=[
-                {"name": "noop", "description": "x", "input_schema": {"type": "object"}}
-            ],
+            tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
         )
     sys_block = create.call_args.kwargs["system"][0]
     assert sys_block.get("cache_control") == {"type": "ephemeral"}
-    assert create.call_args.kwargs["tools"][-1].get("cache_control") == {
-        "type": "ephemeral"
-    }
+    assert create.call_args.kwargs["tools"][-1].get("cache_control") == {"type": "ephemeral"}
 
 
 def test_message_cache_breakpoint_marks_last_block_of_last_message():
@@ -1685,9 +1574,7 @@ def test_create_chat_completion_caches_other_workflows():
             workflow="channel_update",
             system="sys",
             messages=[{"role": "user", "content": "u"}],
-            tools=[
-                {"name": "noop", "description": "x", "input_schema": {"type": "object"}}
-            ],
+            tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
         )
 
     sys_block = create.call_args.kwargs["system"][0]
@@ -1763,9 +1650,7 @@ def test_generate_clan_chat_copy_uses_dedicated_no_tool_workflow():
         captured["system_prompt"] = system_prompt
         captured["user_message"] = user_message
         captured["kwargs"] = kwargs
-        return {
-            "messages": ["Welcome to POAP KINGS, King Levy! 7 years played stands out."]
-        }
+        return {"messages": ["Welcome to POAP KINGS, King Levy! 7 years played stands out."]}
 
     with patch("agent.workflows._chat_with_tools", side_effect=fake_chat_with_tools):
         result = elixir_agent.generate_clan_chat_copy(
@@ -1861,9 +1746,7 @@ def test_create_chat_completion_respects_model_env_overrides():
             workflow="clanops",
             messages=[{"role": "user", "content": "status"}],
         )
-        assert (
-            create.call_args.kwargs["model"] == "claude-test-chat"
-        )  # clanops is chat-tier
+        assert create.call_args.kwargs["model"] == "claude-test-chat"  # clanops is chat-tier
 
         elixir_agent._create_chat_completion(
             workflow="unregistered_workflow",  # unknown → lightweight default tier
@@ -1894,9 +1777,7 @@ def test_chat_with_tools_normalizes_tool_call_messages_for_followup_rounds():
             "agent.chat._create_chat_completion",
             side_effect=fake_create_chat_completion,
         ),
-        patch(
-            "agent.chat._execute_tool", return_value=json.dumps({"war_state": "warDay"})
-        ),
+        patch("agent.chat._execute_tool", return_value=json.dumps({"war_state": "warDay"})),
     ):
         result = elixir_agent._chat_with_tools(
             "system",
@@ -1927,9 +1808,7 @@ def test_chat_with_tools_skips_blank_conversation_history():
         captured_messages.append([dict(m) for m in kwargs["messages"]])
         return response
 
-    with patch(
-        "agent.chat._create_chat_completion", side_effect=fake_create_chat_completion
-    ):
+    with patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion):
         result = elixir_agent._chat_with_tools(
             "system",
             "current question",
@@ -1962,9 +1841,7 @@ def test_chat_with_tools_returns_error_payload_for_invalid_final_json():
     def fake_create_chat_completion(**kwargs):
         return responses.pop(0)
 
-    with patch(
-        "agent.chat._create_chat_completion", side_effect=fake_create_chat_completion
-    ):
+    with patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion):
         result = elixir_agent._chat_with_tools(
             "system",
             "user",
@@ -1993,18 +1870,14 @@ def test_chat_with_tools_returns_truncation_when_initial_response_hits_max_token
     def fake_create_chat_completion(**kwargs):
         return responses.pop(0)
 
-    with patch(
-        "agent.chat._create_chat_completion", side_effect=fake_create_chat_completion
-    ):
+    with patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion):
         with caplog.at_level("WARNING", logger="elixir_agent"):
             result = elixir_agent._chat_with_tools(
                 "system",
                 "user",
                 workflow="interactive",
                 allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"],
-                response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW[
-                    "interactive"
-                ],
+                response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["interactive"],
                 strict_json=True,
                 return_errors=True,
             )
@@ -2031,9 +1904,7 @@ def test_chat_with_tools_returns_empty_response_after_max_tool_rounds(caplog):
             "agent.chat._create_chat_completion",
             side_effect=fake_create_chat_completion,
         ),
-        patch(
-            "agent.chat._execute_tool", return_value=json.dumps({"war_state": "warDay"})
-        ),
+        patch("agent.chat._execute_tool", return_value=json.dumps({"war_state": "warDay"})),
     ):
         with caplog.at_level("WARNING", logger="elixir_agent"):
             result = elixir_agent._chat_with_tools(
@@ -2041,9 +1912,7 @@ def test_chat_with_tools_returns_empty_response_after_max_tool_rounds(caplog):
                 "user",
                 workflow="interactive",
                 allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"],
-                response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW[
-                    "interactive"
-                ],
+                response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["interactive"],
                 strict_json=True,
                 return_errors=True,
             )
@@ -2073,9 +1942,7 @@ def test_execute_tool_update_member_birthday():
         )
         assert result["success"] is True
         assert result["field"] == "birthday"
-        mock_db.set_member_birthday.assert_called_once_with(
-            "#ABC123", name=None, month=3, day=15
-        )
+        mock_db.set_member_birthday.assert_called_once_with("#ABC123", name=None, month=3, day=15)
 
 
 def test_execute_tool_update_member_note():
@@ -2087,6 +1954,4 @@ def test_execute_tool_update_member_note():
             )
         )
         assert result["success"] is True
-        mock_db.set_member_note.assert_called_once_with(
-            "#ABC123", name=None, note="War Machine"
-        )
+        mock_db.set_member_note.assert_called_once_with("#ABC123", name=None, note="War Machine")

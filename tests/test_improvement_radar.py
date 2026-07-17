@@ -87,8 +87,7 @@ def test_improvement_radar_uses_leader_action_notes_edits_and_channel_comments()
         assert leader_spec["evidence"]["metrics"]["copy_edits"] == 1
         assert leader_spec["evidence"]["metrics"]["leader_action_channel_comments"] == 1
         assert any(
-            "deferral is fresh" in sample["detail"]
-            for sample in leader_spec["evidence"]["samples"]
+            "deferral is fresh" in sample["detail"] for sample in leader_spec["evidence"]["samples"]
         )
 
         stored = radar.store_improvement_specs([leader_spec], conn=conn)
@@ -138,9 +137,7 @@ def test_github_promotion_dry_run_does_not_call_runner():
             }
         ]
         assert (
-            db.get_improvement_suggestion("data_health:test", conn=conn)[
-                "github_issue_number"
-            ]
+            db.get_improvement_suggestion("data_health:test", conn=conn)["github_issue_number"]
             is None
         )
     finally:
@@ -300,9 +297,7 @@ def test_github_promotion_skips_low_confidence_suggestions():
             conn=conn,
         )
 
-        results = radar.promote_suggestions_to_github(
-            [suggestion], min_confidence=0.8, conn=conn
-        )
+        results = radar.promote_suggestions_to_github([suggestion], min_confidence=0.8, conn=conn)
 
         assert results == [
             {

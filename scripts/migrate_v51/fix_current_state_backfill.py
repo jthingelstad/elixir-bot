@@ -7,7 +7,7 @@ whose rows predate the fix (battery finding: "average level is 16" —
 an average over zeros). Forward writes are already correct; this
 repairs the standing rows. Idempotent.
 
-Usage: ./venv/bin/python scripts/migrate_v51/fix_current_state_backfill.py [db_path]
+Usage: uv run python scripts/migrate_v51/fix_current_state_backfill.py [db_path]
 """
 
 import json

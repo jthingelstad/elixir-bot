@@ -137,20 +137,14 @@ def test_decline_note_window_overrides_default_cooldown(engine_conn):
     _seed_recommended(engine_conn)
     # Declined 10 days ago (past the 7d default) BUT a note pushed expires_at out
     # 30 days → still inside the leader's requested window, so no re-nomination.
-    _insert_kick_card(
-        engine_conn, status="rejected", decided_at=_stamp(10), expires_at=_stamp(-20)
-    )
+    _insert_kick_card(engine_conn, status="rejected", decided_at=_stamp(10), expires_at=_stamp(-20))
     assert management.renominate_after_cooldown(engine_conn, now=NOW) == []
 
 
 def test_open_proposed_card_suppresses_renomination(engine_conn):
     _seed_recommended(engine_conn)
-    _insert_kick_card(
-        engine_conn, status="rejected", decided_at=_stamp(10), key_suffix="old"
-    )
-    _insert_kick_card(
-        engine_conn, status="proposed", key_suffix="open"
-    )  # already carded
+    _insert_kick_card(engine_conn, status="rejected", decided_at=_stamp(10), key_suffix="old")
+    _insert_kick_card(engine_conn, status="proposed", key_suffix="open")  # already carded
     assert management.renominate_after_cooldown(engine_conn, now=NOW) == []
 
 
@@ -158,12 +152,8 @@ def test_last_decision_done_is_not_renominated(engine_conn):
     _seed_recommended(engine_conn)
     # Latest decided card was 'done' (kicked/handled) not a decline → nothing to
     # re-raise. An older decline must not resurrect it.
-    _insert_kick_card(
-        engine_conn, status="rejected", decided_at=_stamp(30), key_suffix="old"
-    )
-    _insert_kick_card(
-        engine_conn, status="done", decided_at=_stamp(10), key_suffix="new"
-    )
+    _insert_kick_card(engine_conn, status="rejected", decided_at=_stamp(30), key_suffix="old")
+    _insert_kick_card(engine_conn, status="done", decided_at=_stamp(10), key_suffix="new")
     assert management.renominate_after_cooldown(engine_conn, now=NOW) == []
 
 
@@ -196,9 +186,7 @@ def test_renomination_blocked_until_gates_promote(engine_conn):
     assert blocked is not None and blocked > management._iso_naive(NOW)
     # A first-time candidate with no decided card is never blocked.
     assert (
-        management._renomination_blocked_until(
-            engine_conn, "#NEW", "promotion_recommendation", 14
-        )
+        management._renomination_blocked_until(engine_conn, "#NEW", "promotion_recommendation", 14)
         is None
     )
 
@@ -209,8 +197,7 @@ def test_renomination_blocked_until_gates_promote(engine_conn):
 def test_decline_with_revisit_note_sets_expires_window(engine_conn):
     _insert_kick_card(engine_conn, tag="#NOTE", status="proposed", key_suffix="n")
     card = engine_conn.execute(
-        "SELECT action_id FROM leader_action_recommendations "
-        "WHERE target_player_tag='#NOTE'"
+        "SELECT action_id FROM leader_action_recommendations WHERE target_player_tag='#NOTE'"
     ).fetchone()
     updated = la.decide_leader_action(
         card["action_id"],
@@ -231,8 +218,7 @@ def test_decline_with_revisit_note_sets_expires_window(engine_conn):
 def test_plain_decline_sets_no_suppression_window(engine_conn):
     _insert_kick_card(engine_conn, tag="#PLAIN", status="proposed", key_suffix="p")
     card = engine_conn.execute(
-        "SELECT action_id FROM leader_action_recommendations "
-        "WHERE target_player_tag='#PLAIN'"
+        "SELECT action_id FROM leader_action_recommendations WHERE target_player_tag='#PLAIN'"
     ).fetchone()
     updated = la.decide_leader_action(
         card["action_id"],

@@ -82,9 +82,7 @@ def _fingerprint(cards: Iterable[dict]) -> tuple[str, ...]:
             continue
         card_id = card.get("id")
         name = _card_name(card)
-        token = (
-            f"id:{card_id}" if card_id is not None else f"name:{(name or '').lower()}"
-        )
+        token = f"id:{card_id}" if card_id is not None else f"name:{(name or '').lower()}"
         if name or card_id is not None:
             tokens.append(token)
     return tuple(sorted(set(tokens)))
@@ -97,9 +95,7 @@ def _names(cards: Iterable[dict]) -> list[str]:
 def _average_elixir(cards: Iterable[dict]) -> float | None:
     playable = [card for card in cards or [] if isinstance(card, dict)]
     costs = [
-        card.get("elixir_cost")
-        if card.get("elixir_cost") is not None
-        else card.get("elixirCost")
+        card.get("elixir_cost") if card.get("elixir_cost") is not None else card.get("elixirCost")
         for card in playable
         if isinstance(
             card.get("elixir_cost")
@@ -108,11 +104,7 @@ def _average_elixir(cards: Iterable[dict]) -> float | None:
             (int, float),
         )
     ]
-    return (
-        round(sum(costs) / len(costs), 2)
-        if playable and len(costs) == len(playable)
-        else None
-    )
+    return round(sum(costs) / len(costs), 2) if playable and len(costs) == len(playable) else None
 
 
 def _battle_count(rows: list[dict]) -> int:
@@ -139,11 +131,7 @@ def _archetype(cards: Iterable[dict]) -> dict:
     elif "Royal Giant" in names:
         label = "royal giant control"
     elif "Balloon" in names:
-        label = (
-            "balloon cycle"
-            if average is not None and average <= 3.4
-            else "balloon beatdown"
-        )
+        label = "balloon cycle" if average is not None and average <= 3.4 else "balloon beatdown"
     elif names & _BRIDGE_PRESSURE and names & {"Bandit", "Royal Ghost", "P.E.K.K.A"}:
         label = "bridge spam"
     elif names & {"Hog Rider", "Goblin Drill", "Miner", "Wall Breakers"}:
@@ -192,13 +180,10 @@ def _deck_groups(rows: list[dict]) -> list[dict]:
             group["draws"] += 1
         group["trophy_delta"] += int(row.get("trophy_change") or 0)
         group["latest_battle_at"] = (
-            max(group["latest_battle_at"] or "", str(row.get("battle_time") or ""))
-            or None
+            max(group["latest_battle_at"] or "", str(row.get("battle_time") or "")) or None
         )
         group["modes"][str(row.get("mode_group") or "unknown")] += 1
-        group["outcome_granularity"][
-            str(row.get("outcome_granularity") or "battle")
-        ] += 1
+        group["outcome_granularity"][str(row.get("outcome_granularity") or "battle")] += 1
 
     result = []
     for group in groups.values():
@@ -464,9 +449,7 @@ def _clan_view(rows: list[dict], *, days: int, scope: str) -> dict:
             {
                 "archetype": label,
                 **item,
-                "win_rate": round(item["wins"] / item["battles"], 3)
-                if item["battles"]
-                else None,
+                "win_rate": round(item["wins"] / item["battles"], 3) if item["battles"] else None,
             }
         )
     return {
@@ -485,16 +468,12 @@ def _clan_view(rows: list[dict], *, days: int, scope: str) -> dict:
             archetype_rows, key=lambda item: (-item["members"], item["archetype"])
         ),
         "win_condition_spread": [
-            {"card": card, "primary_decks": count}
-            for card, count in win_conditions.most_common(15)
+            {"card": card, "primary_decks": count} for card, count in win_conditions.most_common(15)
         ],
         "common_primary_deck_cards": [
-            {"card": card, "primary_decks": count}
-            for card, count in common_cards.most_common(20)
+            {"card": card, "primary_decks": count} for card, count in common_cards.most_common(20)
         ],
-        "members": sorted(
-            members, key=lambda item: (-item["battles"], item["player_name"] or "")
-        ),
+        "members": sorted(members, key=lambda item: (-item["battles"], item["player_name"] or "")),
         "evidence_limits": {
             "scope": "POAP KINGS observed decks only; this is clan-local meta, not global ladder meta",
             "opponent_decks_captured": False,
@@ -605,9 +584,7 @@ def _card_impact(
         item["battles"] += 1
         item["wins"] += 1 if row.get("outcome") == "W" else 0
         item["losses"] += 1 if row.get("outcome") == "L" else 0
-        item["latest_battle_at"] = max(
-            item["latest_battle_at"] or "", row.get("battle_time") or ""
-        )
+        item["latest_battle_at"] = max(item["latest_battle_at"] or "", row.get("battle_time") or "")
         item["evidence_types"].add("recent_battle_deck")
     for deck in current_decks:
         names = set(_names(deck.get("cards") or []))
@@ -635,12 +612,8 @@ def _card_impact(
     for item in by_player.values():
         item["matching_cards"] = sorted(item["matching_cards"])
         item["evidence_types"] = sorted(item["evidence_types"])
-        item["matching_changes"] = [
-            targets[name.lower()] for name in item["matching_cards"]
-        ]
-        item["win_rate"] = (
-            round(item["wins"] / item["battles"], 3) if item["battles"] else None
-        )
+        item["matching_changes"] = [targets[name.lower()] for name in item["matching_cards"]]
+        item["win_rate"] = round(item["wins"] / item["battles"], 3) if item["battles"] else None
         members.append(item)
     observed = {name.lower() for member in members for name in member["matching_cards"]}
     return {
@@ -751,10 +724,9 @@ def get_deck_intelligence(
             }
         try:
             current_decks = (
-                _invoke(source, "list_current_member_decks", history_tag, conn=conn)
-                or []
+                _invoke(source, "list_current_member_decks", history_tag, conn=conn) or []
             )
-        except (AttributeError, TypeError):
+        except AttributeError, TypeError:
             current_decks = []
         result = _card_impact(
             rows,

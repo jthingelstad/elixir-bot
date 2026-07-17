@@ -61,10 +61,7 @@ def test_integrity_repair_dry_run_apply_and_idempotence(engine_conn):
         "(player_tag,metric_date,best_trophies,exp_level) "
         "VALUES ('#FIX','2026-07-05',NULL,0)"
     )
-    c.execute(
-        "INSERT INTO war_seasons (season_id,started_at) "
-        "VALUES (190,'20260701T000000.000Z')"
-    )
+    c.execute("INSERT INTO war_seasons (season_id,started_at) VALUES (190,'20260701T000000.000Z')")
     c.execute(
         "INSERT INTO war_weeks (season_id,section_index,created_date) "
         "VALUES (190,0,'20260701T093700.000Z')"
@@ -138,21 +135,15 @@ def test_integrity_repair_dry_run_apply_and_idempotence(engine_conn):
     ).fetchone()
     assert (daily["best_trophies"], daily["exp_level"]) == (5000, 50)
     assert (
-        c.execute("SELECT created_date FROM war_weeks WHERE season_id=190").fetchone()[
-            0
-        ]
+        c.execute("SELECT created_date FROM war_weeks WHERE season_id=190").fetchone()[0]
         == "2026-07-01T09:37:00Z"
     )
     assert (
-        c.execute(
-            "SELECT channel_id FROM conversation_threads WHERE thread_id=9001"
-        ).fetchone()[0]
+        c.execute("SELECT channel_id FROM conversation_threads WHERE thread_id=9001").fetchone()[0]
         is None
     )
     assert (
-        c.execute(
-            "SELECT COUNT(*) FROM clan_memberships WHERE player_tag='#OVER'"
-        ).fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM clan_memberships WHERE player_tag='#OVER'").fetchone()[0]
         == 1
     )
 

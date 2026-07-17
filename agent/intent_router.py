@@ -30,9 +30,7 @@ log = logging.getLogger("elixir_agent")
 
 INTENT_ROUTER_WORKFLOW = "intent_router"
 
-_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "prompts" / "agents" / "intent_router.md"
-)
+_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "agents" / "intent_router.md"
 
 
 class Intent(TypedDict, total=False):
@@ -167,9 +165,7 @@ def classify_intent(
     selected_model = model or _lightweight_model_name()
 
     workflows = (
-        ("interactive", "clanops")
-        if workflow not in {"interactive", "clanops"}
-        else (workflow,)
+        ("interactive", "clanops") if workflow not in {"interactive", "clanops"} else (workflow,)
     )
     system_prompt = _load_prompt(workflows)
     history_text = _format_conversation_history(conversation_history)
@@ -196,9 +192,7 @@ def classify_intent(
         )
     except Exception as exc:
         log.warning("intent_router_call_failed: %s", exc, exc_info=True)
-        return _fallback_intent(
-            started, selected_model, f"llm_error: {exc.__class__.__name__}"
-        )
+        return _fallback_intent(started, selected_model, f"llm_error: {exc.__class__.__name__}")
 
     tool_uses = response_tool_uses(resp)
     if not tool_uses:
@@ -207,7 +201,7 @@ def classify_intent(
     call = tool_uses[0]
     try:
         args = dict(call.input)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return _fallback_intent(started, selected_model, "tool_args_parse_error")
 
     route = args.get("route")
@@ -260,7 +254,7 @@ def _coerce_float(value, *, default: float) -> float:
         if value is None:
             return default
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 

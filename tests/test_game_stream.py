@@ -90,9 +90,7 @@ def test_card_sync_detects_new_card_not_bootstrap_and_is_idempotent():
     assert rows[0]["change_key"] == "card:28000018"
     assert p["name"] == "Ronin" and p["icon_url"] == "http://x/c.png"
     # re-sync the same set → no duplicate event
-    sync_card_catalog(
-        {"items": [_card(26000000, "Knight"), _card(28000018, "Ronin")]}, conn=conn
-    )
+    sync_card_catalog({"items": [_card(26000000, "Knight"), _card(28000018, "Ronin")]}, conn=conn)
     assert len(ge.new_events_since(conn, 0)) == 1
     conn.close()
 
@@ -113,9 +111,7 @@ def test_emitter_skips_mastery_attributes_novel_badge_and_reads_events():
         "badge_name",
         "OldBadge",
         first_seen="2026-06-13T11:46:39",
-        sample={
-            "badge": {"name": "OldBadge", "iconUrls": {"large": "http://x/old.png"}}
-        },
+        sample={"badge": {"name": "OldBadge", "iconUrls": {"large": "http://x/old.png"}}},
     )
     conn.commit()
     # first pass seeds the cursor to the tip and emits nothing (go-live)
@@ -141,10 +137,7 @@ def test_emitter_skips_mastery_attributes_novel_badge_and_reads_events():
     assert (
         emit_game_from_sentinel(conn, "2026-07-07T15:05:00Z") == 2
     )  # badge + event; Mastery skipped
-    kinds = {
-        r["event_type"]: json.loads(r["payload_json"])
-        for r in ge.new_events_since(conn, 0)
-    }
+    kinds = {r["event_type"]: json.loads(r["payload_json"]) for r in ge.new_events_since(conn, 0)}
     assert "MasteryRonin" not in json.dumps(kinds)
     assert kinds["event_badge_earned"]["badge_label"] == "Chaos S2"
     assert kinds["event_badge_earned"]["member_name"] == "Aaqib Javed"
@@ -194,28 +187,18 @@ def test_badge_attributed_to_first_observer_not_latest():
         "endpoint": "player",
         "sample": {"badge": badge},
     }
-    _insert_or_touch_observation(
-        conn, {**base, "entity_key": "AAA"}, "2026-07-06T21:30:43"
-    )
-    _insert_or_touch_observation(
-        conn, {**base, "entity_key": "BBB"}, "2026-07-07T02:00:00"
-    )
+    _insert_or_touch_observation(conn, {**base, "entity_key": "AAA"}, "2026-07-06T21:30:43")
+    _insert_or_touch_observation(conn, {**base, "entity_key": "BBB"}, "2026-07-07T02:00:00")
     row = conn.execute(
         "SELECT observation_id, entity_key, first_entity_key "
         "FROM api_sentinel_observations WHERE name='Chaos_S2'"
     ).fetchone()
-    assert (
-        row["entity_key"] == "BBB" and row["first_entity_key"] == "AAA"
-    )  # drift vs preserved
+    assert row["entity_key"] == "BBB" and row["first_entity_key"] == "AAA"  # drift vs preserved
     conn.commit()
     # emit the (existing) obs by placing the cursor just behind it
     cursor_set(conn, "emit:game", row["observation_id"] - 1)
     emit_game_from_sentinel(conn, "2026-07-07T03:00:00Z")
-    ev = [
-        r
-        for r in ge.new_events_since(conn, 0)
-        if r["event_type"] == "event_badge_earned"
-    ][0]
+    ev = [r for r in ge.new_events_since(conn, 0) if r["event_type"] == "event_badge_earned"][0]
     assert json.loads(ev["payload_json"])["member_name"] == "Aaqib"  # first, not latest
     conn.close()
 
@@ -243,11 +226,7 @@ def test_emitter_unattributed_when_member_unresolvable():
     )
     conn.commit()
     emit_game_from_sentinel(conn, "2026-07-07T15:05:00Z")
-    row = [
-        r
-        for r in ge.new_events_since(conn, 0)
-        if r["event_type"] == "event_badge_earned"
-    ][0]
+    row = [r for r in ge.new_events_since(conn, 0) if r["event_type"] == "event_badge_earned"][0]
     assert json.loads(row["payload_json"])["member_name"] is None
     conn.close()
 
@@ -442,9 +421,7 @@ def test_chaos_s2_replay_end_to_end():
         "badge_name",
         "Chaos_S2",
         first_seen="2026-07-06T21:30:43",
-        sample={
-            "badge": {"name": "Chaos_S2", "iconUrls": {"large": "http://x/chaos.png"}}
-        },
+        sample={"badge": {"name": "Chaos_S2", "iconUrls": {"large": "http://x/chaos.png"}}},
     )
     conn.commit()
     emit_game_from_sentinel(conn, "2026-07-06T21:35:00Z")

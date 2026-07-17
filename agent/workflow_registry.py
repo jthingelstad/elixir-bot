@@ -72,22 +72,16 @@ TOOL_DEFINITIONS_BY_NAME = {d["name"]: d for d in TOOL_DEFINITIONS}
 READ_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "read"]
 WRITE_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "write"]
 ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
-READ_TOOLS_NO_EXTERNAL = [
-    t for t in READ_TOOLS if t["name"] not in EXTERNAL_LOOKUP_TOOL_NAMES
-]
+READ_TOOLS_NO_EXTERNAL = [t for t in READ_TOOLS if t["name"] not in EXTERNAL_LOOKUP_TOOL_NAMES]
 
 _INTEL_REPORT_TOOL_NAMES = {"cr_api", "get_clan_intel_report"}
 INTEL_REPORT_TOOLS = [t for t in READ_TOOLS if t["name"] in _INTEL_REPORT_TOOL_NAMES]
 
 _TOURNAMENT_RECAP_TOOL_NAMES = {"cr_api"}
-TOURNAMENT_RECAP_TOOLS = [
-    t for t in READ_TOOLS if t["name"] in _TOURNAMENT_RECAP_TOOL_NAMES
-]
+TOURNAMENT_RECAP_TOOLS = [t for t in READ_TOOLS if t["name"] in _TOURNAMENT_RECAP_TOOL_NAMES]
 
 _TOURNAMENT_UPDATE_TOOL_NAMES = {"cr_api"}
-TOURNAMENT_UPDATE_TOOLS = [
-    t for t in READ_TOOLS if t["name"] in _TOURNAMENT_UPDATE_TOOL_NAMES
-]
+TOURNAMENT_UPDATE_TOOLS = [t for t in READ_TOOLS if t["name"] in _TOURNAMENT_UPDATE_TOOL_NAMES]
 
 INTERACTIVE_READ_TOOLS = READ_TOOLS
 AWARENESS_TOOLS = READ_TOOLS + [
@@ -251,15 +245,11 @@ _WORKFLOW_SPECS = (
     WorkflowSpec("member_report", model_family="intensive"),
     # Weekly public Elder Standing report — standalone, no tools, composed from a
     # pre-materialized facts brief (runtime.elder_standing), grounding-guarded.
-    WorkflowSpec(
-        "elder_standing", tools=[], tools_allowed=False, model_family="intensive"
-    ),
+    WorkflowSpec("elder_standing", tools=[], tools_allowed=False, model_family="intensive"),
     # DM outreach ask (runtime.outreach via app): a short warm profile-outreach DM
     # composed in Elixir's voice from a member facts brief. No tools; a leader
     # approves the draft before it sends.
-    WorkflowSpec(
-        "member_outreach_ask", tools=[], tools_allowed=False, model_family="chat"
-    ),
+    WorkflowSpec("member_outreach_ask", tools=[], tools_allowed=False, model_family="chat"),
     # Awareness cost gate (runtime.awareness.gate): a lightweight (Haiku) binary
     # post-vs-silence triage that runs before the expensive Sonnet brain on
     # soft-signal ticks. No tools, tiny prompt — it only gates, never posts.
@@ -323,27 +313,21 @@ def workflow_model_family(name: str | None) -> ModelFamily:
 
 
 TOOLSETS_BY_WORKFLOW = {
-    spec.name: spec.tools
-    for spec in _WORKFLOW_SPECS
-    if spec.response_schema is not None
+    spec.name: spec.tools for spec in _WORKFLOW_SPECS if spec.response_schema is not None
 }
 for _alias, _canonical in _ALIASES.items():
     if _canonical in TOOLSETS_BY_WORKFLOW:
         TOOLSETS_BY_WORKFLOW[_alias] = TOOLSETS_BY_WORKFLOW[_canonical]
 
 MAX_ROUNDS_BY_WORKFLOW = {
-    spec.name: spec.max_tool_rounds
-    for spec in _WORKFLOW_SPECS
-    if spec.response_schema is not None
+    spec.name: spec.max_tool_rounds for spec in _WORKFLOW_SPECS if spec.response_schema is not None
 }
 for _alias, _canonical in _ALIASES.items():
     if _canonical in MAX_ROUNDS_BY_WORKFLOW:
         MAX_ROUNDS_BY_WORKFLOW[_alias] = MAX_ROUNDS_BY_WORKFLOW[_canonical]
 
 RESPONSE_SCHEMAS_BY_WORKFLOW = {
-    spec.name: spec.response_schema
-    for spec in _WORKFLOW_SPECS
-    if spec.response_schema is not None
+    spec.name: spec.response_schema for spec in _WORKFLOW_SPECS if spec.response_schema is not None
 }
 for _alias, _canonical in _ALIASES.items():
     if _canonical in RESPONSE_SCHEMAS_BY_WORKFLOW:

@@ -6,7 +6,7 @@ in string-compared columns (migrated Z-suffixed, new writes T-no-Z from the
 old _utcnow, one space-format row). Idempotent — already-normalized rows
 match the target format and are skipped.
 
-Usage: ./venv/bin/python scripts/migrate_v51/fix_memories_ts.py
+Usage: uv run python scripts/migrate_v51/fix_memories_ts.py
 """
 
 from __future__ import annotations
@@ -15,9 +15,7 @@ import os
 import sqlite3
 import sys
 
-sys.path.insert(
-    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 def _normalize(value: str | None) -> str | None:
@@ -35,9 +33,7 @@ def main() -> int:
     db_path = os.getenv(
         "ELIXIR_DB_PATH",
         os.path.join(
-            os.path.dirname(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            ),
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
             "elixir-v51.db",
         ),
     )
@@ -53,9 +49,7 @@ def main() -> int:
         ),
         ("memory_log", "log_id", ("at",)),
     ):
-        for row in conn.execute(
-            f"SELECT {id_col}, {', '.join(cols)} FROM {table}"
-        ).fetchall():
+        for row in conn.execute(f"SELECT {id_col}, {', '.join(cols)} FROM {table}").fetchall():
             updates = {}
             for col in cols:
                 val = row[col]

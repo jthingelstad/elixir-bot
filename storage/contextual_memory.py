@@ -363,10 +363,7 @@ def upsert_race_streak_memory(
             op_conn.close()
 
     if streak_count == 0:
-        body = (
-            f"POAP KINGS' consecutive 1st-place streak ended in "
-            f"Season {season_id} Week {week}."
-        )
+        body = f"POAP KINGS' consecutive 1st-place streak ended in Season {season_id} Week {week}."
     else:
         body = (
             f"POAP KINGS has finished 1st in every river race from "

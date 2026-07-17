@@ -65,9 +65,7 @@ def _board(source, *, conn=None) -> dict:
     at_risk = _at_risk(source, {"min_donations_week": 0}, conn=conn)
     promotion = _invoke(source, "get_promotion_candidates", conn=conn)
     demotion = _invoke(source, "get_demotion_candidates", conn=conn)
-    open_actions = _invoke(
-        source, "list_leader_actions", status="proposed", limit=25, conn=conn
-    )
+    open_actions = _invoke(source, "list_leader_actions", status="proposed", limit=25, conn=conn)
     held_tags = {
         member.get("player_tag")
         for member in (summary.get("readiness") or {}).get("held_members") or []

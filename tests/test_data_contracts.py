@@ -101,9 +101,7 @@ def test_duplicate_battle_enriches_missing_war_keys(engine_conn, cr_fixture):
     now = datetime(2026, 7, 4, 16, 0, tzinfo=timezone.utc)
 
     assert (
-        ingest.mirror_battles(
-            engine_conn, tag, [battle], "2026-07-04T16:00:00Z", None, now=now
-        )
+        ingest.mirror_battles(engine_conn, tag, [battle], "2026-07-04T16:00:00Z", None, now=now)
         == 1
     )
     before = engine_conn.execute(
@@ -127,14 +125,11 @@ def test_duplicate_battle_enriches_missing_war_keys(engine_conn, cr_fixture):
         pace_status="behind",
     )
     assert (
-        ingest.mirror_battles(
-            engine_conn, tag, [battle], "2026-07-04T16:10:00Z", clock, now=now
-        )
+        ingest.mirror_battles(engine_conn, tag, [battle], "2026-07-04T16:10:00Z", clock, now=now)
         == 0
     )
     after = engine_conn.execute(
-        "SELECT season_id, section_index, war_day_index "
-        "FROM battle_events WHERE player_tag = ?",
+        "SELECT season_id, section_index, war_day_index FROM battle_events WHERE player_tag = ?",
         (tag,),
     ).fetchone()
     assert tuple(after) == (133, 2, 0)

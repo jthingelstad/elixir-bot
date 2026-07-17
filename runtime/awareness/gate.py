@@ -165,9 +165,7 @@ def _fresh_cake_days(read: dict) -> list:
     ones that should still nudge the gate toward a look."""
     posted = _posted_cake_tags(read)
     return [
-        c
-        for c in (read.get("cake_days_today") or [])
-        if c and c.get("subject_tag") not in posted
+        c for c in (read.get("cake_days_today") or []) if c and c.get("subject_tag") not in posted
     ]
 
 
@@ -312,9 +310,7 @@ def _compact_read_for_triage(read: dict) -> str:
     time_block = read.get("time") or {}
     payload = {
         "now": read.get("generated_at"),
-        "war_phase": (
-            time_block.get("war_day_label") or time_block.get("phase") or None
-        ),
+        "war_phase": (time_block.get("war_day_label") or time_block.get("phase") or None),
         "posting_pulse": read.get("posting_pulse") or {},
         "soft_signals": [_slim_sig(s) for s in _soft_lane_signals(read)],
         # only cake days not yet celebrated today — an already-posted anniversary
@@ -350,9 +346,7 @@ def _default_generate(system_prompt: str, user_msg: str) -> str | None:
     )
 
 
-def triage(
-    read: dict, *, generate: Callable[[str, str], str | None] | None = None
-) -> dict:
+def triage(read: dict, *, generate: Callable[[str, str], str | None] | None = None) -> dict:
     """Run the lightweight post-vs-silence triage. Returns
     ``{"decision": "post"|"silent", "reason": str}``.
 
@@ -368,9 +362,7 @@ def triage(
     try:
         raw = gen(_TRIAGE_SYSTEM, user_msg)
     except Exception as exc:  # pragma: no cover - defensive
-        log.warning(
-            "awareness gate: triage call raised (%s); failing safe to deliberate", exc
-        )
+        log.warning("awareness gate: triage call raised (%s); failing safe to deliberate", exc)
         return {"decision": "post", "reason": f"triage error: {exc}"}
 
     if not raw:
@@ -399,7 +391,7 @@ def _parse_verdict(raw: str):
             d = str(obj.get("decision", "")).strip().lower()
             if d in ("post", "silent"):
                 return d, str(obj.get("reason", "")).strip()
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
     low = text.lower()
     # Fallback: unambiguous single-word signal in prose.
@@ -473,9 +465,7 @@ def decide(read: dict, *, triage_fn: Callable[[dict], dict] | None = None) -> di
             + f" [{cls['reason']}]",
         }
     except Exception as exc:  # pragma: no cover - defensive
-        log.warning(
-            "awareness gate: decide failed (%s); failing safe to deliberate", exc
-        )
+        log.warning("awareness gate: decide failed (%s); failing safe to deliberate", exc)
         return {"deliberate": True, "tier": "error", "reason": f"gate error: {exc}"}
 
 

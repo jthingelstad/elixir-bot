@@ -5,11 +5,11 @@ the v4 signal/awareness system (item 7 + issue #101 "F2") without re-discovering
 the footprint. Read this + the cited files; you should not need prior chat context.
 
 ## Baseline (start state — verify before starting)
-- Branch `main`, clean tree, at commit `3d63475` (or later). `./venv/bin/ruff check .`
-  passes; full suite green (`./venv/bin/pytest tests/ -q`, ~987 passing, ~4 min).
-- Bot healthy: `./venv/bin/python -m event_core.live.monitor` → service_up, no errors,
+- Branch `main`, clean tree, at commit `3d63475` (or later). `uv run ruff check .`
+  passes; full suite green (`uv run pytest tests/ -q`, ~987 passing, ~4 min).
+- Bot healthy: `uv run python -m event_core.live.monitor` → service_up, no errors,
   consumer at head. `git check-ignore .env` confirms .env is untracked.
-- **Gate every step:** `./venv/bin/ruff check .` AND `./venv/bin/pytest tests/ -q`
+- **Gate every step:** `uv run ruff check .` AND `uv run pytest tests/ -q`
   must pass before committing. Commit ONLY green — `main` must stay deployable.
   ruff is in the venv, not on PATH; a `.git/hooks/pre-commit` runs it automatically.
 

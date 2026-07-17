@@ -43,11 +43,7 @@ def test_receipt_retention_keeps_content_with_a_recent_receipt(engine_conn):
 
     assert stats["api_observation_receipts"] == 2
     assert stats["raw_api_payloads"] == 1
-    remaining = engine_conn.execute(
-        "SELECT entity_key FROM raw_api_payloads"
-    ).fetchall()
+    remaining = engine_conn.execute("SELECT entity_key FROM raw_api_payloads").fetchall()
     assert [row["entity_key"] for row in remaining] == ["SHARED"]
-    receipt = engine_conn.execute(
-        "SELECT entity_key FROM api_observation_receipts"
-    ).fetchone()
+    receipt = engine_conn.execute("SELECT entity_key FROM api_observation_receipts").fetchone()
     assert receipt["entity_key"] == "SHARED"
