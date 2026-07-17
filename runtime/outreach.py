@@ -83,14 +83,17 @@ def compose_ask(member_name: Optional[str]) -> str:
 def propose_cards(
     *,
     raise_card: Callable[[dict, str], Optional[dict]],
+    compose: Optional[Callable[[dict], str]] = None,
     limit: int = CARDS_PER_RUN,
     now: Optional[str] = None,
     conn=None,
 ) -> list[dict]:
-    """Pick eligible targets and raise one leader card each. ``raise_card(target,
-    copy)`` creates + posts the #actions card and returns the action dict (with
-    ``action_id``), or None on failure. Returns the outreach rows moved to
-    'proposed'. No-op (returns []) unless ``ELIXIR_DM_OUTREACH=1``."""
+    """Pick eligible targets and raise one leader card each. ``compose(target) ->
+    str`` writes the ask DM (Elixir's agent voice); it falls back to the
+    deterministic ``compose_ask`` template if omitted, empty, or it raises.
+    ``raise_card(target, copy)`` creates + posts the #actions card and returns the
+    action dict (with ``action_id``), or None on failure. Returns the outreach rows
+    moved to 'proposed'. No-op (returns []) unless ``ELIXIR_DM_OUTREACH=1``."""
     if not outreach_enabled():
         return []
     now = _now(now)
@@ -98,7 +101,15 @@ def propose_cards(
     proposed: list[dict] = []
     for target in targets:
         tag = target["player_tag"]
-        copy = compose_ask(target.get("member_name"))
+        copy = ""
+        if compose is not None:
+            try:
+                copy = (compose(target) or "").strip()
+            except Exception:
+                log.exception("outreach: compose failed for %s; using template", tag)
+                copy = ""
+        if not copy:
+            copy = compose_ask(target.get("member_name"))
         try:
             action = raise_card(target, copy)
         except Exception:

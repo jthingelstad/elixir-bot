@@ -32,6 +32,7 @@ from agent.prompt_builders import (
     _intel_report_system,
     _interactive_system,
     _leader_action_feedback_system,
+    _member_outreach_ask_system,
     _member_report_system,
     _memory_synthesis_system,
     _promote_system,
@@ -1369,6 +1370,28 @@ def generate_elder_standing(facts: str) -> str:
             temperature=0.7,
             max_tokens=1200,
             error_label="Elder standing",
+        )
+        or ""
+    )
+
+
+def generate_outreach_ask(facts: str) -> str:
+    """Compose the warm profile-outreach DM in Elixir's voice from a facts brief
+    (the member's name + any known details). Returns the message text, or "" so the
+    caller falls back to the deterministic template. No tools; a leader approves the
+    draft before it sends."""
+    user_msg = (
+        f"{facts}\n\nWrite the direct message now — a few warm, natural sentences in "
+        "your own voice, grounded only in the facts above. Return only the message text."
+    )
+    return (
+        _generate_simple_message(
+            _member_outreach_ask_system(),
+            user_msg,
+            workflow="member_outreach_ask",
+            temperature=0.8,
+            max_tokens=300,
+            error_label="Member outreach ask",
         )
         or ""
     )
