@@ -8,7 +8,10 @@
 > `editor_verdicts` table (schema v8). **The living rubric / feeders (§3) stay
 > live** in `engine/editor.py` (`record_deleted_post`, `record_copy_edit_pair`,
 > `record_active_awareness_quality`, `record_post_quality_feedback`) — they never
-> used the critic or its ledger. This doc is kept for design reference; if a
+> used the critic or its ledger. **§4's scheduled `editorial-review` /
+> `editorial-sweep` self-review activity was also retired 2026-07-10** with the
+> Editor (see `runtime/activities.py`) — treat §4's weekly self-review report as
+> historical design, not a live job. This doc is kept for design reference; if a
 > critic is ever rebuilt it must run OUTSIDE the delivery transaction with the
 > brain's full facts.
 >

@@ -281,7 +281,7 @@ def test_runtime_schema_mutation_is_centralized():
     offenders = []
     for package in ("engine", "storage", "runtime", "memory_store", "db"):
         for path in (root / package).rglob("*.py"):
-            if path == root / "db" / "schema.py" or path.name == "_migrations.py":
+            if path == root / "db" / "schema.py":
                 continue
             text = path.read_text()
             if "ALTER TABLE" in text or "CREATE TABLE IF NOT EXISTS" in text:

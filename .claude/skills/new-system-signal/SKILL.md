@@ -59,7 +59,7 @@ The user will describe the feature or change to announce. You need to:
 - Avoid overusing emoji — zero to two total is the sweet spot.
 - Sound like a proud clan system announcing a real upgrade, not a generic changelog.
 
-4. **Verify the signal is valid** by running: `venv/bin/python -m pytest tests/ -x -q`
+4. **Verify the signal is valid** by running: `uv run pytest tests/ -x -q`
 
 The test in `test_elixir_channels.py` dynamically checks against `STARTUP_SYSTEM_SIGNALS` so it should pass automatically without needing test updates.
 

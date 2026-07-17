@@ -12,7 +12,8 @@ Usage:
     uv run python scripts/migrate_v51/schema_v51.py \
         --db elixir-v51.db --archive elixir-v5-archive-2026H2.db
 
-Expected table count: 68 designed tables after the current forward migration.
+Expected table count: EXPECTED_TABLE_COUNT designed tables after the current
+forward migration (currently 71; the constant below is the enforced value).
 """
 
 from __future__ import annotations

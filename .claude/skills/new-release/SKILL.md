@@ -27,13 +27,13 @@ retired.
 Always inspect the generated three-tier copy before publishing:
 
 ```bash
-./venv/bin/python scripts/cut_release.py --dry-run --since <ref>
+uv run python scripts/cut_release.py --dry-run --since <ref>
 ```
 
 The user may supply the coined name:
 
 ```bash
-./venv/bin/python scripts/cut_release.py --dry-run --since <ref> --name "Blazing Balloon"
+uv run python scripts/cut_release.py --dry-run --since <ref> --name "Blazing Balloon"
 ```
 
 If no name is supplied, the script coins one. Report it for review before the
@@ -42,7 +42,7 @@ non-dry-run cut when the user has not already authorized autonomous publishing.
 ## Cut
 
 ```bash
-./venv/bin/python scripts/cut_release.py --since <ref> --name "Blazing Balloon"
+uv run python scripts/cut_release.py --since <ref> --name "Blazing Balloon"
 ```
 
 Use `--no-email` or `--no-announce` only when explicitly requested or when that
@@ -50,7 +50,7 @@ surface is unavailable. To retry only a failed Discord announcement after the
 release itself succeeded:
 
 ```bash
-./venv/bin/python scripts/cut_release.py --announce-only blazing-balloon
+uv run python scripts/cut_release.py --announce-only blazing-balloon
 ```
 
 ## Verify

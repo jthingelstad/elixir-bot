@@ -84,14 +84,17 @@ CREATE TABLE memory_log (                -- ONE history (replaces versions+audit
     diff_json TEXT
 );
 
-CREATE TABLE episodes (                  -- the Gen A survivor, kept ON PURPOSE (D3)
-    episode_id INTEGER PRIMARY KEY,
+-- NB: shipped as `memory_episodes` with the columns below (the design-era name
+-- `episodes` and its `workflow`/`updated_at` shape were not what landed).
+CREATE TABLE memory_episodes (           -- the Gen A survivor, kept ON PURPOSE (D3)
+    episode_id INTEGER PRIMARY KEY AUTOINCREMENT,
     subject_type TEXT NOT NULL,          -- channel|member|discord_user
     subject_key TEXT NOT NULL,
-    workflow TEXT,
+    episode_type TEXT NOT NULL,
     summary TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(subject_type, subject_key, workflow)
+    importance INTEGER NOT NULL DEFAULT 1,
+    source_message_ids_json TEXT,
+    created_at TEXT NOT NULL
 );
 
 -- memories_fts: FTS5 over (title, body, summary) with sync triggers (D2).

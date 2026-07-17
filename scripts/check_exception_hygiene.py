@@ -40,7 +40,7 @@ BROAD_EXCEPTION_BASELINE = {
     "db/__init__.py": 2,
     "db/schema.py": 8,  # +1: V8 migration rollback/re-raise (same pattern as v2-v7)
     "engine/chronicles.py": 1,
-    "engine/delivery.py": 3,
+    "engine/delivery.py": 2,  # -1: dead editor_gate branch removed (critic gone)
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
     "engine/leader_note_effects.py": 2,  # apply/revert leader-note effects fail-open (never break the interpreter)
