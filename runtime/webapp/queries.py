@@ -898,21 +898,26 @@ def command_page() -> dict:
             """,
         )
 
-        clock = _war_clock_dict(conn)
+        # Use the same rich war-season snapshot the awareness read uses (day,
+        # rank, weekly fame, standings) rather than the thin clock/week-clans path.
+        war_state = {}
         war_standings = []
-        sid = (clock or {}).get("season_id")
-        sec = (clock or {}).get("section_index")
-        if sid is not None and sec is not None:
-            war_standings = _rows(
-                conn,
-                """
-                SELECT c.name, wwc.fame, wwc.rank
-                FROM war_week_clans wwc LEFT JOIN clans c ON c.clan_tag = wwc.clan_tag
-                WHERE wwc.season_id = ? AND wwc.section_index = ?
-                ORDER BY wwc.fame DESC LIMIT 5
-                """,
-                (sid, sec),
-            )
+        try:
+            snap = war_capability.get_war_season_view(view="snapshot", conn=conn)[
+                "data"
+            ]
+            war_state = snap.get("state") or {}
+            race = war_state.get("race") or {}
+            war_standings = [
+                {
+                    "rank": s.get("rank"),
+                    "name": s.get("clan_name"),
+                    "fame": s.get("fame"),
+                }
+                for s in (race.get("race_standings") or [])[:5]
+            ]
+        except Exception:
+            log.debug("command war snapshot unavailable", exc_info=True)
 
         roster_count = (
             _one(
@@ -953,7 +958,7 @@ def command_page() -> dict:
             "open_cases": open_cases,
             "pending_revisits": pending_revisits,
             "attention": attention,
-            "war_clock": clock,
+            "war_state": war_state,
             "war_standings": war_standings,
             "roster_count": roster_count,
             "recent_posts": recent_posts,
