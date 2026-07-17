@@ -61,27 +61,27 @@
   <header class="top">
     <span class="brand">Elixir</span>
     <a href="/" class="{{ 'active' if nav=='command' else '' }}" title="Operator home: what needs your decision, who needs attention, the clan at a glance, what Elixir's been saying">Command</a>
-    <span class="navsep" title="The 10-minute engine tick: poll → materialize → emit">Ingest</span>
+    <span class="navsep" title="What's waiting on you: leadership decisions and cases">Decisions</span>
+    <a href="/management" class="{{ 'active' if nav=='management' else '' }}" title="Promote/demote/kick states, open #actions cards, decision cases">Management</a>
+    <span class="navsep" title="How POAP KINGS is doing: roster, war, awards">Clan</span>
+    <a href="/members" class="{{ 'active' if nav=='members' else '' }}" title="Active roster with management verdicts + per-member deep-dive">Members</a>
+    <a href="/war" class="{{ 'active' if nav=='war' else '' }}" title="River Race clock, weekly standings, and per-day war attendance">War</a>
+    <a href="/awards" class="{{ 'active' if nav=='awards' else '' }}" title="Season award history (War Champ, free-pass rotation)">Awards</a>
+    <span class="navsep" title="What Elixir has been saying and doing, and how it learns">Elixir</span>
+    <a href="/awareness" class="{{ 'active' if nav=='awareness' else '' }}" title="The hourly awareness loop: gate tier, decision, signals, posts">Awareness</a>
+    <a href="/editorial" class="{{ 'active' if nav=='editorial' else '' }}" title="Editorial rubric (exemplars/anti-patterns) + weekly retrospectives">Editorial</a>
+    <a href="/memories" class="{{ 'active' if nav=='memories' else '' }}" title="Memory store — searchable, by kind/member">Memories</a>
+    <span class="navsep" title="The machine underneath: ingest, jobs, model calls, cost, health">System</span>
+    <a href="/overview" class="{{ 'active' if nav=='overview' else '' }}" title="System health at a glance: latest tick, war clock, awareness 24h, errors">Overview</a>
     <a href="/ticks" class="{{ 'active' if nav=='ticks' else '' }}" title="Engine-tick history + event-stream cursor positions">Ticks</a>
     <a href="/polling" class="{{ 'active' if nav=='polling' else '' }}" title="Adaptive per-member poll heat + next-tick fetch plan">Polling</a>
     <a href="/streams" class="{{ 'active' if nav=='streams' else '' }}" title="Emitted domain events, state baselines, and raw API payloads">Streams</a>
     <a href="/api-sentinel" class="{{ 'active' if nav=='api' else '' }}" title="API admission ledger (accept/reject) + schema-drift tracker">API</a>
-    <span class="navsep" title="Clan state, roster, war, and leadership decisions">Decide</span>
-    <a href="/members" class="{{ 'active' if nav=='members' else '' }}" title="Active roster with management verdicts + per-member deep-dive">Members</a>
-    <a href="/management" class="{{ 'active' if nav=='management' else '' }}" title="Promote/demote/kick states, open #actions cards, decision cases">Management</a>
-    <a href="/recognition" class="{{ 'active' if nav=='recognition' else '' }}" title="Recognition ledger — historical award claims (the retired recognition system), NOT leader decisions">Recognition</a>
-    <a href="/war" class="{{ 'active' if nav=='war' else '' }}" title="River Race clock, weekly standings, and per-day war attendance">War</a>
-    <a href="/awards" class="{{ 'active' if nav=='awards' else '' }}" title="Season award history (War Champ, free-pass rotation)">Awards</a>
-    <span class="navsep" title="The hourly awareness brain and its learning">Brain</span>
-    <a href="/awareness" class="{{ 'active' if nav=='awareness' else '' }}" title="The hourly awareness loop: gate tier, decision, signals, posts">Awareness</a>
-    <a href="/editorial" class="{{ 'active' if nav=='editorial' else '' }}" title="Editorial rubric (exemplars/anti-patterns) + weekly retrospectives">Editorial</a>
-    <a href="/memories" class="{{ 'active' if nav=='memories' else '' }}" title="Memory store — searchable, by kind/member">Memories</a>
-    <span class="navsep" title="Scheduled jobs, model calls, cost, and runtime health">System</span>
-    <a href="/overview" class="{{ 'active' if nav=='overview' else '' }}" title="System health at a glance: latest tick, war clock, awareness 24h, errors">Overview</a>
     <a href="/activities" class="{{ 'active' if nav=='activities' else '' }}" title="Scheduled-job registry: schedule, next run, last outcome">Activities</a>
     <a href="/llm" class="{{ 'active' if nav=='llm' else '' }}" title="LLM call history with full prompt/response drill-down">LLM</a>
     <a href="/cost" class="{{ 'active' if nav=='cost' else '' }}" title="LLM spend by workflow and model (7d/30d)">Cost</a>
     <a href="/incidents" class="{{ 'active' if nav=='incidents' else '' }}" title="Runtime incident ledger (fail-soft errors + tracebacks)">Incidents</a>
+    <a href="/recognition" class="{{ 'active' if nav=='recognition' else '' }}" title="Recognition ledger — historical award claims (the retired recognition system), NOT leader decisions">Recognition</a>
     <span class="sp"></span>
     <a href="/chat" class="{{ 'active' if nav=='chat' else '' }}">Chat</a>
     <span class="who">{{ login }}</span>
