@@ -79,6 +79,27 @@ before a baseline advances. Counters land in
 - Local start: `venv/bin/python elixir.py`
 - Production process management uses `launchd`; see `SETUP.md`
 
+### Feature flags — dark-launch, then graduate
+
+Member-facing or behaviour-changing features ship behind an `ELIXIR_*` env flag
+(OFF by default) so they can be validated in prod before they're trusted — e.g.
+`ELIXIR_DM_OUTREACH`, `ELIXIR_NOTE_INTERPRET`, `ELIXIR_AWARENESS_GATE`.
+
+**A flag is scaffolding, not furniture.** Every dark-launch flag carries an
+implicit graduation step: once the feature is trusted, **remove the flag** — make
+the behaviour the default and delete the `os.getenv` gate, its `.env` line, and
+the flag's mentions in docstrings/tests. Do NOT leave a validated feature gated
+indefinitely; that is how `.env` and the code accrete dead toggles.
+
+Rules of thumb:
+- A flag that is fully ON in prod and no longer being toggled is a graduation
+  candidate — collapse it (see `ELIXIR_DM_OUTREACH_SEND`, retired 2026-07-17).
+- When you retire a flag, grep the whole repo (`.env`, code, tests, RELEASES.md)
+  and remove every reference; a retired flag left in `.env` reads as live config.
+- A flag read nowhere in code is dead — delete it from `.env` on sight.
+- Keep flags only for genuine kill-switches (a risky, still-watched behaviour) or
+  true deploy config (paths, ports, model ids, secrets) — those are not flags.
+
 ### Venv setup (one-time)
 
 ```bash

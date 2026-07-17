@@ -1076,10 +1076,10 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
 
 # -- DM outreach (Phase 1) -------------------------------------------------
 #
-# Double-gated and OFF by default. ELIXIR_DM_OUTREACH raises cards at all;
-# ELIXIR_DM_OUTREACH_SEND actually delivers a DM on approve (else dry-run-log). A
-# leader approves every card before any member is messaged. Flow logic lives in
-# runtime/outreach.py; these are the thin Discord bridges.
+# Gated by ELIXIR_DM_OUTREACH (OFF by default): it raises cards AND, on a
+# leader's approval, delivers the DM. A leader approves every card before any
+# member is messaged. Flow logic lives in runtime/outreach.py; these are the
+# thin Discord bridges.
 
 
 def _outreach_tenure(joined_date) -> str | None:
@@ -1104,7 +1104,7 @@ def _outreach_tenure(joined_date) -> str | None:
 
 async def _send_member_dm(discord_user_id: str, content: str) -> tuple[bool, str]:
     """Deliver an outreach DM to a member. Returns (ok, detail). When
-    ELIXIR_DM_OUTREACH_SEND is off, logs what would be sent and reports 'dry_run'
+    ELIXIR_DM_OUTREACH is off, logs what would be sent and reports 'dry_run'
     so the flow can be exercised without messaging anyone."""
     from runtime import outreach
 
