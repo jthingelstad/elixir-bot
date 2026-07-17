@@ -14,9 +14,39 @@ import db
 from runtime import member_report
 from runtime.jobs import _core
 
+_DEFAULT_LOG = [
+    {
+        "battle_time": "20260707T144643.000Z",
+        "game_mode_name": "Ladder",
+        "mode_group": "ladder",
+        "outcome": "W",
+        "crowns_for": 3,
+        "crowns_against": 1,
+        "trophy_change": 30,
+        "deck_json": '[{"id":1,"name":"Hog Rider","level":14},{"id":2,"name":"Musketeer","level":14}]',
+    },
+    {
+        "battle_time": "20260707T120000.000Z",
+        "game_mode_name": "CW_Battle_1v1",
+        "mode_group": "war",
+        "outcome": "L",
+        "crowns_for": 0,
+        "crowns_against": 2,
+        "trophy_change": 0,
+        "deck_json": '[{"id":3,"name":"Giant","level":13}]',
+    },
+]
 
-def _ctx(name="King Thing", *, log=None, trophies=12400):
-    """A minimal-but-shaped context dict for the render layer."""
+_DEFAULT_PROGRESS = [
+    {"emoji": "🏆", "text": "New peak: 12,400 (+214 this week vs +40 last)"},
+    {"emoji": "🆕", "text": "Unlocked Ronin (legendary)"},
+]
+
+
+def _ctx(name="King Thing", *, log=None, trophies=12400, progress=None):
+    """A minimal-but-shaped context dict for the render layer. by_type is derived
+    from the log with the real helper so the fixture stays consistent."""
+    log = _DEFAULT_LOG if log is None else log
     return {
         "name": name,
         "profile": {
@@ -33,31 +63,22 @@ def _ctx(name="King Thing", *, log=None, trophies=12400):
                 "win_rate": 8 / 11,
                 "net_trophies": 214,
             },
+            "prior_tally": {"net_trophies": 40},
             "battle_of_week": {
-                "outcome": "victory",
+                "outcome": "W",
                 "crowns_for": 3,
                 "crowns_against": 1,
                 "mode": "Ladder",
             },
-            "log": log
-            if log is not None
-            else [
-                {
-                    "battle_time": "20260707T144643.000Z",
-                    "game_mode_name": "Ladder",
-                    "mode_group": "ladder",
-                    "outcome": "victory",
-                    "crowns_for": 3,
-                    "crowns_against": 1,
-                    "trophy_change": 30,
-                },
-            ],
+            "log": log,
+            "by_type": member_report._battles_by_type(log),
         },
+        "progress": _DEFAULT_PROGRESS if progress is None else progress,
         "game_stream": {"trending_cards": [], "new_cards": []},
     }
 
 
-def test_render_has_scorecard_table_and_no_title():
+def test_render_has_scorecard_and_no_title():
     ctx = _ctx()
     narrative = {
         "overview": "You climbed.",
@@ -71,19 +92,48 @@ def test_render_has_scorecard_table_and_no_title():
     assert not body.lstrip().startswith("# ")  # no H1 title
     assert "### 🏆 12,400" in body  # scorecard
     assert "8–3" in body and "11 battles" in body
-    assert "## The full tape" in body  # the one structured block
     assert "| When | Mode | Result | Crowns |" in body  # battle table header
-    assert "Ladder" in body
     # narrative blocks are woven in
     assert "You climbed." in body and "Ronin arrived." in body
     assert "See you next week. — E" in body
 
 
+def test_render_segments_battle_log_by_type():
+    ctx = _ctx()
+    narrative = {"battle_intros": {"ladder": "Your Hog cycle hummed.", "war": "Rough boat week."}}
+    _, body = member_report.render_member_report(ctx, narrative)
+
+    # One section per mode family, labeled and card-aware, each with its own table.
+    assert "## Trophy Road (1 battles)" in body
+    assert "## River Race (1 battles)" in body
+    assert body.count("| When | Mode | Result | Crowns |") == 2  # one table per type
+    assert "Your Hog cycle hummed." in body  # per-type intro used
+    assert "The full tape" not in body  # the old single table is gone
+
+
+def test_render_battle_intro_falls_back_when_absent():
+    ctx = _ctx()
+    _, body = member_report.render_member_report(ctx, {})  # no battle_intros
+    # deterministic per-type intro names the top cards + record
+    assert "Hog Rider" in body  # ladder top card in the fallback intro
+    assert "## Trophy Road (1 battles)" in body
+
+
+def test_render_progress_section():
+    ctx = _ctx()
+    _, body = member_report.render_member_report(ctx, {"progress": "Big week for the vault."})
+    assert "**Your progress this week**" in body
+    assert "Big week for the vault." in body  # LLM lead-in
+    assert "- 🏆 New peak: 12,400" in body  # grounded bullet
+    assert "- 🆕 Unlocked Ronin (legendary)" in body
+
+
 def test_render_degrades_without_narrative_or_battles():
-    ctx = _ctx(log=[])
-    subject, body = member_report.render_member_report(ctx, None)
+    ctx = _ctx(log=[], progress=[])
+    _, body = member_report.render_member_report(ctx, None)
     assert "### 🏆" in body  # scorecard still renders
-    assert "## The full tape" not in body  # empty log → no table
+    assert "\n## " not in body  # empty log → no per-type section headers
+    assert "**Your progress this week**" not in body  # no signals → no section
     # falls back to grounded prose, never blank
     assert "8" in body and "3" in body
 

@@ -1349,7 +1349,7 @@ def generate_weekly_recap(
     return recap or None
 
 
-_MEMBER_REPORT_BLOCKS = ("overview", "standouts", "meta", "closer")
+_MEMBER_REPORT_BLOCKS = ("overview", "standouts", "progress", "meta", "closer")
 
 
 def generate_elder_standing(facts: str) -> str:
@@ -1400,11 +1400,13 @@ def generate_outreach_ask(facts: str) -> str:
 def generate_member_report(facts: str) -> dict:
     """Generate the narrative blocks for one member's weekly report from a
     facts-only brief (built by runtime.member_report.facts_for_model). Returns a
-    dict of the five blocks; missing blocks come back as "" so the renderer can
-    fall back deterministically."""
+    dict of the named blocks plus a ``battle_intros`` map (one per battle type);
+    missing blocks come back as "" (or an empty map) so the renderer can fall back
+    deterministically."""
     user_msg = (
-        f"{facts}\n\nWrite this member's personalized weekly report now — "
-        "the five tagged blocks, grounded only in the facts above."
+        f"{facts}\n\nWrite this member's personalized weekly report now — the "
+        "tagged blocks plus one <battle_intro> per battle type, grounded only in "
+        "the facts above."
     )
     text = (
         _generate_simple_message(
@@ -1425,7 +1427,15 @@ def _parse_member_report(text: str) -> dict:
         m = re.search(rf"<{name}>(.*?)</{name}>", text, re.S | re.I)
         return m.group(1).strip() if m else ""
 
-    return {name: block(name) for name in _MEMBER_REPORT_BLOCKS}
+    out = {name: block(name) for name in _MEMBER_REPORT_BLOCKS}
+    # Per-type battle intros: repeated <battle_intro type="ladder">…</battle_intro>.
+    intros: dict[str, str] = {}
+    for m in re.finditer(
+        r'<battle_intro\s+type="([^"]+)"\s*>(.*?)</battle_intro>', text, re.S | re.I
+    ):
+        intros[m.group(1).strip()] = m.group(2).strip()
+    out["battle_intros"] = intros
+    return out
 
 
 def generate_tournament_update(signals, *, recent_posts=None, memory_context=None):
