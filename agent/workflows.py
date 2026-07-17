@@ -656,7 +656,11 @@ def repair_awareness_plan(situation: dict, plan: dict, violations: list[str]):
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["awareness_repair"],
         strict_json=True,
         return_errors=True,
-        max_tokens=4096,
+        # The repair must echo the FULL plan back as JSON (every post, verbatim
+        # except the reworded copy). 4096 truncated a 2-post plan mid-response,
+        # dropping a post → deliver.py rejected it as repair.changed_post_count
+        # and failed the tick (#177, 2026-07-16). 8192 fits a multi-post plan.
+        max_tokens=8192,
     )
 
 
