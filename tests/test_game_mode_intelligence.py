@@ -1,12 +1,16 @@
 import json
-from datetime import datetime, timezone
 
 import db
 from storage.game_modes import classify_battle_mode
 
 
 def _battle_ts(time_part: str) -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d") + f"T{time_part}.000Z"
+    # Date the synthetic battle on the CHICAGO day (the rollups filter by
+    # chicago_date, not UTC). Using the UTC date failed nightly in the
+    # 00:00-05:00 UTC window, when UTC has ticked to tomorrow's date but Chicago
+    # (UTC-5/6) is still on today's — the battle then landed outside the
+    # `days=1` Chicago window. See elixir-game-mode-tests-flake-nightly.
+    return db.chicago_today().replace("-", "") + f"T{time_part}.000Z"
 
 
 def _battle(
