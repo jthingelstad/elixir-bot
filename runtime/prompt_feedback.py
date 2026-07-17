@@ -160,6 +160,11 @@ async def handle_raw_reaction_add(payload) -> None:
                 )
                 queue_leader_action_feedback_refresh(action.get("action_type"))
                 await refresh_leader_action_card(app.bot, action)
+                if action.get("action_type") == "member_outreach":
+                    try:
+                        await app._member_outreach_decision(action, action_status)
+                    except Exception:
+                        log.exception("member outreach decision handling failed")
             return
     feedback_value = feedback_value_for_emoji(getattr(payload, "emoji", None))
     if not feedback_value:

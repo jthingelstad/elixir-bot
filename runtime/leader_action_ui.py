@@ -64,6 +64,16 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         "Skip",
         allow_copy_edit=True,
     ),
+    "member_outreach": LeaderActionTypeSpec(
+        "member_outreach",
+        "Profile Outreach",
+        "📧",
+        0x9B59B6,
+        "Send DM",
+        "Skip",
+        allow_copy_edit=True,
+        copy_field_label="DM to member",
+    ),
     "promotion_recommendation": LeaderActionTypeSpec(
         "promotion_recommendation",
         "Promotion Recommendation",

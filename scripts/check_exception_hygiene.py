@@ -55,7 +55,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/activity_runner.py": 3,
     "runtime/admin.py": 4,
     "runtime/alerts.py": 1,
-    "runtime/app.py": 32,
+    "runtime/app.py": 37,  # +5: DM-outreach bridges (fetch/send/create fallbacks)
     "runtime/awareness/deliver.py": 10,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
@@ -79,7 +79,8 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/leader_action_feedback.py": 1,
     "runtime/leader_action_ui.py": 8,
     "runtime/onboarding.py": 3,
-    "runtime/prompt_feedback.py": 4,
+    "runtime/outreach.py": 2,  # raise_card + send_dm fail-soft in the flow loop
+    "runtime/prompt_feedback.py": 5,  # +1: member_outreach decision handling
     "runtime/startup.py": 3,
     "runtime/status.py": 3,
     "runtime/system_signals.py": 1,
