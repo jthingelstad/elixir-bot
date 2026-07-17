@@ -1,10 +1,11 @@
 """Deliver the brain's post plan to Discord.
 
 ``deliver_posts`` takes ``plan["posts"]`` and sends each one to its channel,
-records it for the next tick's ``channel_memory`` (dedup), and — for posts the
-brain flags as clan-chat-worthy — escalates an in-game relay HITL card. The
-awareness loop always renders its plan to the #thinking diagnostic as well; that
-is the observability record, separate from this member-facing delivery.
+records it for the next tick's ``channel_memory`` (dedup), and — for a post the
+brain also voiced for the in-game surface (a non-empty ``clan_chat``) — raises an
+in-game clan-chat card a leader can paste. The awareness loop always renders its
+plan to the #thinking diagnostic as well; that is the observability record,
+separate from this member-facing delivery.
 
 Design contract (locked with Jamie): **fail-hard, no fallback.** Any send
 failure or an uncovered hard-post floor fails the whole tick; the loop records
@@ -18,7 +19,7 @@ unit-testable:
 
 - ``post_fn(channel_id: int, copy: str) -> int | None`` — send, return message id
 - ``record_fn(*, lane, content, covers, message_id, loop_number) -> None`` — dedup memory
-- ``relay_fn(post: dict, channel_name: str) -> None`` — optional clan-chat escalation
+- ``relay_fn(post: dict, channel_name: str) -> None`` — optional in-game clan-chat voicing
 """
 
 from __future__ import annotations
@@ -34,13 +35,6 @@ log = logging.getLogger("elixir")
 # The only two channels the brain posts to. Anything else in a plan is a bug in
 # the prompt/output and fails the tick rather than leaking to a wrong channel.
 POSTABLE_CHANNELS = ("announcements", "elixir")
-
-# A new member is ALWAYS welcomed in-game, not just on Discord (Jamie, 2026-07-12):
-# whichever post covers the join signal force-raises a clan-chat welcome relay card
-# even if the brain didn't set relay_to_clan_chat. The prompt also mandates the
-# brain author the `clan_chat` welcome (with account detail) so the copy stays
-# grounded; this backstop guarantees the card exists regardless.
-JOIN_EVENT_TYPES = frozenset({"member_joined"})
 
 
 def _post_content(post: dict) -> str:
@@ -249,16 +243,6 @@ def deliver_posts(
     delivered = 0
     replayed = 0
 
-    # Signal keys of any member-join hard-post this tick. A post covering one of
-    # these always relays an in-game welcome (see JOIN_EVENT_TYPES).
-    join_signal_keys = {
-        s.get("signal_key")
-        for s in (read.get("hard_post_signals") or [])
-        if isinstance(s, dict)
-        and s.get("event_type") in JOIN_EVENT_TYPES
-        and s.get("signal_key")
-    }
-
     for item in work:
         if item["status"] == "fulfilled":
             continue
@@ -354,22 +338,18 @@ def deliver_posts(
                 }
         delivered += 1
 
-        # Clan-chat escalation rides a delivered post and never fails it — the
-        # Discord post already landed; a relay hiccup is logged and dropped.
-        # A new-member join ALWAYS relays a welcome, even if the brain didn't flag
-        # it — the clan welcomes every newcomer in-game.
-        should_relay = bool(post.get("relay_to_clan_chat"))
-        if not should_relay and join_signal_keys.intersection(covers):
-            should_relay = True
-            log.info(
-                "awareness deliver: forcing in-game welcome relay for join %s",
-                sorted(join_signal_keys.intersection(covers)),
-            )
-        if relay_fn is not None and should_relay:
+        # The in-game clan-chat voicing rides a delivered Discord post and never
+        # fails it — the Discord post already landed; a voicing hiccup is logged
+        # and dropped. Presence of `clan_chat` IS the routing decision: the brain
+        # either voiced this moment for the in-game surface or it didn't. (A join
+        # always carries one — the copy policy fails the tick otherwise, so it
+        # re-surfaces rather than going out un-welcomed on the clan's only
+        # everyone-reaches-it surface.)
+        if relay_fn is not None and post.get("clan_chat"):
             try:
                 relay_fn(post, cfg.get("channel_name") or channel)
             except Exception:
-                log.exception("awareness deliver: clan-chat relay failed (non-fatal)")
+                log.exception("awareness deliver: clan-chat voicing failed (non-fatal)")
 
     result = {
         "delivered": delivered,

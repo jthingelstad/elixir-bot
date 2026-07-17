@@ -224,10 +224,6 @@ from runtime.alerts import (  # noqa: E402,F401
     _maybe_alert_llm_failure,
     schedule_llm_failure_alert,
 )
-from runtime.clan_chat_copy import (  # noqa: E402,F401
-    generate_clan_chat_copy,
-    sign_clan_chat_text,
-)
 from runtime.discord_posting import (  # noqa: E402,F401
     _chunk_discord_text,
     _entry_posts,
@@ -974,14 +970,16 @@ async def _awareness_loop():
 
 
 async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
-    """Escalate a brain post the brain flagged (``relay_to_clan_chat``) into an
-    in-game relay HITL card in #actions. The Discord post has ALREADY
-    landed; this only offers a leader a copy/paste clan-chat version. Guarded by
-    the leader-action post policy (backlog cap + same-objective cooldown) so the
-    brain can't flood the board — but NOT the earned-frequency decline throttle,
-    which is an old-engine artifact that shouldn't gate curated brain relays
-    (throttle_on_decline=False). Never raises into delivery — returns
-    False on any guard/failure; the delivered post stands regardless."""
+    """Deliver a post's in-game clan-chat voicing (``clan_chat``) — the sibling
+    copy the brain authored for the in-game surface in the same grounded pass — as
+    a card in #actions a leader can paste (clan chat has no post API, so a human is
+    the send button). The Discord post has ALREADY landed; this delivers the moment
+    to the clan's only everyone-reaches-it surface. Guarded by the leader-action
+    post policy (backlog cap + same-objective cooldown) so the brain can't flood the
+    board — but NOT the earned-frequency decline throttle, an old-engine artifact
+    that shouldn't gate curated brain voicings (throttle_on_decline=False). Never
+    raises into delivery — returns False on any guard/failure; the Discord post
+    stands regardless."""
     content = post.get("content")
     if isinstance(content, list):
         content = "\n\n".join(str(c) for c in content if c is not None)
@@ -1014,61 +1012,28 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
 
     from runtime.clan_chat_copy import signed_valid_messages
 
-    fallback = sign_clan_chat_text(content, limit=CLASH_COPY_MAX_LENGTH)
-    copy_source = None
-
-    # PRIMARY: the brain authored the in-game copy in the SAME grounded pass that
-    # wrote the Discord post — drawn from the full read, NOT a redraft of the post
-    # — so there's no second LLM hop to lose depth or introduce drift. Accept it
-    # only if it clears the deterministic guardrails; otherwise fall through.
+    # The brain authors the in-game voicing in the SAME grounded pass that wrote
+    # the Discord post — a sibling of the post, drawn from the full read, NOT a
+    # redraft of it. Accept it only if it clears the deterministic guardrails.
+    # There is NO second-LLM redraft: if the voicing is absent or fails the
+    # guardrails, this moment simply isn't voiced in-game. (A join can't reach
+    # here without a valid voicing — the copy policy fails the tick otherwise.)
     copies = signed_valid_messages(
         post.get("clan_chat"), max_chars=CLASH_COPY_MAX_LENGTH
     )
-    if copies is not None:
-        copy_source = "brain"
-    elif post.get("clan_chat"):
-        log.info("awareness relay: brain clan_chat missed guardrails; using fallback")
-
-    # FALLBACK ONLY: legacy posts with no clan_chat, or a guardrail miss. Redraft
-    # the Discord post via the LLM (the old telephone path, now just the safety net).
-    if copies is None:
-        context = (
-            "Awareness brain relay: redraft this Discord post as 1-2 short plain-text "
-            "Clash Royale in-game clan chat messages a leader can paste in sequence. "
-            "In-game chat is tight, so lead with the headline in message 1; add a "
-            "SECOND message ONLY when the story genuinely needs the backup detail — "
-            "most relays are a single message. Same facts, same warmth, shorter and "
-            "plainer — no markdown, no emoji codes, no links. Introduce nothing new.\n"
-            f"Reason it's worth sharing: {post.get('relay_reason') or ''}\n"
-            f"Discord post (source): {content}"
-        )
-        try:
-            generated = await generate_clan_chat_copy(
-                intent="awareness_relay",
-                context=context,
-                max_messages=2,
-                max_chars=CLASH_COPY_MAX_LENGTH,
-                forbidden_terms=("http://", "https://", "www.", "Discord"),
-                fallback_messages=[content],
-                metadata={"source": "awareness_relay", "channel": channel_name},
+    if not copies:
+        if post.get("clan_chat"):
+            log.info(
+                "awareness clan-chat: voicing missed guardrails; not voicing in-game"
             )
-            copies = (
-                list(generated.messages)
-                if generated and generated.messages
-                else [fallback]
-            )
-            copy_source = "llm_fallback"
-        except Exception:
-            log.warning(
-                "awareness relay clan-chat copy generation failed", exc_info=True
-            )
-            copies = [fallback]
-            copy_source = "signed_content"
-    # Cap the sequence at 2 so a relay never becomes a wall of pastes; persist as
+        return False
+    # Cap the sequence at 2 so a voicing never becomes a wall of pastes; persist as
     # newline-joined text so it round-trips through _split_copy_messages on edit.
-    copies = [c.strip() for c in copies if c and c.strip()][:2] or [fallback]
+    copies = [c.strip() for c in copies if c and c.strip()][:2]
+    if not copies:
+        return False
     copy_text = "\n".join(copies)
-    log.info("awareness relay copy source=%s (%d msg)", copy_source, len(copies))
+    log.info("awareness clan-chat voicing (%d msg)", len(copies))
 
     baseline = await asyncio.to_thread(
         db.build_leader_action_baseline,

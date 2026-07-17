@@ -385,13 +385,17 @@ def test_expired_sending_lease_returns_to_pending_for_at_least_once_retry(engine
     assert tuple(row) == (1, "delivery lease expired; retrying at least once")
 
 
-def test_relay_failure_does_not_fail_the_post():
+def test_clan_chat_voicing_failure_does_not_fail_the_post():
     def bad_relay(post, channel_name):
-        raise RuntimeError("relay boom")
+        raise RuntimeError("voicing boom")
 
     plan = {
         "posts": [
-            {"channel": "elixir", "content": "big news", "relay_to_clan_chat": True}
+            {
+                "channel": "elixir",
+                "content": "big news",
+                "clan_chat": ["Big news for the whole clan today."],
+            }
         ]
     }
     with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
@@ -406,22 +410,43 @@ def test_relay_failure_does_not_fail_the_post():
     assert result["delivered"] == 1
 
 
-def test_member_join_always_relays_even_without_brain_flag():
-    """A new-member join ALWAYS raises an in-game welcome relay, even if the brain
-    forgot to set relay_to_clan_chat — the deterministic backstop."""
-    relayed = []
+def test_presence_of_clan_chat_is_the_routing_decision():
+    """The in-game voicing fires because `clan_chat` is present — no separate flag.
+    A sibling post with no `clan_chat` is not voiced in-game."""
+    voiced = []
+    plan = {
+        "posts": [
+            {
+                "channel": "elixir",
+                "content": "voiced one",
+                "clan_chat": ["Nice climb from Andy today."],
+            },
+            {"channel": "elixir", "content": "silent one"},
+        ]
+    }
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        deliver_mod.deliver_posts(
+            {},
+            plan,
+            post_fn=lambda *_: 5,
+            record_fn=lambda **_: None,
+            relay_fn=lambda p, c: voiced.append(p.get("content")),
+        )
+    assert voiced == ["voiced one"], (
+        "only the post with a clan_chat voicing goes in-game"
+    )
 
-    def relay_fn(post, channel_name):
-        relayed.append(post.get("covers_signal_keys"))
 
-    # Brain welcomed BigNorton in #announcements but did NOT flag the relay.
+def test_member_join_with_clan_chat_voices_in_game():
+    """A join that carries its in-game welcome is voiced to clan chat."""
+    voiced = []
     plan = {
         "posts": [
             {
                 "channel": "announcements",
                 "content": "Welcome BigNorton! 10,090 trophies.",
                 "covers_signal_keys": ["member_joined:#CV20JCY0V:t"],
-                "relay_to_clan_chat": False,
+                "clan_chat": ["Welcome BigNorton to POAP KINGS! 10,090 trophies."],
             }
         ]
     }
@@ -436,43 +461,43 @@ def test_member_join_always_relays_even_without_brain_flag():
             plan,
             post_fn=lambda *_: 5,
             record_fn=lambda **_: None,
-            relay_fn=relay_fn,
+            relay_fn=lambda p, c: voiced.append(p.get("covers_signal_keys")),
         )
 
     assert result["failed"] is False
-    assert relayed == [["member_joined:#CV20JCY0V:t"]], (
-        "join must force a welcome relay"
-    )
+    assert voiced == [["member_joined:#CV20JCY0V:t"]]
 
 
-def test_non_join_post_without_flag_does_not_relay():
-    """A non-join post that the brain didn't flag must NOT be force-relayed — the
-    backstop is join-specific, not a blanket relay-everything."""
-    relayed = []
+def test_member_join_without_clan_chat_fails_tick_as_missed_signal():
+    """A join with no in-game voicing is a MISSED SIGNAL: the copy policy fails the
+    tick (no template substituted) so the join re-surfaces next loop."""
+    voiced = []
     plan = {
         "posts": [
             {
-                "channel": "elixir",
-                "content": "routine milestone",
-                "covers_signal_keys": ["card_level_milestone:#X:1"],
-                "relay_to_clan_chat": False,
+                "channel": "announcements",
+                "content": "Welcome BigNorton! 10,090 trophies.",
+                "covers_signal_keys": ["member_joined:#CV20JCY0V:t"],
             }
         ]
     }
     read = {
         "hard_post_signals": [
-            {"signal_key": "member_joined:#OTHER:t", "event_type": "member_joined"}
+            {"signal_key": "member_joined:#CV20JCY0V:t", "event_type": "member_joined"}
         ]
     }
     with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
-        deliver_mod.deliver_posts(
+        result = deliver_mod.deliver_posts(
             read,
             plan,
             post_fn=lambda *_: 5,
             record_fn=lambda **_: None,
-            relay_fn=lambda p, c: relayed.append(p),
+            relay_fn=lambda p, c: voiced.append(p),
         )
-    assert relayed == [], "only the post covering the join relays, not unrelated posts"
+
+    assert result["failed"] is True
+    assert "join_missing_clan_chat" in result["reason"]
+    assert voiced == [], "nothing is voiced in-game when the tick fails pre-send"
 
 
 def test_copy_policy_blocks_gendered_member_pronoun_before_send():

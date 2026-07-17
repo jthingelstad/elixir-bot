@@ -154,6 +154,33 @@ def validate_plan(read: dict, plan: dict) -> list[str]:
             else:
                 code = "game_truth"
             violations.append(f"post[{index}].{code}")
+
+    # A member-join moment must be voiced on the in-game surface too. Clan chat is
+    # the ONLY channel that reaches every clan member (Discord reaches only the
+    # opted-in, often-inactive subset), so a newcomer's in-game welcome is not
+    # optional. If the post covering a join carries no valid `clan_chat` voicing,
+    # that is a missed signal — flagged here so the one-shot repair can add it,
+    # grounded from the read; if repair can't, the tick fails and the join
+    # re-surfaces next loop. No template is ever substituted.
+    join_keys = {
+        str(signal.get("signal_key"))
+        for signal in (read.get("hard_post_signals") or [])
+        if isinstance(signal, dict)
+        and signal.get("event_type") == "member_joined"
+        and signal.get("signal_key")
+    }
+    if join_keys:
+        from runtime.clan_chat_copy import signed_valid_messages
+
+        for index, post in enumerate(posts):
+            if not isinstance(post, dict):
+                continue
+            covers = {str(key) for key in (post.get("covers_signal_keys") or []) if key}
+            if (
+                covers & join_keys
+                and signed_valid_messages(post.get("clan_chat")) is None
+            ):
+                violations.append(f"post[{index}].join_missing_clan_chat")
     return violations
 
 

@@ -55,7 +55,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/activity_runner.py": 3,
     "runtime/admin.py": 4,
     "runtime/alerts.py": 1,
-    "runtime/app.py": 33,
+    "runtime/app.py": 32,
     "runtime/awareness/deliver.py": 10,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
