@@ -69,9 +69,7 @@ def _resolve_member_candidate(query: str):
     if best:
         return best, None
     choices = ", ".join(
-        item.get("member_ref_with_handle")
-        or item.get("current_name")
-        or item["player_tag"]
+        item.get("member_ref_with_handle") or item.get("current_name") or item["player_tag"]
         for item in matches[:3]
     )
     return None, f"I couldn't tell which member you meant. Top matches: {choices}"
@@ -86,8 +84,7 @@ def _extract_member_deck_target(text: str, message):
     mentioned_users = [
         user
         for user in getattr(message, "mentions", [])
-        if getattr(user, "id", None)
-        != getattr(getattr(_bot(), "user", None), "id", None)
+        if getattr(user, "id", None) != getattr(getattr(_bot(), "user", None), "id", None)
     ]
     if len(mentioned_users) == 1:
         linked = db.get_linked_member_for_discord_user(mentioned_users[0].id)
@@ -170,9 +167,7 @@ def _build_member_war_decks_report(member_query: str):
     if status == "insufficient_data" or not decks:
         reason = result.get("reason")
         gaps = result.get("gaps") or []
-        detail = reason or (
-            gaps[0] if gaps else "not enough recent war battles to reconstruct."
-        )
+        detail = reason or (gaps[0] if gaps else "not enough recent war battles to reconstruct.")
         return (
             f"I don't have enough recent war battle data to reconstruct {label}'s war decks yet. "
             f"{detail}"

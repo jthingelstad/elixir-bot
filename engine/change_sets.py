@@ -78,9 +78,7 @@ def derive_roster_change_set(
         if not previous or not current or previous == current:
             continue
         direction = (
-            "promoted"
-            if role_rank.get(current, -1) > role_rank.get(previous, -1)
-            else "demoted"
+            "promoted" if role_rank.get(current, -1) > role_rank.get(previous, -1) else "demoted"
         )
         roles.append(
             RoleTransition(

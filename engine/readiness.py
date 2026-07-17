@@ -64,9 +64,7 @@ def evaluate_source_freshness(conn, *, now, home_clan: str) -> dict:
         now=now_dt,
         max_age_minutes=CLAN_MAX_AGE_MINUTES,
     )
-    battle_stream_ready = (
-        conn.execute("SELECT 1 FROM battle_events LIMIT 1").fetchone() is not None
-    )
+    battle_stream_ready = conn.execute("SELECT 1 FROM battle_events LIMIT 1").fetchone() is not None
     rows = conn.execute(
         """SELECT cm.player_tag, ps.last_battlelog_poll, ps.last_profile_poll
            FROM clan_memberships cm
@@ -106,9 +104,7 @@ def evaluate_source_freshness(conn, *, now, home_clan: str) -> dict:
         }
     return {
         "as_of": as_of,
-        "ready": bool(clan["fresh"])
-        and battle_stream_ready
-        and ready_count == len(rows),
+        "ready": bool(clan["fresh"]) and battle_stream_ready and ready_count == len(rows),
         "clan": clan,
         "battle_stream": {"ready": battle_stream_ready},
         "members_total": len(rows),
@@ -244,8 +240,7 @@ def update_materialization(
             values.append(value)
     values.append(materialization_id)
     conn.execute(
-        f"UPDATE materialization_runs SET {', '.join(fields)} "
-        "WHERE materialization_id = ?",
+        f"UPDATE materialization_runs SET {', '.join(fields)} WHERE materialization_id = ?",
         values,
     )
 

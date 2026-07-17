@@ -35,7 +35,7 @@ def list_runtime_job_status(*, conn=None) -> dict[str, dict]:
     for row in rows:
         try:
             state = json.loads(row["status_json"] or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             state = {}
         state["updated_at"] = row["updated_at"]
         statuses[row["job_name"]] = state
@@ -59,7 +59,7 @@ def get_awareness_loop_by_number(loop_number, *, conn=None) -> dict | None:
     def _loads(value):
         try:
             return json.loads(value or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return {}
 
     read = _loads(row["read_json"])

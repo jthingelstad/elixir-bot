@@ -44,20 +44,12 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
     "badge_earned": _event("player", "milestone", "badge_name"),
     "arena_changed": _event("player", "milestone", "arena_id", "arena_name"),
     "card_unlocked": _event("player", "milestone", "card_id", "card_name", "rarity"),
-    "card_level_milestone": _event(
-        "player", "milestone", "card_id", "card_name", "milestone"
-    ),
-    "collection_level_milestone": _event(
-        "player", "milestone", "milestone", "collection_level"
-    ),
+    "card_level_milestone": _event("player", "milestone", "card_id", "card_name", "milestone"),
+    "collection_level_milestone": _event("player", "milestone", "milestone", "collection_level"),
     "pol_promotion": _event("player", "battle_mode", "league", "prev_league"),
     "ultimate_champion_reached": _event("player", "battle_mode", "league"),
-    "pol_global_rank_attained": _event(
-        "player", "battle_mode", "from_rank", "to_rank", "league"
-    ),
-    "pol_season_closed": _event(
-        "player", "battle_mode", "pol_season_id", time_semantics="exact"
-    ),
+    "pol_global_rank_attained": _event("player", "battle_mode", "from_rank", "to_rank", "league"),
+    "pol_season_closed": _event("player", "battle_mode", "pol_season_id", time_semantics="exact"),
     # clan stream
     "member_joined": _event("clan", "clan_event", "name", hard_post=True),
     "member_left": _event("clan", "clan_event", "name"),
@@ -72,9 +64,7 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
     ),
     "weekly_donation_leader": _event("clan", "clan_event", "week_ending", "leaders"),
     "clan_score_milestone": _event("clan", "clan_event", "milestone", "clan_score"),
-    "clan_league_changed": _event(
-        "clan", "clan_event", "league", "prev_league", "war_trophies"
-    ),
+    "clan_league_changed": _event("clan", "clan_event", "league", "prev_league", "war_trophies"),
     "clan_birthday": _event("clan", "clan_event", "years", hard_post=True),
     "member_birthday": _event("clan", "clan_event", "name"),
     "join_anniversary": _event("clan", "clan_event", "name", "months"),
@@ -90,12 +80,8 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
         hard_post=True,
     ),
     # war stream
-    "season_closed": _event(
-        "war", "war", "weeks", time_semantics="exact", hard_post=True
-    ),
-    "week_finished": _event(
-        "war", "war", "our_rank", "our_fame", "standings", hard_post=True
-    ),
+    "season_closed": _event("war", "war", "weeks", time_semantics="exact", hard_post=True),
+    "week_finished": _event("war", "war", "our_rank", "our_fame", "standings", hard_post=True),
     "season_started": _event("war", "war", "season_id"),
     "colosseum_detected": _event("war", "war", "section_index"),
     "war_day_opened": _event("war", "war", "period_type", "day_index", "war_day_human"),
@@ -103,9 +89,7 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
     # game stream
     "card_added": _event("game", "system", "name", time_semantics="exact"),
     "event_started": _event("game", "system", "title", time_semantics="exact"),
-    "event_badge_earned": _event(
-        "game", "system", "badge_name", time_semantics="exact"
-    ),
+    "event_badge_earned": _event("game", "system", "badge_name", time_semantics="exact"),
 }
 
 _STREAM_BY_TABLE = {
@@ -126,9 +110,7 @@ def validate_event(
     if contract is None:
         raise ValueError(f"undeclared event type: {event_type}")
     if contract.stream != stream:
-        raise ValueError(
-            f"event {event_type} belongs to {contract.stream}, not {stream}"
-        )
+        raise ValueError(f"event {event_type} belongs to {contract.stream}, not {stream}")
     missing = sorted(contract.required_payload - payload.keys())
     if missing:
         raise ValueError(f"event {event_type} missing payload fields: {missing}")
@@ -140,16 +122,12 @@ def validate_event(
 
 def hard_post_event_types() -> frozenset[str]:
     return frozenset(
-        event_type
-        for event_type, contract in EVENT_CONTRACTS.items()
-        if contract.hard_post
+        event_type for event_type, contract in EVENT_CONTRACTS.items() if contract.hard_post
     )
 
 
 def lane_by_event_type() -> dict[str, str]:
-    return {
-        event_type: contract.lane for event_type, contract in EVENT_CONTRACTS.items()
-    }
+    return {event_type: contract.lane for event_type, contract in EVENT_CONTRACTS.items()}
 
 
 __all__ = [

@@ -174,9 +174,7 @@ def test_run_awareness_loop_live_delivers_the_plan(monkeypatch):
     from runtime.awareness import loop as loop_mod
 
     plan = {
-        "posts": [
-            {"channel": "elixir", "content": "live post", "covers_signal_keys": []}
-        ],
+        "posts": [{"channel": "elixir", "content": "live post", "covers_signal_keys": []}],
         "skipped_reason": None,
     }
     delivered = {}
@@ -488,15 +486,9 @@ def test_diagnostic_render_full_content_chunked_not_truncated():
 
     # A realistic long post — well over one Discord message.
     body = "\n".join(f"- line {i}: something worth reading in full" for i in range(120))
-    plan = {
-        "posts": [
-            {"channel": "leader-lounge", "content": body, "covers_signal_keys": ["k1"]}
-        ]
-    }
+    plan = {"posts": [{"channel": "leader-lounge", "content": body, "covers_signal_keys": ["k1"]}]}
 
-    render = diag_mod.build_diagnostic_render(
-        {"time": None}, plan, tool_trace=[], loop_number=12
-    )
+    render = diag_mod.build_diagnostic_render({"time": None}, plan, tool_trace=[], loop_number=12)
     chunks = render["thread_chunks"]
     joined = "\n".join(chunks)
 

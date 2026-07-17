@@ -42,7 +42,7 @@ def _decode_event(row, stream: str) -> dict:
     item["stream_position"] = int(item.pop("event_id"))
     try:
         item["payload"] = json.loads(item.pop("payload_json") or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         item["payload"] = {}
     return item
 
@@ -73,9 +73,7 @@ def list_events_after_cursors(
             continue
         start = max(0, int(cursors.get(stream, 0) or 0))
         heads[stream] = int(
-            conn.execute(f"SELECT COALESCE(MAX(event_id), 0) FROM {table}").fetchone()[
-                0
-            ]
+            conn.execute(f"SELECT COALESCE(MAX(event_id), 0) FROM {table}").fetchone()[0]
         )
         backfilled_expr = "backfilled" if has_backfilled else "0"
         rows = conn.execute(
@@ -97,16 +95,13 @@ def list_events_after_cursors(
         )
     )
     batch = candidates[:cap]
-    checkpoints = {
-        stream: max(0, int(cursors.get(stream, 0) or 0)) for stream in wanted
-    }
+    checkpoints = {stream: max(0, int(cursors.get(stream, 0) or 0)) for stream in wanted}
     for event in batch:
         stream = event["stream"]
         checkpoints[stream] = max(checkpoints.get(stream, 0), event["stream_position"])
 
     remaining = {
-        stream: max(0, heads.get(stream, 0) - checkpoints.get(stream, 0))
-        for stream in wanted
+        stream: max(0, heads.get(stream, 0) - checkpoints.get(stream, 0)) for stream in wanted
     }
     return {
         "events": batch,
@@ -231,7 +226,7 @@ def list_recent_events(
             item["stream"] = stream
             try:
                 item["payload"] = json.loads(item.pop("payload_json") or "{}")
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 item["payload"] = {}
             events.append(item)
     events.sort(key=lambda e: str(e.get("observed_at") or ""), reverse=True)

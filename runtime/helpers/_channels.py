@@ -151,9 +151,7 @@ async def _reply_text(message, content):
     sent_messages = []
     for post in posts:
         safe_post = _discord_safe_content(post)
-        safe_post = _runtime_app()._resolve_custom_emoji(
-            safe_post, getattr(message, "guild", None)
-        )
+        safe_post = _runtime_app()._resolve_custom_emoji(safe_post, getattr(message, "guild", None))
         if len(safe_post) > DISCORD_MAX_MESSAGE_LEN:
             for chunk in _chunk_for_discord(safe_post):
                 sent = await _safe_reply(message, chunk)

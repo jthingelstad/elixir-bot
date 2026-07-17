@@ -343,9 +343,7 @@ def test_decide_triage_silent_is_gated_silence(monkeypatch):
             "system": [],
         }
     )
-    out = gate.decide(
-        read, triage_fn=lambda r: {"decision": "silent", "reason": "in cooldown"}
-    )
+    out = gate.decide(read, triage_fn=lambda r: {"decision": "silent", "reason": "in cooldown"})
     assert out["deliberate"] is False
     assert out["decider"] == "triage"
     assert "cooldown" in out["silence_reason"]
@@ -364,9 +362,7 @@ def test_decide_triage_post_escalates_to_brain(monkeypatch):
             "system": [],
         }
     )
-    out = gate.decide(
-        read, triage_fn=lambda r: {"decision": "post", "reason": "fresh unlock"}
-    )
+    out = gate.decide(read, triage_fn=lambda r: {"decision": "post", "reason": "fresh unlock"})
     assert out["deliberate"] is True
     assert "escalated" in out["reason"]
 

@@ -150,9 +150,7 @@ def list_member_metadata_rows(
             "cr_games_per_day_updated_at": row["cr_games_per_day_updated_at"],
             "cr_collection_level": row["cr_collection_level"],
             "cr_collection_level_badge_tier": row["cr_collection_level_badge_tier"],
-            "cr_collection_level_badge_max_tier": row[
-                "cr_collection_level_badge_max_tier"
-            ],
+            "cr_collection_level_badge_max_tier": row["cr_collection_level_badge_max_tier"],
             "cr_collection_level_updated_at": row["cr_collection_level_updated_at"],
             "cr_clan_war_wins": row["cr_clan_war_wins"],
             "cr_battle_wins": row["cr_battle_wins"],
@@ -171,9 +169,9 @@ def list_member_metadata_rows(
 
 
 def _utc_cutoff(days):
-    return (
-        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
-    ).strftime("%Y-%m-%dT%H:%M:%S")
+    return (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
 
 
 def _cr_cutoff(days):
@@ -182,15 +180,15 @@ def _cr_cutoff(days):
     # everywhere else — the 'T'-position char ('0' vs '-') makes every CR
     # timestamp compare greater than an ISO cutoff, so an ISO comparison never
     # deletes anything. This cutoff matches the stored format.
-    return (
-        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
-    ).strftime("%Y%m%dT%H%M%S.000Z")
+    return (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
+        "%Y%m%dT%H%M%S.000Z"
+    )
 
 
 def _date_cutoff(days):
-    return (
-        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
-    ).strftime("%Y-%m-%d")
+    return (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
+        "%Y-%m-%d"
+    )
 
 
 # Tables whose retention column stores raw Clash Royale timestamps, not ISO.

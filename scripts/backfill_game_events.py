@@ -12,8 +12,8 @@ AFTER the backfill are treated as new.
 It also seeds the live cursors to the current tips (recognize:game →
 game_events head, emit:game → sentinel head) so the stream starts clean.
 
-    ./venv/bin/python scripts/backfill_game_events.py --dry-run
-    ./venv/bin/python scripts/backfill_game_events.py --apply
+    uv run python scripts/backfill_game_events.py --dry-run
+    uv run python scripts/backfill_game_events.py --apply
 """
 
 from __future__ import annotations
@@ -34,8 +34,7 @@ from storage._formatting import preferred_display_name  # noqa: E402
 
 def _sentinel_rows(conn, sentinel_type):
     return conn.execute(
-        "SELECT * FROM api_sentinel_observations WHERE sentinel_type = ? "
-        "ORDER BY observation_id",
+        "SELECT * FROM api_sentinel_observations WHERE sentinel_type = ? ORDER BY observation_id",
         (sentinel_type,),
     ).fetchall()
 
@@ -43,7 +42,7 @@ def _sentinel_rows(conn, sentinel_type):
 def _sample(row):
     try:
         return json.loads(row["sample_json"] or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {}
 
 
@@ -115,12 +114,8 @@ def _plan(conn) -> list[dict]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     g = ap.add_mutually_exclusive_group()
-    g.add_argument(
-        "--dry-run", action="store_true", help="print the plan, write nothing (default)"
-    )
-    g.add_argument(
-        "--apply", action="store_true", help="persist backfilled rows + seed cursors"
-    )
+    g.add_argument("--dry-run", action="store_true", help="print the plan, write nothing (default)")
+    g.add_argument("--apply", action="store_true", help="persist backfilled rows + seed cursors")
     args = ap.parse_args()
 
     conn = db.get_connection()
@@ -137,9 +132,7 @@ def main() -> int:
     for row in plan:
         if row["event_type"] == "event_badge_earned":
             p = row["payload"]
-            print(
-                f"    badge {p['badge_label']!r} -> {p['member_name'] or '(unattributed)'}"
-            )
+            print(f"    badge {p['badge_label']!r} -> {p['member_name'] or '(unattributed)'}")
 
     if not args.apply:
         print("\n(dry-run — nothing written; re-run with --apply)")
@@ -159,9 +152,7 @@ def main() -> int:
             backfilled=True,
         )
     # Seed the live cursors to the current tips so nothing pre-existing announces.
-    game_head = conn.execute(
-        "SELECT COALESCE(MAX(event_id), 0) FROM game_events"
-    ).fetchone()[0]
+    game_head = conn.execute("SELECT COALESCE(MAX(event_id), 0) FROM game_events").fetchone()[0]
     sentinel_head = conn.execute(
         "SELECT COALESCE(MAX(observation_id), 0) FROM api_sentinel_observations"
     ).fetchone()[0]

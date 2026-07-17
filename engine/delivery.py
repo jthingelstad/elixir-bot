@@ -46,9 +46,7 @@ def raise_intent(
     thread_id (channels.md §2) is a delivery ADDRESS, not a lane — when set,
     the send targets that thread; the lane still owns permissions/voice."""
     anchor = parse_utc(now)
-    expires = (anchor + timedelta(hours=MAX_INTENT_AGE_HOURS)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    expires = (anchor + timedelta(hours=MAX_INTENT_AGE_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     cur = conn.execute(
         """INSERT INTO communication_intents
                (recognition_key, intent_type, lane, scope, payload_json,
@@ -75,7 +73,7 @@ def _accepts_thread(send_fn) -> bool:
 
     try:
         return len(inspect.signature(send_fn).parameters) >= 3
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
 
 
@@ -87,7 +85,7 @@ def _accepts_image(send_fn) -> bool:
 
     try:
         return len(inspect.signature(send_fn).parameters) >= 4
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
 
 
@@ -97,7 +95,7 @@ def _intent_image_url(intent) -> str | None:
     try:
         pj = intent["payload_json"] if "payload_json" in intent.keys() else None
         return (json.loads(pj) or {}).get("image_url") if pj else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -142,13 +140,9 @@ def consume(conn, send_fn, compose_fn, now: str, *, editor_gate=None) -> dict:
             try:
                 copy = compose_fn(intent)
             except Exception:
-                log.exception(
-                    "compose failed for intent %s; using fallback", intent["intent_id"]
-                )
+                log.exception("compose failed for intent %s; using fallback", intent["intent_id"])
             if not copy or _compose.looks_like_meta(copy):
-                copy = _compose.render_intent(
-                    intent
-                )  # deterministic fallback (§7 guard)
+                copy = _compose.render_intent(intent)  # deterministic fallback (§7 guard)
             elif editor_gate is not None:
                 try:
                     copy = editor_gate(conn, intent, copy, compose_fn, now)
@@ -158,9 +152,7 @@ def consume(conn, send_fn, compose_fn, now: str, *, editor_gate=None) -> dict:
                         intent["intent_id"],
                     )
             try:
-                thread_id = (
-                    intent["thread_id"] if "thread_id" in intent.keys() else None
-                )
+                thread_id = intent["thread_id"] if "thread_id" in intent.keys() else None
                 kwargs = {}
                 if thread_id is not None and _accepts_thread(send_fn):
                     kwargs["thread_id"] = thread_id

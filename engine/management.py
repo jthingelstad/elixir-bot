@@ -62,9 +62,7 @@ WAR_QUALIFY_RATE = 0.75  # legacy war_reliable signal — evidence rendering onl
 BATTLE_DAYS_MIN = 8
 KICK_WATCH_DAYS = 3  # CLAN.md inactivity_days — the "getting quiet" line
 KICK_AT_RISK_DAYS = 5  # idle days → at_risk (concerning); flat, not trophy-scaled
-KICK_CONFIRM_DAYS = (
-    3  # + this → recommended (card) ≈ day 8, before "10 looks unmanaged"
-)
+KICK_CONFIRM_DAYS = 3  # + this → recommended (card) ≈ day 8, before "10 looks unmanaged"
 ROSTER_CAP = 50  # CR clan cap; open_slots = ROSTER_CAP − active members
 # Contribution grace: a member who CURRENTLY clears the elder floor (recent war
 # participation OR Champion ranked — the SAME test that earns elder, so ranked
@@ -113,11 +111,9 @@ def _state(row) -> dict:
     raw = row["state_json"] or "{}"
     try:
         loaded = json.loads(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         tag = _row_tag(row)
-        log.warning(
-            "member_management.state_json unparseable, resetting to {} (tag=%s)", tag
-        )
+        log.warning("member_management.state_json unparseable, resetting to {} (tag=%s)", tag)
         return {}
     if not isinstance(loaded, dict):
         tag = _row_tag(row)
@@ -133,14 +129,14 @@ def _state(row) -> dict:
 def _row_tag(row) -> str | None:
     try:
         return row["player_tag"]
-    except (KeyError, IndexError):
+    except KeyError, IndexError:
         return None
 
 
 def _row_name(row) -> str | None:
     try:
         return row["player_name"] or row["current_name"]
-    except (KeyError, IndexError):
+    except KeyError, IndexError:
         return None
 
 
@@ -321,9 +317,7 @@ def _week_qualifies_war(conn, tag, week_anchor: str):
     """Attendance across the closed week's finalized battle days
     (war_attendance_days; runtime.md §3 finalization). Training-only weeks
     (no rows clan-wide) skip — management.md §2."""
-    week_start = (
-        (datetime.fromisoformat(week_anchor) - timedelta(days=7)).date().isoformat()
-    )
+    week_start = (datetime.fromisoformat(week_anchor) - timedelta(days=7)).date().isoformat()
     clan_days = conn.execute(
         "SELECT COUNT(*) FROM war_attendance_days WHERE observed_at >= ? AND observed_at < ?",
         (week_start, week_anchor),
@@ -388,12 +382,10 @@ def _ranked_standing(conn, tag) -> tuple[int, int]:
             last = (json.loads(bl["payload_json"]) or {}).get("last") or {}
             last_lg = last.get("league") or 0
             last_rt = last.get("trophies") or 0
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pass
     league = max(cur_lg, last_lg)
-    rating = max(
-        [rt for lg, rt in ((cur_lg, cur_rt), (last_lg, last_rt)) if lg == league] or [0]
-    )
+    rating = max([rt for lg, rt in ((cur_lg, cur_rt), (last_lg, last_rt)) if lg == league] or [0])
     return league, rating
 
 
@@ -494,12 +486,8 @@ def _elder_scores(conn, now: str, week_anchor: str) -> dict:
         # of the gap war leaves (headroom), muted by RANKED_WEIGHT because war is
         # direct clan contribution and ranked only reps the clan. War-maxed → ~1;
         # ranked-only → caps low; doing both wins; bounded 0-1 (never saturates).
-        r["competitive"] = r["war_pct"] + RANKED_WEIGHT * r["ranked_pct"] * (
-            1 - r["war_pct"]
-        )
-        r["score"] = (
-            SCORE_W_WAR * r["competitive"] + SCORE_W_DONATION * r["donation_pct"]
-        )
+        r["competitive"] = r["war_pct"] + RANKED_WEIGHT * r["ranked_pct"] * (1 - r["war_pct"])
+        r["score"] = SCORE_W_WAR * r["competitive"] + SCORE_W_DONATION * r["donation_pct"]
     return raw
 
 
@@ -510,9 +498,7 @@ def _elder_band(conn, scores: dict, now: str) -> dict:
     the competitive floor. Swaps are guarded by SWAP_MARGIN + sustained weeks so
     they never flap. Deterministic ranking: score desc, tenure desc, tag asc."""
     n = len(scores)
-    order = sorted(
-        scores.items(), key=lambda kv: (-kv[1]["score"], -kv[1]["tenure"], kv[0])
-    )
+    order = sorted(scores.items(), key=lambda kv: (-kv[1]["score"], -kv[1]["tenure"], kv[0]))
     rank = {tag: i + 1 for i, (tag, _) in enumerate(order)}
     floor = round(ELDER_BAND_FLOOR * n)
     ceil = round(ELDER_BAND_CEIL * n)
@@ -550,9 +536,7 @@ def _elder_band(conn, scores: dict, now: str) -> dict:
     # clan promotes nobody rather than elevating the undeserving to hit 15%.
     if current_elders < floor:
         should_be = {
-            t
-            for t in should_be
-            if scores[t]["role"] == "elder" or scores[t]["score"] >= median
+            t for t in should_be if scores[t]["role"] == "elder" or scores[t]["score"] >= median
         }
 
     want_promote = [t for t in should_be if scores[t]["role"] == "member"]
@@ -616,9 +600,7 @@ def elder_evidence(conn, tag: str, now: str | None = None) -> dict | None:
     me = scores.get(tag)
     if not me:
         return None
-    order = sorted(
-        scores.items(), key=lambda kv: (-kv[1]["score"], -kv[1]["tenure"], kv[0])
-    )
+    order = sorted(scores.items(), key=lambda kv: (-kv[1]["score"], -kv[1]["tenure"], kv[0]))
     rank = next((i + 1 for i, (t, _) in enumerate(order) if t == tag), None)
     league = me.get("ranked_league") or 0
     return {
@@ -627,9 +609,7 @@ def elder_evidence(conn, tag: str, now: str | None = None) -> dict | None:
         "roster_size": len(scores),
         "war_deck_rate": round(me.get("war_rate") or 0.0, 2),
         "ranked_league": league,
-        "ranked_league_name": ranked_league_name(league)
-        if league >= RANKED_FLOOR_LEAGUE
-        else None,
+        "ranked_league_name": ranked_league_name(league) if league >= RANKED_FLOOR_LEAGUE else None,
         "ranked_battles": me.get("ranked_battles") or 0,
         "ranked_pct": round(me.get("ranked_pct") or 0.0, 2),
         "donations_4wk_avg": round(me.get("donations") or 0),
@@ -726,11 +706,7 @@ def run_tick_evaluators(
             # the shared stream epoch (cold review 2026-07-04 #10: the epoch
             # marched every zero-battle member toward at_risk in lockstep,
             # false kick cards landing as a batch mid-July).
-            candidates = [
-                _parse_ts(v)
-                for v in (m["membership_joined_at"], m["last_seen_at"])
-                if v
-            ]
+            candidates = [_parse_ts(v) for v in (m["membership_joined_at"], m["last_seen_at"]) if v]
             candidates = [c for c in candidates if c is not None]
             if not candidates:
                 continue  # no personal anchor — no judgment
@@ -752,8 +728,7 @@ def run_tick_evaluators(
             # on the watchlist; only the card is delayed.
             confirm_days = KICK_CONFIRM_DAYS
             if slack > 0 and (
-                _passes_war_floor(conn, tag, now)
-                or _passes_ranked_floor(conn, tag, now)
+                _passes_war_floor(conn, tag, now) or _passes_ranked_floor(conn, tag, now)
             ):
                 confirm_days += round(KICK_CONTRIB_GRACE_MAX * slack)
             if days_idle >= KICK_AT_RISK_DAYS + confirm_days:
@@ -1028,8 +1003,7 @@ def _kick_evidence_anchor(conn, tag: str) -> str | None:
     if row and row[0]:
         return str(row[0])
     row = conn.execute(
-        "SELECT MAX(joined_at) FROM clan_memberships "
-        "WHERE player_tag = ? AND left_at IS NULL",
+        "SELECT MAX(joined_at) FROM clan_memberships WHERE player_tag = ? AND left_at IS NULL",
         (tag,),
     ).fetchone()
     if row and row[0]:
@@ -1228,9 +1202,7 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
         d_state = m["demote_state"] or "none"
         d_gate = tag in band["demotable"]
         d_reason = band.get("demote_reasons", {}).get(tag)
-        d_threshold = (
-            DEMOTE_WEEKS if d_reason == "abandoned" else PROMOTE_QUALIFYING_WEEKS
-        )
+        d_threshold = DEMOTE_WEEKS if d_reason == "abandoned" else PROMOTE_QUALIFYING_WEEKS
         d_weeks = st.get("demote_weeks", 0)
         if d_gate:
             d_weeks += 1
@@ -1306,9 +1278,7 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
                 continue
             if _premise_still_rejected(conn, r["player_tag"], action_type):
                 continue
-            blocked = _renomination_blocked_until(
-                conn, r["player_tag"], action_type, cooldown
-            )
+            blocked = _renomination_blocked_until(conn, r["player_tag"], action_type, cooldown)
             if blocked is not None and now_dt is not None and blocked > now_dt:
                 continue
             kept.append(r)

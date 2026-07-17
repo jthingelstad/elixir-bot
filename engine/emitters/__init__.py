@@ -46,9 +46,7 @@ def insert_stream_event(
         "observed_at": observed_at,
         "timing": timing,
         "window_start": window_start,
-        "evidence_json": json.dumps(evidence, separators=(",", ":"))
-        if evidence
-        else None,
+        "evidence_json": json.dumps(evidence, separators=(",", ":")) if evidence else None,
         "payload_json": json.dumps(payload, separators=(",", ":"), sort_keys=True),
         "scope": scope,
         "created_at": utcnow(),

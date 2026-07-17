@@ -156,9 +156,7 @@ def _should_merge_related_posts(posts: list[str]) -> bool:
 
 def _normalize_entry_posts(content) -> list[str]:
     if isinstance(content, list):
-        posts = [
-            item.strip() for item in content if isinstance(item, str) and item.strip()
-        ]
+        posts = [item.strip() for item in content if isinstance(item, str) and item.strip()]
         if _should_merge_related_posts(posts):
             return ["\n\n".join(posts)]
         return posts
@@ -188,9 +186,7 @@ async def _post_to_elixir(channel, entry: dict):
     return sent_messages
 
 
-async def compose_and_post(
-    channel, *, lane: str, context: str, leadership: bool = False
-) -> bool:
+async def compose_and_post(channel, *, lane: str, context: str, leadership: bool = False) -> bool:
     """Agent-compose an in-voice update from `context` and post it to `channel`.
 
     The v5-style replacement for the v4 awareness-delivery path (`_deliver_signal_

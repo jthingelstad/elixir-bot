@@ -21,7 +21,7 @@ def _hours_since_iso(value: Optional[str]) -> Optional[float]:
     if dt is None:
         try:
             dt = datetime.fromisoformat(str(value))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -168,17 +168,11 @@ def snapshot_clan_daily_metrics(
     if not isinstance(member_count, int):
         member_count = len(member_list)
     total_member_trophies = sum((member.get("trophies") or 0) for member in member_list)
-    avg_member_trophies = (
-        round(total_member_trophies / member_count, 2) if member_count else 0.0
-    )
+    avg_member_trophies = round(total_member_trophies / member_count, 2) if member_count else 0.0
     top_member_trophies = (
-        max((member.get("trophies") or 0) for member in member_list)
-        if member_list
-        else 0
+        max((member.get("trophies") or 0) for member in member_list) if member_list else 0
     )
-    weekly_donations_total = sum(
-        (member.get("donations") or 0) for member in member_list
-    )
+    weekly_donations_total = sum((member.get("donations") or 0) for member in member_list)
     joins_today = conn.execute(
         "SELECT COUNT(*) AS cnt FROM clan_memberships WHERE joined_at = ?",
         (metric_date,),
@@ -255,9 +249,9 @@ def get_member_history(
 ) -> list[dict]:
     """Role/trophy history from first-class events + daily metrics
     (schema.md §9: history stops diffing snapshot pairs)."""
-    cutoff = (
-        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
-    ).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
     tag = _canon_tag(tag)
     daily = conn.execute(
         "SELECT d.metric_date, d.trophies, d.best_trophies, d.donations_week AS donations, "
@@ -399,9 +393,7 @@ def resolve_member(
 
 
 @managed_connection
-def list_members(
-    status: str = "active", conn: Optional[sqlite3.Connection] = None
-) -> list[dict]:
+def list_members(status: str = "active", conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     predicate = _ACTIVE if status == "active" else "1=1"
     rows = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag, m.current_name, "
@@ -467,9 +459,7 @@ def get_clan_roster_summary(conn: Optional[sqlite3.Connection] = None) -> dict:
 
 
 @managed_connection
-def get_member_profile(
-    tag: str, conn: Optional[sqlite3.Connection] = None
-) -> Optional[dict]:
+def get_member_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag, COALESCE(m.display_name, m.current_name) AS member_name, "
         f"CASE WHEN {_ACTIVE} THEN 'active' ELSE 'observed' END AS status, "
@@ -552,22 +542,16 @@ def _career_fields_from_baseline(conn, player_tag: str) -> dict:
         return out
     try:
         payload = _json.loads(row["payload_json"])
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return out
     out["player_profile_at"] = row["observed_at"]
     out["career_wins"] = payload.get("wins")
     out["career_losses"] = payload.get("losses")
     out["career_battle_count"] = payload.get("battle_count", payload.get("battleCount"))
-    out["career_total_donations"] = payload.get(
-        "total_donations", payload.get("totalDonations")
-    )
+    out["career_total_donations"] = payload.get("total_donations", payload.get("totalDonations"))
     out["war_day_wins"] = payload.get("war_day_wins", payload.get("warDayWins"))
-    out["challenge_max_wins"] = payload.get(
-        "challenge_max_wins", payload.get("challengeMaxWins")
-    )
-    out["three_crown_wins"] = payload.get(
-        "three_crown_wins", payload.get("threeCrownWins")
-    )
+    out["challenge_max_wins"] = payload.get("challenge_max_wins", payload.get("challengeMaxWins"))
+    out["three_crown_wins"] = payload.get("three_crown_wins", payload.get("threeCrownWins"))
     out["current_favourite_card_name"] = payload.get(
         "favourite_card",
         payload.get("currentFavouriteCard", {}).get("name")
@@ -638,9 +622,7 @@ def get_member_membership_summary(
 
 
 @managed_connection
-def get_member_overview(
-    tag: str, conn: Optional[sqlite3.Connection] = None
-) -> Optional[dict]:
+def get_member_overview(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     from storage.war import get_member_war_status
 
     profile = get_member_profile(tag, conn=conn)
@@ -669,9 +651,7 @@ def list_longest_tenure_members(
             continue
         joined_day = joined_date[:10]
         try:
-            tenure_days = (
-                today - datetime.strptime(joined_day, "%Y-%m-%d").date()
-            ).days
+            tenure_days = (today - datetime.strptime(joined_day, "%Y-%m-%d").date()).days
         except ValueError:
             tenure_days = None
         item = dict(row)
@@ -688,9 +668,7 @@ def list_longest_tenure_members(
 
 
 @managed_connection
-def list_recent_joins(
-    days: int = 30, conn: Optional[sqlite3.Connection] = None
-) -> list[dict]:
+def list_recent_joins(days: int = 30, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     from storage.war import get_current_season_id
 
     cutoff = datetime.now(timezone.utc).date() - timedelta(days=days)
@@ -817,18 +795,16 @@ def get_members_on_hot_streak(
 
 
 @managed_connection
-def get_weekly_digest_summary(
-    days: int = 7, conn: Optional[sqlite3.Connection] = None
-) -> dict:
+def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] = None) -> dict:
     from storage.war import get_current_season_id
     from storage.war_analytics import get_trending_war_contributors, get_war_score_trend
     from storage.war_status import get_trophy_changes, get_war_season_summary
 
     roster = get_clan_roster_summary(conn=conn)
     season_id = get_current_season_id(conn=conn)
-    cutoff_ts = (
-        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
-    ).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff_ts = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
     cutoff_race_day = (
         datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
     ).strftime("%Y%m%d")
@@ -841,9 +817,7 @@ def get_weekly_digest_summary(
         "ORDER BY COALESCE(cs.donations_week, 0) DESC, cs.clan_rank ASC, m.current_name COLLATE NOCASE "
         "LIMIT 5"
     ).fetchall()
-    donors = [
-        _member_reference_fields(conn, row["tag"], dict(row)) for row in top_donors
-    ]
+    donors = [_member_reference_fields(conn, row["tag"], dict(row)) for row in top_donors]
 
     race_rows = conn.execute(
         "SELECT season_id, section_index, our_rank, trophy_change, our_fame, finish_time, created_date "
@@ -871,15 +845,11 @@ def get_weekly_digest_summary(
             "LIMIT 3",
             (row["season_id"], row["section_index"]),
         ).fetchall()
-        participants = [
-            _member_reference_fields(conn, p["tag"], dict(p)) for p in top_participants
-        ]
+        participants = [_member_reference_fields(conn, p["tag"], dict(p)) for p in top_participants]
         recent_war_races.append(
             {
                 "season_id": row["season_id"],
-                "week": (row["section_index"] + 1)
-                if row["section_index"] is not None
-                else None,
+                "week": (row["section_index"] + 1) if row["section_index"] is not None else None,
                 "section_index": row["section_index"],
                 "created_date": row["created_date"],
                 "our_rank": row["our_rank"],
@@ -893,12 +863,8 @@ def get_weekly_digest_summary(
         )
 
     trophy_changes = get_trophy_changes(since_hours=max(24, days * 24), conn=conn)
-    trophy_risers = [item for item in trophy_changes if (item.get("change") or 0) > 0][
-        :5
-    ]
-    trophy_drops = [item for item in trophy_changes if (item.get("change") or 0) < 0][
-        :3
-    ]
+    trophy_risers = [item for item in trophy_changes if (item.get("change") or 0) > 0][:5]
+    trophy_drops = [item for item in trophy_changes if (item.get("change") or 0) < 0][:3]
 
     # Progression from daily metrics (player_profile_snapshots retired).
     progression = []
@@ -918,9 +884,7 @@ def get_weekly_digest_summary(
         first_best = first["best_trophies"]
         latest_best = latest["best_trophies"]
         best_gain = (
-            latest_best - first_best
-            if first_best is not None and latest_best is not None
-            else None
+            latest_best - first_best if first_best is not None and latest_best is not None else None
         )
         item = {
             "tag": row["tag"],

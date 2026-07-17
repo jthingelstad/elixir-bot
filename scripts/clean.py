@@ -21,6 +21,7 @@ CACHE_DIR_NAMES = {
 }
 SKIP_ROOT_DIRS = {
     ".git",
+    ".venv",
     "venv",
 }
 OPTIONAL_FILES = {
@@ -43,9 +44,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Remove local caches and optional runtime artifacts."
     )
-    parser.add_argument(
-        "--db", action="store_true", help="Also remove local SQLite and PID files."
-    )
+    parser.add_argument("--db", action="store_true", help="Also remove local SQLite and PID files.")
     args = parser.parse_args()
 
     removed: list[str] = []

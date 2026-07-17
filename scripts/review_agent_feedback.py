@@ -50,12 +50,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Review recent Elixir agent failures and ask-elixir feedback."
     )
-    parser.add_argument(
-        "--limit", type=int, default=20, help="Number of review items to show."
-    )
-    parser.add_argument(
-        "--workflow", help="Filter to a workflow like clanops or interactive."
-    )
+    parser.add_argument("--limit", type=int, default=20, help="Number of review items to show.")
+    parser.add_argument("--workflow", help="Filter to a workflow like clanops or interactive.")
     parser.add_argument(
         "--json",
         action="store_true",

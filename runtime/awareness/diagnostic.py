@@ -23,9 +23,7 @@ log = logging.getLogger("elixir")
 # lands on the LLM view filtered to this tick's workflow — every awareness API
 # round (the loop's rounds at the top) is drillable there for the full
 # prompt/response. Overridable for a different tailnet host / port.
-OBSERVATORY_URL = os.getenv(
-    "ELIXIR_OBSERVATORY_URL", "https://otto.tail09aaf9.ts.net:8444"
-)
+OBSERVATORY_URL = os.getenv("ELIXIR_OBSERVATORY_URL", "https://otto.tail09aaf9.ts.net:8444")
 
 _HEADER = "AWARENESS (live)"
 _MAX_LEN = 1900
@@ -40,8 +38,7 @@ def _summarize_read(read: dict) -> str:
     read = read or {}
     lanes = read.get("signals_by_lane") or {}
     lane_counts = (
-        ", ".join(f"{lane} {len(sigs)}" for lane, sigs in lanes.items() if sigs)
-        or "no signals"
+        ", ".join(f"{lane} {len(sigs)}" for lane, sigs in lanes.items() if sigs) or "no signals"
     )
 
     time_block = read.get("time") or {}

@@ -53,7 +53,7 @@ install_bot() {
     <string>$LABEL</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$PROJECT_DIR/venv/bin/python</string>
+        <string>$PROJECT_DIR/.venv/bin/python</string>
         <string>$PROJECT_DIR/elixir.py</string>
     </array>
     <key>WorkingDirectory</key>
@@ -80,22 +80,19 @@ upgrade_bot() {
     git pull --ff-only origin main
 
     echo "==> Updating dependencies..."
-    source venv/bin/activate
-    pip install -q -r requirements.lock
+    uv sync --locked --no-dev
 
     start_bot
 }
 
 backup_db() {
     echo "==> Backing up the v5.1 operational database..."
-    source "$PROJECT_DIR/venv/bin/activate"
-    python "$PROJECT_DIR/scripts/backup_db.py"
+    "$PROJECT_DIR/.venv/bin/python" "$PROJECT_DIR/scripts/backup_db.py"
 }
 
 update_awards() {
     echo "==> Updating awards across every season in war_races..."
-    source "$PROJECT_DIR/venv/bin/activate"
-    python "$PROJECT_DIR/scripts/backfill_awards.py" --all
+    "$PROJECT_DIR/.venv/bin/python" "$PROJECT_DIR/scripts/backfill_awards.py" --all
 }
 
 run_activity() {
@@ -103,8 +100,7 @@ run_activity() {
         echo "Usage: $0 activity run <activity-key>"
         exit 1
     fi
-    source "$PROJECT_DIR/venv/bin/activate"
-    python -m runtime.activity_runner run "$3"
+    "$PROJECT_DIR/.venv/bin/python" -m runtime.activity_runner run "$3"
 }
 
 case "${1:-}" in

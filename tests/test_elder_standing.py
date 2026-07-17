@@ -14,9 +14,7 @@ STANDING = {
     "composition": {"elders": 3, "members": 5},
     "holding": [{"name": "Atternam", "why": "98% war decks, 8 ranked battles"}],
     "rising": [{"name": "Fullboat", "why": "100% war decks, 98 ranked battles"}],
-    "stepping_down": [
-        {"name": "OllieTurtle", "why": "3% war decks", "reason": "outranked"}
-    ],
+    "stepping_down": [{"name": "OllieTurtle", "why": "3% war decks", "reason": "outranked"}],
 }
 
 

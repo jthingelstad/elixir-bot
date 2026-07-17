@@ -79,9 +79,7 @@ def upsert_game_mode_contexts_from_events(
             continue
         event_tag = event.get("eventTag")
         title = event.get("title") or event.get("name")
-        game_mode = (
-            event.get("gameMode") if isinstance(event.get("gameMode"), dict) else {}
-        )
+        game_mode = event.get("gameMode") if isinstance(event.get("gameMode"), dict) else {}
         source_key = _context_source_key(event_tag or title, f"event:{index}")
         _upsert_context(
             conn,
@@ -148,7 +146,7 @@ def list_game_mode_contexts(
         try:
             raw_value = json.loads(context.pop("raw_json") or "{}")
             raw = raw_value if isinstance(raw_value, dict) else {}
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except TypeError, ValueError, json.JSONDecodeError:
             raw = {}
         if context.get("context_type") == "event":
             context["event_name"] = context.get("display_name")

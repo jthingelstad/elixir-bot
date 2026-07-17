@@ -22,9 +22,7 @@ def test_fresh_build_matches_committed_schema_fingerprint(tmp_path):
     build(str(path), None)
     conn = sqlite3.connect(path)
     try:
-        assert (
-            conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
-        )
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
         assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
     finally:
         conn.close()
@@ -88,14 +86,11 @@ def test_legacy_migration_backfills_awareness_then_removes_retired_queue(tmp_pat
             "SELECT loop_number, tool_trace_json FROM awareness_thoughts"
         ).fetchone()
         post = conn.execute(
-            "SELECT lane, content_preview, loop_number, discord_message_id "
-            "FROM awareness_posts"
+            "SELECT lane, content_preview, loop_number, discord_message_id FROM awareness_posts"
         ).fetchone()
         assert thought == (1, None)
         assert post == ("elixir", "A migrated awareness post", 9, "123")
-        assert (
-            conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
-        )
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
         assert (
             conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE name = 'communication_intents'"
@@ -116,9 +111,7 @@ def test_empty_get_connection_builds_complete_current_schema(tmp_path):
     path = tmp_path / "empty.db"
     conn = db.get_connection(path)
     try:
-        assert (
-            conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
-        )
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
         assert conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='discord_users'"
         ).fetchone()
@@ -146,15 +139,11 @@ def test_v8_migration_drops_editor_verdicts_forward_from_v7(tmp_path):
         )
         conn.execute("PRAGMA user_version = 7")
         conn.commit()
-        assert conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE name='editor_verdicts'"
-        ).fetchone()
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='editor_verdicts'").fetchone()
 
         apply_schema_migrations(conn)
 
-        assert (
-            conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
-        )
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
         assert not conn.execute(
             "SELECT 1 FROM sqlite_master WHERE name='editor_verdicts'"
         ).fetchone()
@@ -181,9 +170,7 @@ def test_v6_migration_adds_member_outreach_forward_from_v5(tmp_path):
 
         apply_schema_migrations(conn)
 
-        assert (
-            conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
-        )
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
         cols = {r[1] for r in conn.execute("PRAGMA table_info(member_outreach)")}
         assert {"outreach_id", "player_tag", "field", "status", "consent"} <= cols
         # Re-running is a no-op and stays on the committed fingerprint.
@@ -211,26 +198,16 @@ def test_v7_migration_adds_leader_note_feedback_columns_forward_from_v6(tmp_path
             "premise_rejected",
             "premise_fingerprint",
         ):
-            conn.execute(
-                f"ALTER TABLE leader_action_recommendations DROP COLUMN {column}"
-            )
+            conn.execute(f"ALTER TABLE leader_action_recommendations DROP COLUMN {column}")
         conn.execute("PRAGMA user_version = 6")
         conn.commit()
-        cols = {
-            r[1]
-            for r in conn.execute("PRAGMA table_info(leader_action_recommendations)")
-        }
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(leader_action_recommendations)")}
         assert "note_interpret_status" not in cols
 
         apply_schema_migrations(conn)
 
-        assert (
-            conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
-        )
-        cols = {
-            r[1]
-            for r in conn.execute("PRAGMA table_info(leader_action_recommendations)")
-        }
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(leader_action_recommendations)")}
         assert {
             "note_interpret_status",
             "note_interpret_json",
@@ -278,11 +255,7 @@ def test_system_status_reads_awareness_native_ledgers(tmp_path):
             "?, '{}', 1, 0, 'quiet'), "
             "('failed', 2, strftime('%Y-%m-%dT%H:%M:%SZ','now'), "
             "'{}', '{}', 0, 0, '⚠️ tick failed: delivery @ post: boom')",
-            (
-                json.dumps(
-                    {"signals_by_lane": {"elixir": [{"key": "a"}, {"key": "b"}]}}
-                ),
-            ),
+            (json.dumps({"signals_by_lane": {"elixir": [{"key": "a"}, {"key": "b"}]}}),),
         )
         conn.execute(
             "INSERT INTO awareness_posts "

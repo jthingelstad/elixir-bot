@@ -50,7 +50,7 @@ def distill_summary(text: str) -> str | None:
         if content and content.strip():
             return content.strip()
         return None
-    except (APIError, APIConnectionError):
+    except APIError, APIConnectionError:
         log.warning("distill_summary failed", exc_info=True)
         return None
 
@@ -84,9 +84,7 @@ If nothing is worth extracting, return an empty array: []
 Respond with ONLY the JSON array, no other text."""
 
 
-def extract_inference_facts(
-    content: str, context_label: str | None = None
-) -> list[dict]:
+def extract_inference_facts(content: str, context_label: str | None = None) -> list[dict]:
     """Extract durable facts from conversation or signal content."""
     content = (content or "").strip()
     if not content:
@@ -134,19 +132,17 @@ def extract_inference_facts(
                     "scope": fact.get("scope", "leadership")
                     if fact.get("scope") in ("leadership", "public")
                     else "leadership",
-                    "tags": [
-                        str(t).strip().lower() for t in (fact.get("tags") or []) if t
-                    ],
+                    "tags": [str(t).strip().lower() for t in (fact.get("tags") or []) if t],
                     "member_tag": str(fact["member_tag"]).strip()
                     if fact.get("member_tag")
                     else None,
                 }
             )
         return valid
-    except (json.JSONDecodeError, ValueError, TypeError):
+    except json.JSONDecodeError, ValueError, TypeError:
         log.warning("extract_inference_facts_parse_failed", exc_info=True)
         return []
-    except (APIError, APIConnectionError):
+    except APIError, APIConnectionError:
         log.warning("extract_inference_facts_api_failed", exc_info=True)
         return []
 
@@ -154,9 +150,7 @@ def extract_inference_facts(
 # ── Inference fact persistence ─────────────────────────────────────────────
 
 
-def save_inference_facts(
-    facts: list[dict], channel_id: str | int | None = None, conn=None
-) -> int:
+def save_inference_facts(facts: list[dict], channel_id: str | int | None = None, conn=None) -> int:
     """De-duplicate and persist extracted inference facts. Returns count saved."""
     from memory_store import attach_tags, create_memory, search_memories
 
@@ -208,7 +202,7 @@ def save_inference_facts(
                     conn=conn,
                 )
             saved += 1
-        except (sqlite3.Error, KeyError, TypeError):
+        except sqlite3.Error, KeyError, TypeError:
             log.warning(
                 "save_inference_facts: failed to save fact %r",
                 fact.get("title"),
@@ -473,7 +467,7 @@ def store_observation_facts(
                 )
                 if result:
                     saved += 1
-            except (sqlite3.Error, KeyError, TypeError):
+            except sqlite3.Error, KeyError, TypeError:
                 log.warning(
                     "store_observation_facts: failed for signal %s",
                     signal_type,

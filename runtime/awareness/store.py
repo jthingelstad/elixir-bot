@@ -103,8 +103,7 @@ def ensure_event_cursors(conn: sqlite3.Connection) -> tuple[dict[str, int], bool
     for stream, table in AWARENESS_EVENT_STREAMS.items():
         consumer_key = f"{AWARENESS_CURSOR_PREFIX}{stream}"
         row = conn.execute(
-            "SELECT cursor_int FROM stream_cursors "
-            "WHERE consumer_key = ? AND scope_key = ''",
+            "SELECT cursor_int FROM stream_cursors WHERE consumer_key = ? AND scope_key = ''",
             (consumer_key,),
         ).fetchone()
         if row is not None and row[0] is not None:
@@ -135,11 +134,7 @@ def ensure_event_cursors(conn: sqlite3.Connection) -> tuple[dict[str, int], bool
                 position,
                 _utcnow(),
                 json.dumps(
-                    {
-                        "initialized_from": "last_success"
-                        if last_success
-                        else "stream_start"
-                    }
+                    {"initialized_from": "last_success" if last_success else "stream_start"}
                 ),
             ),
         )
@@ -155,9 +150,7 @@ def event_cursor_positions(*, conn: sqlite3.Connection = None) -> dict[str, int]
 
 
 @managed_connection
-def advance_event_cursors(
-    positions: dict[str, int], *, conn: sqlite3.Connection = None
-) -> None:
+def advance_event_cursors(positions: dict[str, int], *, conn: sqlite3.Connection = None) -> None:
     """Advance only known awareness streams; positions never move backward."""
     now = _utcnow()
     for stream, position in (positions or {}).items():
@@ -223,9 +216,7 @@ def persist_thought(
         skipped_reason = reason
     thought_id = uuid.uuid4().hex
     loop_number = (
-        conn.execute(
-            "SELECT COALESCE(MAX(loop_number), 0) + 1 FROM awareness_thoughts"
-        ).fetchone()
+        conn.execute("SELECT COALESCE(MAX(loop_number), 0) + 1 FROM awareness_thoughts").fetchone()
         or [1]
     )[0]
     conn.execute(
@@ -321,9 +312,7 @@ def record_awareness_post(
 
 def delivery_intent_key(post: dict, content: str) -> str:
     """Stable post identity: covered moments first, content only as fallback."""
-    covers = sorted(
-        {str(value) for value in (post.get("covers_signal_keys") or []) if value}
-    )
+    covers = sorted({str(value) for value in (post.get("covers_signal_keys") or []) if value})
     identity = {
         "lane": str(post.get("channel") or ""),
         "covers": covers,
@@ -364,9 +353,7 @@ def prepare_delivery_intents(
         if intent_key in seen:
             continue
         seen.add(intent_key)
-        covers = sorted(
-            {str(value) for value in (post.get("covers_signal_keys") or []) if value}
-        )
+        covers = sorted({str(value) for value in (post.get("covers_signal_keys") or []) if value})
         conn.execute(
             """INSERT OR IGNORE INTO awareness_delivery_intents
                    (intent_key, lane, content, covers_json, post_json,
@@ -399,8 +386,7 @@ def prepare_delivery_intents(
     if params:
         current_clause = " OR intent_key IN ({})".format(",".join("?" for _ in params))
     fulfilled_clause = (
-        " OR (status = 'fulfilled' "
-        "AND datetime(fulfilled_at) >= datetime('now', '-6 hours'))"
+        " OR (status = 'fulfilled' AND datetime(fulfilled_at) >= datetime('now', '-6 hours'))"
         if required
         else ""
     )
@@ -417,11 +403,7 @@ def prepare_delivery_intents(
     prepared = []
     for row in rows:
         persisted_post = json.loads(row["post_json"])
-        covers = {
-            str(value)
-            for value in (persisted_post.get("covers_signal_keys") or [])
-            if value
-        }
+        covers = {str(value) for value in (persisted_post.get("covers_signal_keys") or []) if value}
         if (
             row["status"] == "fulfilled"
             and row["intent_key"] not in seen
@@ -454,9 +436,7 @@ def mark_delivery_sending(intent_key: str, *, conn: sqlite3.Connection = None) -
 
 
 @managed_connection
-def mark_delivery_pending(
-    intent_key: str, error: str, *, conn: sqlite3.Connection = None
-) -> None:
+def mark_delivery_pending(intent_key: str, error: str, *, conn: sqlite3.Connection = None) -> None:
     conn.execute(
         """UPDATE awareness_delivery_intents
            SET status = 'pending', updated_at = ?, last_error = ?

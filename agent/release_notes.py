@@ -51,9 +51,7 @@ _SUBJECT_TAG = re.compile(r"<subject>(.*?)</subject>", re.S | re.I)
 # `## v5.1 — Consolidated Collector` and the current, version-free
 # `## Blazing Balloon (2026-07-08)`. Match ONLY those two — never the
 # `## The story` / `## Features` section headers inside a release body.
-_RELEASE_HEADER = re.compile(
-    r"^## (?:(v[\d.]+) — (.+?)|(.+?) \((\d{4}-\d{2}-\d{2})\))\s*$", re.M
-)
+_RELEASE_HEADER = re.compile(r"^## (?:(v[\d.]+) — (.+?)|(.+?) \((\d{4}-\d{2}-\d{2})\))\s*$", re.M)
 
 
 def slugify_release(name: str) -> str:
@@ -71,7 +69,7 @@ def _git(args: list[str]) -> str:
         return subprocess.check_output(
             ["git", *args], cwd=REPO_ROOT, text=True, stderr=subprocess.DEVNULL
         )
-    except (subprocess.SubprocessError, OSError):
+    except subprocess.SubprocessError, OSError:
         return ""
 
 
@@ -107,13 +105,9 @@ def release_history() -> list[dict]:
     out: list[dict] = []
     for m in _RELEASE_HEADER.finditer(text):
         if m.group(1):  # legacy `## v5.1 — Name`
-            out.append(
-                {"version": m.group(1), "name": m.group(2).strip(), "date": None}
-            )
+            out.append({"version": m.group(1), "name": m.group(2).strip(), "date": None})
         else:  # current `## Name (YYYY-MM-DD)`
-            out.append(
-                {"version": None, "name": m.group(3).strip(), "date": m.group(4)}
-            )
+            out.append({"version": None, "name": m.group(3).strip(), "date": m.group(4)})
     return out
 
 
@@ -124,12 +118,8 @@ def recent_changes(*, days: int | None = None, since_ref: str | None = None) -> 
         since_ref = latest_release_tag()
     if since_ref:
         rev = [f"{since_ref}..HEAD"]
-        info = _git(
-            ["log", "-1", "--date=short", "--pretty=format:%h %ad %s", since_ref]
-        ).strip()
-        window = f"since {since_ref}" + (
-            f" ({info.split(' ', 1)[1][:10]})" if info else ""
-        )
+        info = _git(["log", "-1", "--date=short", "--pretty=format:%h %ad %s", since_ref]).strip()
+        window = f"since {since_ref}" + (f" ({info.split(' ', 1)[1][:10]})" if info else "")
     else:
         days = days or 7
         rev = [f"--since={days} days ago"]
@@ -150,12 +140,8 @@ def recent_changes(*, days: int | None = None, since_ref: str | None = None) -> 
             "--pretty=format:%n### %h %ad %s%n%b",
         ]
     ).strip()
-    doc_lines = _git(
-        ["log", *rev, "--name-only", "--pretty=format:", "--", "*.md"]
-    ).splitlines()
-    changed_docs = sorted(
-        {ln.strip() for ln in doc_lines if ln.strip().endswith(".md")}
-    )
+    doc_lines = _git(["log", *rev, "--name-only", "--pretty=format:", "--", "*.md"]).splitlines()
+    changed_docs = sorted({ln.strip() for ln in doc_lines if ln.strip().endswith(".md")})
     try:
         releases_head = "\n".join(open(RELEASES_MD).read().splitlines()[:60])
     except OSError:
@@ -182,9 +168,7 @@ def _card_names() -> list[str]:
     try:
         return [
             r["name"]
-            for r in conn.execute(
-                "SELECT name FROM card_catalog ORDER BY name"
-            ).fetchall()
+            for r in conn.execute("SELECT name FROM card_catalog ORDER BY name").fetchall()
         ]
     finally:
         conn.close()
@@ -357,9 +341,7 @@ def _extract_notes(text: str) -> str:
     return _extract_tag(text, "detailed") or _extract_tag(text, "notes") or text.strip()
 
 
-def release_notes_draft(
-    *, days: int | None = None, since_ref: str | None = None
-) -> dict | None:
+def release_notes_draft(*, days: int | None = None, since_ref: str | None = None) -> dict | None:
     """Build the three-tier announcement in ONE model call. Returns
     {subject, body, announcement, clanchat, window, release_name}, or None if
     there were no changes in the window. `body` is the detailed tier
@@ -381,8 +363,7 @@ def release_notes_draft(
     )
     out = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
     return {
-        "subject": _extract_subject(out)
-        or f"Under my hood: what changed ({material['window']})",
+        "subject": _extract_subject(out) or f"Under my hood: what changed ({material['window']})",
         "body": _extract_notes(out),
         "announcement": _extract_tag(out, "announcement"),
         "clanchat": _extract_tag(out, "clanchat"),
@@ -405,9 +386,7 @@ def _gh_bin() -> str | None:
     )
 
 
-def create_github_release(
-    *, name: str, date: str, tag: str, commit: str, body: str
-) -> str | None:
+def create_github_release(*, name: str, date: str, tag: str, commit: str, body: str) -> str | None:
     """Tag `commit` and publish the GitHub release — the permanent code
     reference for what shipped. `tag` is the ref-safe name-slug (e.g.
     'blazing-balloon'); the title carries the human label 'Name (date)'.
@@ -435,9 +414,7 @@ def create_github_release(
             )
         gh = _gh_bin()
         if not gh:
-            log.warning(
-                "gh CLI not found; tag %s pushed but no GitHub release created", tag
-            )
+            log.warning("gh CLI not found; tag %s pushed but no GitHub release created", tag)
             return None
         view = subprocess.run(
             [gh, "release", "view", tag, "--json", "url", "-q", ".url"],
@@ -512,12 +489,8 @@ def _main() -> None:
     from dotenv import load_dotenv
 
     load_dotenv()  # standalone preview: env from .env, like the runtime does
-    parser = argparse.ArgumentParser(
-        description="Preview Elixir's release notes draft."
-    )
-    parser.add_argument(
-        "--days", type=int, default=None, help="look back this many days"
-    )
+    parser = argparse.ArgumentParser(description="Preview Elixir's release notes draft.")
+    parser.add_argument("--days", type=int, default=None, help="look back this many days")
     parser.add_argument(
         "--since",
         metavar="REF",

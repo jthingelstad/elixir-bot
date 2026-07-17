@@ -37,7 +37,7 @@ def _confident(effect: dict, kind: str) -> bool:
         return True
     try:
         return float(effect.get("confidence") or 0.0) >= _MIN_CONFIDENCE
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
 
 
@@ -74,9 +74,7 @@ def _interpret_and_persist(action_id: int):
         result = None
 
     if not isinstance(result, dict) or result.get("_error"):
-        return db.record_note_interpretation(
-            action_id, status="failed", note_hash=note_hash
-        )
+        return db.record_note_interpretation(action_id, status="failed", note_hash=note_hash)
 
     effect = result.get("effect") if isinstance(result.get("effect"), dict) else {}
     kind = (effect.get("kind") or "none").strip()
@@ -106,9 +104,7 @@ async def _interpret_async(action_id: int, bot) -> None:
     try:
         updated = await asyncio.to_thread(_interpret_and_persist, action_id)
     except Exception:
-        log.warning(
-            "leader note interpretation failed action_id=%s", action_id, exc_info=True
-        )
+        log.warning("leader note interpretation failed action_id=%s", action_id, exc_info=True)
         return
     if updated is None or bot is None:
         return
@@ -117,9 +113,7 @@ async def _interpret_async(action_id: int, bot) -> None:
 
         await refresh_leader_action_card(bot, updated)
     except Exception:
-        log.warning(
-            "leader note card refresh failed action_id=%s", action_id, exc_info=True
-        )
+        log.warning("leader note card refresh failed action_id=%s", action_id, exc_info=True)
 
 
 def undo_note_interpretation(action_id: int):
@@ -128,11 +122,7 @@ def undo_note_interpretation(action_id: int):
     action = db.get_leader_action_by_id(action_id)
     if not action:
         return None
-    stored = (
-        action.get("note_interpret")
-        if isinstance(action.get("note_interpret"), dict)
-        else {}
-    )
+    stored = action.get("note_interpret") if isinstance(action.get("note_interpret"), dict) else {}
     try:
         from engine.leader_note_effects import revert_leader_note_effect
 
@@ -158,12 +148,8 @@ def revert_and_reset_note(action_id: int, note: str, discord_user_id):
                 else {},
             )
         except Exception:
-            log.warning(
-                "revert during fix failed action_id=%s", action_id, exc_info=True
-            )
-    return db.set_leader_action_note_text(
-        action_id, note=note, discord_user_id=discord_user_id
-    )
+            log.warning("revert during fix failed action_id=%s", action_id, exc_info=True)
+    return db.set_leader_action_note_text(action_id, note=note, discord_user_id=discord_user_id)
 
 
 def queue_leader_note_interpretation(action_id: int | None, *, bot=None):

@@ -40,9 +40,7 @@ def _card_mode_fields(card: dict) -> dict:
     how a card was deployed in a battle/deck — for that see `_played_as` in
     db/__init__.py.
     """
-    max_evolution_level = _card_mode_value(
-        card, "maxEvolutionLevel", "max_evolution_level"
-    )
+    max_evolution_level = _card_mode_value(card, "maxEvolutionLevel", "max_evolution_level")
     evolution_level = _card_mode_value(card, "evolutionLevel", "evolution_level")
 
     supports_evo = max_evolution_level in {1, 3}
@@ -69,9 +67,7 @@ def _card_mode_fields(card: dict) -> dict:
 
 
 @managed_connection
-def get_member_current_deck(
-    tag: str, conn: Optional[sqlite3.Connection] = None
-) -> Optional[dict]:
+def get_member_current_deck(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
         "SELECT cs.current_deck_json, NULL AS current_deck_support_cards_json, "
         "cs.observed_at AS fetched_at "
@@ -110,8 +106,7 @@ def _deck_catalog(conn) -> dict[int, dict]:
     return {
         int(row["card_id"]): dict(row)
         for row in conn.execute(
-            "SELECT card_id, name, elixir_cost, rarity, card_type, max_level "
-            "FROM card_catalog"
+            "SELECT card_id, name, elixir_cost, rarity, card_type, max_level FROM card_catalog"
         ).fetchall()
     }
 
@@ -167,7 +162,7 @@ def list_current_member_decks(
     for row in rows:
         try:
             cards = _enrich_deck_cards(json.loads(row["current_deck_json"]), catalog)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if len(cards) != 8:
             continue
@@ -200,9 +195,7 @@ def list_deck_battle_history(
     days = max(1, min(int(days or 30), 180))
     limit = max(1, min(int(limit or 1200), 5000))
     predicate = _DECK_HISTORY_SCOPES.get(scope, _DECK_HISTORY_SCOPES["competitive"])
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
-        "%Y%m%dT%H%M%S.000Z"
-    )
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
     where = ["b.deck_json IS NOT NULL", "b.battle_time >= ?", predicate]
     params: list = [cutoff]
     if tag:
@@ -230,7 +223,7 @@ def list_deck_battle_history(
     for row in rows:
         try:
             raw_cards = json.loads(row["deck_json"] or "[]")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         cards = _enrich_deck_cards(raw_cards, catalog)
         # Ordinary battles carry one exact 8-card deck. Duel rows concatenate
@@ -246,9 +239,7 @@ def list_deck_battle_history(
             item["cards"] = cards[segment_index * 8 : (segment_index + 1) * 8]
             item["deck_segment"] = segment_index + 1
             item["series_deck_count"] = segment_count
-            item["outcome_granularity"] = (
-                "duel_series" if segment_count > 1 else "battle"
-            )
+            item["outcome_granularity"] = "duel_series" if segment_count > 1 else "battle"
             result.append(item)
     return result
 
@@ -295,11 +286,7 @@ def _normalize_collection_card(raw_card: dict) -> dict:
             card["level"] = display_level
     max_level = card.get("maxLevel")
     api_max_level = card.get("api_max_level")
-    if (
-        "api_max_level" not in card
-        and isinstance(max_level, int)
-        and 0 < max_level <= 16
-    ):
+    if "api_max_level" not in card and isinstance(max_level, int) and 0 < max_level <= 16:
         card["api_max_level"] = max_level
         card["maxLevel"] = 16
     elif isinstance(api_max_level, int) and isinstance(max_level, int):
@@ -360,9 +347,7 @@ def _card_reference_for_collection(card: dict, *, card_type: str | None = None) 
     evolution_level = _card_mode_value(card, "evolutionLevel", "evolution_level")
     if evolution_level is not None:
         item["evolution_level"] = evolution_level
-    max_evolution_level = _card_mode_value(
-        card, "maxEvolutionLevel", "max_evolution_level"
-    )
+    max_evolution_level = _card_mode_value(card, "maxEvolutionLevel", "max_evolution_level")
     if max_evolution_level is not None:
         item["max_evolution_level"] = max_evolution_level
     if card.get("mode_label"):
@@ -393,12 +378,8 @@ def _collection_cards_by_rarity(cards: list[dict], support_cards: list[dict]) ->
     return grouped
 
 
-def _collection_summary_from_cards(
-    cards: list[dict], support_cards: list[dict]
-) -> dict:
-    combined = [
-        card for card in [*(cards or []), *(support_cards or [])] if card.get("name")
-    ]
+def _collection_summary_from_cards(cards: list[dict], support_cards: list[dict]) -> dict:
+    combined = [card for card in [*(cards or []), *(support_cards or [])] if card.get("name")]
     level_counts: dict[str, int] = {}
     rarity_counts: dict[str, int] = {}
     highest_level = None
@@ -454,9 +435,7 @@ def get_member_card_collection(
 
     if isinstance(min_level, int):
         cards = [card for card in cards if (card.get("level") or 0) >= min_level]
-        support_cards = [
-            card for card in support_cards if (card.get("level") or 0) >= min_level
-        ]
+        support_cards = [card for card in support_cards if (card.get("level") or 0) >= min_level]
 
     cards.sort(key=_card_sort_key)
     support_cards.sort(key=_card_sort_key)
@@ -618,9 +597,7 @@ def _king_tower_level(conn: sqlite3.Connection, member_tag: str) -> Optional[int
 
 
 @managed_connection
-def get_member_card_profile(
-    tag: str, conn: Optional[sqlite3.Connection] = None
-) -> Optional[dict]:
+def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     """Compact card-collection digest. Always small (~3KB), always answers
     broad questions ("how am I doing on cards", "what should I upgrade")
     without sending raw card lists.
@@ -634,9 +611,7 @@ def get_member_card_profile(
     if snapshot is None:
         return None
     king_tower = _king_tower_level(conn, tag)
-    all_cards = [
-        c for c in snapshot["cards"] + snapshot["support_cards"] if c.get("name")
-    ]
+    all_cards = [c for c in snapshot["cards"] + snapshot["support_cards"] if c.get("name")]
 
     # Aggregate counts.
     totals = {
@@ -657,9 +632,7 @@ def get_member_card_profile(
         bucket["owned"] += 1
         if _is_max(card):
             bucket["maxed"] += 1
-        elif _ready_required(card) is not None and _card_count(card) >= _ready_required(
-            card
-        ):
+        elif _ready_required(card) is not None and _card_count(card) >= _ready_required(card):
             bucket["ready"] += 1
 
     modes = {
@@ -688,11 +661,7 @@ def get_member_card_profile(
         key=lambda c: (-_card_count(c), c.get("name") or ""),
     )[:5]
     closest_top = sorted(
-        (
-            c
-            for c in enriched
-            if not _is_max(c) and isinstance(c.get("levels_to_max"), int)
-        ),
+        (c for c in enriched if not _is_max(c) and isinstance(c.get("levels_to_max"), int)),
         key=lambda c: (c["levels_to_max"], -(c.get("level") or 0), c.get("name") or ""),
     )[:5]
     if king_tower is not None:
@@ -716,9 +685,7 @@ def get_member_card_profile(
         "by_rarity": by_rarity,
         "modes": modes,
         "ready_to_upgrade_top": [
-            _slim_for_digest(
-                c, fields=["count", "cards_required_for_next_level", "king_tower_gap"]
-            )
+            _slim_for_digest(c, fields=["count", "cards_required_for_next_level", "king_tower_gap"])
             for c in ready_top
         ],
         "closest_to_max_top": [
@@ -735,9 +702,7 @@ def get_member_card_profile(
             for c in closest_top
         ],
         "biggest_king_tower_gaps_top": [
-            _slim_for_digest(
-                c, fields=["king_tower_gap", "levels_to_max", "ready_to_upgrade"]
-            )
+            _slim_for_digest(c, fields=["king_tower_gap", "levels_to_max", "ready_to_upgrade"])
             for c in gap_top
         ],
     }
@@ -770,9 +735,7 @@ def _filter_required_response() -> dict:
 
 def _matches_filter(card: dict, filt: dict, *, war_card_names: set[str]) -> bool:
     if filt.get("rarity"):
-        if (_normalize_rarity_filter(card.get("rarity")) or "unknown") != filt[
-            "rarity"
-        ]:
+        if (_normalize_rarity_filter(card.get("rarity")) or "unknown") != filt["rarity"]:
             return False
     if filt.get("name"):
         target = filt["name"].lower()
@@ -911,9 +874,7 @@ def lookup_member_cards(
         deck = get_member_current_deck(tag, conn=conn)
         if not deck:
             return {"error": "no_current_deck", "member_tag": _canon_tag(tag)}
-        deck_cards = [
-            _enrich_card_for_lookup(c, king_tower) for c in deck.get("cards", [])
-        ]
+        deck_cards = [_enrich_card_for_lookup(c, king_tower) for c in deck.get("cards", [])]
         return {
             "fetched_at": deck.get("fetched_at"),
             "filter_applied": {"deck": True},
@@ -927,12 +888,8 @@ def lookup_member_cards(
     if filt.get("mode") == "war":
         war_names, war_coverage = _war_card_names(conn, tag)
 
-    all_cards = [
-        c for c in snapshot["cards"] + snapshot["support_cards"] if c.get("name")
-    ]
-    matching = [
-        c for c in all_cards if _matches_filter(c, filt, war_card_names=war_names)
-    ]
+    all_cards = [c for c in snapshot["cards"] + snapshot["support_cards"] if c.get("name")]
+    matching = [c for c in all_cards if _matches_filter(c, filt, war_card_names=war_names)]
 
     # Sort: ready-to-upgrade first prioritizes by count surplus; otherwise by level desc.
     if filt.get("ready_to_upgrade"):
@@ -940,9 +897,7 @@ def lookup_member_cards(
     elif filt.get("near_ready"):
         matching.sort(key=lambda c: -(_card_count(c) / max(_ready_required(c) or 1, 1)))
     elif filt.get("near_max"):
-        matching.sort(
-            key=lambda c: (c.get("levels_to_max") or 99, -(c.get("level") or 0))
-        )
+        matching.sort(key=lambda c: (c.get("levels_to_max") or 99, -(c.get("level") or 0)))
     else:
         matching.sort(key=_card_sort_key)
 
@@ -987,7 +942,7 @@ def get_member_signature_cards(
     for r in rows:
         try:
             deck = json.loads(r["deck_json"] or "[]")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         for card in deck:
             name = card.get("name") if isinstance(card, dict) else None
@@ -1027,11 +982,7 @@ def get_members_with_most_level_16_cards(
     for row in rows:
         cards = row.pop("_cards")
         level_16_cards = sorted(
-            {
-                card.get("name")
-                for card in cards
-                if card.get("name") and _card_level(card) == 16
-            }
+            {card.get("name") for card in cards if card.get("name") and _card_level(card) == 16}
         )
         item = {
             "tag": row["tag"],
@@ -1070,11 +1021,10 @@ def get_clan_favourite_card_counts(
     ).fetchall():
         try:
             payload = _json.loads(r["payload_json"])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         name = (
-            payload.get("favourite_card")
-            or payload.get("currentFavouriteCard", {}).get("name")
+            payload.get("favourite_card") or payload.get("currentFavouriteCard", {}).get("name")
             if isinstance(payload.get("currentFavouriteCard"), dict)
             else payload.get("favourite_card")
         )
@@ -1098,9 +1048,7 @@ def get_clan_most_common_maxed_cards(
     rows = []
     for _tag in member_tags:
         _fetched, _cards = _load_collection_cards(conn, _tag)
-        rows.append(
-            {"cards_json": json.dumps(_cards), "support_cards_json": "[]", "_tag": _tag}
-        )
+        rows.append({"cards_json": json.dumps(_cards), "support_cards_json": "[]", "_tag": _tag})
     card_counts: dict[str, int] = {}
     for row in rows:
         for raw in [
@@ -1113,9 +1061,7 @@ def get_clan_most_common_maxed_cards(
                 name = raw["name"]
                 card_counts[name] = card_counts.get(name, 0) + 1
     ranked = sorted(card_counts.items(), key=lambda item: (-item[1], item[0].lower()))
-    return [
-        {"card_name": name, "member_count": count} for name, count in ranked[:limit]
-    ]
+    return [{"card_name": name, "member_count": count} for name, count in ranked[:limit]]
 
 
 @managed_connection
@@ -1123,9 +1069,9 @@ def get_clan_recently_played_cards(
     days: int = 14, limit: int = 20, conn: Optional[sqlite3.Connection] = None
 ) -> list[dict]:
     """Cards that appeared most often in clan members' recent battle decks."""
-    cutoff = (
-        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
-    ).strftime("%Y%m%dT%H%M%S.000Z")
+    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
+        "%Y%m%dT%H%M%S.000Z"
+    )
     rows = conn.execute(
         "SELECT bf.deck_json "
         "FROM battle_events bf "
@@ -1156,9 +1102,7 @@ def get_clan_rare_maxed_cards(
     rows = []
     for _tag in member_tags:
         _fetched, _cards = _load_collection_cards(conn, _tag)
-        rows.append(
-            {"cards_json": json.dumps(_cards), "support_cards_json": "[]", "_tag": _tag}
-        )
+        rows.append({"cards_json": json.dumps(_cards), "support_cards_json": "[]", "_tag": _tag})
     card_counts: dict[str, int] = {}
     for row in rows:
         for raw in [
@@ -1221,12 +1165,7 @@ def get_clan_overlooked_cards(
 
     # Step 3: high-level cards owned by many but played by nobody (or very few)
     overlooked = [
-        (name, count)
-        for name, count in owned.items()
-        if count >= min_owners and name not in played
+        (name, count) for name, count in owned.items() if count >= min_owners and name not in played
     ]
     overlooked.sort(key=lambda item: (-item[1], item[0].lower()))
-    return [
-        {"card_name": name, "owners_at_level": count}
-        for name, count in overlooked[:limit]
-    ]
+    return [{"card_name": name, "owners_at_level": count} for name, count in overlooked[:limit]]

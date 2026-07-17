@@ -32,8 +32,8 @@ What it gates:
     delivery queue is absent, and global DB invariants hold
 
 Usage:
-    ./venv/bin/python scripts/simulate.py                 # 7 days, 30-min ticks
-    ./venv/bin/python scripts/simulate.py --days 9 --reset 09:37 --keep
+    uv run python scripts/simulate.py                 # 7 days, 30-min ticks
+    uv run python scripts/simulate.py --days 9 --reset 09:37 --keep
 """
 
 from __future__ import annotations
@@ -298,9 +298,7 @@ def main() -> int:
 
     world = SimWorld(start, reset_hh, reset_mm)
     # freeze the Chicago day to sim time (calendar emitter, rollups)
-    tick_mod.chicago_today = lambda: (world.now - timedelta(hours=5)).strftime(
-        "%Y-%m-%d"
-    )
+    tick_mod.chicago_today = lambda: (world.now - timedelta(hours=5)).strftime("%Y-%m-%d")
 
     ticks = args.days * 24 * 60 // args.tick_minutes
     print(
@@ -333,9 +331,9 @@ def main() -> int:
         "WHERE event_type='war_day_opened' ORDER BY observed_at"
     ).fetchall()
     expect_days = min(args.days, 4)  # battle days observed in a 7-day week sim
-    g[f"war_day_opened x{expect_days}, once per battle day"] = len(
-        wd
-    ) == expect_days and len({r[0] for r in wd}) == len(wd)
+    g[f"war_day_opened x{expect_days}, once per battle day"] = len(wd) == expect_days and len(
+        {r[0] for r in wd}
+    ) == len(wd)
     labels = [json.loads(r[2]).get("war_day_human") for r in wd]
     g["war-day labels are 1-based humans"] = labels == [
         f"battle day {i + 1} of 4" for i in range(len(wd))
@@ -347,9 +345,7 @@ def main() -> int:
         boundary = obs.replace(hour=reset_hh, minute=reset_mm, second=0)
         lag = (obs - boundary).total_seconds() / 60
         boundary_ok &= 0 <= lag <= args.tick_minutes
-    g[f"war_day_opened within {args.tick_minutes}min of the {args.reset}Z reset"] = (
-        boundary_ok
-    )
+    g[f"war_day_opened within {args.tick_minutes}min of the {args.reset}Z reset"] = boundary_ok
 
     joins = conn.execute(
         "SELECT COUNT(*) FROM clan_events WHERE event_type='member_joined' AND subject_tag=?",
@@ -390,14 +386,13 @@ def main() -> int:
         training = [by_day.get(d, 0) for d in (1, 2)]
         war = [by_day.get(d, 0) for d in range(3, min(last_full, 6) + 1)]
         # training: hourly (~24/day with 30-min ticks); war days: every tick
-        g["race polls hourly in training, every tick in war"] = max(
-            training, default=0
-        ) < min(war, default=9999)
+        g["race polls hourly in training, every tick in war"] = max(training, default=0) < min(
+            war, default=9999
+        )
 
     if world.day_index() >= 7:
         wf = conn.execute(
-            "SELECT COUNT(*) FROM war_events WHERE event_type='week_finished' "
-            "AND dedup_key=?",
+            "SELECT COUNT(*) FROM war_events WHERE event_type='week_finished' AND dedup_key=?",
             (f"week_finished:{SEASON}:{SECTION}",),
         ).fetchone()[0]
         g["week_finished emitted at section rollover"] = wf == 1

@@ -7,8 +7,8 @@ temporarily). Opening the project `db` package also applies any pending
 migrations (e.g. the war_current_state collapse and the player_profile_snapshots
 cards_json cleanup), so the one-time historical reduction happens here too.
 
-    venv/bin/python scripts/db_compact.py            # purge + vacuum
-    venv/bin/python scripts/db_compact.py --purge-only
+    uv run python scripts/db_compact.py            # purge + vacuum
+    uv run python scripts/db_compact.py --purge-only
 """
 
 from __future__ import annotations
@@ -31,12 +31,8 @@ def _size_mb(path: str) -> float:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Purge expired rows and VACUUM the v5.1 DB."
-    )
-    parser.add_argument(
-        "--purge-only", action="store_true", help="Skip VACUUM (no file shrink)."
-    )
+    parser = argparse.ArgumentParser(description="Purge expired rows and VACUUM the v5.1 DB.")
+    parser.add_argument("--purge-only", action="store_true", help="Skip VACUUM (no file shrink).")
     args = parser.parse_args()
 
     path = db.DB_PATH
@@ -58,9 +54,7 @@ def main() -> None:
         print("Purged rows: none expired")
 
     if args.purge_only:
-        print(
-            "Skipping VACUUM (--purge-only). Freed pages will be reused, file size unchanged."
-        )
+        print("Skipping VACUUM (--purge-only). Freed pages will be reused, file size unchanged.")
         return
 
     # VACUUM must run outside any transaction, so use a dedicated autocommit
@@ -73,9 +67,7 @@ def main() -> None:
         vac.execute("VACUUM")
     except sqlite3.OperationalError as exc:
         print(f"VACUUM failed: {exc}")
-        print(
-            "Is the bot still running? Stop it and retry — VACUUM needs an exclusive lock."
-        )
+        print("Is the bot still running? Stop it and retry — VACUUM needs an exclusive lock.")
         sys.exit(1)
     finally:
         vac.close()

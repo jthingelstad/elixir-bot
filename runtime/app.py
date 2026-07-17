@@ -35,9 +35,7 @@ from runtime.system_signals import queue_startup_system_signals
 
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 # Quiet noisy third-party loggers so operational signals stay readable.
 # discord.py installs its own handler via utils.setup_logging() in client.run();
 # we pass log_handler=None below to suppress it, and clear any handlers it may
@@ -115,10 +113,7 @@ SLASH_COMMANDS_SYNCED = False
 def _has_leader_role(member) -> bool:
     if not LEADER_ROLE_ID:
         return True
-    return any(
-        getattr(role, "id", None) == LEADER_ROLE_ID
-        for role in getattr(member, "roles", [])
-    )
+    return any(getattr(role, "id", None) == LEADER_ROLE_ID for role in getattr(member, "roles", []))
 
 
 def _is_clanops_channel(channel) -> bool:
@@ -134,7 +129,7 @@ def _preview_text(value, limit=500):
     else:
         try:
             text = json.dumps(value, default=str, ensure_ascii=False)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             text = repr(value)
     return text[:limit]
 
@@ -142,7 +137,7 @@ def _preview_text(value, limit=500):
 def _json_trace_text(value):
     try:
         return json.dumps(value, default=str, ensure_ascii=False)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return json.dumps({"repr": repr(value)}, ensure_ascii=False)
 
 
@@ -424,9 +419,7 @@ def _engine_startup_cursors() -> int:
                 (consumer_key,),
             ).fetchone()
             if row is None:
-                engine_db.cursor_set(
-                    conn, consumer_key, engine_db.stream_head(conn, table)
-                )
+                engine_db.cursor_set(conn, consumer_key, engine_db.stream_head(conn, table))
                 initialized += 1
         conn.commit()
     finally:
@@ -480,9 +473,7 @@ async def _post_pending_leader_action_cards(limit: int = 4) -> int:
                 )
             posted += 1
         except Exception:
-            log.exception(
-                "engine leader-action card post failed for %s", action.get("action_id")
-            )
+            log.exception("engine leader-action card post failed for %s", action.get("action_id"))
             if not post_attempted:
                 try:  # sentinel write itself failed pre-post — safe to retry
                     await asyncio.to_thread(
@@ -631,9 +622,7 @@ async def _engine_tick():
         lanes = engine_compose.channels()
         rr = lanes.get("river-race") or {}
         if rr.get("channel_id"):
-            born = await _threads.ensure_war_week_thread(
-                bot, _engine_db.connect, rr["channel_id"]
-            )
+            born = await _threads.ensure_war_week_thread(bot, _engine_db.connect, rr["channel_id"])
             if born:
                 counters["war_week_thread_born"] = born
     except Exception:
@@ -645,9 +634,7 @@ async def _engine_tick():
         webapp_ticks.record_tick(dict(counters))
     except Exception:
         log.debug("webapp tick recording failed", exc_info=True)
-    runtime_status.mark_job_success(
-        "engine_tick", json.dumps(counters, default=str)[:900]
-    )
+    runtime_status.mark_job_success("engine_tick", json.dumps(counters, default=str)[:900])
     return counters
 
 
@@ -690,8 +677,7 @@ async def _weekly_leadership_review():
                             f"Weekly review: {tag} is {kind.replace('_', ' ')} "
                             f"per the management evaluators. Evidence: {json.dumps(row, default=str)[:600]}"
                         ),
-                        rationale=row.get("rationale")
-                        or "Weekly management review candidacy.",
+                        rationale=row.get("rationale") or "Weekly management review candidacy.",
                         target_player_tag=tag,
                         target_player_name=row.get("player_name"),
                         source_signal_key=f"engine:weekly-review:{monday.isoformat()}:{tag}:{action_type}",
@@ -763,11 +749,9 @@ async def _engine_health():
             previous_size = None
             if row:
                 try:
-                    last = json.loads(
-                        json.loads(row["status_json"]).get("last_summary") or "{}"
-                    )
+                    last = json.loads(json.loads(row["status_json"]).get("last_summary") or "{}")
                     previous_size = last.get("db_size_bytes")
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     pass
             return health.run_all(conn, previous_size)
         finally:
@@ -785,9 +769,7 @@ async def _engine_health():
             elixir_log.post_event,
             f"**Engine health: {len(problems)} issue(s)**\n{body}",
         )
-        log.warning(
-            "engine health: %d issue(s): %s", len(problems), "; ".join(problems)
-        )
+        log.warning("engine health: %d issue(s): %s", len(problems), "; ".join(problems))
     else:
         log.info("engine health: all checks clean (db %.1fMB)", size / 1e6)
     runtime_status.mark_job_success(
@@ -800,9 +782,7 @@ async def _engine_health():
 # The leader-only #thinking channel — Elixir's train of thought lands here as a
 # bot-native embed per loop, with the full read/tool-trace/decision in a thread.
 # Replaced the old #elixir-log webhook (2026-07-09).
-THINKING_CHANNEL_ID = int(
-    os.getenv("ELIXIR_THINKING_CHANNEL_ID", "1524983821852872896")
-)
+THINKING_CHANNEL_ID = int(os.getenv("ELIXIR_THINKING_CHANNEL_ID", "1524983821852872896"))
 
 
 # Live #thinking session for the in-flight tick. Awareness runs one-at-a-time
@@ -852,9 +832,7 @@ async def _awareness_event(event: dict) -> None:
         elif etype in ("tool", "truncation", "retry"):
             thread = _thinking_session.get("thread")
             if thread is not None:
-                await thread.send(
-                    diag_mod.format_live_event(event)[:1900], allowed_mentions=none
-                )
+                await thread.send(diag_mod.format_live_event(event)[:1900], allowed_mentions=none)
 
         elif etype == "end":
             render = event.get("render") or {}
@@ -878,9 +856,7 @@ async def _awareness_event(event: dict) -> None:
                 try:
                     await thread.edit(name=render.get("thread_name") or f"Loop #{n}")
                 except Exception:
-                    log.debug(
-                        "awareness: #thinking thread rename failed", exc_info=True
-                    )
+                    log.debug("awareness: #thinking thread rename failed", exc_info=True)
             if msg is not None:
                 embed = discord.Embed(
                     title=render.get("header") or f"🧠 Loop #{n}",
@@ -888,9 +864,7 @@ async def _awareness_event(event: dict) -> None:
                     url=obs_url or None,
                 )
                 for name, value in (render.get("fields") or {}).items():
-                    embed.add_field(
-                        name=name, value=(value or "—")[:1024], inline=False
-                    )
+                    embed.add_field(name=name, value=(value or "—")[:1024], inline=False)
                 if obs_url:
                     embed.add_field(
                         name="Full details",
@@ -924,17 +898,13 @@ async def _awareness_loop():
     def _progress_fn(event):
         # Runs in the worker thread; marshal each live event back to the loop.
         try:
-            asyncio.run_coroutine_threadsafe(_awareness_event(event), loop).result(
-                timeout=90
-            )
+            asyncio.run_coroutine_threadsafe(_awareness_event(event), loop).result(timeout=90)
         except Exception:
             log.exception("awareness: #thinking event bridge failed")
 
     def _post_fn(channel_id, copy):
         # Worker thread → bot loop, mirroring the engine send_fn.
-        fut = asyncio.run_coroutine_threadsafe(
-            _engine_send(int(channel_id), copy), loop
-        )
+        fut = asyncio.run_coroutine_threadsafe(_engine_send(int(channel_id), copy), loop)
         return fut.result(timeout=120)
 
     def _relay_fn(post, channel_name):
@@ -1018,14 +988,10 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
     # There is NO second-LLM redraft: if the voicing is absent or fails the
     # guardrails, this moment simply isn't voiced in-game. (A join can't reach
     # here without a valid voicing — the copy policy fails the tick otherwise.)
-    copies = signed_valid_messages(
-        post.get("clan_chat"), max_chars=CLASH_COPY_MAX_LENGTH
-    )
+    copies = signed_valid_messages(post.get("clan_chat"), max_chars=CLASH_COPY_MAX_LENGTH)
     if not copies:
         if post.get("clan_chat"):
-            log.info(
-                "awareness clan-chat: voicing missed guardrails; not voicing in-game"
-            )
+            log.info("awareness clan-chat: voicing missed guardrails; not voicing in-game")
         return False
     # Cap the sequence at 2 so a voicing never becomes a wall of pastes; persist as
     # newline-joined text so it round-trips through _split_copy_messages on edit.
@@ -1041,18 +1007,14 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
         target_player_tag=None,
     )
     seq_note = f" ({len(copies)} messages, paste in order)" if len(copies) > 1 else ""
-    prompt_text = (
-        f"Paste this clan-chat note (from #{channel_name}){seq_note}: {copy_text}"
-    )
+    prompt_text = f"Paste this clan-chat note (from #{channel_name}){seq_note}: {copy_text}"
     action = await asyncio.to_thread(
         db.create_leader_action_recommendation,
         action_type="in_game_relay",
         objective=objective,
         prompt_text=prompt_text,
         rationale=(
-            post.get("relay_reason")
-            or post.get("summary")
-            or "Brain-flagged for clan chat"
+            post.get("relay_reason") or post.get("summary") or "Brain-flagged for clan chat"
         ),
         target_channel_key="arena-relay",
         target_channel_id=channel_config["id"],
@@ -1068,9 +1030,7 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
     )
     if not action or action.get("source_message_id"):
         return False
-    card_messages = await post_leader_action_card(
-        relay_channel, action, copy_messages=copies
-    )
+    card_messages = await post_leader_action_card(relay_channel, action, copy_messages=copies)
     return bool(card_messages)
 
 
@@ -1092,7 +1052,7 @@ def _outreach_tenure(joined_date) -> str | None:
         return "a long-time member (here since before our records began)"
     try:
         jd = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     days = (datetime.now(timezone.utc) - jd).days
     if days < 21:
@@ -1117,14 +1077,12 @@ async def _send_member_dm(discord_user_id: str, content: str) -> tuple[bool, str
         return True, "dry_run"
     try:
         uid = int(discord_user_id)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False, "bad discord_user_id"
     try:
         user = bot.get_user(uid) or await bot.fetch_user(uid)
     except Exception as exc:
-        log.warning(
-            "member outreach: could not fetch user %s: %s", discord_user_id, exc
-        )
+        log.warning("member outreach: could not fetch user %s: %s", discord_user_id, exc)
         return False, f"fetch failed: {exc}"
     if user is None:
         return False, "user not found"
@@ -1185,9 +1143,7 @@ async def _raise_outreach_card(target: dict, copy: str):
         return None
     if not action or action.get("source_message_id"):
         return None
-    card_messages = await post_leader_action_card(
-        relay_channel, action, copy_messages=[copy]
-    )
+    card_messages = await post_leader_action_card(relay_channel, action, copy_messages=[copy])
     return action if card_messages else None
 
 
@@ -1224,10 +1180,7 @@ async def _member_outreach_propose():
             trophies = profile.get("trophies")
             if trophies:
                 arena = profile.get("arena_name")
-                lines.append(
-                    f"Current trophies: {trophies}"
-                    + (f" (in {arena})" if arena else "")
-                )
+                lines.append(f"Current trophies: {trophies}" + (f" (in {arena})" if arena else ""))
             fav = profile.get("current_favourite_card_name")
             if fav:
                 lines.append(f"Favorite card: {fav}")
@@ -1243,9 +1196,7 @@ async def _member_outreach_propose():
     except Exception:
         log.exception("member outreach propose failed")
         return
-    runtime_status.mark_job_success(
-        "member_outreach_propose", f"proposed {len(proposed)}"
-    )
+    runtime_status.mark_job_success("member_outreach_propose", f"proposed {len(proposed)}")
     return proposed
 
 
@@ -1257,9 +1208,7 @@ async def _member_outreach_decision(action: dict, status: str) -> None:
     loop = asyncio.get_running_loop()
 
     def _send_sync(discord_user_id, content):
-        fut = asyncio.run_coroutine_threadsafe(
-            _send_member_dm(discord_user_id, content), loop
-        )
+        fut = asyncio.run_coroutine_threadsafe(_send_member_dm(discord_user_id, content), loop)
         return fut.result(timeout=60)
 
     await asyncio.to_thread(outreach.on_decision, action, status, send_dm=_send_sync)
@@ -1272,9 +1221,7 @@ async def _handle_outreach_dm(message) -> None:
     isn't a general DM bot."""
     from runtime import email_verification, outreach
 
-    member = await asyncio.to_thread(
-        db.get_linked_member_for_discord_user, message.author.id
-    )
+    member = await asyncio.to_thread(db.get_linked_member_for_discord_user, message.author.id)
     if not member:
         return
     reply = await asyncio.to_thread(
@@ -1370,9 +1317,7 @@ async def _war_attendance_snapshot():
         runtime_status.mark_job_failure("war_attendance_snapshot", str(exc))
         log.exception("war attendance snapshot failed")
         return
-    runtime_status.mark_job_success(
-        "war_attendance_snapshot", json.dumps(result, default=str)
-    )
+    runtime_status.mark_job_success("war_attendance_snapshot", json.dumps(result, default=str))
     return result
 
 
@@ -1448,9 +1393,7 @@ async def on_ready():
     except Exception:
         log.exception("observatory webapp startup failed")
     if not scheduler.running:
-        cleared_stale_jobs = await asyncio.to_thread(
-            runtime_status.clear_stale_running_jobs
-        )
+        cleared_stale_jobs = await asyncio.to_thread(runtime_status.clear_stale_running_jobs)
         if cleared_stale_jobs:
             log.warning(
                 "Cleared stale runtime job running state after restart: %s",
@@ -1473,9 +1416,7 @@ async def on_ready():
         try:
             initialized = await asyncio.to_thread(_engine_startup_cursors)
             if initialized:
-                log.info(
-                    "engine startup: %s cursor(s) initialized at head", initialized
-                )
+                log.info("engine startup: %s cursor(s) initialized at head", initialized)
         except Exception:
             log.exception("engine startup cursor init failed")
         startup_posted = await _post_startup_message()
@@ -1552,18 +1493,13 @@ async def on_message_delete(message):
     Elixir's OWN posts in one of its posting lanes is the strongest
     anti-pattern signal — capture the copy before it's gone."""
     try:
-        if (
-            bot.user is None
-            or message.author is None
-            or message.author.id != bot.user.id
-        ):
+        if bot.user is None or message.author is None or message.author.id != bot.user.id:
             return
         from engine import editor as engine_editor
         from engine.recognition import compose as engine_compose
 
         lane_channel_ids = {
-            ch["channel_id"]: ch["channel_name"]
-            for ch in engine_compose.channels().values()
+            ch["channel_id"]: ch["channel_name"] for ch in engine_compose.channels().values()
         }
         channel_name = lane_channel_ids.get(getattr(message.channel, "id", None))
         if channel_name is None:
@@ -1589,9 +1525,7 @@ async def on_message_delete(message):
                 mid,
             )
     except Exception:
-        log.exception(
-            "editor deletion feeder failed for message %s", getattr(message, "id", "?")
-        )
+        log.exception("editor deletion feeder failed for message %s", getattr(message, "id", "?"))
 
 
 @bot.event

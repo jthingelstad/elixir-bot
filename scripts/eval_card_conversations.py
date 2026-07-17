@@ -82,13 +82,7 @@ def pick_members(target_count: int) -> list[dict]:
             bucket = "no_snapshot"
         else:
             ready_n = len(profile.get("ready_to_upgrade_top") or [])
-            bucket = (
-                "many_ready"
-                if ready_n >= 3
-                else "few_ready"
-                if ready_n >= 1
-                else "none_ready"
-            )
+            bucket = "many_ready" if ready_n >= 3 else "few_ready" if ready_n >= 1 else "none_ready"
         m["card_bucket"] = bucket
         m["king_tower"] = profile.get("king_tower_level") if profile else None
         by_bucket[bucket].append(m)
@@ -167,9 +161,7 @@ def generate_card_script(member: dict) -> list[tuple[str, str]]:
         f"**Member:** {name} ({tag}). King Tower level "
         f"{member.get('king_tower') or 'unknown'}. Card-bucket: {member.get('card_bucket', '?')}.\n\n"
         f"Generate one message for EACH of these buckets, in this exact order:\n\n"
-        + "\n".join(
-            f"{i + 1}. **{b}** — {_BUCKET_HINTS[b]}" for i, b in enumerate(buckets)
-        )
+        + "\n".join(f"{i + 1}. **{b}** — {_BUCKET_HINTS[b]}" for i, b in enumerate(buckets))
         + "\n\n**Instructions:**\n"
         f"- Write the messages as if {name} is speaking. Don't reference themselves "
         f"by name (use 'my', 'I', etc.).\n"
@@ -386,11 +378,7 @@ def print_member_report(member: dict, turns: list[dict]) -> None:
         f"[king_tower={member.get('king_tower')}, bucket={member.get('card_bucket')}] ──"
     )
     for i, t in enumerate(turns, 1):
-        flag = (
-            "!"
-            if t.get("error")
-            else ("·" if t.get("event_type") == "agent_error" else " ")
-        )
+        flag = "!" if t.get("error") else ("·" if t.get("event_type") == "agent_error" else " ")
         tools = [name for name, _ in t.get("tool_calls") or []]
         tools_str = f" tools={','.join(tools)}" if tools else " tools=-"
         markers = []
@@ -404,9 +392,7 @@ def print_member_report(member: dict, turns: list[dict]) -> None:
             markers.append("DEPRECATED!")
         marker_str = f" [{','.join(markers)}]" if markers else ""
         clen = t.get("content_len") or 0
-        print(
-            f"  [{i}]{flag} {t.get('bucket'):11s}{tools_str:60s} len={clen:>4}{marker_str}"
-        )
+        print(f"  [{i}]{flag} {t.get('bucket'):11s}{tools_str:60s} len={clen:>4}{marker_str}")
         print(f"       Q: {t['question'][:120]}")
         if t.get("error"):
             print(f"       ERROR: {t['error']}")
@@ -424,12 +410,9 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
     null_responses = sum(
         1
         for _, t in all_turns
-        if t.get("event_type") == "agent_error"
-        or (not t.get("error") and not t.get("content"))
+        if t.get("event_type") == "agent_error" or (not t.get("error") and not t.get("content"))
     )
-    deprecated = [
-        (m, t) for m, t in all_turns if t.get("used_deprecated_cards_include")
-    ]
+    deprecated = [(m, t) for m, t in all_turns if t.get("used_deprecated_cards_include")]
     clarifying = [(m, t) for m, t in all_turns if t.get("clarifying")]
     used_profile = sum(1 for _, t in all_turns if t.get("used_card_profile"))
     used_lookup = sum(1 for _, t in all_turns if t.get("used_lookup_member_cards"))
@@ -437,9 +420,7 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
     print(f"Total turns: {total}")
     print(f"Errors: {errors}")
     print(f"Null/empty responses: {null_responses}  ← target: 0")
-    print(
-        f"Deprecated include=['cards']: {len(deprecated)}  ← target: 0 (regression check)"
-    )
+    print(f"Deprecated include=['cards']: {len(deprecated)}  ← target: 0 (regression check)")
     print(f"Card profile fired: {used_profile}/{total} turns")
     print(f"lookup_member_cards fired: {used_lookup}/{total} turns")
     print(f"Clarifying questions: {len(clarifying)}/{total}")
@@ -501,15 +482,11 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--members", type=int, default=4, help="Number of members to test"
-    )
+    parser.add_argument("--members", type=int, default=4, help="Number of members to test")
     parser.add_argument(
         "--turns", type=int, default=6, help="Turns per member (max 6, one per bucket)"
     )
-    parser.add_argument(
-        "--seed", type=int, default=None, help="Random seed for member selection"
-    )
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for member selection")
     parser.add_argument("--out", default="scripts/card_conversations_eval_results.json")
     args = parser.parse_args()
 
@@ -562,12 +539,8 @@ def main() -> None:
             assistant_content = turn.get("content")
             if assistant_content:
                 if isinstance(assistant_content, list):
-                    assistant_content = "\n\n".join(
-                        str(s) for s in assistant_content if s
-                    )
-                conversation_history.append(
-                    {"role": "assistant", "content": assistant_content}
-                )
+                    assistant_content = "\n\n".join(str(s) for s in assistant_content if s)
+                conversation_history.append({"role": "assistant", "content": assistant_content})
 
         print_member_report(member, turns)
         all_rows.append(

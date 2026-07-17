@@ -48,19 +48,13 @@ def _persist_raw_payload(endpoint_name: str, entity_key: str | None, payload) ->
                 elif label == "leaderboards":
                     db.upsert_game_mode_contexts_from_leaderboards(payload, conn=conn)
             except Exception:
-                log.exception(
-                    "game_mode_context_persist_failed endpoint=%s entity=%s", label, key
-                )
+                log.exception("game_mode_context_persist_failed endpoint=%s entity=%s", label, key)
             conn.commit()
             try:
-                db.record_api_payload_sentinel_observations(
-                    label, key, payload, conn=conn
-                )
+                db.record_api_payload_sentinel_observations(label, key, payload, conn=conn)
             except Exception:
                 conn.rollback()
-                log.exception(
-                    "api_sentinel_observation_failed endpoint=%s entity=%s", label, key
-                )
+                log.exception("api_sentinel_observation_failed endpoint=%s entity=%s", label, key)
         finally:
             conn.close()
     except Exception:
@@ -110,9 +104,7 @@ def _normalize_cr_tag(raw) -> str:
     cleaned = _strip_tag(raw)
     bad = set(cleaned) - _VALID_TAG_CHARS
     if bad:
-        raise InvalidTagError(
-            f"invalid characters in tag '{cleaned}': {''.join(sorted(bad))}"
-        )
+        raise InvalidTagError(f"invalid characters in tag '{cleaned}': {''.join(sorted(bad))}")
     return cleaned
 
 
@@ -172,7 +164,7 @@ def _retry_delay(attempt: int, response: "requests.Response | None") -> float:
         if retry_after:
             try:
                 return min(float(retry_after), _RETRY_MAX_SECONDS)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 pass
     # 1, 2, 4, 8, … with up to 50% jitter.
     base = min(_RETRY_BASE_SECONDS * (2**attempt), _RETRY_MAX_SECONDS)
@@ -277,7 +269,7 @@ def _cached_fetch(endpoint_name, tag, path, ttl_seconds):
         return cached
     try:
         payload = _request_json(path, endpoint_name=endpoint_name, entity_key=tag)
-    except (requests.RequestException, ValueError):
+    except requests.RequestException, ValueError:
         return None
     _cache_set(cache_key, payload, ttl_seconds)
     return payload
@@ -286,10 +278,8 @@ def _cached_fetch(endpoint_name, tag, path, ttl_seconds):
 def get_clan():
     """Fetch our clan profile. Returns payload dict or None on error."""
     try:
-        return _request_json(
-            f"/clans/%23{CLAN_TAG}", endpoint_name="clan", entity_key=CLAN_TAG
-        )
-    except (requests.RequestException, ValueError):
+        return _request_json(f"/clans/%23{CLAN_TAG}", endpoint_name="clan", entity_key=CLAN_TAG)
+    except requests.RequestException, ValueError:
         return None
 
 
@@ -390,7 +380,7 @@ def get_cards():
     """
     try:
         return _request_json("/cards", endpoint_name="cards")
-    except (requests.RequestException, ValueError):
+    except requests.RequestException, ValueError:
         return None
 
 
@@ -401,7 +391,7 @@ def get_events():
     """
     try:
         return _request_json("/events", endpoint_name="events")
-    except (requests.RequestException, ValueError):
+    except requests.RequestException, ValueError:
         return None
 
 
@@ -435,7 +425,7 @@ def get_leaderboards():
     """Fetch available game-mode leaderboards."""
     try:
         return _request_json("/leaderboards", endpoint_name="leaderboards")
-    except (requests.RequestException, ValueError):
+    except requests.RequestException, ValueError:
         return None
 
 

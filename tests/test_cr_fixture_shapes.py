@@ -197,9 +197,7 @@ def test_roster_projection_round_trips_into_player_state(engine_conn):
     # Use the real profile fixture first: the following sparse roster refresh
     # must preserve its profile-owned exp/best fields.
     ensure_player(engine_conn, profile_tag, profile.get("name"), "2026-07-04T23:59:00Z")
-    refresh_player_state(
-        engine_conn, profile_tag, profile, None, "2026-07-04T23:59:00Z"
-    )
+    refresh_player_state(engine_conn, profile_tag, profile, None, "2026-07-04T23:59:00Z")
 
     # pick a roster member with a real, non-zero clan_rank + donations
     tag, member = next(iter(roster.items()))

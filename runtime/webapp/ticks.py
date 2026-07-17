@@ -23,9 +23,7 @@ log = logging.getLogger("elixir.webapp.ticks")
 
 def record_tick(counters: dict) -> None:
     entry = dict(counters or {})
-    entry.setdefault(
-        "recorded_at", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    )
+    entry.setdefault("recorded_at", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
     _TICKS.appendleft(entry)
     try:
         import db
@@ -73,7 +71,5 @@ def recent_ticks(limit: int = 100) -> list[dict]:
         finally:
             conn.close()
     except Exception:
-        log.debug(
-            "persisted tick history unavailable; using memory ring", exc_info=True
-        )
+        log.debug("persisted tick history unavailable; using memory ring", exc_info=True)
     return [dict(t) for t in list(_TICKS)[:limit]]

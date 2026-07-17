@@ -26,12 +26,7 @@ MAX_SCREENSHOT_LONG_EDGE = 1440
 
 
 def _attachment_media_type(attachment) -> str | None:
-    media_type = (
-        (getattr(attachment, "content_type", None) or "")
-        .split(";", 1)[0]
-        .strip()
-        .lower()
-    )
+    media_type = (getattr(attachment, "content_type", None) or "").split(";", 1)[0].strip().lower()
     if media_type:
         return media_type
     filename = getattr(attachment, "filename", "") or ""
@@ -129,7 +124,7 @@ def _prepare_screenshot_image(
                     }
                 )
                 return best, "image/jpeg", metadata
-    except (UnidentifiedImageError, OSError, ValueError):
+    except UnidentifiedImageError, OSError, ValueError:
         metadata["preprocess_error"] = "unreadable_image"
     return data, media_type, metadata
 
@@ -158,9 +153,7 @@ def _attachment_summary(attachments) -> str:
     return "\n".join(parts)
 
 
-def _question_with_attachment_context(
-    raw_question: str, image_attachments: list
-) -> str:
+def _question_with_attachment_context(raw_question: str, image_attachments: list) -> str:
     question = (raw_question or "").strip()
     if not image_attachments:
         return question
@@ -179,9 +172,7 @@ def _question_with_attachment_context(
     )
 
 
-def _question_with_unreadable_attachment_context(
-    raw_question: str, image_attachments: list
-) -> str:
+def _question_with_unreadable_attachment_context(raw_question: str, image_attachments: list) -> str:
     question = (raw_question or "").strip()
     summary = _attachment_summary(image_attachments)
     attachment_text = (
@@ -332,7 +323,7 @@ def _persist_inline_memories(memories, channel_id, workflow):
             if member_tag_input:
                 try:
                     resolved_tag = _resolve_member_tag(member_tag_input)
-                except (ValueError, Exception):
+                except ValueError, Exception:
                     resolved_tag = None
                 if resolved_tag:
                     memory = upsert_member_note_memory(
@@ -397,9 +388,7 @@ def _persist_inline_memories(memories, channel_id, workflow):
     return saved
 
 
-def _persist_screenshot_memories(
-    memories, channel_id, workflow, source_message_id=None
-):
+def _persist_screenshot_memories(memories, channel_id, workflow, source_message_id=None):
     """Persist durable facts Elixir inferred from leader-submitted screenshots."""
     from agent.tool_exec import _resolve_member_tag
     from memory_store import (
@@ -427,7 +416,7 @@ def _persist_screenshot_memories(
         confidence = mem.get("confidence", 0.85)
         try:
             confidence = max(0.1, min(0.95, float(confidence)))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             confidence = 0.85
 
         try:
@@ -480,9 +469,7 @@ def _persist_screenshot_memories(
                 member_tag=resolved_tag,
                 channel_id=str(channel_id) if channel_id else None,
                 event_type="arena_relay_screenshot_fact",
-                event_id=str(source_message_id)
-                if source_message_id is not None
-                else None,
+                event_id=str(source_message_id) if source_message_id is not None else None,
                 metadata=metadata,
             )
             if tags:
@@ -516,12 +503,8 @@ def _coerce_observation_list(value) -> list:
     return [value]
 
 
-def _screenshot_observation_payload(
-    result: dict, content: str, image_count: int
-) -> dict:
-    observation = (
-        result.get("observation") if isinstance(result.get("observation"), dict) else {}
-    )
+def _screenshot_observation_payload(result: dict, content: str, image_count: int) -> dict:
+    observation = result.get("observation") if isinstance(result.get("observation"), dict) else {}
     screenshot_type = (
         observation.get("screenshot_type")
         or observation.get("type")
@@ -610,29 +593,21 @@ async def _post_conversation_memory(
             user_summary = await asyncio.to_thread(distill_summary, user_content)
             # Always write user summary — distilled if available, truncated fallback otherwise.
             # save_message no longer writes last_user_summary to avoid persisting verbatim text.
-            final_user_summary = user_summary or (
-                user_content[:200] if user_content else ""
-            )
-            await asyncio.to_thread(
-                db.update_message_summary, user_message_id, final_user_summary
-            )
+            final_user_summary = user_summary or (user_content[:200] if user_content else "")
+            await asyncio.to_thread(db.update_message_summary, user_message_id, final_user_summary)
 
         if assistant_message_id and assistant_content:
-            assistant_summary = await asyncio.to_thread(
-                distill_summary, assistant_content
-            )
+            assistant_summary = await asyncio.to_thread(distill_summary, assistant_content)
             if assistant_summary:
                 await asyncio.to_thread(
                     db.update_message_summary, assistant_message_id, assistant_summary
                 )
 
         # Step 2: Extract inference facts (clanops and interactive only)
-        if (
-            workflow in {"clanops", "interactive"}
-            and user_content
-            and assistant_content
-        ):
-            combined = f"User ({author_name or 'unknown'}): {user_content}\n\nElixir: {assistant_content}"
+        if workflow in {"clanops", "interactive"} and user_content and assistant_content:
+            combined = (
+                f"User ({author_name or 'unknown'}): {user_content}\n\nElixir: {assistant_content}"
+            )
             facts = await asyncio.to_thread(
                 extract_inference_facts,
                 combined,
@@ -695,9 +670,7 @@ def _stored_assistant_content(content) -> str:
     return (content or "").strip()
 
 
-async def _handle_arena_relay_action_note(
-    app, message, channel_config, raw_question: str
-) -> bool:
+async def _handle_arena_relay_action_note(app, message, channel_config, raw_question: str) -> bool:
     if channel_config.get("lane") != "arena-relay":
         return False
     reference = getattr(message, "reference", None)
@@ -896,9 +869,7 @@ async def _handle_arena_relay_screenshot_observation(
                     len(screenshot_memories),
                 )
             except Exception:
-                _log.error(
-                    "arena relay screenshot memory persistence failed", exc_info=True
-                )
+                _log.error("arena relay screenshot memory persistence failed", exc_info=True)
 
         try:
             observation = await asyncio.to_thread(
@@ -915,9 +886,7 @@ async def _handle_arena_relay_screenshot_observation(
                 observation.get("image_count"),
             )
         except Exception:
-            _log.error(
-                "arena relay screenshot observation persistence failed", exc_info=True
-            )
+            _log.error("arena relay screenshot observation persistence failed", exc_info=True)
 
         sent = await app._reply_text(message, content)
         await asyncio.to_thread(
@@ -1011,9 +980,7 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
         app._extract_member_deck_target, ctx["raw_question"], message
     )
     target_tag = (
-        deck_target
-        if isinstance(deck_target, str) and deck_target.startswith("#")
-        else None
+        deck_target if isinstance(deck_target, str) and deck_target.startswith("#") else None
     )
     target_name = None
     if target_tag:
@@ -1167,9 +1134,7 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
                 discord_message_id=message.id,
                 detail=str(e),
             )
-            await app._safe_reply(
-                message, "Hit an error reviewing the deck. Try again in a sec."
-            )
+            await app._safe_reply(message, "Hit an error reviewing the deck. Try again in a sec.")
     return True
 
 
@@ -1236,9 +1201,7 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
         if workflow not in {"clanops", "interactive"}:
             return False
         content = await asyncio.to_thread(app._build_roster_join_dates_report)
-        await _handle_report_route(
-            app, message, ctx, "roster_join_dates_report", content
-        )
+        await _handle_report_route(app, message, ctx, "roster_join_dates_report", content)
         return True
 
     if route == "kick_risk":
@@ -1252,9 +1215,7 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
         if workflow != "clanops":
             return False
         content = await asyncio.to_thread(app._build_top_war_contributors_report)
-        await _handle_report_route(
-            app, message, ctx, "top_war_contributors_report", content
-        )
+        await _handle_report_route(app, message, ctx, "top_war_contributors_report", content)
         return True
 
     if route == "status_report":
@@ -1316,9 +1277,7 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
             clan, war = {}, {}
         if mode == "short":
             route_name = "clan_status_short_report"
-            content = await asyncio.to_thread(
-                app._build_clan_status_short_report, clan, war
-            )
+            content = await asyncio.to_thread(app._build_clan_status_short_report, clan, war)
         else:
             route_name = "clan_status_report"
             content = await asyncio.to_thread(app._build_clan_status_report, clan, war)
@@ -1365,9 +1324,7 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
                 deck_target=deck_target,
                 mode="war",
             )
-            content = await asyncio.to_thread(
-                app._build_member_war_decks_report, deck_target
-            )
+            content = await asyncio.to_thread(app._build_member_war_decks_report, deck_target)
             event_type = "member_war_decks_report"
         else:
             _log_route(
@@ -1380,9 +1337,7 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
                 ctx["raw_question"],
                 deck_target=deck_target,
             )
-            content = await asyncio.to_thread(
-                app._build_member_deck_report, deck_target
-            )
+            content = await asyncio.to_thread(app._build_member_deck_report, deck_target)
             event_type = "member_deck_report"
         await _save_reply_save(
             app,
@@ -1496,18 +1451,12 @@ async def route_message(message):
     reply_policy = channel_config.get("reply_policy", "mention_only")
     allows_open_channel_reply = reply_policy == "open_channel"
     scope = app._channel_scope(message.channel)
-    conversation_scope = app._channel_conversation_scope(
-        message.channel, message.author.id
-    )
+    conversation_scope = app._channel_conversation_scope(message.channel, message.author.id)
     stripped_content = (
-        app._strip_bot_mentions(message.content).strip()
-        if mentioned
-        else message.content.strip()
+        app._strip_bot_mentions(message.content).strip() if mentioned else message.content.strip()
     )
     image_attachments = _image_attachments(message)
-    raw_question = _question_with_attachment_context(
-        stripped_content, image_attachments
-    )
+    raw_question = _question_with_attachment_context(stripped_content, image_attachments)
 
     ctx = {
         "mentioned": mentioned,
@@ -1520,9 +1469,7 @@ async def route_message(message):
         "allows_open_channel_reply": allows_open_channel_reply,
     }
 
-    if await _handle_arena_relay_action_note(
-        app, message, channel_config, raw_question
-    ):
+    if await _handle_arena_relay_action_note(app, message, channel_config, raw_question):
         return
     if await _handle_arena_relay_screenshot_observation(
         app,
@@ -1536,14 +1483,8 @@ async def route_message(message):
     # If the bot wasn't addressed and the channel doesn't allow proactive
     # replies, skip routing entirely. Avoids wasting an LLM router call on
     # human-to-human chatter.
-    bot_should_consider = (
-        mentioned or allows_open_channel_reply or workflow == "reception"
-    )
-    if (
-        bot_should_consider
-        and image_attachments
-        and workflow in {"interactive", "clanops"}
-    ):
+    bot_should_consider = mentioned or allows_open_channel_reply or workflow == "reception"
+    if bot_should_consider and image_attachments and workflow in {"interactive", "clanops"}:
         ctx["image_blocks"] = await _collect_screenshot_image_blocks(message)
         if not ctx["image_blocks"]:
             ctx["raw_question"] = _question_with_unreadable_attachment_context(
@@ -1650,9 +1591,7 @@ async def route_message(message):
                     }
                     if agent_error:
                         failure_kwargs["detail"] = _agent_failure_detail(agent_error)
-                        failure_kwargs["result_preview"] = agent_error.get(
-                            "result_preview"
-                        )
+                        failure_kwargs["result_preview"] = agent_error.get("result_preview")
                         failure_kwargs["raw_json"] = agent_error.get("raw_json") or {
                             "response_text": agent_error.get("response_text")
                         }
@@ -1660,9 +1599,7 @@ async def route_message(message):
                         failure_kwargs["detail"] = type(result).__name__
                         failure_kwargs["result_preview"] = app._preview_text(result)
                     app._log_prompt_failure(**failure_kwargs)
-                    await app._safe_reply(
-                        message, "Having a hiccup. Try again in a sec."
-                    )
+                    await app._safe_reply(message, "Having a hiccup. Try again in a sec.")
                     return
                 content = result.get("content", result.get("summary", ""))
                 if not content:
@@ -1677,9 +1614,7 @@ async def route_message(message):
                         result_preview=app._preview_text(result),
                         raw_json=result,
                     )
-                    await app._safe_reply(
-                        message, "Having a hiccup. Try again in a sec."
-                    )
+                    await app._safe_reply(message, "Having a hiccup. Try again in a sec.")
                     return
                 sent_messages = await app._reply_text(message, content)
                 _reception_asst_msg_id = None
@@ -1811,9 +1746,7 @@ async def route_message(message):
                     }
                     if agent_error:
                         failure_kwargs["detail"] = _agent_failure_detail(agent_error)
-                        failure_kwargs["result_preview"] = agent_error.get(
-                            "result_preview"
-                        )
+                        failure_kwargs["result_preview"] = agent_error.get("result_preview")
                         failure_kwargs["raw_json"] = agent_error.get("raw_json") or {
                             "response_text": agent_error.get("response_text")
                         }
@@ -1841,9 +1774,7 @@ async def route_message(message):
                         _log.error("inline memory persistence failed", exc_info=True)
                 content = result.get("content", result.get("summary", ""))
                 if not content:
-                    app.log.error(
-                        "%s channel error: empty result payload %s", workflow, result
-                    )
+                    app.log.error("%s channel error: empty result payload %s", workflow, result)
                     app._log_prompt_failure(
                         question=raw_question,
                         workflow=workflow,
@@ -1865,9 +1796,7 @@ async def route_message(message):
                 try:
                     await app._share_channel_result(result, workflow)
                 except Exception as exc:
-                    app.log.error(
-                        "%s channel share error: %s", workflow, exc, exc_info=True
-                    )
+                    app.log.error("%s channel share error: %s", workflow, exc, exc_info=True)
                 _channel_asst_msg_id = None
                 try:
                     _channel_asst_msg_id = await asyncio.to_thread(
@@ -1882,9 +1811,7 @@ async def route_message(message):
                         discord_message_id=_primary_discord_message_id(sent_messages),
                     )
                 except Exception as exc:
-                    app.log.error(
-                        "%s channel reply save error: %s", workflow, exc, exc_info=True
-                    )
+                    app.log.error("%s channel reply save error: %s", workflow, exc, exc_info=True)
                 app._safe_create_task(
                     _post_conversation_memory(
                         _channel_user_msg_id,
@@ -1911,9 +1838,7 @@ async def route_message(message):
                     detail=str(e),
                 )
                 if mentioned:
-                    await app._safe_reply(
-                        message, "Hit an error. Try again in a moment."
-                    )
+                    await app._safe_reply(message, "Hit an error. Try again in a moment.")
         return
 
     await app.bot.process_commands(message)

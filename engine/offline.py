@@ -67,21 +67,17 @@ class OfflineEngine:
                 return season_id
         return infer_season_id(self.conn, payload)
 
-    def apply(
-        self, endpoint: str, entity_key: str, payload_json: str, fetched_at: str
-    ) -> None:
+    def apply(self, endpoint: str, entity_key: str, payload_json: str, fetched_at: str) -> None:
         try:
             payload = json.loads(payload_json)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             self._count("bad_payload")
             return
         now = parse_cr_time(fetched_at)
         if now is None:
             self._count("bad_observed_at")
             return
-        expected_key = (
-            HOME_CLAN if endpoint in {"clan", "currentriverrace"} else entity_key
-        )
+        expected_key = HOME_CLAN if endpoint in {"clan", "currentriverrace"} else entity_key
         if endpoint in {"clan", "currentriverrace", "player", "player_battlelog"}:
             decision, observation = observations.observe(
                 endpoint,
@@ -96,11 +92,7 @@ class OfflineEngine:
                 return
             self._count("observations_accepted")
             assert observation is not None
-            season_id = (
-                self._season_id_at(payload, now)
-                if endpoint == "currentriverrace"
-                else None
-            )
+            season_id = self._season_id_at(payload, now) if endpoint == "currentriverrace" else None
             applied = materialize.apply_observation(
                 self.conn,
                 observation,
@@ -169,7 +161,5 @@ class OfflineEngine:
         out.update({f"recognize_{k}": v for k, v in rec.items()})
         out.update({f"deliver_{k}": v for k, v in d.items()})
         out["posts_composed"] = len(sent)
-        out["proactive_mode"] = (
-            "legacy_comparison" if legacy_proactive else "awareness_only"
-        )
+        out["proactive_mode"] = "legacy_comparison" if legacy_proactive else "awareness_only"
         return out

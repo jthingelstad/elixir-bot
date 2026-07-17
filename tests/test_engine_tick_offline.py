@@ -40,9 +40,7 @@ def _profile(tag, name, level, wins, collection_level=None):
     if collection_level is not None:
         # Collection Level rides the CollectionLevel badge (the CR 2026 metric);
         # it projects into the cards aspect where collection_level_milestone fires.
-        badges.append(
-            {"name": "CollectionLevel", "level": 8, "progress": collection_level}
-        )
+        badges.append({"name": "CollectionLevel", "level": 8, "progress": collection_level})
     return json.dumps(
         {
             "tag": tag,
@@ -145,9 +143,7 @@ def test_offline_end_to_end(tmp_path, v51_schema_template):
     assert conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0] == 1
     # projections: current state and form exist for #A
     assert (
-        conn.execute(
-            "SELECT COUNT(*) FROM player_recent_form WHERE player_tag='#A'"
-        ).fetchone()[0]
+        conn.execute("SELECT COUNT(*) FROM player_recent_form WHERE player_tag='#A'").fetchone()[0]
         >= 1
     )
     # exactly one intent for the collection-level moment, and it delivered offline
@@ -196,9 +192,7 @@ def test_offline_finish_defaults_to_awareness_only(tmp_path, v51_schema_template
     counters = eng.finish()
 
     assert counters["proactive_mode"] == "awareness_only"
-    assert (
-        eng.conn.execute("SELECT COUNT(*) FROM recognition_ledger").fetchone()[0] == 0
-    )
+    assert eng.conn.execute("SELECT COUNT(*) FROM recognition_ledger").fetchone()[0] == 0
     assert (
         eng.conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='communication_intents'"
@@ -275,10 +269,7 @@ def test_tick_materialization_rolls_back_all_derived_writes_on_emit_failure(
         assert "materialize_error" in counters
         assert counters["manage_skipped"] == "materialization_not_ready"
         assert conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0] == 0
-        assert (
-            conn.execute("SELECT COUNT(*) FROM materialization_inputs").fetchone()[0]
-            == 0
-        )
+        assert conn.execute("SELECT COUNT(*) FROM materialization_inputs").fetchone()[0] == 0
         run = conn.execute(
             "SELECT status, apply_ok FROM materialization_runs ORDER BY materialization_id DESC"
         ).fetchone()
@@ -321,10 +312,7 @@ def test_tick_manage_failure_rolls_back_the_whole_generation(
         assert "manage_error" in counters
         assert conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM player_events").fetchone()[0] == 0
-        assert (
-            conn.execute("SELECT COUNT(*) FROM materialization_inputs").fetchone()[0]
-            == 0
-        )
+        assert conn.execute("SELECT COUNT(*) FROM materialization_inputs").fetchone()[0] == 0
         run = conn.execute(
             "SELECT status, apply_ok, manage_ok FROM materialization_runs "
             "ORDER BY materialization_id DESC"

@@ -84,10 +84,9 @@ Do not duplicate schedule values in prose; inspect the registry or use the
 Python 3.14 is the supported runtime.
 
 ```bash
-python3 -m venv venv
-./venv/bin/pip install -r requirements.lock -r requirements-dev.txt
+uv sync --locked
 # Create .env with the required secrets below.
-./venv/bin/python elixir.py
+uv run python elixir.py
 ```
 
 Required secrets:
@@ -101,9 +100,8 @@ CR_API_KEY=...
 Non-secret clan and Discord configuration lives in `prompts/CLAN.md` and
 `prompts/DISCORD.md`. See [SETUP.md](SETUP.md) before running production.
 
-`requirements.txt` contains direct runtime constraints.
-`requirements.lock` is the exact production environment. CI and deployment
-install the lock; development adds `requirements-dev.txt`.
+`pyproject.toml` contains direct runtime and development constraints.
+`uv.lock` is the exact environment used by CI and deployment.
 
 ## Repository map
 
@@ -144,29 +142,29 @@ See [docs/data-model-erd.md](docs/data-model-erd.md) and
 
 ## Tests and confidence gates
 
-Use the project virtualenv:
+Use the locked uv environment:
 
 ```bash
-./venv/bin/python scripts/check_dependency_lock.py
-./venv/bin/python scripts/check_docs.py
-./venv/bin/python scripts/check_exception_hygiene.py
-./venv/bin/ruff check .
-./venv/bin/ruff format --check .
-./venv/bin/mypy capabilities/contracts.py
-./venv/bin/pytest tests/ -q --cov=capabilities --cov-report=term-missing --cov-fail-under=80
+uv lock --check
+uv run python scripts/check_docs.py
+uv run python scripts/check_exception_hygiene.py
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy capabilities/contracts.py
+uv run pytest tests/ -q --cov=capabilities --cov-report=term-missing --cov-fail-under=80
 ```
 
 Before deploying engine changes, also run:
 
 ```bash
-./venv/bin/python scripts/replay_gate.py
-./venv/bin/python scripts/simulate.py
+uv run python scripts/replay_gate.py
+uv run python scripts/simulate.py
 ```
 
 For one consolidated health answer:
 
 ```bash
-./venv/bin/python scripts/confidence_report.py --json
+uv run python scripts/confidence_report.py --json
 ```
 
 The suite uses isolated SQLite databases and mocked external services. Real CR
@@ -190,15 +188,15 @@ Observatory web app, not general Discord commands.
 Review model/channel failures with:
 
 ```bash
-./venv/bin/python scripts/review_agent_feedback.py --limit 20
-./venv/bin/python scripts/review_agent_feedback.py --workflow clanops --json
+uv run python scripts/review_agent_feedback.py --limit 20
+uv run python scripts/review_agent_feedback.py --workflow clanops --json
 ```
 
 ## Cleanup and portability
 
 ```bash
-./venv/bin/python scripts/clean.py
-./venv/bin/python scripts/clean.py --db
+uv run python scripts/clean.py
+uv run python scripts/clean.py --db
 ```
 
 The database cleanup option removes only legacy local runtime files; it never

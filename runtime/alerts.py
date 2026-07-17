@@ -52,9 +52,7 @@ async def _alert_admin(content: str, event_type: str, signature: str) -> bool:
         return True
     channel_configs = prompts.discord_channels_by_workflow("clanops")
     if not channel_configs:
-        log.warning(
-            "Admin alert skipped (%s): no clanops channel configured", event_type
-        )
+        log.warning("Admin alert skipped (%s): no clanops channel configured", event_type)
         return False
     channel = runtime_app.bot.get_channel(channel_configs[0]["id"])
     if not channel:
@@ -208,9 +206,7 @@ def schedule_llm_failure_alert(context: str) -> None:
         )
         return
     try:
-        future = asyncio.run_coroutine_threadsafe(
-            _maybe_alert_llm_failure(context), loop
-        )
+        future = asyncio.run_coroutine_threadsafe(_maybe_alert_llm_failure(context), loop)
     except Exception:
         log.critical(
             "schedule_llm_failure_alert: scheduling failed; LLM failure during %s will NOT be alerted",

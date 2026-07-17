@@ -100,7 +100,7 @@ def base_score(event_type: str, payload: dict | None) -> tuple[int, bool]:
     if event_type == "trophy_push":
         try:
             delta = int(payload.get("trophy_delta") or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             delta = 0
         return min(45, 25 + max(0, delta - 100) // 50 * 5), False
     if event_type == "arena_up":
@@ -164,9 +164,7 @@ def _evidence_rows(conn, subject_tag: str, anchor: datetime, cutoff_at: str | No
     return out
 
 
-def _derived_ledger_evidence(
-    conn, subject_tag: str, anchor: datetime, cutoff_at: str | None
-):
+def _derived_ledger_evidence(conn, subject_tag: str, anchor: datetime, cutoff_at: str | None):
     """Suppressed derived battle moments do not have player_events rows, but
     they still claimed the ledger. Count their base moment score for accrual;
     never reuse the ledger's `score` column here because suppressed rows may
@@ -188,12 +186,10 @@ def _derived_ledger_evidence(
         occurred_at = r["claimed_at"]
         try:
             blob = json.loads(r["event_refs_json"] or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             blob = {}
         for item in (blob.get("suppressed") or {}).get("recognition_evidence") or []:
-            if item.get("dedup_key") == r["recognition_key"] and item.get(
-                "occurred_at"
-            ):
+            if item.get("dedup_key") == r["recognition_key"] and item.get("occurred_at"):
                 occurred_at = item["occurred_at"]
                 break
         t = parse_utc(occurred_at)
@@ -228,7 +224,7 @@ def decide(
     for r in _evidence_rows(conn, subject_tag, anchor, last_highlight):
         try:
             payload = _json.loads(r["payload_json"]) if r["payload_json"] else {}
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             payload = {}
         score, _ = base_score(r["event_type"], payload)
         if score > 0:
@@ -250,9 +246,7 @@ def decide(
     post = sel_bypass or total >= HIGHLIGHT_THRESHOLD
     trace = {
         "recognition_policy": POLICY_ID,
-        "recognition_decision": "bypass"
-        if sel_bypass
-        else ("accrued" if post else "accruing"),
+        "recognition_decision": "bypass" if sel_bypass else ("accrued" if post else "accruing"),
         "recognition_score": total,
         "recognition_threshold": HIGHLIGHT_THRESHOLD,
         "recognition_selected_score": sel_score,

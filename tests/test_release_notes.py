@@ -66,11 +66,7 @@ def test_release_history_parses_both_header_shapes(tmp_path, monkeypatch):
     assert {"version": "v5.1", "name": "Consolidated Collector", "date": None} in hist
     # `## The story` / `## Features` / `## Release Notes` section headers are NOT releases.
     names = [h["name"] for h in hist]
-    assert (
-        "The story" not in names
-        and "Features" not in names
-        and "Release Notes" not in names
-    )
+    assert "The story" not in names and "Features" not in names and "Release Notes" not in names
 
 
 def test_slugify_release():
@@ -121,9 +117,7 @@ def test_extract_three_tiers():
         "<announcement>medium post</announcement><clanchat>short blurb</clanchat>"
     )
     assert rn._extract_subject(out) == "S"
-    assert (
-        rn._extract_notes(out) == "## The story\nlong body"
-    )  # <detailed> is the notes tier
+    assert rn._extract_notes(out) == "## The story\nlong body"  # <detailed> is the notes tier
     assert rn._extract_tag(out, "announcement") == "medium post"
     assert rn._extract_tag(out, "clanchat") == "short blurb"
     assert rn._extract_tag(out, "missing") == ""
@@ -169,16 +163,12 @@ def test_coin_name_rejects_malformed(monkeypatch):
         lambda **kw: _resp("Blazing Balloon\nextra line"),
     )
     assert rn.coin_release_name(dict(MATERIAL)) == ""  # multi-line → nameless
-    monkeypatch.setattr(
-        core, "_create_chat_completion", lambda **kw: _resp('"Gilded Golem"')
-    )
+    monkeypatch.setattr(core, "_create_chat_completion", lambda **kw: _resp('"Gilded Golem"'))
     assert rn.coin_release_name(dict(MATERIAL)) == "Gilded Golem"  # quotes stripped
 
 
 def test_coin_name_failure_tolerant(monkeypatch):
-    monkeypatch.setattr(
-        rn, "_card_names", lambda: (_ for _ in ()).throw(RuntimeError("db down"))
-    )
+    monkeypatch.setattr(rn, "_card_names", lambda: (_ for _ in ()).throw(RuntimeError("db down")))
     assert rn.coin_release_name(dict(MATERIAL)) == ""
 
 
@@ -196,9 +186,7 @@ def test_announcement_messages_chunk_and_link():
 
 
 def test_announcement_messages_nameless():
-    msgs = rn.announcement_messages(
-        announcement="b", release_url=None, name="", date="2026-07-08"
-    )
+    msgs = rn.announcement_messages(announcement="b", release_url=None, name="", date="2026-07-08")
     assert msgs[0].startswith("**Release (2026-07-08)**")
     assert "GitHub" not in msgs[0]
 

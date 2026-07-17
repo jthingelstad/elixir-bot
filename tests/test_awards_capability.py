@@ -52,9 +52,7 @@ def test_live_award_standings_report_the_resolved_current_period():
         "capabilities.awards.get_war_season_view",
         return_value={"data": {"freshness": {"as_of": "2026-07-15T02:00:00Z"}}},
     ):
-        result = get_awards_recognition(
-            view="current_standings", source=_AwardsSource()
-        )
+        result = get_awards_recognition(view="current_standings", source=_AwardsSource())
 
     assert result["period"] == {"id": 134, "kind": "war_season"}
 

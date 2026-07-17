@@ -123,9 +123,7 @@ def test_stream_missing_channel_is_safe_noop(monkeypatch):
     app._thinking_session.clear()
     # Must not raise even with no channel.
     asyncio.run(app._awareness_event({"type": "start", "read_summary": "x"}))
-    asyncio.run(
-        app._awareness_event({"type": "end", "render": _render(), "loop_number": 7})
-    )
+    asyncio.run(app._awareness_event({"type": "end", "render": _render(), "loop_number": 7}))
 
 
 def test_tool_event_before_start_is_ignored(monkeypatch):

@@ -95,9 +95,7 @@ async def ticks_page(request: web.Request) -> web.Response:
         for k in t:
             if k not in keys and k != "recorded_at":
                 keys.append(k)
-    return render(
-        "ticks.html", request, nav="ticks", history=history, counter_keys=keys, **data
-    )
+    return render("ticks.html", request, nav="ticks", history=history, counter_keys=keys, **data)
 
 
 async def members_page(request: web.Request) -> web.Response:
@@ -133,7 +131,7 @@ async def streams_page(request: web.Request) -> web.Response:
 async def raw_payload_page(request: web.Request) -> web.Response:
     try:
         payload_id = int(request.match_info["payload_id"])
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         raise web.HTTPBadRequest(text="bad payload id") from None
     row = await asyncio.to_thread(queries.raw_payload, payload_id)
     if row is None:
@@ -146,14 +144,10 @@ async def raw_payload_page(request: web.Request) -> web.Response:
         from engine.normalize import annotate as _annotate
 
         try:
-            body = _json.dumps(
-                _annotate(_json.loads(body), row.get("endpoint")), indent=2
-            )
-        except (TypeError, ValueError):
+            body = _json.dumps(_annotate(_json.loads(body), row.get("endpoint")), indent=2)
+        except TypeError, ValueError:
             annotated = False
-    return render(
-        "raw.html", request, nav="streams", row=row, body=body, annotated=annotated
-    )
+    return render("raw.html", request, nav="streams", row=row, body=body, annotated=annotated)
 
 
 async def recognition_page(request: web.Request) -> web.Response:
@@ -203,9 +197,7 @@ async def recognition_detail(request: web.Request) -> web.Response:
     data = await asyncio.to_thread(queries.recognition_detail, key)
     if data is None:
         raise web.HTTPNotFound(text="no such recognition key")
-    return render(
-        "recognition_detail.html", request, nav="recognition", key=key, **data
-    )
+    return render("recognition_detail.html", request, nav="recognition", key=key, **data)
 
 
 async def member_page(request: web.Request) -> web.Response:
@@ -248,7 +240,7 @@ async def llm_cost_page(request: web.Request) -> web.Response:
 async def llm_call_detail_page(request: web.Request) -> web.Response:
     try:
         call_id = int(request.match_info["call_id"])
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         raise web.HTTPBadRequest(text="bad call id") from None
     data = await asyncio.to_thread(queries.llm_call_detail, call_id)
     if data is None:

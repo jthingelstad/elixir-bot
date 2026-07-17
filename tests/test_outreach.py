@@ -63,9 +63,7 @@ def test_propose_uses_injected_agent_compose(tmp_path, monkeypatch):
         seen = []
         outreach.propose_cards(
             raise_card=lambda t, c: seen.append(c) or {"action_id": 1},
-            compose=lambda t: (
-                f"Hey {t['member_name']}, Elixir here — mind sharing your email?"
-            ),
+            compose=lambda t: f"Hey {t['member_name']}, Elixir here — mind sharing your email?",
             conn=conn,
         )
         assert seen == ["Hey Alpha, Elixir here — mind sharing your email?"]
@@ -73,9 +71,7 @@ def test_propose_uses_injected_agent_compose(tmp_path, monkeypatch):
         conn.close()
 
 
-def test_propose_falls_back_to_template_when_compose_empty_or_raises(
-    tmp_path, monkeypatch
-):
+def test_propose_falls_back_to_template_when_compose_empty_or_raises(tmp_path, monkeypatch):
     conn = db.get_connection(str(tmp_path / "t.db"))
     try:
         _seed(conn)

@@ -33,8 +33,7 @@ def test_suppressed_claims_have_null_intent(legacy_engine_conn):
         {"score": 40, "threshold": 80},
     )
     row = legacy_engine_conn.execute(
-        "SELECT intent_id, event_refs_json FROM recognition_ledger "
-        "WHERE recognition_key = ?",
+        "SELECT intent_id, event_refs_json FROM recognition_ledger WHERE recognition_key = ?",
         (KEY,),
     ).fetchone()
     assert row["intent_id"] is None
@@ -75,9 +74,7 @@ def test_cohort_wave_uses_same_day_suppressed_events_across_ticks(legacy_engine_
     for tag in ("#A", "#B"):
         key = f"badge_earned:{tag}:badge"
         assert ledger.claim(legacy_engine_conn, key, "player", [key], 55)
-        ledger.record_suppression(
-            legacy_engine_conn, key, REASON_ACCRUING, {"score": 55}
-        )
+        ledger.record_suppression(legacy_engine_conn, key, REASON_ACCRUING, {"score": 55})
     cursor_set(legacy_engine_conn, "recognize:player", 2)
 
     cands, _ = player_candidates(legacy_engine_conn)
@@ -190,9 +187,7 @@ def test_mastery_badge_background_but_real_badge_posts_via_bypass_peer(
     posted = legacy_engine_conn.execute(
         "SELECT intent_type FROM communication_intents WHERE lane = 'elixir'"
     ).fetchall()
-    assert [r["intent_type"] for r in posted] == [
-        "celebrate:collection_level_milestone"
-    ]
+    assert [r["intent_type"] for r in posted] == ["celebrate:collection_level_milestone"]
     # both card-grind moments suppressed as background
     for key in ("cl:#A", "mb:#A"):
         blob = json.loads(
@@ -227,9 +222,7 @@ def test_card_unlock_wave_still_posts(legacy_engine_conn):
     )
 
 
-def test_poison_event_skips_after_three_repeated_failures(
-    legacy_engine_conn, monkeypatch
-):
+def test_poison_event_skips_after_three_repeated_failures(legacy_engine_conn, monkeypatch):
     legacy_engine_conn.execute(
         "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
         "VALUES ('#A', 'Al', ?, ?)",

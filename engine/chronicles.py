@@ -28,16 +28,12 @@ def _rows(conn, sql, params=()):
 
 
 def _name(conn, tag):
-    row = conn.execute(
-        "SELECT current_name FROM players WHERE player_tag = ?", (tag,)
-    ).fetchone()
+    row = conn.execute("SELECT current_name FROM players WHERE player_tag = ?", (tag,)).fetchone()
     return (row[0] if row else None) or tag
 
 
 def _war_chronicle(conn, season_id: int) -> str | None:
-    season = conn.execute(
-        "SELECT * FROM war_seasons WHERE season_id = ?", (season_id,)
-    ).fetchone()
+    season = conn.execute("SELECT * FROM war_seasons WHERE season_id = ?", (season_id,)).fetchone()
     if season is None:
         return None
     weeks = _rows(
@@ -97,21 +93,16 @@ def _war_chronicle(conn, season_id: int) -> str | None:
         )
         fp = season["free_pass_tag"]
         if fp and fp != season["war_champ_tag"]:
-            parts.append(
-                f"The Free Pass rotated to {_name(conn, fp)} (no repeat seasons)."
-            )
+            parts.append(f"The Free Pass rotated to {_name(conn, fp)} (no repeat seasons).")
         elif fp:
             parts.append("They keep the Free Pass (no rotation due).")
         if len(standings) > 1:
             others = ", ".join(
-                f"{_name(conn, s['player_tag'])} ({s['points']})"
-                for s in standings[1:4]
+                f"{_name(conn, s['player_tag'])} ({s['points']})" for s in standings[1:4]
             )
             parts.append(f"Top contributors behind them: {others}.")
     elif standings:  # season not yet closed (or champ unknown): keep the leader
-        tops = ", ".join(
-            f"{_name(conn, s['player_tag'])} ({s['points']})" for s in standings[:4]
-        )
+        tops = ", ".join(f"{_name(conn, s['player_tag'])} ({s['points']})" for s in standings[:4])
         parts.append(f"Top contributors: {tops}.")
     extras = [a for a in awards if a["award_type"] not in ("war_champ", "free_pass")]
     if extras:
@@ -149,9 +140,7 @@ def _ranked_chronicle(conn, season_id: str) -> str | None:
         (season_id,),
     )
     if not players:
-        return (
-            f"Ranked season {season_id} closed with no clan members active in Ranked."
-        )
+        return f"Ranked season {season_id} closed with no clan members active in Ranked."
     parts = [f"Ranked season {season_id}: {len(players)} members played Ranked."]
     if pod:
         from engine.normalize import ranked_league_name
@@ -160,11 +149,7 @@ def _ranked_chronicle(conn, season_id: str) -> str | None:
         line = (
             f"{lead['name']} led the clan — {ranked_league_name(lead['league'])}"
             + (f" at {lead['rating']} rating" if lead["rating"] else "")
-            + (
-                f", {lead['wins']}W/{lead['battles'] - lead['wins']}L"
-                if lead["battles"]
-                else ""
-            )
+            + (f", {lead['wins']}W/{lead['battles'] - lead['wins']}L" if lead["battles"] else "")
             + "."
         )
         parts.append(line)
@@ -179,8 +164,7 @@ def _ranked_chronicle(conn, season_id: str) -> str | None:
     total_battles = sum(p["battles"] or 0 for p in players)
     total_wins = sum(p["wins"] or 0 for p in players)
     parts.append(
-        f"Clan Ranked volume: {total_battles} battles, "
-        f"{total_wins} wins across the season."
+        f"Clan Ranked volume: {total_battles} battles, {total_wins} wins across the season."
     )
     return " ".join(parts)
 

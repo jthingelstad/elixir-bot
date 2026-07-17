@@ -61,9 +61,7 @@ def sync_card_catalog(api_response: dict, conn=None) -> int:
     all_cards.extend(api_response.get("supportItems") or [])
 
     ge.ensure_schema(conn)  # lazily adds card_catalog.first_seen_at + game_events
-    existing = {
-        r[0] for r in conn.execute("SELECT card_id FROM card_catalog").fetchall()
-    }
+    existing = {r[0] for r in conn.execute("SELECT card_id FROM card_catalog").fetchall()}
     bootstrap = not existing
     new_cards: list[dict] = []
 
@@ -216,9 +214,7 @@ def lookup_cards(
         clauses.append("max_evolution_level IS NULL")
 
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-    total_matched = conn.execute(
-        f"SELECT COUNT(*) FROM card_catalog{where}", params
-    ).fetchone()[0]
+    total_matched = conn.execute(f"SELECT COUNT(*) FROM card_catalog{where}", params).fetchone()[0]
 
     if name:
         # exact match, then prefix, then shortest (Knight before Golden Knight).

@@ -60,7 +60,7 @@ map when gathering evidence:
   conversation, durable memory, incidents, and LLM telemetry. The pre-cut
   `elixir-v5-archive-2026H2.db` is immutable historical evidence only.
 - **Runtime health:** start with `bash scripts/admin.sh status`,
-  `./venv/bin/python scripts/confidence_report.py --quick --json`, open
+  `uv run python scripts/confidence_report.py --quick --json`, open
   `runtime_incidents`, and the repo-root `elixir-v5.log`.
 
 The short version: **the engine owns facts and deterministic policy; awareness

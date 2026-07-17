@@ -62,9 +62,7 @@ def evaluate_elder_eligibility(
     Donation volume is intentionally not an absolute check here. Elder
     recommendations are relative to the smoothed donation leaderboard.
     """
-    activity_days = (
-        days_since_battle if days_since_battle is not None else days_inactive
-    )
+    activity_days = days_since_battle if days_since_battle is not None else days_inactive
     checks = {
         "tenure": min_tenure_days <= 0
         or (tenure_days is not None and tenure_days >= min_tenure_days),
@@ -97,9 +95,7 @@ def compute_member_ranks(conn: Optional[sqlite3.Connection] = None) -> dict[int,
     if not active_ids:
         return {}
 
-    ranks: dict[int, dict] = {
-        mid: {field: None for field in RANK_FIELDS} for mid in active_ids
-    }
+    ranks: dict[int, dict] = {mid: {field: None for field in RANK_FIELDS} for mid in active_ids}
 
     season_id = get_current_season_id(conn=conn)
     today = _member_activity_anchor(conn).date()

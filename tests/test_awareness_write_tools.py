@@ -190,9 +190,7 @@ def test_awareness_write_does_not_reopen_a_leader_closed_case(memdb):
     )
     case_id = first["case_id"]
     # Leader dismisses the case.
-    db.resolve_decision_case(
-        case_id, status="dismissed", resolution="Leader kept them."
-    )
+    db.resolve_decision_case(case_id, status="dismissed", resolution="Leader kept them.")
     assert db.get_decision_case_by_id(case_id)["status"] == "dismissed"
 
     # A later awareness write must NOT reopen it.
@@ -361,11 +359,7 @@ def test_awareness_write_budget_rejects_fourth_call(memdb):
         [
             _fake_response(tool_uses_round1, stop_reason="tool_use"),
             _fake_response(
-                [
-                    _fake_text_block(
-                        json.dumps({"posts": [], "skipped_reason": "budget test"})
-                    )
-                ]
+                [_fake_text_block(json.dumps({"posts": [], "skipped_reason": "budget test"}))]
             ),
         ]
     )
@@ -374,9 +368,7 @@ def test_awareness_write_budget_rejects_fourth_call(memdb):
         return next(responses)
 
     tool_stats: dict = {}
-    with patch.object(
-        agent_chat, "_create_chat_completion", side_effect=_fake_completion
-    ):
+    with patch.object(agent_chat, "_create_chat_completion", side_effect=_fake_completion):
         result = agent_chat._chat_with_tools(
             "system",
             "user",
@@ -405,11 +397,7 @@ def test_save_clan_memory_awareness_is_idempotent(memdb):
         "body": "Andy on a 5-win run.",
         "member_tag": None,
     }
-    first = json.loads(
-        tool_exec._execute_tool("save_clan_memory", args, workflow="awareness")
-    )
-    second = json.loads(
-        tool_exec._execute_tool("save_clan_memory", args, workflow="awareness")
-    )
+    first = json.loads(tool_exec._execute_tool("save_clan_memory", args, workflow="awareness"))
+    second = json.loads(tool_exec._execute_tool("save_clan_memory", args, workflow="awareness"))
     assert first["success"] and second["success"]
     assert first["memory_id"] == second["memory_id"]  # same memory, no duplicate

@@ -266,9 +266,7 @@ def _parse_birthday_value(value: str) -> tuple[str, str] | None:
 
 
 class _PreviewChannel:
-    def __init__(
-        self, channel_id: int, name: str, captured_posts: list[tuple[str, str]]
-    ):
+    def __init__(self, channel_id: int, name: str, captured_posts: list[tuple[str, str]]):
         self.id = channel_id
         self.name = name.lstrip("#")
         self.type = "text"
@@ -315,17 +313,11 @@ def _build_clan_list_report(*, full: bool = False) -> str:
         lines.append("_No active members found._")
         return "\n".join(lines)
     for member in members:
-        name = (
-            member.get("current_name")
-            or member.get("member_name")
-            or member.get("player_tag")
-        )
+        name = member.get("current_name") or member.get("member_name") or member.get("player_tag")
         if full:
             joined_date = member.get("joined_date") or "n/a"
             if member.get("birth_month") and member.get("birth_day"):
-                birthday = (
-                    f"{int(member['birth_month']):02d}-{int(member['birth_day']):02d}"
-                )
+                birthday = f"{int(member['birth_month']):02d}-{int(member['birth_day']):02d}"
             else:
                 birthday = "n/a"
             profile_flag = "yes" if member.get("profile_url") else "no"
@@ -359,13 +351,9 @@ def _build_member_profile_report(member_query: str, *, conn=None) -> str:
     birthday = None
     if profile.get("birth_month") and profile.get("birth_day"):
         birthday = f"{int(profile['birth_month']):02d}-{int(profile['birth_day']):02d}"
-    trophies = (
-        f"{profile['trophies']:,}" if isinstance(profile.get("trophies"), int) else None
-    )
+    trophies = f"{profile['trophies']:,}" if isinstance(profile.get("trophies"), int) else None
     best_trophies = (
-        f"{profile['best_trophies']:,}"
-        if isinstance(profile.get("best_trophies"), int)
-        else None
+        f"{profile['best_trophies']:,}" if isinstance(profile.get("best_trophies"), int) else None
     )
     streak = None
     if profile.get("recent_form"):
@@ -445,8 +433,7 @@ def _format_leader_action_outcome(action: dict) -> str:
         changed = outcome.get("changed") or {}
         if changed:
             return " | ".join(
-                f"{key} changed {'yes' if value else 'no'}"
-                for key, value in changed.items()
+                f"{key} changed {'yes' if value else 'no'}" for key, value in changed.items()
             )
     return "outcome pending"
 
@@ -483,9 +470,7 @@ def _build_relay_status_report(*, view: str = "all", limit: int = 10, conn=None)
         limit = max(1, min(int(limit or 10), 25))
 
         if view == "pending":
-            actions = db.list_leader_actions(
-                status=db.ACTION_PROPOSED, limit=limit, conn=conn
-            )
+            actions = db.list_leader_actions(status=db.ACTION_PROPOSED, limit=limit, conn=conn)
         elif view == "decided":
             actions = [
                 action
@@ -499,15 +484,12 @@ def _build_relay_status_report(*, view: str = "all", limit: int = 10, conn=None)
         for action in actions:
             if action.get("status") == db.ACTION_DONE:
                 refreshed.append(
-                    db.refresh_leader_action_outcome(action["action_id"], conn=conn)
-                    or action
+                    db.refresh_leader_action_outcome(action["action_id"], conn=conn) or action
                 )
             else:
                 refreshed.append(action)
 
-        pending_count = len(
-            db.list_leader_actions(status=db.ACTION_PROPOSED, limit=50, conn=conn)
-        )
+        pending_count = len(db.list_leader_actions(status=db.ACTION_PROPOSED, limit=50, conn=conn))
         lines = ["**Arena Relay Leader Actions**"]
         lines.append(f"- Pending: {pending_count}")
         lines.append(
@@ -550,9 +532,7 @@ def _build_activity_show_report(activity_key: str) -> str:
     lines.append(
         f"- Schedule: {next(spec['schedule'] for spec in schedule_specs_from_registry(elixir) if spec['activity_key'] == resolved['activity_key'])}"
     )
-    lines.append(
-        f"- Manual trigger: {'yes' if resolved['manual_trigger_allowed'] else 'no'}"
-    )
+    lines.append(f"- Manual trigger: {'yes' if resolved['manual_trigger_allowed'] else 'no'}")
     lines.append("- Delivery targets:")
     for target in resolved["delivery_targets"]:
         lines.append(f"  - {target}")
@@ -592,9 +572,7 @@ def _format_conversation_facts(title: str, facts: list[dict], limit: int) -> lis
     return lines
 
 
-def _format_conversation_episodes(
-    title: str, episodes: list[dict], limit: int
-) -> list[str]:
+def _format_conversation_episodes(title: str, episodes: list[dict], limit: int) -> list[str]:
     if not episodes:
         return [f"- {title}: none"]
     lines = [f"- {title}: {len(episodes)}"]
@@ -680,9 +658,7 @@ def _build_memory_report(
             user_ctx = memory_context.get("discord_user") or {}
             member_ctx = memory_context.get("member") or {}
             lines.extend(
-                _format_conversation_facts(
-                    "User facts", user_ctx.get("facts") or [], limit
-                )
+                _format_conversation_facts("User facts", user_ctx.get("facts") or [], limit)
             )
             lines.extend(
                 _format_conversation_episodes(
@@ -690,9 +666,7 @@ def _build_memory_report(
                 )
             )
             lines.extend(
-                _format_conversation_facts(
-                    "Member facts", member_ctx.get("facts") or [], limit
-                )
+                _format_conversation_facts("Member facts", member_ctx.get("facts") or [], limit)
             )
             lines.extend(
                 _format_conversation_episodes(
@@ -794,7 +768,9 @@ async def _run_runtime_job(job_name: str, preview: bool) -> str:
                 await run_activity_once(display_name, runtime_module=elixir)
             except Exception as exc:
                 return f"`{display_name}` failed in preview mode: {exc}"
-            return f"Ran `{display_name}` in preview mode.\n\n{_format_preview_posts(captured_posts)}"
+            return (
+                f"Ran `{display_name}` in preview mode.\n\n{_format_preview_posts(captured_posts)}"
+            )
     try:
         await run_activity_once(display_name, runtime_module=elixir)
     except (UnknownActivityError, ManualActivityNotAllowed, ActivityRunError) as exc:
@@ -819,9 +795,7 @@ async def _run_system_signals(preview: bool) -> str:
             return f"{summary}\n\n{_format_preview_posts(captured_posts)}"
 
     try:
-        count = await elixir._publish_pending_system_signal_updates(
-            seed_startup_signals=True
-        )
+        count = await elixir._publish_pending_system_signal_updates(seed_startup_signals=True)
     except Exception as exc:
         return f"`signal.publish-pending` failed: {exc}"
     return f"Published {count} pending system signal(s)."
@@ -838,9 +812,7 @@ def _resolve_member_tag(member_query: str, *, conn=None) -> tuple[str, str]:
     if not query:
         raise ValueError("Member name or tag is required.")
     if len(query) > _MEMBER_QUERY_MAX_LEN:
-        raise ValueError(
-            f"Member name/tag must be {_MEMBER_QUERY_MAX_LEN} characters or fewer."
-        )
+        raise ValueError(f"Member name/tag must be {_MEMBER_QUERY_MAX_LEN} characters or fewer.")
     tag_match = re.search(r"(#?[A-Z0-9]+)\)$", query, re.IGNORECASE)
     if tag_match:
         matches = db.resolve_member(tag_match.group(1), limit=3, conn=conn)
@@ -851,9 +823,7 @@ def _resolve_member_tag(member_query: str, *, conn=None) -> tuple[str, str]:
     best = pick_best_match(matches)
     if best is None:
         choices = ", ".join(
-            item.get("member_ref_with_handle")
-            or item.get("current_name")
-            or item.get("player_tag")
+            item.get("member_ref_with_handle") or item.get("current_name") or item.get("player_tag")
             for item in matches[:3]
         )
         raise ValueError(f"Ambiguous member {member_query!r}. Top matches: {choices}")
@@ -862,9 +832,7 @@ def _resolve_member_tag(member_query: str, *, conn=None) -> tuple[str, str]:
     ) or best["player_tag"]
 
 
-async def _run_member_metadata_command(
-    command: str, *, preview: bool, args: dict
-) -> str:
+async def _run_member_metadata_command(command: str, *, preview: bool, args: dict) -> str:
     import db
     import runtime.onboarding as onboarding
 
@@ -919,9 +887,7 @@ async def _run_member_metadata_command(
     if command == "set-profile-url":
         if preview:
             return f"Preview: would set profile URL for {label} to {args['url']}."
-        await asyncio.to_thread(
-            db.set_member_profile_url, member_tag, None, args["url"]
-        )
+        await asyncio.to_thread(db.set_member_profile_url, member_tag, None, args["url"])
         return f"Set profile URL for {label}."
     if command == "clear-profile-url":
         if preview:
@@ -979,14 +945,9 @@ def _suggest_clan_member_for_discord_user(display_values: list[str]) -> str | No
             "player_tag_exact",
         }
         if exactish and (
-            len(matches) == 1
-            or top.get("match_score", 0) - matches[1].get("match_score", 0) >= 100
+            len(matches) == 1 or top.get("match_score", 0) - matches[1].get("match_score", 0) >= 100
         ):
-            name = (
-                top.get("current_name")
-                or top.get("member_name")
-                or top.get("player_tag")
-            )
+            name = top.get("current_name") or top.get("member_name") or top.get("player_tag")
             return f"{name} (`{top['player_tag']}`)"
     return None
 
@@ -1009,9 +970,7 @@ async def _run_member_audit_discord() -> str:
     for guild_member in guild.members:
         if guild_member.bot:
             continue
-        link = await asyncio.to_thread(
-            db.get_linked_member_for_discord_user, guild_member.id
-        )
+        link = await asyncio.to_thread(db.get_linked_member_for_discord_user, guild_member.id)
         if link:
             if member_role and member_role not in guild_member.roles:
                 role_missing.append(guild_member)
@@ -1103,13 +1062,9 @@ def _translate_member_field_command(
 
 async def _run_member_field_command(action: str, *, preview: bool, args: dict) -> str:
     member_args = {"member": args["member"]}
-    command, extra_args = _translate_member_field_command(
-        action, args["field"], args.get("value")
-    )
+    command, extra_args = _translate_member_field_command(action, args["field"], args.get("value"))
     member_args.update(extra_args)
-    return await _run_member_metadata_command(
-        command, preview=preview, args=member_args
-    )
+    return await _run_member_metadata_command(command, preview=preview, args=member_args)
 
 
 async def dispatch_admin_command(

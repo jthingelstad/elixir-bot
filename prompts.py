@@ -184,14 +184,10 @@ def validate_discord_channel_config():
             errors.append(f"invalid tool policy '{tool_policy}' for {channel['name']}")
         reply_policy = channel.get("reply_policy")
         if reply_policy not in VALID_REPLY_POLICIES:
-            errors.append(
-                f"invalid reply policy '{reply_policy}' for {channel['name']}"
-            )
+            errors.append(f"invalid reply policy '{reply_policy}' for {channel['name']}")
         memory_scope = channel.get("memory_scope")
         if memory_scope not in VALID_MEMORY_SCOPES:
-            errors.append(
-                f"invalid memory scope '{memory_scope}' for {channel['name']}"
-            )
+            errors.append(f"invalid memory scope '{memory_scope}' for {channel['name']}")
         if channel["id"] in seen_ids:
             errors.append(
                 f"duplicate channel id {channel['id']} for {seen_ids[channel['id']]} and {channel['name']}"
@@ -339,11 +335,7 @@ def discord_channel_configs():
         if heading == "Config":
             continue
         start = match.start()
-        end = (
-            heading_matches[i + 1].start()
-            if i + 1 < len(heading_matches)
-            else len(text)
-        )
+        end = heading_matches[i + 1].start() if i + 1 < len(heading_matches) else len(text)
         section = text[start:end].strip()
 
         id_match = re.search(r"^ID:\s*(\d+)\s*$", section, re.MULTILINE)
@@ -493,9 +485,7 @@ def _parse_config_section(text, heading):
 
     Returns dict of {key: int_value} for numeric values, {key: str_value} otherwise.
     """
-    section_match = re.search(
-        rf"## {re.escape(heading)}\s*\n(.*?)(?=\n## |\Z)", text, re.DOTALL
-    )
+    section_match = re.search(rf"## {re.escape(heading)}\s*\n(.*?)(?=\n## |\Z)", text, re.DOTALL)
     if not section_match:
         return {}
 
@@ -606,9 +596,7 @@ def clan_phase(today: date | None = None) -> dict:
     if today is None:
         today = date.today()
     founded_str = thresholds().get("clan_founded")
-    founded = (
-        datetime.strptime(founded_str, "%Y-%m-%d").date() if founded_str else today
-    )
+    founded = datetime.strptime(founded_str, "%Y-%m-%d").date() if founded_str else today
     days = max(0, (today - founded).days)
     months = round(days / _DAYS_PER_MONTH, 1)
     phase = _phase_for_days(days)

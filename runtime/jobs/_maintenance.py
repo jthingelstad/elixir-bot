@@ -65,15 +65,11 @@ def _build_maintenance_report(
         if backup_result["ok"]:
             compressed_mb = backup_result["size_compressed"] / 1_048_576
             original_mb = backup_result["size_original"] / 1_048_576
-            lines.append(
-                f"**Backup:** {original_mb:.1f} MB -> {compressed_mb:.1f} MB compressed"
-            )
+            lines.append(f"**Backup:** {original_mb:.1f} MB -> {compressed_mb:.1f} MB compressed")
             if pruned_count > 0:
                 lines.append(f"  Pruned {pruned_count} old backup(s)")
         else:
-            lines.append(
-                f"**Backup: FAILED** — {backup_result.get('error', 'unknown error')}"
-            )
+            lines.append(f"**Backup: FAILED** — {backup_result.get('error', 'unknown error')}")
         lines.append("")
 
     lines += [
@@ -185,9 +181,7 @@ async def _db_maintenance_cycle():
 
             channel = _bot().get_channel(channel_id)
             if not channel:
-                runtime_status.mark_job_failure(
-                    "db_maintenance", "leaders channel not found"
-                )
+                runtime_status.mark_job_failure("db_maintenance", "leaders channel not found")
                 return
 
             await _post_to_elixir(channel, {"content": report})

@@ -48,9 +48,7 @@ def conn():
 
 
 def _now(c, offset="0 hours"):
-    return c.execute(
-        "SELECT strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)", (offset,)
-    ).fetchone()[0]
+    return c.execute("SELECT strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)", (offset,)).fetchone()[0]
 
 
 def test_tick_errors_flags_error_counters(conn):
@@ -58,9 +56,7 @@ def test_tick_errors_flags_error_counters(conn):
         "INSERT INTO tick_history (recorded_at, counters_json) VALUES (?, ?)",
         (_now(conn), json.dumps({"poll_error": 1, "battles_ingested": 0})),
     )
-    assert health.check_tick_errors(conn) == [
-        "1 tick(s) with step errors in the last 24h"
-    ]
+    assert health.check_tick_errors(conn) == ["1 tick(s) with step errors in the last 24h"]
 
 
 def test_tick_errors_clean_when_counters_healthy(conn):
@@ -95,9 +91,7 @@ def test_ledger_duplicates(conn):
 
 def test_poll_starvation_null_counts_as_starved(conn):
     conn.execute("INSERT INTO players VALUES ('#AAA')")
-    conn.execute(
-        "INSERT INTO clan_memberships (player_tag, left_at) VALUES ('#AAA', NULL)"
-    )
+    conn.execute("INSERT INTO clan_memberships (player_tag, left_at) VALUES ('#AAA', NULL)")
     conn.execute(
         "INSERT INTO poll_state (player_tag, last_battlelog_poll, last_profile_poll) VALUES ('#AAA', NULL, NULL)"
     )
@@ -118,13 +112,9 @@ def test_poll_starvation_ignores_departed_members(conn):
 
 
 def test_memory_writes_flags_stale_and_accepts_fresh(conn):
-    conn.execute(
-        "INSERT INTO memories (created_at) VALUES (?)", (_now(conn, "-3 days"),)
-    )
+    conn.execute("INSERT INTO memories (created_at) VALUES (?)", (_now(conn, "-3 days"),))
     assert len(health.check_memory_writes(conn)) == 1
-    conn.execute(
-        "INSERT INTO memories (created_at) VALUES (?)", (_now(conn, "-1 hours"),)
-    )
+    conn.execute("INSERT INTO memories (created_at) VALUES (?)", (_now(conn, "-1 hours"),))
     assert health.check_memory_writes(conn) == []
 
 

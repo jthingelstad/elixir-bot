@@ -63,7 +63,7 @@ def _get_build_hash():
             .decode()
             .strip()
         )
-    except (subprocess.SubprocessError, OSError):
+    except subprocess.SubprocessError, OSError:
         return "unknown"
 
 
@@ -145,17 +145,13 @@ def _build_system_prompt(*sections):
 
 def response_text(resp) -> str | None:
     """Concatenated text blocks from a native Anthropic Message, or None."""
-    parts = [
-        block.text for block in resp.content if getattr(block, "type", None) == "text"
-    ]
+    parts = [block.text for block in resp.content if getattr(block, "type", None) == "text"]
     return "".join(parts) if parts else None
 
 
 def response_tool_uses(resp) -> list:
     """tool_use blocks (each has .id, .name, .input) from a native Message."""
-    return [
-        block for block in resp.content if getattr(block, "type", None) == "tool_use"
-    ]
+    return [block for block in resp.content if getattr(block, "type", None) == "tool_use"]
 
 
 def _content_has_anthropic_payload(content) -> bool:
@@ -191,9 +187,7 @@ def _sanitize_anthropic_messages(messages):
     if dropped:
         log.info("anthropic_empty_messages_dropped count=%s", dropped)
     if not sanitized:
-        sanitized.append(
-            {"role": "user", "content": "No user message content was provided."}
-        )
+        sanitized.append({"role": "user", "content": "No user message content was provided."})
         log.warning("anthropic_messages_empty_after_sanitize inserted_placeholder=true")
     return sanitized
 
@@ -222,9 +216,7 @@ def _with_message_cache_breakpoint(messages):
     last = messages[-1]
     content = last.get("content")
     if isinstance(content, str):
-        new_content = [
-            {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}
-        ]
+        new_content = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
     elif isinstance(content, list) and content and isinstance(content[-1], dict):
         new_content = list(content)
         new_content[-1] = {**new_content[-1], "cache_control": {"type": "ephemeral"}}
@@ -275,9 +267,7 @@ def _jsonable_messages(messages):
             ser = [_jsonable_block(b) for b in content]
         else:
             ser = content
-        out.append(
-            {"role": m.get("role") if isinstance(m, dict) else "?", "content": ser}
-        )
+        out.append({"role": m.get("role") if isinstance(m, dict) else "?", "content": ser})
     return out
 
 
@@ -314,9 +304,7 @@ def _serialize_response(resp):
             {
                 "stop_reason": getattr(resp, "stop_reason", None),
                 "text": response_text(resp),
-                "tool_uses": [
-                    {"name": b.name, "input": b.input} for b in response_tool_uses(resp)
-                ],
+                "tool_uses": [{"name": b.name, "input": b.input} for b in response_tool_uses(resp)],
             },
             default=str,
         )
@@ -352,9 +340,7 @@ def _create_chat_completion(
     sanitized_messages = _sanitize_anthropic_messages(messages)
     # Snapshot the semantic prompt (pre cache-control markers) for capture — what
     # the model sees, without the ephemeral-cache plumbing.
-    prompt_json = _serialize_prompt(
-        system, sanitized_messages, tools, max_tokens, temperature
-    )
+    prompt_json = _serialize_prompt(system, sanitized_messages, tools, max_tokens, temperature)
 
     cache_enabled = workflow not in WORKFLOWS_WITHOUT_CACHE
     # Stable prefix (system + tools) gets a 1h TTL for periodic workflows so it
@@ -441,7 +427,7 @@ def _create_chat_completion(
                 prompt_json=prompt_json,
                 response_json=_serialize_response(resp),
             )
-        except (OSError, sqlite3.Error):
+        except OSError, sqlite3.Error:
             log.warning("llm_call_persist_failed workflow=%s", workflow, exc_info=True)
         return resp
     except (APIError, APIConnectionError) as exc:
@@ -463,7 +449,7 @@ def _create_chat_completion(
                 prompt_json=prompt_json,
                 response_json=None,
             )
-        except (OSError, sqlite3.Error):
+        except OSError, sqlite3.Error:
             log.warning("llm_call_persist_failed workflow=%s", workflow, exc_info=True)
         # Central alert trigger: runs for every failing LLM call regardless of
         # which workflow / caller ran. Lazy import: runtime.alerts is cheap and

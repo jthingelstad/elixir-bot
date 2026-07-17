@@ -30,8 +30,7 @@ def _insert_declined_card(conn, *, key, note, tag="#AAA"):
 
 def _premise_flag(conn, action_id):
     return conn.execute(
-        "SELECT premise_rejected FROM leader_action_recommendations "
-        "WHERE action_id = ?",
+        "SELECT premise_rejected FROM leader_action_recommendations WHERE action_id = ?",
         (action_id,),
     ).fetchone()[0]
 

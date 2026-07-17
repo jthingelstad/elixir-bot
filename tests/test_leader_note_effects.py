@@ -37,9 +37,7 @@ def test_timing_hold_sets_and_reverts_expiry(engine_conn):
     action_id = _insert_card(engine_conn, key="hold1")
     assert _expires_at(engine_conn, action_id) is None
 
-    result = fx.apply_leader_note_effect(
-        action_id, {"kind": "timing_hold", "hold_days": 30}
-    )
+    result = fx.apply_leader_note_effect(action_id, {"kind": "timing_hold", "hold_days": 30})
     assert result["applied"] and result["kind"] == "timing_hold"
     assert _expires_at(engine_conn, action_id) is not None
     assert result["prior"] == {"expires_at": None}

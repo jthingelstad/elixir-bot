@@ -76,9 +76,7 @@ def test_member_contract_combines_requested_local_facets_and_freshness():
 
 
 def test_member_capability_does_not_fetch_unrequested_facets():
-    result = get_member_intelligence(
-        "#ABC123", facets=("profile",), source=_MemberSource()
-    )
+    result = get_member_intelligence("#ABC123", facets=("profile",), source=_MemberSource())
 
     assert result["requested_facets"] == ["profile"]
     assert "form" not in result

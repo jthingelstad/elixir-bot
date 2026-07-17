@@ -57,9 +57,7 @@ def test_delivers_both_channels_and_records_each():
     read = {"hard_post_signals": [{"signal_key": "s1"}]}
 
     with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
-        result = deliver_mod.deliver_posts(
-            read, plan, post_fn=post_fn, record_fn=record_fn
-        )
+        result = deliver_mod.deliver_posts(read, plan, post_fn=post_fn, record_fn=record_fn)
 
     assert result == {
         "delivered": 2,
@@ -97,9 +95,7 @@ def test_uncovered_hard_post_floor_fails_tick():
     record_fn, recorded = _recorder()
     sent = []
     read = {"hard_post_signals": [{"signal_key": "s1"}, {"signal_key": "s2"}]}
-    plan = {
-        "posts": [{"channel": "elixir", "content": "hi", "covers_signal_keys": ["s1"]}]
-    }
+    plan = {"posts": [{"channel": "elixir", "content": "hi", "covers_signal_keys": ["s1"]}]}
     with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
         result = deliver_mod.deliver_posts(
             read,
@@ -178,9 +174,7 @@ def test_partial_delivery_retry_sends_only_unfulfilled_intent(engine_conn):
         second = deliver_mod.deliver_posts(
             read,
             plan,
-            post_fn=lambda channel_id, copy: (
-                retry_sends.append((channel_id, copy)) or 902
-            ),
+            post_fn=lambda channel_id, copy: retry_sends.append((channel_id, copy)) or 902,
             record_fn=record,
             intent_store=IntentStore,
         )
@@ -238,9 +232,7 @@ def test_pending_outbox_post_drains_even_when_fresh_plan_chooses_silence(engine_
             {"hard_post_signals": [{"signal_key": "s1"}]},
             plan,
             post_fn=lambda channel_id, copy: sent.append((channel_id, copy)) or 903,
-            record_fn=lambda **kwargs: store.record_awareness_post(
-                conn=engine_conn, **kwargs
-            ),
+            record_fn=lambda **kwargs: store.record_awareness_post(conn=engine_conn, **kwargs),
             intent_store=IntentStore,
         )
 
@@ -281,9 +273,7 @@ def test_invalid_hard_post_plan_is_rejected_before_outbox_persistence(engine_con
 
     assert result["failed"] is True
     assert result["uncovered_hard"] == ["s2"]
-    count = engine_conn.execute(
-        "SELECT COUNT(*) FROM awareness_delivery_intents"
-    ).fetchone()[0]
+    count = engine_conn.execute("SELECT COUNT(*) FROM awareness_delivery_intents").fetchone()[0]
     assert count == 0
 
 
@@ -329,9 +319,7 @@ def test_fulfilled_sibling_counts_while_pending_sibling_retries(engine_conn):
         posts, required_signal_keys={"s1", "s2"}, conn=engine_conn
     )
     first_key = next(
-        item["intent_key"]
-        for item in work
-        if item["post"]["channel"] == "announcements"
+        item["intent_key"] for item in work if item["post"]["channel"] == "announcements"
     )
     assert store.mark_delivery_sending(first_key, conn=engine_conn) is True
     store.mark_delivery_fulfilled(first_key, 904, conn=engine_conn)
@@ -343,9 +331,7 @@ def test_fulfilled_sibling_counts_while_pending_sibling_retries(engine_conn):
             {"hard_post_signals": [{"signal_key": "s1"}, {"signal_key": "s2"}]},
             plan,
             post_fn=lambda channel_id, copy: sent.append((channel_id, copy)) or 905,
-            record_fn=lambda **kwargs: store.record_awareness_post(
-                conn=engine_conn, **kwargs
-            ),
+            record_fn=lambda **kwargs: store.record_awareness_post(conn=engine_conn, **kwargs),
             intent_store=IntentStore,
         )
 
@@ -378,8 +364,7 @@ def test_expired_sending_lease_returns_to_pending_for_at_least_once_retry(engine
 
     assert expired[0]["status"] == "pending"
     row = engine_conn.execute(
-        "SELECT attempts, last_error FROM awareness_delivery_intents "
-        "WHERE intent_key = ?",
+        "SELECT attempts, last_error FROM awareness_delivery_intents WHERE intent_key = ?",
         (intent_key,),
     ).fetchone()
     assert tuple(row) == (1, "delivery lease expired; retrying at least once")
@@ -432,9 +417,7 @@ def test_presence_of_clan_chat_is_the_routing_decision():
             record_fn=lambda **_: None,
             relay_fn=lambda p, c: voiced.append(p.get("content")),
         )
-    assert voiced == ["voiced one"], (
-        "only the post with a clan_chat voicing goes in-game"
-    )
+    assert voiced == ["voiced one"], "only the post with a clan_chat voicing goes in-game"
 
 
 def test_member_join_with_clan_chat_voices_in_game():
@@ -794,9 +777,7 @@ def test_recorded_post_is_idempotent_by_discord_message_id(engine_conn):
         lane="announcements", content="retry receipt", message_id=42, conn=engine_conn
     )
 
-    rows = engine_conn.execute(
-        "SELECT lane, content_preview FROM awareness_posts"
-    ).fetchall()
+    rows = engine_conn.execute("SELECT lane, content_preview FROM awareness_posts").fetchall()
     assert [tuple(row) for row in rows] == [("elixir", "first receipt")]
 
 
@@ -825,8 +806,7 @@ def test_post_receipt_failure_is_fail_soft_but_records_incident(engine_conn):
     )
 
     incident = engine_conn.execute(
-        "SELECT component, summary FROM runtime_incidents "
-        "WHERE component = 'awareness.record_post'"
+        "SELECT component, summary FROM runtime_incidents WHERE component = 'awareness.record_post'"
     ).fetchone()
     assert incident is not None
     assert incident[0] == "awareness.record_post"
@@ -840,9 +820,7 @@ def test_failed_tick_does_not_advance_cursor(engine_conn):
     store.ensure_awareness_schema(engine_conn)
 
     # A successful silence advances the cursor.
-    store.persist_thought(
-        {}, {"posts": [], "skipped_reason": "quiet"}, conn=engine_conn
-    )
+    store.persist_thought({}, {"posts": [], "skipped_reason": "quiet"}, conn=engine_conn)
     after_silence = store.last_tick_at(conn=engine_conn)
     assert after_silence is not None
 
@@ -853,7 +831,5 @@ def test_failed_tick_does_not_advance_cursor(engine_conn):
 
     # A real post advances it again.
     store.record_awareness_post(lane="elixir", content="hi", conn=engine_conn)
-    store.persist_thought(
-        {}, {"posts": [{"channel": "elixir", "content": "hi"}]}, conn=engine_conn
-    )
+    store.persist_thought({}, {"posts": [{"channel": "elixir", "content": "hi"}]}, conn=engine_conn)
     assert store.last_tick_at(conn=engine_conn) >= after_silence

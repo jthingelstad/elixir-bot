@@ -96,9 +96,7 @@ def test_period_anchor_beats_fixed_boundary():
 
     anchor = datetime(2026, 7, 4, 9, 37, tzinfo=timezone.utc)
     now = anchor + timedelta(hours=2)
-    clock = war_clock(
-        _race("warDay", 24, 3, fame=500), now, season_id=133, period_anchor=anchor
-    )
+    clock = war_clock(_race("warDay", 24, 3, fame=500), now, season_id=133, period_anchor=anchor)
     assert 21.5 <= clock.hours_left_in_period <= 22.5
     # Stale anchor (past its day) falls back to the nominal boundary
     stale = war_clock(

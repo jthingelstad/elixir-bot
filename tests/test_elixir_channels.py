@@ -131,18 +131,14 @@ def test_on_message_routes_interactive_channel_when_mentioned():
         asyncio.run(elixir.on_message(message))
 
     assert mock_respond.call_args.kwargs["workflow"] == "interactive"
-    mock_history.assert_called_once_with(
-        "channel_user:100:123", elixir.CHANNEL_CONVERSATION_LIMIT
-    )
+    mock_history.assert_called_once_with("channel_user:100:123", elixir.CHANNEL_CONVERSATION_LIMIT)
     message.reply.assert_awaited_once_with("You look solid.")
     mock_share.assert_awaited_once()
     mock_process.assert_not_awaited()
 
 
 def test_on_message_routes_ask_elixir_without_mention():
-    message = _make_message(
-        1482368505058955467, "ask-elixir", "what deck should I learn next?"
-    )
+    message = _make_message(1482368505058955467, "ask-elixir", "what deck should I learn next?")
     sent_message = SimpleNamespace(id=987)
     message.reply = AsyncMock(return_value=sent_message)
 
@@ -191,9 +187,7 @@ def test_on_message_routes_ask_elixir_without_mention():
     message.reply.assert_awaited_once_with(
         "Try a deck with faster cycles so you can learn matchups quicker."
     )
-    assistant_save = [
-        call for call in mock_save.call_args_list if call.args[1] == "assistant"
-    ][0]
+    assistant_save = [call for call in mock_save.call_args_list if call.args[1] == "assistant"][0]
     assert assistant_save.kwargs["discord_message_id"] == "987"
     mock_share.assert_awaited_once()
     mock_process.assert_not_awaited()
@@ -487,9 +481,7 @@ def test_on_message_passes_screenshot_to_deck_review():
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message"),
         patch("elixir._extract_member_deck_target", return_value="#ABC123"),
-        patch(
-            "elixir.db.get_member_profile", return_value={"current_name": "King Thing"}
-        ),
+        patch("elixir.db.get_member_profile", return_value={"current_name": "King Thing"}),
         patch(
             "agent.intent_router.classify_intent",
             return_value={
@@ -609,16 +601,12 @@ def test_on_message_does_not_save_unsent_interactive_reply():
                 "summary": "solid",
             },
         ),
-        patch(
-            "elixir._reply_text", new=AsyncMock(side_effect=RuntimeError("send failed"))
-        ),
+        patch("elixir._reply_text", new=AsyncMock(side_effect=RuntimeError("send failed"))),
         patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
     ):
         asyncio.run(elixir.on_message(message))
 
-    assistant_saves = [
-        call for call in mock_save.call_args_list if call.args[1] == "assistant"
-    ]
+    assistant_saves = [call for call in mock_save.call_args_list if call.args[1] == "assistant"]
     assert assistant_saves == []
     mock_share.assert_not_awaited()
     message.reply.assert_awaited_once_with("Hit an error. Try again in a moment.")
@@ -631,9 +619,7 @@ def test_on_raw_reaction_add_marks_arena_relay_action_done():
         message_id=987,
         user_id=123,
         emoji="✅",
-        member=SimpleNamespace(
-            bot=False, roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)]
-        ),
+        member=SimpleNamespace(bot=False, roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)]),
     )
 
     async def fake_to_thread(fn, *args, **kwargs):
@@ -779,9 +765,7 @@ def test_arena_relay_leader_screenshot_is_observed():
                 "observation": {
                     "screenshot_type": "boat_defense",
                     "players": ["dez42"],
-                    "actionable_facts": [
-                        "At least three open defense slots are visible."
-                    ],
+                    "actionable_facts": ["At least three open defense slots are visible."],
                     "uncertainty": None,
                 },
             },
@@ -881,9 +865,7 @@ def test_arena_relay_screenshot_persists_structured_memories():
         "arena-relay",
         555,
     )
-    message.reply.assert_awaited_once_with(
-        "**Read:** Fullboat is camping with limited signal."
-    )
+    message.reply.assert_awaited_once_with("**Read:** Fullboat is camping with limited signal.")
     mock_process.assert_not_awaited()
 
 
@@ -899,12 +881,8 @@ def test_persist_screenshot_memories_saves_elixir_inference_with_evidence():
     ]
 
     with (
-        patch(
-            "agent.tool_exec._resolve_member_tag", return_value="#ABC123"
-        ) as mock_resolve,
-        patch(
-            "memory_store.create_memory", return_value={"memory_id": 42}
-        ) as mock_create,
+        patch("agent.tool_exec._resolve_member_tag", return_value="#ABC123") as mock_resolve,
+        patch("memory_store.create_memory", return_value={"memory_id": 42}) as mock_create,
         patch("memory_store.attach_tags") as mock_tags,
         patch("memory_store.attach_evidence_ref") as mock_evidence,
     ):
@@ -1018,9 +996,7 @@ def test_collect_screenshot_payload_resizes_large_images():
         attachments=[attachment],
     )
 
-    blocks, metadata = asyncio.run(
-        channel_router._collect_screenshot_image_payload(message)
-    )
+    blocks, metadata = asyncio.run(channel_router._collect_screenshot_image_payload(message))
 
     attachment.read.assert_awaited_once()
     assert len(blocks) == 1
@@ -1030,8 +1006,7 @@ def test_collect_screenshot_payload_resizes_large_images():
     assert metadata[0]["resized"] is True
     assert metadata[0]["reencoded"] is True
     assert (
-        max(metadata[0]["width"], metadata[0]["height"])
-        == channel_router.MAX_SCREENSHOT_LONG_EDGE
+        max(metadata[0]["width"], metadata[0]["height"]) == channel_router.MAX_SCREENSHOT_LONG_EDGE
     )
 
 
@@ -1083,9 +1058,7 @@ def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():
             "runtime.prompt_feedback.db.upsert_prompt_feedback",
             return_value={"prompt_feedback_id": 44, "became_active_down": True},
         ) as mock_upsert,
-        patch(
-            "runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited"
-        ) as mock_mark,
+        patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
         patch(
             "runtime.app.bot",
             new=SimpleNamespace(
@@ -1211,9 +1184,7 @@ def test_on_raw_reaction_add_records_positive_feedback_and_acknowledges_receipt(
             "runtime.prompt_feedback.db.upsert_prompt_feedback",
             return_value={"prompt_feedback_id": 45, "became_active_down": False},
         ) as mock_upsert,
-        patch(
-            "runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited"
-        ) as mock_mark,
+        patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
         patch(
             "runtime.app.bot",
             new=SimpleNamespace(
@@ -1272,9 +1243,7 @@ def test_on_raw_reaction_add_ignores_non_owner_feedback():
         patch("runtime.prompt_feedback.db.upsert_prompt_feedback") as mock_upsert,
         patch(
             "runtime.app.bot",
-            new=SimpleNamespace(
-                user=SimpleNamespace(id=111), get_channel=lambda _channel_id: None
-            ),
+            new=SimpleNamespace(user=SimpleNamespace(id=111), get_channel=lambda _channel_id: None),
         ),
     ):
         asyncio.run(elixir.on_raw_reaction_add(payload))
@@ -1325,14 +1294,10 @@ def test_on_raw_reaction_add_does_not_repeat_retry_invitation_for_active_down_fe
             "runtime.prompt_feedback.db.upsert_prompt_feedback",
             return_value={"prompt_feedback_id": 44, "became_active_down": False},
         ) as mock_upsert,
-        patch(
-            "runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited"
-        ) as mock_mark,
+        patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
         patch(
             "runtime.app.bot",
-            new=SimpleNamespace(
-                user=SimpleNamespace(id=999), get_channel=lambda _channel_id: None
-            ),
+            new=SimpleNamespace(user=SimpleNamespace(id=999), get_channel=lambda _channel_id: None),
         ),
     ):
         asyncio.run(elixir.on_raw_reaction_add(payload))
@@ -1382,9 +1347,7 @@ def test_on_raw_reaction_remove_clears_matching_feedback():
         patch("runtime.prompt_feedback.db.clear_prompt_feedback") as mock_clear,
         patch(
             "runtime.app.bot",
-            new=SimpleNamespace(
-                user=SimpleNamespace(id=999), get_channel=lambda _channel_id: None
-            ),
+            new=SimpleNamespace(user=SimpleNamespace(id=999), get_channel=lambda _channel_id: None),
         ),
     ):
         asyncio.run(elixir.on_raw_reaction_remove(payload))
@@ -1397,9 +1360,7 @@ def test_on_raw_reaction_remove_clears_matching_feedback():
 
 
 def test_on_message_saves_primary_discord_message_id_for_multipart_ask_elixir_reply():
-    message = _make_message(
-        1482368505058955467, "ask-elixir", "give me a deeper explanation"
-    )
+    message = _make_message(1482368505058955467, "ask-elixir", "give me a deeper explanation")
     sent_messages = [
         SimpleNamespace(id=2001),
         SimpleNamespace(id=2002),
@@ -1447,9 +1408,7 @@ def test_on_message_saves_primary_discord_message_id_for_multipart_ask_elixir_re
     ):
         asyncio.run(elixir.on_message(message))
 
-    assistant_save = [
-        call for call in mock_save.call_args_list if call.args[1] == "assistant"
-    ][0]
+    assistant_save = [call for call in mock_save.call_args_list if call.args[1] == "assistant"][0]
     assert assistant_save.kwargs["discord_message_id"] == "2001"
     assert assistant_save.args[2] == "Part one.\n\nPart two."
     mock_share.assert_awaited_once()
@@ -1482,9 +1441,7 @@ def test_strip_bot_mentions_removes_only_leading_mention():
 def test_post_to_elixir_sends_content_list_as_multiple_messages():
     channel = SimpleNamespace(send=AsyncMock())
 
-    asyncio.run(
-        elixir._post_to_elixir(channel, {"content": ["First post", "Second post"]})
-    )
+    asyncio.run(elixir._post_to_elixir(channel, {"content": ["First post", "Second post"]}))
 
     assert channel.send.await_args_list[0].args == ("First post",)
     assert channel.send.await_args_list[1].args == ("Second post",)
@@ -1523,14 +1480,10 @@ def test_entry_posts_keeps_distinct_updates_separate():
 
 
 def test_post_to_elixir_resolves_custom_emoji_shortcodes():
-    guild = SimpleNamespace(
-        emojis=[SimpleNamespace(name="elixir_hype", id=321, animated=False)]
-    )
+    guild = SimpleNamespace(emojis=[SimpleNamespace(name="elixir_hype", id=321, animated=False)])
     channel = SimpleNamespace(send=AsyncMock(), guild=guild)
 
-    asyncio.run(
-        elixir._post_to_elixir(channel, {"content": "Keep climbing :elixir_hype:"})
-    )
+    asyncio.run(elixir._post_to_elixir(channel, {"content": "Keep climbing :elixir_hype:"}))
 
     channel.send.assert_awaited_once_with("Keep climbing <:elixir_hype:321>")
 
@@ -1552,9 +1505,7 @@ def test_post_startup_message_posts_build_hash_to_elixir_log_webhook():
             "elixir.prompts.discord_channels_by_workflow",
             return_value=[{"id": 200, "name": "#leader-lounge"}],
         ),
-        patch(
-            "elixir.prompts.discord_channel_configs", return_value=proactive_channels
-        ),
+        patch("elixir.prompts.discord_channel_configs", return_value=proactive_channels),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir.db.list_channel_messages", return_value=[]),
         patch("elixir.elixir_agent.RELEASE_LABEL", 'v3.0 "Three-Lane Elixir"'),
@@ -1727,9 +1678,7 @@ def test_startup_channel_audit_reports_missing_or_unwritable_channels():
 
     with (
         patch.object(elixir.bot, "get_channel", side_effect=fake_get_channel),
-        patch.object(
-            elixir.bot, "fetch_channel", new=AsyncMock(side_effect=fake_fetch_channel)
-        ),
+        patch.object(elixir.bot, "fetch_channel", new=AsyncMock(side_effect=fake_fetch_channel)),
         patch.object(
             type(elixir.bot),
             "user",
@@ -1801,9 +1750,7 @@ def test_startup_channel_audit_flags_missing_soft_perms():
     )
 
     def fake_get_channel(channel_id):
-        return {200: reception_channel, 300: ask_channel, 400: leader_channel}.get(
-            channel_id
-        )
+        return {200: reception_channel, 300: ask_channel, 400: leader_channel}.get(channel_id)
 
     with (
         patch.object(elixir.bot, "get_channel", side_effect=fake_get_channel),
@@ -1910,9 +1857,7 @@ def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
 
 
 def test_on_message_logs_agent_failure_payload_details():
-    message = _make_message(
-        200, "clan-ops", "<@999> Who is on the hottest streak right now?"
-    )
+    message = _make_message(200, "clan-ops", "<@999> Who is on the hottest streak right now?")
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -1994,9 +1939,7 @@ def test_on_message_logs_agent_failure_payload_details():
 
 
 def test_on_message_ignores_unmentioned_clanops_chat():
-    message = _make_message(
-        200, "clan-ops", "I think we need to review promotions this week."
-    )
+    message = _make_message(200, "clan-ops", "I think we need to review promotions this week.")
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -2248,9 +2191,7 @@ def test_slash_help_does_not_save_conversation_history():
     root = _root(bot, "clanops")
     help_command = root.get_command("help")
 
-    response = SimpleNamespace(
-        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
-    )
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
@@ -2301,9 +2242,7 @@ def test_member_help_is_ungated():
     register_elixir_app_commands(bot)
     help_cmd = _root(bot, "elixir").get_command("help")
 
-    response = SimpleNamespace(
-        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
-    )
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=999, name="general", type="text"),
         user=SimpleNamespace(id=42, name="member", display_name="Member", roles=[]),
@@ -2335,9 +2274,7 @@ def test_slash_relay_status_allowed_in_arena_relay():
     relay_group = root.get_command("relay")
     status_command = relay_group.get_command("status")
 
-    response = SimpleNamespace(
-        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
-    )
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=300, name="leader-actions", type="text"),
@@ -2384,9 +2321,7 @@ def test_slash_non_relay_command_still_rejected_in_arena_relay():
     clan_group = root.get_command("clan")
     war_status_command = clan_group.get_command("war")
 
-    response = SimpleNamespace(
-        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
-    )
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=300, name="leader-actions", type="text"),
@@ -2496,9 +2431,7 @@ def test_dispatch_admin_command_handles_member_audit_discord():
 
 def test_dispatch_admin_command_handles_verify_discord():
     with (
-        patch(
-            "runtime.admin._resolve_member_tag", return_value=("#ABC123", "King Levy")
-        ),
+        patch("runtime.admin._resolve_member_tag", return_value=("#ABC123", "King Levy")),
         patch(
             "runtime.onboarding.verify_discord_membership",
             new=AsyncMock(return_value="Verified Discord identity for King Levy."),
@@ -2610,10 +2543,7 @@ def test_dispatch_admin_command_handles_set_discord():
             )
         )
 
-    assert (
-        "Couldn't resolve `@kinglevy` to a unique Discord member for King Levy."
-        in result
-    )
+    assert "Couldn't resolve `@kinglevy` to a unique Discord member for King Levy." in result
     assert "Use a real mention" in result
     assert len(mock_to_thread.await_args_list) == 1
 
@@ -2679,9 +2609,7 @@ def test_dispatch_admin_command_handles_set_note_and_writes_contextual_memory():
         None,
         "Reliable war leader.",
     )
-    assert mock_to_thread.await_args_list[2].args == (
-        runtime_admin.upsert_member_note_memory,
-    )
+    assert mock_to_thread.await_args_list[2].args == (runtime_admin.upsert_member_note_memory,)
     assert mock_to_thread.await_args_list[2].kwargs == {
         "member_tag": "#ABC123",
         "member_label": "King Levy",
@@ -2713,9 +2641,7 @@ def test_dispatch_admin_command_handles_clear_note_and_archives_contextual_memor
         "#ABC123",
         None,
     )
-    assert mock_to_thread.await_args_list[2].args == (
-        runtime_admin.archive_member_note_memory,
-    )
+    assert mock_to_thread.await_args_list[2].args == (runtime_admin.archive_member_note_memory,)
     assert mock_to_thread.await_args_list[2].kwargs == {
         "member_tag": "#ABC123",
         "actor": "leader:admin-command",
@@ -2792,9 +2718,7 @@ def test_slash_clan_members_full_passes_flag_to_admin_dispatch():
     clan_group = root.get_command("clan")
     clan_list_command = clan_group.get_command("members")
 
-    response = SimpleNamespace(
-        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
-    )
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
@@ -2831,9 +2755,7 @@ def test_slash_clan_war_dispatches_to_admin():
     clan_group = root.get_command("clan")
     war_status_command = clan_group.get_command("war")
 
-    response = SimpleNamespace(
-        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
-    )
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
@@ -2870,9 +2792,7 @@ def test_slash_member_set_discord_passes_identity_to_admin_dispatch():
     member_group = root.get_command("member")
     set_discord_command = member_group.get_command("set")
 
-    response = SimpleNamespace(
-        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
-    )
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
@@ -2919,9 +2839,7 @@ def test_slash_activity_run_defers_before_dispatching():
     jobs_group = root.get_command("activity")
     run_command = jobs_group.get_command("run")
 
-    response = SimpleNamespace(
-        is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock()
-    )
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
@@ -2944,9 +2862,7 @@ def test_slash_activity_run_defers_before_dispatching():
             new=AsyncMock(return_value="job failed"),
         ) as mock_dispatch,
     ):
-        asyncio.run(
-            run_command.callback(interaction, activity="weekly-recap", preview=False)
-        )
+        asyncio.run(run_command.callback(interaction, activity="weekly-recap", preview=False))
 
     response.defer.assert_awaited_once_with(ephemeral=True)
     mock_dispatch.assert_awaited_once_with(
@@ -2971,14 +2887,12 @@ def test_queue_startup_system_signals_enqueues_well_formed_announcements():
 
     for system_signal in STARTUP_SYSTEM_SIGNALS:
         payload = system_signal["payload"]
-        assert payload.get("title", "").startswith("Achievement Unlocked"), (
-            system_signal["signal_key"]
-        )
-        assert payload.get("message"), system_signal["signal_key"]
-        assert payload.get("capability_area"), system_signal["signal_key"]
-        assert system_signal["signal_type"] in {"capability_unlock"}, system_signal[
+        assert payload.get("title", "").startswith("Achievement Unlocked"), system_signal[
             "signal_key"
         ]
+        assert payload.get("message"), system_signal["signal_key"]
+        assert payload.get("capability_area"), system_signal["signal_key"]
+        assert system_signal["signal_type"] in {"capability_unlock"}, system_signal["signal_key"]
 
 
 def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
@@ -3221,16 +3135,12 @@ def test_llm_outage_alert_waits_for_three_consecutive_soft_errors():
                 "runtime.app.runtime_status.snapshot",
                 return_value=snapshot_with_count(2),
             ):
-                early = asyncio.run(
-                    runtime_app._maybe_alert_llm_failure("channel update")
-                )
+                early = asyncio.run(runtime_app._maybe_alert_llm_failure("channel update"))
             with patch(
                 "runtime.app.runtime_status.snapshot",
                 return_value=snapshot_with_count(3),
             ):
-                third = asyncio.run(
-                    runtime_app._maybe_alert_llm_failure("channel update")
-                )
+                third = asyncio.run(runtime_app._maybe_alert_llm_failure("channel update"))
         finally:
             runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
 
@@ -3397,16 +3307,12 @@ def test_activity_registry_has_unique_keys_and_required_fields():
     assert all(activity.owner_lane for activity in activities)
     assert all(activity.job_id for activity in activities)
     assert all(activity.job_function for activity in activities)
-    assert all(
-        activity.schedule_kind in {"interval", "cron"} for activity in activities
-    )
+    assert all(activity.schedule_kind in {"interval", "cron"} for activity in activities)
     assert all(activity.delivery_targets for activity in activities)
 
 
 def test_activity_registry_exposes_war_and_promotion_visibility():
-    specs = {
-        spec["activity_key"]: spec for spec in schedule_specs_from_registry(elixir)
-    }
+    specs = {spec["activity_key"]: spec for spec in schedule_specs_from_registry(elixir)}
 
     assert specs["engine-tick"]["owner_lane"] == "player-highlights"
     assert specs["engine-tick"]["activity_role"] == "observer"
@@ -3496,9 +3402,7 @@ def test_api_sentinel_tick_is_record_only_no_leader_posts():
         return fn(*args, **kwargs)
 
     with (
-        patch(
-            "runtime.jobs._maintenance.asyncio.to_thread", side_effect=fake_to_thread
-        ),
+        patch("runtime.jobs._maintenance.asyncio.to_thread", side_effect=fake_to_thread),
         patch(
             "runtime.jobs._maintenance.db.bootstrap_api_sentinel_baseline",
             return_value={
@@ -3512,12 +3416,8 @@ def test_api_sentinel_tick_is_record_only_no_leader_posts():
             return_value=[{"eventTag": "#E", "title": "Event"}],
         ),
         patch("runtime.jobs._maintenance.runtime_status.mark_job_start") as mock_start,
-        patch(
-            "runtime.jobs._maintenance.runtime_status.mark_job_success"
-        ) as mock_success,
-        patch(
-            "runtime.jobs._maintenance.runtime_status.mark_job_failure"
-        ) as mock_failure,
+        patch("runtime.jobs._maintenance.runtime_status.mark_job_success") as mock_success,
+        patch("runtime.jobs._maintenance.runtime_status.mark_job_failure") as mock_failure,
     ):
         # No pending-signal listing and no signal posting happen anymore; if the
         # tick tried, these attributes wouldn't even be patched here.
@@ -3652,10 +3552,7 @@ def test_build_status_report_omits_job_schedule_section():
     assert "Current war season id: 130" in report
     assert "Member role auto-grant: Manage Roles permission missing" in report
     assert "🧠 Context memory: 7 total (3 leader / 2 inference / 2 system)" in report
-    assert (
-        "💸 Claude spend: 7d $3.50 across 12 call(s), projected $15.00/mo; failures 1"
-        in report
-    )
+    assert "💸 Claude spend: 7d $3.50 across 12 call(s), projected $15.00/mo; failures 1" in report
     assert (
         "👁️ Awareness 7d: 20 tick(s), 8 signal(s), 6 post(s), failed ticks 0, delivery failures 0"
         in report
@@ -3765,9 +3662,7 @@ def test_on_message_handles_roster_join_dates_directly():
     message.reply.assert_awaited_once_with(
         "**Clan Roster + Join Dates**\n1. King Levy (coLeader) — joined 2024-01-15"
     )
-    assert (
-        mock_save.call_args_list[1].kwargs["event_type"] == "roster_join_dates_report"
-    )
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "roster_join_dates_report"
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 
@@ -3869,10 +3764,7 @@ def test_on_message_handles_top_war_contributors_directly():
     message.reply.assert_awaited_once_with(
         "**Top War Contributors (Season 130)**\n1. King Levy — 3,200 fame across 4 race(s)"
     )
-    assert (
-        mock_save.call_args_list[1].kwargs["event_type"]
-        == "top_war_contributors_report"
-    )
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "top_war_contributors_report"
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 
@@ -3977,10 +3869,7 @@ def test_build_clan_status_report_summarizes_operational_clan_state():
     assert report.startswith("**POAP KINGS Status**")
     assert "Roster: 21/50 members | 29 open" in report
     assert "weekly donations 1,400" in report
-    assert (
-        "top donors King Levy (<@1474760692992180429>) 220, Finn 180, Vijay 140"
-        in report
-    )
+    assert "top donors King Levy (<@1474760692992180429>) 220, Finn 180, Vijay 140" in report
     assert "War now: season 77 | week 2 | state riverRace | boat-rank 1" in report
     assert (
         "Watch list: 1 with no war decks this season | 1 at risk | 1 on cold streaks | 1 joined in last 30d"
@@ -4090,13 +3979,9 @@ def test_build_war_status_report_summarizes_current_war_awareness():
         )
 
     assert report.startswith("**POAP KINGS War Status**")
-    assert (
-        "Live: state full | season 129 | week 2 | Battle Day 2 | boat-rank 2" in report
-    )
+    assert "Live: state full | season 129 | week 2 | Battle Day 2 | boat-rank 2" in report
     assert "Clock: Battle Day 2 | time left 22h 29m | key `s00129-w01-p011`" in report
-    assert (
-        "Engagement: 17 engaged | 9 finished all 4 | 8 untouched | 25 tracked" in report
-    )
+    assert "Engagement: 17 engaged | 9 finished all 4 | 8 untouched | 25 tracked" in report
     assert "Season points leaders (War Champ race): King Levy 800, Finn 600" in report
     assert "Waiting on: Vijay, Ditika" in report
     assert (
@@ -4172,14 +4057,8 @@ def test_build_db_status_report_lists_group_summaries():
         report = elixir._build_db_status_report()
 
     assert report.startswith("**Elixir DB Status**")
-    assert (
-        "File: `elixir.db` | schema v15 | size 40.0 KB | WAL 8.0 KB | SHM 32.0 KB"
-        in report
-    )
-    assert (
-        "Storage: page size 4,096 B | pages 10 | free pages 2 | journal wal | tables 3"
-        in report
-    )
+    assert "File: `elixir.db` | schema v15 | size 40.0 KB | WAL 8.0 KB | SHM 32.0 KB" in report
+    assert "Storage: page size 4,096 B | pages 10 | free pages 2 | journal wal | tables 3" in report
     assert "Clan: 1 tables | 50 rows | 4.0 KB" in report
     assert "War: 1 tables | 320 rows | 12.0 KB" in report
     assert "Memory: 1 tables | 1,200 rows | 24.0 KB" in report
@@ -4228,13 +4107,9 @@ def test_build_clan_status_report_uses_non_war_risk_watchlist():
             },
         ),
         patch("elixir.db.list_members", return_value=[]),
-        patch(
-            "elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}
-        ),
+        patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
         patch("elixir.db.get_war_season_summary", return_value=None),
-        patch(
-            "elixir.db.get_members_at_risk", return_value={"members": []}
-        ) as mock_risk,
+        patch("elixir.db.get_members_at_risk", return_value={"members": []}) as mock_risk,
         patch("elixir.db.get_members_on_losing_streak", return_value=[]),
         patch("elixir.db.list_recent_joins", return_value=[]),
         patch("elixir.db.get_war_deck_status_today", return_value={}),
@@ -4263,9 +4138,7 @@ def test_build_clan_status_report_formats_recent_joins_as_relative_days():
             },
         ),
         patch("elixir.db.list_members", return_value=[]),
-        patch(
-            "elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}
-        ),
+        patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
         patch("elixir.db.get_war_season_summary", return_value=None),
         patch("elixir.db.get_members_at_risk", return_value={"members": []}),
         patch("elixir.db.get_members_on_losing_streak", return_value=[]),
@@ -4275,9 +4148,7 @@ def test_build_clan_status_report_formats_recent_joins_as_relative_days():
         ),
         patch("elixir.db.get_war_deck_status_today", return_value={}),
     ):
-        report = elixir._build_clan_status_report(
-            {"name": "POAP KINGS", "members": 21}, {}
-        )
+        report = elixir._build_clan_status_report({"name": "POAP KINGS", "members": 21}, {})
 
     assert "Recent joins: Ditika (3 days ago)" in report
 
@@ -4294,9 +4165,7 @@ def test_build_clan_status_report_prefers_live_recent_join_delta():
             },
         ),
         patch("elixir.db.list_members", return_value=[]),
-        patch(
-            "elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}
-        ),
+        patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
         patch(
             "elixir.db.get_war_season_summary",
             return_value={
@@ -4319,9 +4188,7 @@ def test_build_clan_status_report_prefers_live_recent_join_delta():
             {
                 "name": "POAP KINGS",
                 "members": 21,
-                "_elixir_recent_joins": [
-                    {"member_ref": "Ditika", "joined_date": today}
-                ],
+                "_elixir_recent_joins": [{"member_ref": "Ditika", "joined_date": today}],
             },
             {},
         )
@@ -4481,9 +4348,7 @@ def test_reply_text_converts_markdown_images_to_discord_friendly_text():
 
 
 def test_reply_text_resolves_custom_emoji_shortcodes():
-    guild = SimpleNamespace(
-        emojis=[SimpleNamespace(name="elixir_trophy", id=987, animated=False)]
-    )
+    guild = SimpleNamespace(emojis=[SimpleNamespace(name="elixir_trophy", id=987, animated=False)])
     message = _make_message(200, "ask-elixir", "nice")
     message.guild = guild
 
@@ -4534,9 +4399,7 @@ def test_build_clan_status_short_report_is_compact():
             return_value=[{"member_ref": "Finn", "current_streak": 3}],
         ),
     ):
-        report = elixir._build_clan_status_short_report(
-            {"name": "POAP KINGS", "members": 21}, {}
-        )
+        report = elixir._build_clan_status_short_report({"name": "POAP KINGS", "members": 21}, {})
 
     assert report.startswith("**POAP KINGS Status (Short)**")
     assert "Roster: 21/50 | open 29" in report
@@ -4558,18 +4421,12 @@ def test_build_clan_status_short_report_uses_non_war_risk_watchlist():
                 "avg_trophies": 7523.4,
             },
         ),
-        patch(
-            "elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}
-        ),
+        patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
         patch("elixir.db.get_war_season_summary", return_value=None),
-        patch(
-            "elixir.db.get_members_at_risk", return_value={"members": []}
-        ) as mock_risk,
+        patch("elixir.db.get_members_at_risk", return_value={"members": []}) as mock_risk,
         patch("elixir.db.get_members_on_losing_streak", return_value=[]),
     ):
-        elixir._build_clan_status_short_report(
-            {"name": "POAP KINGS", "members": 21}, {}
-        )
+        elixir._build_clan_status_short_report({"name": "POAP KINGS", "members": 21}, {})
 
         mock_risk.assert_called_once_with(
             inactivity_days=7,
@@ -4699,9 +4556,7 @@ def test_build_weekly_clan_recap_context_summarizes_week():
                     "races": 3,
                     "total_clan_fame": 50234,
                     "fame_per_active_member": 2392.1,
-                    "top_contributors": [
-                        {"member_ref": "King Levy", "total_points": 3200}
-                    ],
+                    "top_contributors": [{"member_ref": "King Levy", "total_points": 3200}],
                 },
                 "recent_war_races": [
                     {
@@ -4715,9 +4570,7 @@ def test_build_weekly_clan_recap_context_summarizes_week():
                         "top_participants": [
                             {"member_ref": "King Levy", "points": 3200, "decks_used": 4}
                         ],
-                        "standings_preview": [
-                            {"rank": 1, "name": "POAP KINGS", "fame": 12345}
-                        ],
+                        "standings_preview": [{"rank": 1, "name": "POAP KINGS", "fame": 12345}],
                     }
                 ],
                 "trending_war_contributors": {
@@ -4817,7 +4670,5 @@ def test_share_channel_result_rewrites_member_refs_before_posting():
             )
         )
 
-    mock_post.assert_awaited_once_with(
-        channel, {"content": "King Levy had a great week."}
-    )
+    mock_post.assert_awaited_once_with(channel, {"content": "King Levy had a great week."})
     assert mock_save.call_args.args[2] == "King Levy had a great week."

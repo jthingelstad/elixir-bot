@@ -28,9 +28,7 @@ import db
 LEADER_ACTION_OPEN_CARD_CAP = int(os.getenv("LEADER_ACTION_OPEN_CARD_CAP", "5"))
 # Open cards older than this stop counting against the backlog so a stale
 # action from a finished war cannot deadlock the board forever.
-LEADER_ACTION_BACKLOG_WINDOW_DAYS = int(
-    os.getenv("LEADER_ACTION_BACKLOG_WINDOW_DAYS", "7")
-)
+LEADER_ACTION_BACKLOG_WINDOW_DAYS = int(os.getenv("LEADER_ACTION_BACKLOG_WINDOW_DAYS", "7"))
 # Earned frequency: an action type the leader keeps declining self-throttles.
 # Once at least MIN_DECIDED decisions exist in the trailing window and the
 # decline rate crosses the threshold, that type is limited to one card per

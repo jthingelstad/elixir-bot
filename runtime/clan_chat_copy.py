@@ -113,8 +113,7 @@ def _sign_messages(
     signature: dict[str, Any] | None,
 ) -> list[str]:
     return [
-        sign_clan_chat_text(message, limit=max_chars, signature=signature)
-        for message in messages
+        sign_clan_chat_text(message, limit=max_chars, signature=signature) for message in messages
     ]
 
 
@@ -254,11 +253,7 @@ async def generate_clan_chat_copy(
         max_chars=max_chars,
         signature=signature_config,
     )
-    summary = (
-        str((generated or {}).get("summary") or "")
-        if isinstance(generated, dict)
-        else ""
-    )
+    summary = str((generated or {}).get("summary") or "") if isinstance(generated, dict) else ""
     result = _valid_or_none(
         messages,
         max_messages=max_messages,
@@ -273,9 +268,7 @@ async def generate_clan_chat_copy(
         return result
     if fallback_messages:
         return _valid_or_none(
-            _sign_messages(
-                fallback_messages, max_chars=max_chars, signature=signature_config
-            ),
+            _sign_messages(fallback_messages, max_chars=max_chars, signature=signature_config),
             max_messages=max_messages,
             max_chars=max_chars,
             required_terms=required_terms,
@@ -301,9 +294,7 @@ def _clan_chat_action_reason(rationale: str) -> str:
                 continue
             if not selected:
                 selected.append(
-                    clip_clan_chat_text(part, limit=90)
-                    .removesuffix("...")
-                    .rstrip(" .,;:")
+                    clip_clan_chat_text(part, limit=90).removesuffix("...").rstrip(" .,;:")
                 )
             break
         if selected:
@@ -332,9 +323,7 @@ def signed_valid_messages(
     clean = [str(m).strip() for m in (messages or []) if str(m).strip()][:2]
     if not clean:
         return None
-    signed = [
-        sign_clan_chat_text(m, limit=max_chars, signature=signature) for m in clean
-    ]
+    signed = [sign_clan_chat_text(m, limit=max_chars, signature=signature) for m in clean]
     result = validate_clan_chat_messages(
         signed,
         max_messages=2,
@@ -372,11 +361,7 @@ def role_action_clan_chat_copy(
             else f"Moving {name} back to Member for now."
         )
     else:
-        text = (
-            f"Removing {name} for now: {reason}."
-            if reason
-            else f"Removing {name} for now."
-        )
+        text = f"Removing {name} for now: {reason}." if reason else f"Removing {name} for now."
     signed_text = sign_clan_chat_text(text, limit=max_chars, signature=signature)
     result = validate_clan_chat_messages(
         [signed_text],

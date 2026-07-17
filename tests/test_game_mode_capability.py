@@ -83,9 +83,7 @@ def test_capability_combines_activity_leaders_ranked_state_and_duos(engine_conn)
     assert result["modes"]["ranked"]["top_members"][0]["member_ref"] == "Alpha"
     assert result["ranked"]["standings"][0]["member_ref"] == "Alpha"
     assert result["ranked"]["standings"][0]["rating"] == 1800
-    assert result["duos"] == [
-        {"player": "Alpha", "teammate": "Bravo", "battles": 2, "wins": 1}
-    ]
+    assert result["duos"] == [{"player": "Alpha", "teammate": "Bravo", "battles": 2, "wins": 1}]
 
 
 def test_multi_window_capability_uses_the_same_contract(engine_conn):

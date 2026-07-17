@@ -6,19 +6,17 @@ read [README.md](README.md).
 
 ## Install
 
-Elixir supports Python 3.14. Create the repository virtualenv and reproduce the
-same runtime packages used in production, then add development tools:
+Elixir supports Python 3.14. Reproduce the locked development environment:
 
 ```bash
 cd ~/Projects/elixir-bot
-python3 -m venv venv
-./venv/bin/pip install -r requirements.lock -r requirements-dev.txt
-./venv/bin/python scripts/check_dependency_lock.py
-./venv/bin/pytest tests/ -q
+uv sync --locked
+uv lock --check
+uv run pytest tests/ -q
 ```
 
-Production installs only `requirements.lock`. `requirements.txt` is the bounded
-set of direct dependencies used when deliberately regenerating that lock.
+Production uses `uv sync --locked --no-dev`. Direct dependencies live in
+`pyproject.toml`; `uv.lock` is the only resolved dependency lock.
 
 ## Configure
 
@@ -71,7 +69,7 @@ bash scripts/admin.sh backup
 ## Local run
 
 ```bash
-./venv/bin/python elixir.py
+uv run python elixir.py
 ```
 
 A healthy startup connects to Discord, registers enabled activities from the
@@ -116,7 +114,7 @@ After any runtime change, verify both process state and fresh behavior:
 ```bash
 bash scripts/admin.sh status
 tail -100 elixir-v5.log
-./venv/bin/python scripts/confidence_report.py --json
+uv run python scripts/confidence_report.py --json
 ```
 
 Do not call a deployment complete merely because the test suite passed. Inspect
@@ -146,7 +144,7 @@ Discord gateway session:
 
 ```bash
 bash scripts/admin.sh activity run engine-health
-./venv/bin/python -m runtime.activity_runner run daily-clan-insight
+uv run python -m runtime.activity_runner run daily-clan-insight
 ```
 
 Activities with `manual_trigger_allowed=False` will refuse a manual run.
@@ -177,7 +175,7 @@ and other management views removed from Discord.
 Run the consolidated report:
 
 ```bash
-./venv/bin/python scripts/confidence_report.py --json
+uv run python scripts/confidence_report.py --json
 ```
 
 Inspect unresolved best-effort failures directly when needed:
@@ -190,15 +188,15 @@ sqlite3 elixir-v51.db \
 For model, validation, or channel failures:
 
 ```bash
-./venv/bin/python scripts/review_agent_feedback.py --limit 20
-./venv/bin/python scripts/review_agent_feedback.py --workflow clanops --json
+uv run python scripts/review_agent_feedback.py --limit 20
+uv run python scripts/review_agent_feedback.py --workflow clanops --json
 ```
 
 For engine changes, run the reality gates before deployment:
 
 ```bash
-./venv/bin/python scripts/replay_gate.py
-./venv/bin/python scripts/simulate.py
+uv run python scripts/replay_gate.py
+uv run python scripts/simulate.py
 ```
 
 ## Logs
@@ -233,13 +231,13 @@ memory are durable. `db-maintenance` applies the configured retention policy.
 Remove caches:
 
 ```bash
-./venv/bin/python scripts/clean.py
+uv run python scripts/clean.py
 ```
 
 Also remove known legacy runtime files:
 
 ```bash
-./venv/bin/python scripts/clean.py --db
+uv run python scripts/clean.py --db
 ```
 
 The cleanup command never removes `elixir-v51.db` or either archive.

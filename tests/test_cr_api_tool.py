@@ -115,9 +115,7 @@ class TestExecuteCrApiDispatch:
         assert result["error"] == "our_clan_use_local_tools"
 
     def test_rejects_our_clan_for_clan_members_aspect(self, execute_cr_api):
-        result = execute_cr_api(
-            {"aspect": "clan_members", "tag": f"#{cr_api.CLAN_TAG}"}
-        )
+        result = execute_cr_api({"aspect": "clan_members", "tag": f"#{cr_api.CLAN_TAG}"})
         assert result["error"] == "our_clan_use_local_tools"
 
     def test_player_not_found_returns_structured_error(self, execute_cr_api):
@@ -165,9 +163,7 @@ class TestExecuteCrApiDispatch:
                 }
             ]
         }
-        with patch(
-            "cr_api.get_pathoflegend_location_rankings", return_value=payload
-        ) as mock_fetch:
+        with patch("cr_api.get_pathoflegend_location_rankings", return_value=payload) as mock_fetch:
             result = execute_cr_api(
                 {
                     "aspect": "pathoflegend_location_rankings",
@@ -291,12 +287,8 @@ _FAKE_PLAYER = {
         }
         for i in range(8)
     ],
-    "achievements": [
-        {"name": f"Ach{i}", "stars": 3, "progress": 999} for i in range(12)
-    ],
-    "cards": [
-        {"name": f"Collection{i}", "level": 14} for i in range(120)
-    ],  # should be filtered
+    "achievements": [{"name": f"Ach{i}", "stars": 3, "progress": 999} for i in range(12)],
+    "cards": [{"name": f"Collection{i}", "level": 14} for i in range(120)],  # should be filtered
     "badges": [{"name": f"Badge{i}"} for i in range(60)],  # filtered
 }
 
@@ -352,9 +344,7 @@ class TestFilters:
             for i in range(25)
         ]
         with patch("cr_api.get_player_battle_log", return_value=battles):
-            r = execute_cr_api(
-                {"aspect": "player_battles", "tag": "#PYLQ2", "limit": 5}
-            )
+            r = execute_cr_api({"aspect": "player_battles", "tag": "#PYLQ2", "limit": 5})
         assert r["count"] == 5
         assert len(r["battles"]) == 5
         assert "deck" not in r["battles"][0]
@@ -395,15 +385,9 @@ class TestFilters:
             },
         ]
         with patch("cr_api.get_player_battle_log", return_value=battles):
-            war = execute_cr_api(
-                {"aspect": "player_battles", "tag": "#PYLQ2", "mode": "war"}
-            )
-            ranked = execute_cr_api(
-                {"aspect": "player_battles", "tag": "#PYLQ2", "mode": "ranked"}
-            )
-            event = execute_cr_api(
-                {"aspect": "player_battles", "tag": "#PYLQ2", "mode": "event"}
-            )
+            war = execute_cr_api({"aspect": "player_battles", "tag": "#PYLQ2", "mode": "war"})
+            ranked = execute_cr_api({"aspect": "player_battles", "tag": "#PYLQ2", "mode": "ranked"})
+            event = execute_cr_api({"aspect": "player_battles", "tag": "#PYLQ2", "mode": "event"})
             two_v_two = execute_cr_api(
                 {"aspect": "player_battles", "tag": "#PYLQ2", "mode": "two_v_two"}
             )

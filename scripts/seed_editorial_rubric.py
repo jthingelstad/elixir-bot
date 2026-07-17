@@ -6,7 +6,7 @@ Post texts are verbatim from Discord (message ids in provenance), fetched
 2026-07-04; the Andy welcome is pre-cut (Gen-A, 2026-06-28), recovered from
 #clan-events message 1520822113349402788.
 
-Usage: ./venv/bin/python scripts/seed_editorial_rubric.py
+Usage: uv run python scripts/seed_editorial_rubric.py
 """
 
 from __future__ import annotations
@@ -141,9 +141,9 @@ def main():
     conn = engine_db.connect()
     try:
         counters = seed(conn)
-        total = conn.execute(
-            "SELECT COUNT(*) FROM memory_tags WHERE tag = 'editorial'"
-        ).fetchone()[0]
+        total = conn.execute("SELECT COUNT(*) FROM memory_tags WHERE tag = 'editorial'").fetchone()[
+            0
+        ]
         print(f"seeded: {counters} (editorial-tagged memories now: {total})")
     finally:
         conn.close()

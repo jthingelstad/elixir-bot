@@ -158,11 +158,7 @@ def merge_baseline(old: dict, new: dict) -> dict:
         and old.get("section_index") == new.get("section_index")
         and old.get("section_index") is not None
     )
-    if (
-        same_period
-        and (old.get("our_fame") or 0) > 0
-        and (new.get("our_fame") or 0) == 0
-    ):
+    if same_period and (old.get("our_fame") or 0) > 0 and (new.get("our_fame") or 0) == 0:
         return old
     return new
 
@@ -300,9 +296,7 @@ def _upsert_participation(conn, state: dict, observed_at: str) -> None:
                WHERE season_id = ? AND section_index = ? AND player_tag = ?""",
             (season_id, section, tag),
         ).fetchone()
-        if prev is not None and (p.get("decks_used_today") or 0) > (
-            prev["decks_used_today"] or 0
-        ):
+        if prev is not None and (p.get("decks_used_today") or 0) > (prev["decks_used_today"] or 0):
             from engine import polling
 
             polling.update_heat(conn, tag, new_battles=True, now=observed_at)
@@ -357,9 +351,7 @@ def _upsert_participation(conn, state: dict, observed_at: str) -> None:
             )
 
 
-def emit_award_races(
-    conn, entity_tag, old: dict, new: dict, observed_at, window_start
-) -> int:
+def emit_award_races(conn, entity_tag, old: dict, new: dict, observed_at, window_start) -> int:
     """Award-race lead changes → clan_events, so the ongoing competitions are
     event-driven, not just ambient in the read (Jamie 2026-07-13). Fires when the
     member topping the War Champ points race changes (the free pass is built on
@@ -445,8 +437,7 @@ def _required_season_awards(changes: SeasonCloseChangeSet) -> set[tuple[str, str
     """Minimum award rows implied by the authoritative close outcome."""
     outcome = changes.outcome
     required = {
-        ("war_champ", entry["tag"], entry["official_rank"])
-        for entry in outcome["standings"][:3]
+        ("war_champ", entry["tag"], entry["official_rank"]) for entry in outcome["standings"][:3]
     }
     if outcome.get("free_pass"):
         required.add(("free_pass", outcome["free_pass"]["tag"], 1))
@@ -455,12 +446,9 @@ def _required_season_awards(changes: SeasonCloseChangeSet) -> set[tuple[str, str
         for entry in outcome["donation_champs"][:3]
     )
     required.update(
-        ("rookie_mvp", entry["tag"], entry["official_rank"])
-        for entry in outcome["rookie_mvps"][:3]
+        ("rookie_mvp", entry["tag"], entry["official_rank"]) for entry in outcome["rookie_mvps"][:3]
     )
-    required.update(
-        ("war_participant", entry["tag"], 1) for entry in outcome["war_participants"]
-    )
+    required.update(("war_participant", entry["tag"], 1) for entry in outcome["war_participants"])
     return required
 
 
@@ -714,11 +702,7 @@ def emit_race(conn, entity_tag, old, new, observed_at, window_start) -> int:
     # Colosseum week (cold review 2026-07-04 #3).
     finish_line = 10_000
     old_fame, new_fame = old.get("our_fame") or 0, new.get("our_fame") or 0
-    if (
-        new_type == "warDay"
-        and old_fame < finish_line <= new_fame
-        and new_season is not None
-    ):
+    if new_type == "warDay" and old_fame < finish_line <= new_fame and new_season is not None:
         n += _emit(
             conn,
             new_season,
@@ -734,9 +718,7 @@ def emit_race(conn, entity_tag, old, new, observed_at, window_start) -> int:
     return n
 
 
-def finalize_attendance_day(
-    conn, season_id: int, section_index: int, war_day_index: int
-) -> int:
+def finalize_attendance_day(conn, season_id: int, section_index: int, war_day_index: int) -> int:
     """End-of-battle-day finalization (runtime.md §3 war-attendance-snapshot):
     stamp final decks_used and fame_delta; evaluators read finalized days only."""
     cur = conn.execute(

@@ -66,9 +66,7 @@ def deliver_posts(
     the already-sent posts in channel_memory (the brain won't repeat them)."""
     violations = validate_plan(read, plan)
     if violations and repair_fn is not None:
-        log.warning(
-            "awareness copy policy rejected plan; attempting one repair: %s", violations
-        )
+        log.warning("awareness copy policy rejected plan; attempting one repair: %s", violations)
         original_plan = plan
         try:
             repaired = repair_fn(read, plan, violations)
@@ -76,9 +74,7 @@ def deliver_posts(
             log.exception("awareness copy policy repair raised")
             repaired = None
         if isinstance(repaired, dict):
-            violations = validate_repair(original_plan, repaired) + validate_plan(
-                read, repaired
-            )
+            violations = validate_repair(original_plan, repaired) + validate_plan(read, repaired)
             if not violations:
                 # Keep persistence/diagnostics aligned with what actually
                 # reaches Discord instead of retaining the rejected draft.
@@ -148,9 +144,7 @@ def deliver_posts(
                 "reason": f"delivery intent load failed: {exc}",
                 "uncovered_hard": [],
             }
-        ambiguous = [
-            item["intent_key"] for item in existing_work if item["status"] == "sending"
-        ]
+        ambiguous = [item["intent_key"] for item in existing_work if item["status"] == "sending"]
         if ambiguous:
             reason = f"ambiguous prior delivery intents still within lease: {ambiguous}"
             log.error("awareness deliver: %s", reason)
@@ -215,17 +209,11 @@ def deliver_posts(
     # pending posts from a prior partial attempt even if this turn chose silence
     # or regrouped its signals, and align diagnostics with the exact stored copy.
     plan["posts"] = [
-        {
-            key: value
-            for key, value in item["post"].items()
-            if key != "_delivery_content"
-        }
+        {key: value for key, value in item["post"].items() if key != "_delivery_content"}
         for item in work
     ]
     covered = {
-        signal_key
-        for item in work
-        for signal_key in (item["post"].get("covers_signal_keys") or [])
+        signal_key for item in work for signal_key in (item["post"].get("covers_signal_keys") or [])
     }
     uncovered = sorted(mandatory - covered)
     if uncovered:
@@ -279,9 +267,7 @@ def deliver_posts(
                 try:
                     intent_store.mark_delivery_pending(intent_key, str(exc))
                 except Exception:
-                    log.exception(
-                        "awareness deliver: could not return failed intent to pending"
-                    )
+                    log.exception("awareness deliver: could not return failed intent to pending")
             return {
                 "delivered": delivered,
                 "failed": True,

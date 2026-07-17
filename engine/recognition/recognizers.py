@@ -46,7 +46,7 @@ RANKED_MIN_WIN_RATE = 0.70
 def _payload(row) -> dict:
     try:
         return json.loads(row["payload_json"]) if row["payload_json"] else {}
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {}
 
 
@@ -352,26 +352,18 @@ def _cohort_member_detail(event_type: str, payload: dict) -> str | None:
 
 def _mark_cohort_member(conn, candidate: Candidate, wave_key: str) -> None:
     if ledger.claim(conn, candidate.key, "player", candidate.event_refs, 0):
-        ledger.record_suppression(
-            conn, candidate.key, REASON_COHORT, {"wave_key": wave_key}
-        )
+        ledger.record_suppression(conn, candidate.key, REASON_COHORT, {"wave_key": wave_key})
         return
     row = conn.execute(
         "SELECT intent_id FROM recognition_ledger WHERE recognition_key = ?",
         (candidate.key,),
     ).fetchone()
     if row is not None and row["intent_id"] is None:
-        ledger.record_suppression(
-            conn, candidate.key, REASON_COHORT, {"wave_key": wave_key}
-        )
+        ledger.record_suppression(conn, candidate.key, REASON_COHORT, {"wave_key": wave_key})
 
 
 def _celebrate_stream(event_type: str) -> str:
-    return (
-        "battle"
-        if event_type in ("arena_up", "trophy_push", "ranked_pulse")
-        else "player"
-    )
+    return "battle" if event_type in ("arena_up", "trophy_push", "ranked_pulse") else "player"
 
 
 def _is_card_grind_background(event_type: str, payload: dict | None) -> bool:
@@ -458,9 +450,7 @@ def run_celebrate_pipeline(conn, candidates: list[Candidate], now: str) -> dict:
         postable: list[Candidate] = []
         for c in group:
             if _is_card_grind_background(c.event_type, c.payload):
-                if ledger.claim(
-                    conn, c.key, _celebrate_stream(c.event_type), c.event_refs, 0
-                ):
+                if ledger.claim(conn, c.key, _celebrate_stream(c.event_type), c.event_refs, 0):
                     ledger.record_suppression(conn, c.key, REASON_BACKGROUND, {})
                     counters["celebrate_suppressed"] += 1
             else:
@@ -666,16 +656,11 @@ def war_recognizer(conn, clock: dict | None, now: str) -> dict:
                     if _row is not None:
                         _p = json.loads(_row["payload_json"])
                         _clans = sorted(
-                            (
-                                (c.get("fame") or 0, t)
-                                for t, c in (_p.get("clans") or {}).items()
-                            ),
+                            ((c.get("fame") or 0, t) for t, c in (_p.get("clans") or {}).items()),
                             reverse=True,
                         )
                         _ours = _p.get("our_fame") or 0
-                        _rival = next(
-                            (f for f, t in _clans if t != _p.get("our_tag")), 0
-                        )
+                        _rival = next((f for f, t in _clans if t != _p.get("our_tag")), 0)
                         payload["standings"] = {
                             "our_fame": _ours,
                             "nearest_rival_fame": _rival,
@@ -753,9 +738,7 @@ def _game_group_payload(change_key: str, members: list) -> dict:
     if head["event_type"] == "card_added" and payload.get("icon_url"):
         payload.setdefault("image_url", payload["icon_url"])
     if len(members) > 1:
-        payload["grouped"] = [
-            {"event_type": m["event_type"], **_payload(m)} for m in members[1:]
-        ]
+        payload["grouped"] = [{"event_type": m["event_type"], **_payload(m)} for m in members[1:]]
     return payload
 
 

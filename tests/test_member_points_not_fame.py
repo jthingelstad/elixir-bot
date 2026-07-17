@@ -76,9 +76,7 @@ def test_get_war_season_standings_emits_points_not_fame():
     finally:
         conn.close()
 
-    result = tool_exec._execute_get_war_season(
-        {"aspect": "standings", "season_id": SEASON}
-    )
+    result = tool_exec._execute_get_war_season({"aspect": "standings", "season_id": SEASON})
 
     # The metric name itself is points, not fame.
     assert result["metric"] == "points"

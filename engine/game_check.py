@@ -113,11 +113,7 @@ def _check_card(copy, facts, conn, out):
         out.append(_finding(name, f"'{name}' is not a card in the catalog", "error"))
         return
     display_max = card_display_max_level(card.get("max_level"))
-    if (
-        isinstance(milestone, int)
-        and isinstance(display_max, int)
-        and milestone > display_max
-    ):
+    if isinstance(milestone, int) and isinstance(display_max, int) and milestone > display_max:
         out.append(
             _finding(
                 f"{name} level {milestone}",
@@ -136,17 +132,14 @@ def _check_arena(copy, facts, out):
         out.append(
             _finding(
                 name,
-                f"{name} is a SEASONAL-league arena (id {arena_id}) — "
-                "not a Trophy-Road arena-up",
+                f"{name} is a SEASONAL-league arena (id {arena_id}) — not a Trophy-Road arena-up",
                 "error",
             )
         )
 
 
 def _check_league(copy, facts, out):
-    league = (
-        facts.get("ranked_league") or facts.get("league") or facts.get("new_league")
-    )
+    league = facts.get("ranked_league") or facts.get("league") or facts.get("new_league")
     if not isinstance(league, int):
         return
     correct = ranked_league_name(league)

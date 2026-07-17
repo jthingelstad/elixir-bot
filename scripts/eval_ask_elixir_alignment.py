@@ -98,12 +98,7 @@ def _parse_log_time(value: str) -> datetime | None:
 
 
 def _format_time(value: datetime) -> str:
-    return (
-        value.astimezone(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _open_db(path: str | os.PathLike[str]) -> sqlite3.Connection:
@@ -172,7 +167,7 @@ def _entry_from_match(
             "raw_question",
             before=" original=" if kind == "message_route" else None,
         )
-    except (ValueError, SyntaxError):
+    except ValueError, SyntaxError:
         raw_question = None
     entry = {
         "kind": kind,
@@ -189,7 +184,7 @@ def _entry_from_match(
     if kind == "message_route":
         try:
             entry["original"] = _literal_field(line, "original")
-        except (ValueError, SyntaxError):
+        except ValueError, SyntaxError:
             entry["original"] = None
     return entry
 
@@ -254,19 +249,13 @@ def _blank_user_replies(
                 later_time = _message_time(later)
                 if later_time is None:
                     continue
-                if (
-                    0
-                    <= (later_time - row_time).total_seconds()
-                    <= followup_minutes * 60
-                ):
+                if 0 <= (later_time - row_time).total_seconds() <= followup_minutes * 60:
                     findings.append(
                         {
                             "user_message_id": row.get("message_id"),
                             "user_discord_message_id": row.get("discord_message_id"),
                             "assistant_message_id": later.get("message_id"),
-                            "assistant_discord_message_id": later.get(
-                                "discord_message_id"
-                            ),
+                            "assistant_discord_message_id": later.get("discord_message_id"),
                             "thread_id": row.get("thread_id"),
                             "workflow": later.get("workflow"),
                             "event_type": later.get("event_type"),
@@ -319,9 +308,7 @@ def _topic_mismatches(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                             "user_message_id": row.get("message_id"),
                             "user_discord_message_id": row.get("discord_message_id"),
                             "assistant_message_id": later.get("message_id"),
-                            "assistant_discord_message_id": later.get(
-                                "discord_message_id"
-                            ),
+                            "assistant_discord_message_id": later.get("discord_message_id"),
                             "thread_id": row.get("thread_id"),
                             "question": question,
                             "assistant_preview": answer[:300],
@@ -335,8 +322,7 @@ def _blank_routes(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         entry
         for entry in entries
-        if entry["kind"] == "message_route"
-        and not str(entry.get("raw_question") or "").strip()
+        if entry["kind"] == "message_route" and not str(entry.get("raw_question") or "").strip()
     ]
 
 
@@ -388,9 +374,7 @@ def _ignored_question_blank_routes(
     return findings
 
 
-def _metric(
-    value: Any, threshold: dict[str, Any], passed: bool, definition: str
-) -> dict[str, Any]:
+def _metric(value: Any, threshold: dict[str, Any], passed: bool, definition: str) -> dict[str, Any]:
     return {
         "value": value,
         "threshold": threshold,
@@ -455,8 +439,7 @@ def evaluate(
         "ignored_question_blank_route_count": _metric(
             len(ignored_then_blank),
             {"<=": thresholds.max_ignored_question_blank_route_count},
-            len(ignored_then_blank)
-            <= thresholds.max_ignored_question_blank_route_count,
+            len(ignored_then_blank) <= thresholds.max_ignored_question_blank_route_count,
             "A nonempty #ask-elixir question classified not_for_bot followed by an empty routed reply from the same author/channel.",
         ),
         "topic_mismatch_count": _metric(
@@ -522,25 +505,15 @@ def _resolve_window(args: argparse.Namespace) -> tuple[datetime, datetime]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--db", default=os.fspath(db.DB_PATH), help="SQLite DB path or file: URI"
-    )
+    parser.add_argument("--db", default=os.fspath(db.DB_PATH), help="SQLite DB path or file: URI")
     parser.add_argument(
         "--days", type=int, default=14, help="Lookback window when --since is omitted"
     )
-    parser.add_argument(
-        "--since", help="Inclusive UTC start time, e.g. 2026-06-18T00:00:00Z"
-    )
+    parser.add_argument("--since", help="Inclusive UTC start time, e.g. 2026-06-18T00:00:00Z")
     parser.add_argument("--end", help="Inclusive UTC end time; defaults to now")
-    parser.add_argument(
-        "--log", action="append", dest="logs", help="Log path to scan; repeatable"
-    )
-    parser.add_argument(
-        "--out", default="scripts/ask_elixir_alignment_eval_results.json"
-    )
-    parser.add_argument(
-        "--strict", action="store_true", help="Exit non-zero when thresholds fail"
-    )
+    parser.add_argument("--log", action="append", dest="logs", help="Log path to scan; repeatable")
+    parser.add_argument("--out", default="scripts/ask_elixir_alignment_eval_results.json")
+    parser.add_argument("--strict", action="store_true", help="Exit non-zero when thresholds fail")
     args = parser.parse_args()
 
     since, end = _resolve_window(args)

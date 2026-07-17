@@ -123,8 +123,8 @@ Delete in one arc, same as the v4 teardown precedent:
   `storage/decision_cases.py` Gen-B halves, `storage/signal*`,
   `storage/war_ingest.py`, snapshot stores per `schema.md` §8),
   `storage/clan_voyages.py` + voyage tool defs/exec (C6).
-- **Dependencies:** drop `eventsourcing` from `requirements.txt` /
-  `requirements.lock`; regenerate the lock (AGENTS.md venv convention).
+- **Dependencies:** drop `eventsourcing` from `pyproject.toml` and regenerate
+  `uv.lock`.
 - **C3:** delete the `_RAW_PAYLOAD_ENDPOINT_LABELS` alias (`cr_api.py:23–25`);
   riverracelog payloads stored under their true name from the first new poll.
 - New engine lands as `engine/` (streams, emitters, recognizers, scheduler,
@@ -189,7 +189,7 @@ Delete with their subjects; rewrite against the new engine:
 - **Management:** hysteresis (one good week ≠ eligible; sustained slippage to
   lose it), kick-suppression (C1), auto-withdraw.
 - **Coverage matrix smoke:** one test per tool aspect against a seeded fixture DB.
-- Conventions carried: `./venv/bin/pytest`, in-memory SQLite, fixtures own
+- Conventions carried: `uv run pytest`, in-memory SQLite, fixtures own
   connection lifecycle (AGENTS.md).
 
 ## Phase 9 — Docs & close-out

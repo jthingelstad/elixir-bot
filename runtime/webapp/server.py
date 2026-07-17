@@ -50,9 +50,7 @@ async def _identity_mw(request: web.Request, handler):
     login = request.headers.get(IDENTITY_HEADER, "")
     allowed = _allowed_login()
     if not login or (allowed and login != allowed):
-        return web.Response(
-            status=403, text="Forbidden — Tailscale identity required.\n"
-        )
+        return web.Response(status=403, text="Forbidden — Tailscale identity required.\n")
     return await handler(request)
 
 

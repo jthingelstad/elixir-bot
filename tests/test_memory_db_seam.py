@@ -19,9 +19,7 @@ from memory_store import (
 def test_memory_schema_is_owned_by_central_contract():
     conn = db.get_connection()
     try:
-        assert conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE name = 'memories_fts'"
-        ).fetchone()
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'memories_fts'").fetchone()
     finally:
         conn.close()
 

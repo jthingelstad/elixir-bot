@@ -24,9 +24,7 @@ def test_email_weekly_recap_bcc_and_strips_discord_emoji(monkeypatch):
     assert n == 2
     assert sent["bcc"] == ["a@b.com", "c@d.com"]
     assert sent["to"]  # a To: is set (the sender)
-    assert (
-        "<:" not in sent["body"] and "<a:" not in sent["body"]
-    )  # custom emoji stripped
+    assert "<:" not in sent["body"] and "<a:" not in sent["body"]  # custom emoji stripped
     assert "Weekly Clan Recap" in sent["subject"]
 
 

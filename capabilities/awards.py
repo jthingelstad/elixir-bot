@@ -76,9 +76,7 @@ def get_awards_recognition(
     cap = int(limit) if limit is not None else default_limit
 
     if view == "current_standings":
-        data = _invoke(
-            source, "get_season_awards_standings", season_id=target_season, conn=conn
-        )
+        data = _invoke(source, "get_season_awards_standings", season_id=target_season, conn=conn)
         if isinstance(data, dict):
             data = dict(data)
             war_view = get_war_season_view(
@@ -88,9 +86,7 @@ def get_awards_recognition(
                 source=source,
                 conn=conn,
             )["data"]
-            data["freshness"] = (
-                war_view.get("freshness") if isinstance(war_view, dict) else None
-            )
+            data["freshness"] = war_view.get("freshness") if isinstance(war_view, dict) else None
             data["provisional"] = True
             data["source_note"] = (
                 "live in-progress standings; awards are committed to the durable "

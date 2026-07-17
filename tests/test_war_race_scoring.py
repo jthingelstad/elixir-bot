@@ -109,9 +109,7 @@ def test_standings_are_single_field_and_never_mixed():
         "rank": 2,
     }
     assert sb["today"]["period_points"] == 10525
-    assert all(
-        set(e) == {"name", "period_points", "rank"} for e in sb["today"]["scoreboard"]
-    )
+    assert all(set(e) == {"name", "period_points", "rank"} for e in sb["today"]["scoreboard"])
     assert sb["today"]["scoreboard"][1] == {
         "name": "R.E.I.C.H",
         "period_points": 450,
@@ -221,9 +219,7 @@ def test_boat_defense_fame_clinches_finish_today():
         },
         "participants": {},
     }
-    with patch.object(
-        war_status, "_live_race", return_value=(proj, "2026-07-11T13:06:00Z")
-    ):
+    with patch.object(war_status, "_live_race", return_value=(proj, "2026-07-11T13:06:00Z")):
         war = war_status.get_current_war_status(conn=None)
     assert war["projected_day_fame"] == 3000  # placement only
     assert war["projected_defense_fame"] == 435  # from the API, not back-calc
@@ -237,14 +233,9 @@ def test_boat_defense_fame_clinches_finish_today():
         "defenses_remaining": 0,
         "defense_fame_days": [],
     }
-    with patch.object(
-        war_status, "_live_race", return_value=(proj, "2026-07-11T13:06:00Z")
-    ):
+    with patch.object(war_status, "_live_race", return_value=(proj, "2026-07-11T13:06:00Z")):
         war2 = war_status.get_current_war_status(conn=None)
-    assert (
-        war2["projected_fame_at_close"] == 9870
-        and war2["clinches_finish_today"] is False
-    )
+    assert war2["projected_fame_at_close"] == 9870 and war2["clinches_finish_today"] is False
 
 
 def test_war_season_snapshot_exposes_live_race(engine_conn):
@@ -381,14 +372,10 @@ def test_perfect_attendance_excludes_in_progress_day(engine_conn):
         "clans": {"#US": {"name": "POAP KINGS", "fame": 0, "period_points": 0}},
         "participants": {},
     }
-    with patch.object(
-        war_status, "_live_race", return_value=(proj, "2026-07-11T07:06:00Z")
-    ):
+    with patch.object(war_status, "_live_race", return_value=(proj, "2026-07-11T07:06:00Z")):
         perfect = wa.get_perfect_war_participants(season_id=555, conn=engine_conn)
     names = {m["name"] for m in perfect}
-    assert (
-        "Perf" in names
-    )  # counted on the 2 finalized days despite the unfinished day 3
+    assert "Perf" in names  # counted on the 2 finalized days despite the unfinished day 3
     perf = next(m for m in perfect if m["name"] == "Perf")
     assert perf["battle_days"] == 2  # only finalized days counted
 
@@ -414,9 +401,7 @@ def test_war_season_summary_counts_in_progress_fame(engine_conn):
         "clans": {"#US": {"name": "POAP KINGS", "fame": 5000, "period_points": 0}},
         "participants": {},
     }
-    with patch.object(
-        war_status, "_live_race", return_value=(proj, "2026-07-11T07:06:00Z")
-    ):
+    with patch.object(war_status, "_live_race", return_value=(proj, "2026-07-11T07:06:00Z")):
         summ = war_status.get_war_season_summary(season_id=999, conn=engine_conn)
     assert summ["total_clan_fame"] == 5000  # not 0
     assert summ["current_week_in_progress"] is True

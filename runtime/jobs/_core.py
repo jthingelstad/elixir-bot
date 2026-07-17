@@ -72,9 +72,7 @@ KICK_RECOMMENDATION_FRESH_JOIN_GRACE_DAYS = int(
 # for the same member. Role situations change on roster timescales, so the
 # default is 30 days — much longer than the 7-day unanswered-card dedup.
 WEEKLY_DISCORD_INVITE_RELAY_DAY = os.getenv("WEEKLY_DISCORD_INVITE_RELAY_DAY", "sat")
-WEEKLY_DISCORD_INVITE_RELAY_HOUR = int(
-    os.getenv("WEEKLY_DISCORD_INVITE_RELAY_HOUR", "11")
-)
+WEEKLY_DISCORD_INVITE_RELAY_HOUR = int(os.getenv("WEEKLY_DISCORD_INVITE_RELAY_HOUR", "11"))
 WEEKLY_RECAP_DAY = os.getenv("WEEKLY_RECAP_DAY", "mon")
 WEEKLY_RECAP_HOUR = int(os.getenv("WEEKLY_RECAP_HOUR", "9"))
 WEEKLY_MEMBER_REPORT_DAY = os.getenv("WEEKLY_MEMBER_REPORT_DAY", "mon")
@@ -129,10 +127,7 @@ def _summarize_member_rows(rows, *, name_key="name", value_builder=None, limit=5
     summary = []
     for row in (rows or [])[:limit]:
         name = (
-            row.get(name_key)
-            or row.get("current_name")
-            or row.get("member_ref")
-            or row.get("tag")
+            row.get(name_key) or row.get("current_name") or row.get("member_ref") or row.get("tag")
         )
         if not name:
             continue
@@ -155,10 +150,7 @@ def _build_ask_elixir_daily_insight_context(clan, war):
     overlooked = _query_or_default(
         "overlooked_cards",
         lambda: (
-            db.get_clan_overlooked_cards(
-                min_owners=3, min_level=14, battle_days=14, limit=10
-            )
-            or []
+            db.get_clan_overlooked_cards(min_owners=3, min_level=14, battle_days=14, limit=10) or []
         ),
         [],
     )
@@ -190,7 +182,7 @@ def _build_ask_elixir_daily_insight_context(clan, war):
             for r in rows:
                 try:
                     payload = _json.loads(r["payload_json"] or "{}")
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     payload = {}
                 out.append(
                     {
@@ -231,14 +223,10 @@ def _build_ask_elixir_daily_insight_context(clan, war):
                 "Use this only to avoid repeating yesterday's clan topic. Do not mention these events directly.",
             ]
         )
-        seven_day = (
-            (event_windows.get("7d") or {}) if isinstance(event_windows, dict) else {}
-        )
+        seven_day = (event_windows.get("7d") or {}) if isinstance(event_windows, dict) else {}
         by_type = seven_day.get("by_type") or {}
         if by_type:
-            top_types = sorted(by_type.items(), key=lambda item: (-item[1], item[0]))[
-                :5
-            ]
+            top_types = sorted(by_type.items(), key=lambda item: (-item[1], item[0]))[:5]
             lines.append(
                 "7d event types: "
                 + ", ".join(f"{event_type}={count}" for event_type, count in top_types)
@@ -284,9 +272,7 @@ def _build_ask_elixir_daily_insight_context(clan, war):
                     f"- {item}"
                     for item in _summarize_member_rows(
                         hot_streaks,
-                        value_builder=lambda row: (
-                            f"{row.get('current_streak') or 0} straight wins"
-                        ),
+                        value_builder=lambda row: f"{row.get('current_streak') or 0} straight wins",
                     )
                 ),
             ]
@@ -319,14 +305,11 @@ def _recent_ask_elixir_topics(channel_id, limit: int = 10) -> list[str]:
         topic = None
         try:
             topic = (_json.loads(row["raw_json"] or "{}") or {}).get("topic")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             topic = None
         if not topic:
             preview = (row["content"] or "").lower()
-            if any(
-                w in preview
-                for w in ("war", "fame", "river race", "battle day", "boat")
-            ):
+            if any(w in preview for w in ("war", "fame", "river race", "battle day", "boat")):
                 topic = "war (inferred)"
         if topic:
             topics.append(str(topic))
@@ -351,9 +334,7 @@ async def _ask_elixir_daily_insight():
 
     channel = _bot().get_channel(channel_id)
     if not channel:
-        runtime_status.mark_job_failure(
-            "daily_clan_insight", "ask-elixir channel not found"
-        )
+        runtime_status.mark_job_failure("daily_clan_insight", "ask-elixir channel not found")
         return
 
     recent_topics = await asyncio.to_thread(_recent_ask_elixir_topics, channel_id)
@@ -365,9 +346,7 @@ async def _ask_elixir_daily_insight():
             from runtime.awareness import read as awareness_read
 
             read = awareness_read.build_read()
-            return elixir_agent.generate_ask_elixir_daily(
-                read, recent_topics=recent_topics
-            )
+            return elixir_agent.generate_ask_elixir_daily(read, recent_topics=recent_topics)
         except Exception:
             log.error("Ask Elixir daily compose failed", exc_info=True)
             return None
@@ -433,24 +412,18 @@ async def _weekly_discord_invite_relay():
             if not nudges.is_quiet_period(conn):
                 return None, "not a quiet period"
             item = nudges.due_nudge(conn)
-            return (
-                (item, None) if item else (None, "no nudge due (cap/cooldown/pending)")
-            )
+            return (item, None) if item else (None, "no nudge due (cap/cooldown/pending)")
         finally:
             conn.close()
 
     try:
         item, skip = await asyncio.to_thread(_pick)
         if item is None:
-            runtime_status.mark_job_success(
-                "weekly_discord_invite_relay", f"skipped: {skip}"
-            )
+            runtime_status.mark_job_success("weekly_discord_invite_relay", f"skipped: {skip}")
             return
         ok = await _emit_evergreen_nudge_card(item)
         if not ok:
-            runtime_status.mark_job_failure(
-                "weekly_discord_invite_relay", "nudge card emit failed"
-            )
+            runtime_status.mark_job_failure("weekly_discord_invite_relay", "nudge card emit failed")
             return
     except Exception as exc:
         runtime_status.mark_job_failure("weekly_discord_invite_relay", str(exc))
@@ -477,9 +450,7 @@ async def _emit_evergreen_nudge_card(item: dict) -> bool:
     if not relay_channel:
         log.info("evergreen nudge skipped: arena-relay channel not found")
         return False
-    allowed, reason = await asyncio.to_thread(
-        can_post_leader_action, action_type="in_game_relay"
-    )
+    allowed, reason = await asyncio.to_thread(can_post_leader_action, action_type="in_game_relay")
     if not allowed:
         log.info("evergreen nudge skipped by policy: %s", reason)
         return False
@@ -546,12 +517,8 @@ async def _emit_evergreen_nudge_card(item: dict) -> bool:
 
     await asyncio.to_thread(_mark)
 
-    sent_messages = await post_leader_action_card(
-        relay_channel, action, copy_messages=[copy]
-    )
-    first_message = (
-        sent_messages[0] if isinstance(sent_messages, list) and sent_messages else None
-    )
+    sent_messages = await post_leader_action_card(relay_channel, action, copy_messages=[copy])
+    first_message = sent_messages[0] if isinstance(sent_messages, list) and sent_messages else None
     await asyncio.to_thread(
         db.save_message,
         _channel_scope(relay_channel),
@@ -627,9 +594,7 @@ async def _weekly_clan_recap():
 
     channel = _bot().get_channel(recap_channel_id)
     if not channel:
-        runtime_status.mark_job_failure(
-            "weekly_clan_recap", "weekly digest channel not found"
-        )
+        runtime_status.mark_job_failure("weekly_clan_recap", "weekly digest channel not found")
         return
 
     clan = {}
@@ -655,9 +620,7 @@ async def _weekly_clan_recap():
             from runtime.awareness import read as awareness_read
 
             read = awareness_read.build_read()
-            return elixir_agent.generate_weekly_recap(
-                read, recap_context, previous_message
-            )
+            return elixir_agent.generate_weekly_recap(read, recap_context, previous_message)
         except Exception:
             log.error("Weekly recap compose failed", exc_info=True)
             return None
@@ -671,9 +634,7 @@ async def _weekly_clan_recap():
     try:
         await _post_to_elixir(channel, {"content": recap_post})
     except discord.Forbidden as exc:
-        detail = (
-            f"missing Discord permissions in #{getattr(channel, 'name', 'unknown')}"
-        )
+        detail = f"missing Discord permissions in #{getattr(channel, 'name', 'unknown')}"
         runtime_status.mark_job_failure("weekly_clan_recap", detail)
         raise RuntimeError(f"weekly recap post failed: {detail}") from exc
     await asyncio.to_thread(
@@ -725,9 +686,7 @@ async def _weekly_elder_standing():
         return
     channel = _bot().get_channel(channel_id)
     if not channel:
-        runtime_status.mark_job_failure(
-            "weekly_elder_standing", "announcements channel not found"
-        )
+        runtime_status.mark_job_failure("weekly_elder_standing", "announcements channel not found")
         return
 
     date_str = datetime.now(pytz.timezone("America/Chicago")).strftime("%A, %B %-d")
@@ -748,9 +707,7 @@ async def _weekly_elder_standing():
     try:
         await _post_to_elixir(channel, {"content": text})
     except discord.Forbidden as exc:
-        detail = (
-            f"missing Discord permissions in #{getattr(channel, 'name', 'unknown')}"
-        )
+        detail = f"missing Discord permissions in #{getattr(channel, 'name', 'unknown')}"
         runtime_status.mark_job_failure("weekly_elder_standing", detail)
         raise RuntimeError(f"elder standing post failed: {detail}") from exc
     await asyncio.to_thread(
@@ -777,9 +734,7 @@ async def _email_weekly_recap(recap_post: str) -> int:
 
     if not outbound.enabled():
         return 0
-    recipients = await asyncio.to_thread(
-        lambda: [m["email"] for m in db.list_member_emails()]
-    )
+    recipients = await asyncio.to_thread(lambda: [m["email"] for m in db.list_member_emails()])
     if not recipients:
         return 0
     body = _re.sub(r"<a?:\w+:\d+>", "", recap_post)
@@ -809,16 +764,12 @@ async def _weekly_member_report_cycle():
     from runtime import member_report
 
     if not outbound.enabled():
-        runtime_status.mark_job_success(
-            "weekly_member_report", "skipped: mail not configured"
-        )
+        runtime_status.mark_job_success("weekly_member_report", "skipped: mail not configured")
         return {"sent": 0, "total": 0}
 
     recipients = await asyncio.to_thread(db.list_member_emails)
     if not recipients:
-        runtime_status.mark_job_success(
-            "weekly_member_report", "no members with a verified email"
-        )
+        runtime_status.mark_job_success("weekly_member_report", "no members with a verified email")
         return {"sent": 0, "total": 0}
 
     def _build_and_send(rec: dict) -> None:
@@ -839,9 +790,7 @@ async def _weekly_member_report_cycle():
 
     total = len(recipients)
     if sent == 0:
-        runtime_status.mark_job_failure(
-            "weekly_member_report", f"0/{total} arena dispatches sent"
-        )
+        runtime_status.mark_job_failure("weekly_member_report", f"0/{total} arena dispatches sent")
     else:
         runtime_status.mark_job_success(
             "weekly_member_report", f"{sent}/{total} arena dispatches sent"
@@ -866,9 +815,7 @@ async def _weekly_story_relay_card(recap_text: str) -> bool:
     if not relay_channel:
         log.info("weekly story relay skipped: arena-relay channel not found")
         return False
-    allowed, reason = await asyncio.to_thread(
-        can_post_leader_action, action_type="in_game_relay"
-    )
+    allowed, reason = await asyncio.to_thread(can_post_leader_action, action_type="in_game_relay")
     if not allowed:
         log.info("weekly story relay skipped by policy: %s", reason)
         return False
@@ -921,9 +868,7 @@ async def _weekly_story_relay_card(recap_text: str) -> bool:
     )
     if not action or action.get("source_message_id"):
         return False
-    sent_messages = await post_leader_action_card(
-        relay_channel, action, copy_messages=[copy]
-    )
+    sent_messages = await post_leader_action_card(relay_channel, action, copy_messages=[copy])
     if not isinstance(sent_messages, list):
         sent_messages = []
     first_message = sent_messages[0] if sent_messages else None

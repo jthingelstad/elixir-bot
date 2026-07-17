@@ -33,9 +33,7 @@ def _fold_award_names(rows: list[dict]) -> list[dict]:
     for row in rows:
         name = row.get("player_name")
         if name:
-            row["player_name"] = injection_safe(callable_name(name)) or callable_name(
-                name
-            )
+            row["player_name"] = injection_safe(callable_name(name)) or callable_name(name)
     return rows
 
 
@@ -106,9 +104,7 @@ def _row_to_award(row) -> dict:
 
 
 @managed_connection
-def get_member_trophy_case(
-    tag_or_id, conn: Optional[sqlite3.Connection] = None
-) -> list[dict]:
+def get_member_trophy_case(tag_or_id, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     tag = _canon_tag(str(tag_or_id))
     rows = conn.execute(
         "SELECT award_id, award_type, season_id, section_index, player_tag, rank, "
@@ -190,9 +186,7 @@ def award_leaderboard(
 
 
 @managed_connection
-def get_awards_by_season(
-    season_id: int, conn: Optional[sqlite3.Connection] = None
-) -> list[dict]:
+def get_awards_by_season(season_id: int, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     rows = conn.execute(
         "SELECT a.award_id, a.award_type, a.season_id, a.section_index, "
         "a.player_tag AS member_id, a.player_tag, a.rank, a.metric_value, a.metric_unit, "
@@ -242,9 +236,7 @@ def season_final_section_index(
 
 
 @managed_connection
-def season_is_complete(
-    season_id: int, conn: Optional[sqlite3.Connection] = None
-) -> bool:
+def season_is_complete(season_id: int, conn: Optional[sqlite3.Connection] = None) -> bool:
     """A season is complete when its war_seasons row has ended (the engine
     writes ended_at at the season_closed event, §16.1)."""
     row = conn.execute(

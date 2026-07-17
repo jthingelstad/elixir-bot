@@ -42,12 +42,8 @@ def test_operational_summary_stays_under_envelope_cap():
         return _heavy_awareness(limit)
 
     with patch("agent.tool_exec.db.get_awareness_activity", side_effect=_fake_activity):
-        result = _execute_get_elixir_state(
-            {"aspect": "operational_summary"}, workflow="awareness"
-        )
-    envelope = _build_tool_result_envelope(
-        "get_elixir_state", json.dumps(result, default=str)
-    )
+        result = _execute_get_elixir_state({"aspect": "operational_summary"}, workflow="awareness")
+    envelope = _build_tool_result_envelope("get_elixir_state", json.dumps(result, default=str))
 
     assert json.loads(envelope).get("truncated") is False
     assert len(envelope) <= TOOL_RESULT_MAX_CHARS

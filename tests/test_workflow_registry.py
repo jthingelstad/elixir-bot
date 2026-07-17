@@ -24,9 +24,7 @@ def test_registry_generates_compatibility_maps():
     ):
         spec = get_workflow_spec(workflow)
         assert elixir_agent.MAX_ROUNDS_BY_WORKFLOW[workflow] == spec.max_tool_rounds
-        assert (
-            elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW[workflow] == spec.response_schema
-        )
+        assert elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW[workflow] == spec.response_schema
         assert _names(elixir_agent.TOOLSETS_BY_WORKFLOW[workflow]) == _names(spec.tools)
 
 
@@ -39,9 +37,7 @@ def test_registry_model_selection_matches_existing_defaults(monkeypatch):
     assert elixir_agent._model_for_workflow("interactive") == "chat-model"
     assert elixir_agent._model_for_workflow("site_promote_content") == "promotion-model"
     assert elixir_agent._model_for_workflow("intel_report") == "intensive-model"
-    assert (
-        elixir_agent._model_for_workflow("leader_action_feedback") == "intensive-model"
-    )
+    assert elixir_agent._model_for_workflow("leader_action_feedback") == "intensive-model"
     assert elixir_agent._model_for_workflow("memory_synthesis") == "intensive-model"
     assert elixir_agent._model_for_workflow("clan_chat_copy") == "chat-model"
 

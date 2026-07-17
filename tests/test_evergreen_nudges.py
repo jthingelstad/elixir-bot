@@ -53,9 +53,7 @@ def test_due_nudge_picks_never_sent(engine_conn):
     c = engine_conn
     ensure_schema(c)
     item = due_nudge(c, NOW)
-    assert item is not None and item["nudge_key"] in {
-        n["nudge_key"] for n in SEED_NUDGES
-    }
+    assert item is not None and item["nudge_key"] in {n["nudge_key"] for n in SEED_NUDGES}
     assert "forbidden_terms" in item  # parsed for the composer
 
 

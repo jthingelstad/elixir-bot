@@ -23,8 +23,8 @@ produces ZERO duplicate ledger claims and no first-sight flood (first-day
 event volume comparable to a normal day, not a backfill spike).
 
 Usage:
-    ./venv/bin/python scripts/migrate_v51/rehearsal.py --census --source elixir-v5.db
-    ./venv/bin/python scripts/migrate_v51/rehearsal.py --source elixir-v5-archive-2026H2.db \
+    uv run python scripts/migrate_v51/rehearsal.py --census --source elixir-v5.db
+    uv run python scripts/migrate_v51/rehearsal.py --source elixir-v5-archive-2026H2.db \
         --target /tmp/rehearsal.db
 """
 
@@ -53,8 +53,7 @@ def replay_stream(source: sqlite3.Connection, days: int):
     order or every diff is wrong.
     """
     has_receipts = source.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' "
-        "AND name='api_observation_receipts'"
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='api_observation_receipts'"
     ).fetchone()
     if has_receipts:
         rows = source.execute(
@@ -108,9 +107,7 @@ def run_census(source_path: str, days: int) -> int:
 def run_rehearsal(source_path: str, target_path: str, days: int) -> int:
     import os
 
-    sys.path.insert(
-        0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    )
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     try:
         from engine.offline import OfflineEngine
     except ModuleNotFoundError as exc:
@@ -148,14 +145,10 @@ def run_rehearsal(source_path: str, target_path: str, days: int) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--source", default="elixir-v5.db", help="DB holding raw_api_payloads"
-    )
+    parser.add_argument("--source", default="elixir-v5.db", help="DB holding raw_api_payloads")
     parser.add_argument("--target", default="/tmp/elixir-v51-rehearsal.db")
     parser.add_argument("--days", type=int, default=14)
-    parser.add_argument(
-        "--census", action="store_true", help="report the replay stream only"
-    )
+    parser.add_argument("--census", action="store_true", help="report the replay stream only")
     args = parser.parse_args()
     if args.census:
         return run_census(args.source, args.days)

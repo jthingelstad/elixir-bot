@@ -323,9 +323,7 @@ def _backfill_v1(conn: sqlite3.Connection) -> None:
             "WHERE first_entity_key IS NULL"
         )
     if "awareness_thoughts" in tables:
-        conn.execute(
-            "UPDATE awareness_thoughts SET loop_number = rowid WHERE loop_number IS NULL"
-        )
+        conn.execute("UPDATE awareness_thoughts SET loop_number = rowid WHERE loop_number IS NULL")
     if {"memories", "memories_fts"}.issubset(tables):
         # Creating an external-content FTS table does not index rows that
         # predate the table. Rebuild is idempotent and guarantees migration
@@ -343,7 +341,7 @@ def _backfill_v1(conn: sqlite3.Connection) -> None:
     for row in rows:
         try:
             payload = json.loads(row[2] or "{}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             payload = {}
         conn.execute(
             "INSERT OR IGNORE INTO awareness_posts "
@@ -372,14 +370,10 @@ def _apply_v2(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS editor_verdicts")
     conn.execute("DROP TABLE IF EXISTS communication_intents")
 
-    if "awareness_thoughts" in tables and "shadow" in _columns(
-        conn, "awareness_thoughts"
-    ):
+    if "awareness_thoughts" in tables and "shadow" in _columns(conn, "awareness_thoughts"):
         conn.execute("ALTER TABLE awareness_thoughts DROP COLUMN shadow")
 
-    if "awareness_posts" in tables and "legacy_intent_id" in _columns(
-        conn, "awareness_posts"
-    ):
+    if "awareness_posts" in tables and "legacy_intent_id" in _columns(conn, "awareness_posts"):
         # SQLite cannot DROP a column carrying a UNIQUE constraint. Rebuild
         # this small history table while preserving its stable post ids.
         conn.execute("DROP INDEX IF EXISTS idx_awareness_posts_lane")
@@ -406,12 +400,9 @@ def _apply_v2(conn: sqlite3.Connection) -> None:
         )
         conn.execute("DROP TABLE awareness_posts_v1")
         conn.execute(
-            "CREATE INDEX idx_awareness_posts_lane "
-            "ON awareness_posts(lane, posted_at DESC)"
+            "CREATE INDEX idx_awareness_posts_lane ON awareness_posts(lane, posted_at DESC)"
         )
-        conn.execute(
-            "CREATE INDEX idx_awareness_posts_at ON awareness_posts(posted_at DESC)"
-        )
+        conn.execute("CREATE INDEX idx_awareness_posts_at ON awareness_posts(posted_at DESC)")
 
 
 def _apply_v3(conn: sqlite3.Connection) -> None:
@@ -439,8 +430,7 @@ def _apply_v3(conn: sqlite3.Connection) -> None:
     additions = (
         (
             "judgment_status",
-            "TEXT NOT NULL DEFAULT 'unknown' "
-            "CHECK (judgment_status IN ('unknown','ready','held'))",
+            "TEXT NOT NULL DEFAULT 'unknown' CHECK (judgment_status IN ('unknown','ready','held'))",
         ),
         ("judgment_reason", "TEXT"),
         ("evidence_as_of", "TEXT"),
@@ -451,9 +441,7 @@ def _apply_v3(conn: sqlite3.Connection) -> None:
     )
     for column, declaration in additions:
         if column not in columns:
-            conn.execute(
-                f"ALTER TABLE member_management ADD COLUMN {column} {declaration}"
-            )
+            conn.execute(f"ALTER TABLE member_management ADD COLUMN {column} {declaration}")
             columns.add(column)
 
 
@@ -469,8 +457,7 @@ def _apply_v4(conn: sqlite3.Connection) -> None:
     if "last_fetched_at" not in raw_columns:
         conn.execute("ALTER TABLE raw_api_payloads ADD COLUMN last_fetched_at TEXT")
         conn.execute(
-            "UPDATE raw_api_payloads SET last_fetched_at = fetched_at "
-            "WHERE last_fetched_at IS NULL"
+            "UPDATE raw_api_payloads SET last_fetched_at = fetched_at WHERE last_fetched_at IS NULL"
         )
 
     conn.execute(
@@ -520,9 +507,7 @@ def _apply_v4(conn: sqlite3.Connection) -> None:
     )
     for column, declaration in run_additions:
         if column not in run_columns:
-            conn.execute(
-                f"ALTER TABLE materialization_runs ADD COLUMN {column} {declaration}"
-            )
+            conn.execute(f"ALTER TABLE materialization_runs ADD COLUMN {column} {declaration}")
             run_columns.add(column)
 
     conn.execute(
@@ -675,8 +660,7 @@ def _apply_v6(conn: sqlite3.Connection) -> None:
         "ON member_outreach(status, next_eligible_at)"
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_member_outreach_player "
-        "ON member_outreach(player_tag)"
+        "CREATE INDEX IF NOT EXISTS idx_member_outreach_player ON member_outreach(player_tag)"
     )
 
 
@@ -710,8 +694,7 @@ def _apply_v7(conn: sqlite3.Connection) -> None:
     for column, declaration in additions:
         if column not in columns:
             conn.execute(
-                "ALTER TABLE leader_action_recommendations "
-                f"ADD COLUMN {column} {declaration}"
+                f"ALTER TABLE leader_action_recommendations ADD COLUMN {column} {declaration}"
             )
             columns.add(column)
     conn.execute(
@@ -738,8 +721,7 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
     if version > CURRENT_SCHEMA_VERSION:
         raise RuntimeError(
-            f"database schema v{version} is newer than this build "
-            f"(v{CURRENT_SCHEMA_VERSION})"
+            f"database schema v{version} is newer than this build (v{CURRENT_SCHEMA_VERSION})"
         )
     if version < 1:
         try:
@@ -868,18 +850,14 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
         "ORDER BY type, name"
     ).fetchall()
     canonical = "\n".join(
-        "|".join(
-            (str(row[0]), str(row[1]), str(row[2]), re.sub(r"\s+", " ", row[3]).strip())
-        )
+        "|".join((str(row[0]), str(row[1]), str(row[2]), re.sub(r"\s+", " ", row[3]).strip()))
         for row in rows
     )
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = (
-    "e55d8dc65f7f91bca834341504d8bca7570f46a47c369144d4b8b1f0d74d75cb"
-)
+CURRENT_SCHEMA_FINGERPRINT = "e55d8dc65f7f91bca834341504d8bca7570f46a47c369144d4b8b1f0d74d75cb"
 
 
 __all__ = [

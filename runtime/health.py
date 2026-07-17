@@ -31,7 +31,7 @@ def check_tick_errors(conn) -> list[str]:
     for r in rows:
         try:
             counters = json.loads(r["counters_json"])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if any(k.endswith("_error") for k in counters):
             err_ticks += 1
@@ -46,7 +46,7 @@ def check_tick_errors(conn) -> list[str]:
             last_failure = state.get("last_failure_at") or ""
             if last_failure and last_failure >= _cutoff_iso(conn, "-1 day"):
                 problems.append(f"engine_tick recorded a failure at {last_failure}")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pass
     return problems
 
@@ -201,8 +201,7 @@ def check_awareness_outbox(conn) -> list[str]:
     ).fetchone()[0]
     if pending:
         problems.append(
-            f"{pending} awareness delivery intent(s) pending "
-            f">{OUTBOX_PENDING_STALE_HOURS}h"
+            f"{pending} awareness delivery intent(s) pending >{OUTBOX_PENDING_STALE_HOURS}h"
         )
     return problems
 
@@ -240,9 +239,7 @@ def check_output_silence(conn) -> list[str]:
 
 
 def _cutoff_iso(conn, offset: str) -> str:
-    return conn.execute(
-        "SELECT strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)", (offset,)
-    ).fetchone()[0]
+    return conn.execute("SELECT strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)", (offset,)).fetchone()[0]
 
 
 def run_all(conn, previous_size: int | None = None) -> tuple[list[str], int]:

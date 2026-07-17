@@ -97,15 +97,11 @@ def project_player_aspects(payload: dict) -> dict[str, dict]:
     return {"profile": profile, "cards": cards, "ranked": ranked}
 
 
-def _emit(
-    conn, tag, observed_at, window_start, event_type, dedup_suffix, payload
-) -> int:
+def _emit(conn, tag, observed_at, window_start, event_type, dedup_suffix, payload) -> int:
     return insert_stream_event(
         conn,
         "player_events",
-        dedup_key=f"{event_type}:{tag}:{dedup_suffix}"
-        if dedup_suffix
-        else f"{event_type}:{tag}",
+        dedup_key=f"{event_type}:{tag}:{dedup_suffix}" if dedup_suffix else f"{event_type}:{tag}",
         event_type=event_type,
         subject_cols={"player_tag": tag},
         observed_at=observed_at,
@@ -133,9 +129,7 @@ def emit_profile(conn, tag, old, new, observed_at, window_start) -> int:
             {"milestone": m, "wins": new.get("wins")},
         )
     # best_trophies_peak — every 100 (BestTrophiesPeakDetector)
-    for b in _milestones(
-        old.get("best_trophies"), new.get("best_trophies"), BEST_TROPHIES_STEP
-    ):
+    for b in _milestones(old.get("best_trophies"), new.get("best_trophies"), BEST_TROPHIES_STEP):
         n += _emit(
             conn,
             tag,

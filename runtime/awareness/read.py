@@ -143,9 +143,7 @@ def _game_context(conn, pending_events: list[dict] | None = None) -> dict:
         payload = e.get("payload") or {}
         observed = e.get("observed_at") or ""
         return {
-            "name": payload.get("name")
-            or payload.get("title")
-            or payload.get("event_tag"),
+            "name": payload.get("name") or payload.get("title") or payload.get("event_tag"),
             "rarity": payload.get("rarity"),
             "elixir_cost": payload.get("elixir_cost"),
             "seen_at": observed[:10],
@@ -257,7 +255,7 @@ def _parse_json(value, default=None):
         return default
     try:
         return json.loads(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 
@@ -302,9 +300,7 @@ def _compact_signal(event: dict) -> dict:
     et = event.get("event_type")
     if et == "badge_earned":
         compact["badge_name"] = payload.get("badge_name") or payload.get("name")
-        compact["badge_tier"] = (
-            "legendary" if payload.get("level") is None else "routine"
-        )
+        compact["badge_tier"] = "legendary" if payload.get("level") is None else "routine"
     elif et in ("arena_changed", "arena_up"):
         compact["arena_name"] = payload.get("arena_name")
     elif et == "pol_season_podium":
@@ -527,7 +523,7 @@ def _recent_member_spotlights(conn) -> list[dict]:
     for r in rows:
         try:
             plan = json.loads(r["plan_json"] or "{}")
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             continue
         if plan.get("_error"):
             continue
@@ -568,7 +564,7 @@ def _posting_pulse(conn) -> dict:
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             hours = round((_now() - dt).total_seconds() / 3600.0, 1)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             hours = None
     return {
         "last_post_at": last,
@@ -584,9 +580,7 @@ def _recent_agent_writes(conn, limit: int = 10) -> list[dict]:
     the operational database and therefore belongs to the same read snapshot."""
     import memory_store
 
-    memories = memory_store.list_memories(
-        viewer_scope="leadership", limit=limit * 3, conn=conn
-    )
+    memories = memory_store.list_memories(viewer_scope="leadership", limit=limit * 3, conn=conn)
     out: list[dict] = []
     for m in memories:
         if m.get("source_type") not in {"elixir_inference", "elixir_synthesis"}:
@@ -635,9 +629,7 @@ def _editorial_guidance(conn, limit: int = 12) -> list[dict]:
 
 def _leader_action_board(conn) -> dict:
     """Open #actions cards (undecided asks) + recent decisions."""
-    open_cards = leader_actions.list_leader_actions(
-        status="proposed", limit=15, conn=conn
-    )
+    open_cards = leader_actions.list_leader_actions(status="proposed", limit=15, conn=conn)
     recent = leader_actions.list_leader_actions(limit=15, conn=conn)
     decided = [a for a in recent if (a.get("status") or "proposed") != "proposed"]
 
@@ -665,18 +657,14 @@ def _decision_cases(conn) -> dict:
     """Compact due/open cases with no overlap — ``decision_case_snapshot``
     strips the internal ``state`` blob and dedupes ``open`` against ``due``
     ("due = needs attention now; open = already being monitored")."""
-    return cases.decision_case_snapshot(
-        open_limit=25, due_limit=25, dedupe=True, conn=conn
-    )
+    return cases.decision_case_snapshot(open_limit=25, due_limit=25, dedupe=True, conn=conn)
 
 
 def _management(conn) -> dict:
     """The engine's current promote/demote/kick verdicts — the authoritative
     source for management recommendations (see engine.management). Imported
     lazily to avoid a runtime->engine import at module load."""
-    return management_capability.get_management_decisions(view="summary", conn=conn)[
-        "data"
-    ]
+    return management_capability.get_management_decisions(view="summary", conn=conn)["data"]
 
 
 def _due_revisits(conn, limit: int = 20) -> list[dict]:
@@ -727,9 +715,7 @@ def build_read(conn=None) -> dict:
             return default
 
     try:
-        war_read = _load(
-            "war_status", lambda: war_capability.get_war_intelligence(conn=conn), {}
-        )
+        war_read = _load("war_status", lambda: war_capability.get_war_intelligence(conn=conn), {})
         war = war_read.get("current_state") if war_read.get("available") else None
 
         pending = _load(
@@ -766,16 +752,14 @@ def build_read(conn=None) -> dict:
             "standing": _load("standing", lambda: _standing_block(war), None),
             "war_season": _load(
                 "war_season",
-                lambda: war_capability.get_war_season_view(view="snapshot", conn=conn)[
-                    "data"
-                ],
+                lambda: war_capability.get_war_season_view(view="snapshot", conn=conn)["data"],
                 None,
             ),
             "award_races": _load(
                 "award_races",
-                lambda: awards_capability.get_awards_recognition(
-                    view="races", limit=10, conn=conn
-                )["data"],
+                lambda: awards_capability.get_awards_recognition(view="races", limit=10, conn=conn)[
+                    "data"
+                ],
                 {"war_champ": [], "iron_king": [], "rookie_mvp": []},
             ),
             # Season-by-season War Champ + free-pass lineage (rolling 6), so a
@@ -783,9 +767,9 @@ def build_read(conn=None) -> dict:
             # history, not just the current season.
             "war_history": _load(
                 "war_history",
-                lambda: war_capability.get_war_season_view(
-                    view="history", limit=6, conn=conn
-                )["data"],
+                lambda: war_capability.get_war_season_view(view="history", limit=6, conn=conn)[
+                    "data"
+                ],
                 None,
             ),
             "signals_by_lane": signals_by_lane,
@@ -804,15 +788,11 @@ def build_read(conn=None) -> dict:
                 lambda: _mode_pulse(conn),
                 {"mode_mix": [], "top_by_mode": {}, "window_days": _MODE_PULSE_DAYS},
             ),
-            "cake_days_today": _load(
-                "cake_days_today", lambda: _cake_days_today(conn), []
-            ),
+            "cake_days_today": _load("cake_days_today", lambda: _cake_days_today(conn), []),
             "decision_cases": _load(
                 "decision_cases", lambda: _decision_cases(conn), {"due": [], "open": []}
             ),
-            "channel_memory": _load(
-                "channel_memory", lambda: _channel_memory(conn), {}
-            ),
+            "channel_memory": _load("channel_memory", lambda: _channel_memory(conn), {}),
             "recent_member_spotlights": _load(
                 "recent_member_spotlights", lambda: _recent_member_spotlights(conn), []
             ),

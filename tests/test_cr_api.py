@@ -53,9 +53,7 @@ def test_request_json_success(mock_get, mock_record):
     payload = {"name": "POAP KINGS", "tag": "#ABC123"}
     mock_get.return_value = _mock_response(payload)
 
-    result = cr_api._request_json(
-        "/clans/%23ABC", endpoint_name="clan", entity_key="ABC"
-    )
+    result = cr_api._request_json("/clans/%23ABC", endpoint_name="clan", entity_key="ABC")
 
     assert result == payload
     mock_get.assert_called_once()
@@ -155,9 +153,7 @@ def test_request_json_retries_on_5xx(mock_get, mock_record, mock_sleep):
 @patch("cr_api.time.sleep")
 @patch("cr_api.runtime_status.record_api_call")
 @patch("cr_api.requests.get")
-def test_request_json_retry_honors_retry_after_header(
-    mock_get, mock_record, mock_sleep
-):
+def test_request_json_retry_honors_retry_after_header(mock_get, mock_record, mock_sleep):
     """Retry-After header is respected over exponential backoff."""
     mock_get.return_value = _mock_response_http_error(429, headers={"Retry-After": "7"})
 

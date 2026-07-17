@@ -21,9 +21,7 @@ def schedule_tick_now() -> str:
     import runtime.app as app
 
     job_id = f"engine-tick-web-{datetime.now(timezone.utc).strftime('%H%M%S')}"
-    app.scheduler.add_job(
-        app._engine_tick, trigger="date", id=job_id, misfire_grace_time=60
-    )
+    app.scheduler.add_job(app._engine_tick, trigger="date", id=job_id, misfire_grace_time=60)
     return job_id
 
 

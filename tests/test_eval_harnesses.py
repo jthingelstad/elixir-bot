@@ -216,8 +216,7 @@ def _insert_alignment_message(conn, **overrides):
     row.update(overrides)
     columns = list(row)
     conn.execute(
-        f"INSERT INTO messages ({', '.join(columns)}) "
-        f"VALUES ({', '.join('?' for _ in columns)})",
+        f"INSERT INTO messages ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
         [row[column] for column in columns],
     )
 
@@ -238,9 +237,7 @@ def test_eval_all_requests_samples_from_canonical_db_path(tmp_path, monkeypatch)
     assert clan["members"] == [{"tag": "#AAA111", "name": "Eval Alice"}]
 
 
-def test_eval_card_conversations_builds_context_from_canonical_db_path(
-    tmp_path, monkeypatch
-):
+def test_eval_card_conversations_builds_context_from_canonical_db_path(tmp_path, monkeypatch):
     from scripts import eval_card_conversations
 
     db_path = tmp_path / "elixir-v5-fixture.db"
@@ -293,10 +290,7 @@ def test_eval_leader_actions_scores_exact_artifacts(tmp_path):
     assert result["metrics"]["trace_rate"]["value"] == 1.0
     assert result["metrics"]["relay_copy_text_rate"]["value"] == 1.0
     assert result["artifacts"][0]["source_message"]["workflow"] == "arena-relay"
-    assert (
-        result["artifacts"][0]["copy_messages"][0]["content"]
-        == "Welcome Eval Alice. - E"
-    )
+    assert result["artifacts"][0]["copy_messages"][0]["content"] == "Welcome Eval Alice. - E"
 
 
 def test_eval_leader_actions_flags_stale_open_cards(tmp_path):

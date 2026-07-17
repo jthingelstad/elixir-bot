@@ -159,9 +159,7 @@ def test_blobs_pruned_after_14d_row_survives():
     # row must survive with its blobs NULLed (not deleted).
     from datetime import datetime, timedelta, timezone
 
-    mid_ts = (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    mid_ts = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
     _insert_call_at(mid_ts)
     _insert_call_at("2999-01-01T00:00:00Z")  # future → blobs kept
     stats = metadata_store.purge_old_data()
@@ -179,9 +177,7 @@ def test_blobs_pruned_after_14d_row_survives():
     finally:
         conn.close()
     # 30-day row still EXISTS (metadata kept < 90d) but its blobs are gone.
-    assert (
-        old is not None and old["prompt_json"] is None and old["response_json"] is None
-    )
+    assert old is not None and old["prompt_json"] is None and old["response_json"] is None
     # Fresh row keeps its blobs.
     assert fresh["prompt_json"] is not None
 
@@ -190,16 +186,12 @@ def test_metadata_row_deleted_after_90d():
     # 100 days old → past the 90d metadata window → whole row gone.
     from datetime import datetime, timedelta, timezone
 
-    old_ts = (datetime.now(timezone.utc) - timedelta(days=100)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
     _insert_call_at(old_ts, with_blobs=False)
     metadata_store.purge_old_data()
     conn = db.get_connection()
     try:
-        gone = conn.execute(
-            "SELECT 1 FROM llm_calls WHERE recorded_at = ?", (old_ts,)
-        ).fetchone()
+        gone = conn.execute("SELECT 1 FROM llm_calls WHERE recorded_at = ?", (old_ts,)).fetchone()
     finally:
         conn.close()
     assert gone is None
@@ -269,9 +261,7 @@ def test_end_event_links_to_llm_view(monkeypatch):
         "observatory_url": diag_mod.observatory_url(),
     }
     asyncio.run(app._awareness_event({"type": "start", "read_summary": "x"}))
-    asyncio.run(
-        app._awareness_event({"type": "end", "render": render, "loop_number": 42})
-    )
+    asyncio.run(app._awareness_event({"type": "end", "render": render, "loop_number": 42}))
 
     thread = channel.messages[0].thread
     assert any("/llm?workflow=awareness" in s for s in thread.sent)

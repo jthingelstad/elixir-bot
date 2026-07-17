@@ -37,7 +37,7 @@ def _preview_text(value, limit=500):
     else:
         try:
             text = json.dumps(value, default=str, ensure_ascii=False)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             text = repr(value)
     return text[:limit]
 
@@ -48,11 +48,7 @@ def _summarize_tool_args(args: dict, limit: int = 120) -> str:
         return ""
     parts = []
     for k, v in args.items():
-        sv = (
-            json.dumps(v, default=str, ensure_ascii=False)
-            if not isinstance(v, str)
-            else v
-        )
+        sv = json.dumps(v, default=str, ensure_ascii=False) if not isinstance(v, str) else v
         if len(sv) > 40:
             sv = sv[:37] + "…"
         parts.append(f"{k}={sv}")
@@ -68,7 +64,7 @@ def _summarize_tool_result(result) -> str:
     raw = result if isinstance(result, str) else json.dumps(result, default=str)
     try:
         obj = json.loads(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return f"{len(raw)}B (unparsed)"
     if isinstance(obj, dict):
         if obj.get("error"):
@@ -82,9 +78,7 @@ def _summarize_tool_result(result) -> str:
     return f"ok · {len(raw)}B"
 
 
-def _failure_payload(
-    kind, detail=None, *, response_text=None, parsed_obj=None, phase=None
-):
+def _failure_payload(kind, detail=None, *, response_text=None, parsed_obj=None, phase=None):
     payload = {"kind": kind}
     if detail is not None:
         payload["detail"] = str(detail)
@@ -115,11 +109,9 @@ def _parse_response(text):
             if cleaned.startswith("json"):
                 cleaned = cleaned[4:]
         return json.loads(cleaned.strip())
-    except (json.JSONDecodeError, ValueError, IndexError):
+    except json.JSONDecodeError, ValueError, IndexError:
         if text:
-            log.warning(
-                "LLM returned plain text instead of JSON, wrapping: %s", text[:120]
-            )
+            log.warning("LLM returned plain text instead of JSON, wrapping: %s", text[:120])
             return {"content": text, "summary": "agent response"}
         return None
 
@@ -310,7 +302,7 @@ def _build_tool_result_envelope(name, raw_result):
     """Normalize tool output into a compact envelope for model context."""
     try:
         parsed = json.loads(raw_result)
-    except (json.JSONDecodeError, TypeError, ValueError):
+    except json.JSONDecodeError, TypeError, ValueError:
         parsed = {"error": "tool_result_not_json", "raw": str(raw_result)[:500]}
     parsed = _strip_context_image_fields(parsed)
 
@@ -380,7 +372,7 @@ def _build_tool_result_envelope(name, raw_result):
 def _tool_result_succeeded(envelope_json: str) -> bool:
     try:
         envelope = json.loads(envelope_json)
-    except (json.JSONDecodeError, TypeError, ValueError):
+    except json.JSONDecodeError, TypeError, ValueError:
         return False
     if not isinstance(envelope, dict):
         return False
@@ -478,9 +470,7 @@ def _chat_with_tools(
         nonlocal validation_failure_count
         try:
             parsed = (
-                _parse_json_response(content)
-                if strict_json
-                else _parse_response(content or "null")
+                _parse_json_response(content) if strict_json else _parse_response(content or "null")
             )
         except (json.JSONDecodeError, ValueError) as e:
             validation_failure_count += 1
@@ -491,15 +481,11 @@ def _chat_with_tools(
                     e,
                 )
                 if return_errors:
-                    return _failure_payload(
-                        "parse_error", e, response_text=content, phase=phase
-                    )
+                    return _failure_payload("parse_error", e, response_text=content, phase=phase)
                 return None
             return "__REPAIR__", f"Invalid JSON. Error: {e}"
 
-        ok, error = _validate_response(
-            workflow, parsed, response_schema=response_schema
-        )
+        ok, error = _validate_response(workflow, parsed, response_schema=response_schema)
         if ok:
             return parsed
         validation_failure_count += 1
@@ -603,9 +589,7 @@ def _chat_with_tools(
                 except (APIError, APIConnectionError) as e:
                     log.error("LLM API repair error: %s", e)
                     if return_errors:
-                        return _failure_payload(
-                            "llm_api_error", e, phase="repair_completion"
-                        )
+                        return _failure_payload("llm_api_error", e, phase="repair_completion")
                     return None
 
                 repaired = response_text(repair_resp) or ""
@@ -662,15 +646,9 @@ def _chat_with_tools(
                     }
                 )
             else:
-                side_effect = TOOL_DEFINITIONS_BY_NAME.get(fn_name, {}).get(
-                    "side_effect", "read"
-                )
-                is_awareness_write = (
-                    is_awareness_write_ok and fn_name in AWARENESS_WRITE_TOOL_NAMES
-                )
-                write_allowed = (
-                    side_effect != "write" or is_clanops_write_ok or is_awareness_write
-                )
+                side_effect = TOOL_DEFINITIONS_BY_NAME.get(fn_name, {}).get("side_effect", "read")
+                is_awareness_write = is_awareness_write_ok and fn_name in AWARENESS_WRITE_TOOL_NAMES
+                write_allowed = side_effect != "write" or is_clanops_write_ok or is_awareness_write
                 if not write_allowed:
                     denied_tool_count += 1
                     log.warning(
@@ -687,8 +665,7 @@ def _chat_with_tools(
                     )
                 elif (
                     is_awareness_write
-                    and tool_stats["write_calls_issued"]
-                    >= AWARENESS_WRITE_BUDGET_PER_TICK
+                    and tool_stats["write_calls_issued"] >= AWARENESS_WRITE_BUDGET_PER_TICK
                 ):
                     tool_stats["write_calls_denied"] += 1
                     denied_tool_count += 1
@@ -711,9 +688,7 @@ def _chat_with_tools(
                         }
                     )
                 else:
-                    log.info(
-                        "Tool call workflow=%s: %s(%s)", workflow, fn_name, fn_args
-                    )
+                    log.info("Tool call workflow=%s: %s(%s)", workflow, fn_name, fn_args)
                     tools_called.append(fn_name)
                     if fn_name in EXTERNAL_LOOKUP_TOOL_NAMES:
                         external_lookup_calls += 1
@@ -776,9 +751,7 @@ def _chat_with_tools(
                     phase="final_response",
                 )
             return None
-        parsed = _parse_and_validate(
-            final_content, repair_allowed=False, phase="final_response"
-        )
+        parsed = _parse_and_validate(final_content, repair_allowed=False, phase="final_response")
         _log_agent_loop(max_tool_rounds)
         return parsed
     except (APIError, APIConnectionError) as e:
@@ -811,15 +784,11 @@ def _clan_context(
 
     members = clan_data.get("memberList", clan_data.get("members", []))
     member_summary = []
-    sorted_members = sorted(
-        members, key=lambda x: x.get("clanRank", x.get("clan_rank", 99))
-    )
+    sorted_members = sorted(members, key=lambda x: x.get("clanRank", x.get("clan_rank", 99)))
     limited_members = sorted_members[:max_members]
     for m in limited_members:
         arena = m.get("arena", {})
-        arena_name = (
-            arena.get("name", str(arena)) if isinstance(arena, dict) else str(arena)
-        )
+        arena_name = arena.get("name", str(arena)) if isinstance(arena, dict) else str(arena)
         line = (
             f"  {m.get('name', '?')} ({m.get('tag', '?')}) | rank #{m.get('clanRank', m.get('clan_rank', '?'))} | "
             f"{m.get('trophies', 0):,} trophies | {m.get('donations', 0)} donations | "
@@ -831,17 +800,13 @@ def _clan_context(
         enriched = roster_by_tag.get(tag, {})
         fav_cards = enriched.get("favorite_cards", [])
         if fav_cards:
-            card_str = ", ".join(
-                f"{c['name']} ({c['usage_pct']}%)" for c in fav_cards[:5]
-            )
+            card_str = ", ".join(f"{c['name']} ({c['usage_pct']}%)" for c in fav_cards[:5])
             line += f" | top cards: {card_str}"
         member_summary.append(line)
 
     omitted_count = max(0, len(sorted_members) - len(limited_members))
     if omitted_count:
-        member_summary.append(
-            f"  ... {omitted_count} more members omitted for context budget"
-        )
+        member_summary.append(f"  ... {omitted_count} more members omitted for context budget")
 
     result = "=== CLAN ROSTER ===\n" + "\n".join(member_summary)
 

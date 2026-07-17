@@ -2,11 +2,11 @@
 
 Operational utilities and eval harnesses for the Elixir bot.
 
-Run everything from the repo root with the project venv active:
+Run everything from the repo root through the locked uv environment:
 
 ```bash
-source venv/bin/activate
-python scripts/<name>.py [args]
+uv sync --locked
+uv run python scripts/<name>.py [args]
 ```
 
 ## Operations

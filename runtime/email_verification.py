@@ -33,10 +33,8 @@ def _iso(dt: datetime) -> str:
 
 def _parse(value: str) -> datetime | None:
     try:
-        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=timezone.utc
-        )
-    except (ValueError, TypeError):
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError, TypeError:
         return None
 
 

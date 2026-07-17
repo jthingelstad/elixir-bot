@@ -119,7 +119,7 @@ def _decode_observation(row: dict) -> dict:
         fallback = "{}" if key == "result_json" else "[]"
         try:
             row[key] = json.loads(row.get(key) or fallback)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             row[key] = {} if key == "result_json" else []
     return row
 

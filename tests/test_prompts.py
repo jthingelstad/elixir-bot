@@ -173,9 +173,7 @@ def test_validate_discord_channel_config_flags_singleton_errors(monkeypatch):
     )
     errors = prompts.validate_discord_channel_config()
 
-    assert any(
-        "expected exactly one leader-lounge channel" in error for error in errors
-    )
+    assert any("expected exactly one leader-lounge channel" in error for error in errors)
 
 
 def test_knowledge_block():
@@ -331,30 +329,22 @@ def test_clan_phase_boundary_91_to_92_days():
     from datetime import date
 
     assert prompts.clan_phase(today=date(2026, 5, 6))["phase"] == "founding"  # day 91
-    assert (
-        prompts.clan_phase(today=date(2026, 5, 7))["phase"] == "establishing"
-    )  # day 92
+    assert prompts.clan_phase(today=date(2026, 5, 7))["phase"] == "establishing"  # day 92
 
 
 def test_clan_phase_boundary_273_to_274_days():
     """Phase flip from establishing → established at day 274."""
     from datetime import date
 
-    assert (
-        prompts.clan_phase(today=date(2026, 11, 4))["phase"] == "establishing"
-    )  # day 273
-    assert (
-        prompts.clan_phase(today=date(2026, 11, 5))["phase"] == "established"
-    )  # day 274
+    assert prompts.clan_phase(today=date(2026, 11, 4))["phase"] == "establishing"  # day 273
+    assert prompts.clan_phase(today=date(2026, 11, 5))["phase"] == "established"  # day 274
 
 
 def test_clan_phase_boundary_730_to_731_days():
     """Phase flip from established → mature at day 731."""
     from datetime import date
 
-    assert (
-        prompts.clan_phase(today=date(2028, 2, 4))["phase"] == "established"
-    )  # day 730
+    assert prompts.clan_phase(today=date(2028, 2, 4))["phase"] == "established"  # day 730
     assert prompts.clan_phase(today=date(2028, 2, 5))["phase"] == "mature"  # day 731
 
 
@@ -429,7 +419,4 @@ def test_observation_prompt_includes_custom_emoji_guidance():
     assert "Do not invent custom emoji names" in system_prompt
     assert "channel lane" in system_prompt
     assert "Default to one Discord message" in system_prompt
-    assert (
-        "Do not split one update across multiple near-duplicate messages."
-        in system_prompt
-    )
+    assert "Do not split one update across multiple near-duplicate messages." in system_prompt

@@ -135,9 +135,7 @@ EXPECTED_ROUTES = {
 }
 
 
-def evaluate_batch(
-    questions: list[dict], *, workflow: str = "interactive"
-) -> list[dict]:
+def evaluate_batch(questions: list[dict], *, workflow: str = "interactive") -> list[dict]:
     """Classify each question and return rich rows for analysis."""
     rows = []
     for i, item in enumerate(questions, 1):
@@ -187,9 +185,7 @@ def report(rows: list[dict], round_num: int) -> dict:
     insane = [r for r in rows if not r["sane"]]
     print(f"\nOut-of-expected-set classifications: {len(insane)}/{len(rows)}")
     for r in insane:
-        print(
-            f"  cat={r['category']:13s} → route={r['route']:22s} q={r['question'][:80]!r}"
-        )
+        print(f"  cat={r['category']:13s} → route={r['route']:22s} q={r['question'][:80]!r}")
         print(f"      rationale: {r['rationale']}")
 
     by_cat_correct = defaultdict(lambda: [0, 0])
@@ -213,9 +209,7 @@ def report(rows: list[dict], round_num: int) -> dict:
         latencies.sort()
         p50 = latencies[len(latencies) // 2]
         p95 = latencies[int(len(latencies) * 0.95)]
-        print(
-            f"\nLatency: p50={p50:.0f}ms  p95={p95:.0f}ms  max={max(latencies):.0f}ms"
-        )
+        print(f"\nLatency: p50={p50:.0f}ms  p95={p95:.0f}ms  max={max(latencies):.0f}ms")
 
     return {
         "total": len(rows),
@@ -229,9 +223,7 @@ def report(rows: list[dict], round_num: int) -> dict:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rounds", type=int, default=2)
-    parser.add_argument(
-        "--per-round", type=int, default=5, help="questions per category per round"
-    )
+    parser.add_argument("--per-round", type=int, default=5, help="questions per category per round")
     parser.add_argument("--out", default="scripts/intent_router_eval_results.json")
     args = parser.parse_args()
 
@@ -245,9 +237,7 @@ def main():
         print(
             f"\n— Generating round {round_num} ({args.per_round} per category × {len(CATEGORIES)} cats) —"
         )
-        questions = generate_questions(
-            per_category=args.per_round, seed_round=round_num
-        )
+        questions = generate_questions(per_category=args.per_round, seed_round=round_num)
         if not questions:
             print(f"  round {round_num} produced no questions, skipping")
             continue
@@ -263,9 +253,7 @@ def main():
     if all_rows:
         out_path = Path(args.out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(
-            json.dumps({"rows": all_rows, "summaries": summaries}, indent=2)
-        )
+        out_path.write_text(json.dumps({"rows": all_rows, "summaries": summaries}, indent=2))
         print(f"\nFull results written to {out_path}")
 
         print("\n" + "=" * 70)

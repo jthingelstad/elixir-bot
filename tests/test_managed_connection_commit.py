@@ -83,14 +83,10 @@ def test_memory_store_borrowed_conn_not_committed():
         )
         mid = created["memory_id"]
         assert (
-            conn.execute("SELECT 1 FROM memories WHERE memory_id=?", (mid,)).fetchone()
-            is not None
+            conn.execute("SELECT 1 FROM memories WHERE memory_id=?", (mid,)).fetchone() is not None
         )
         conn.rollback()
-        assert (
-            conn.execute("SELECT 1 FROM memories WHERE memory_id=?", (mid,)).fetchone()
-            is None
-        )
+        assert conn.execute("SELECT 1 FROM memories WHERE memory_id=?", (mid,)).fetchone() is None
     finally:
         conn.close()
 

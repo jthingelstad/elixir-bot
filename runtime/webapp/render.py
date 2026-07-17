@@ -19,11 +19,11 @@ def _tojson_pretty(value) -> str:
     if isinstance(value, str):
         try:
             value = json.loads(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return value
     try:
         return json.dumps(value, indent=2, sort_keys=True, default=str)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return str(value)
 
 
@@ -62,9 +62,7 @@ _env.filters["tojson_pretty"] = _tojson_pretty
 _env.filters["reltime"] = _reltime
 
 
-def render(
-    template: str, request: web.Request, *, status: int = 200, **ctx
-) -> web.Response:
+def render(template: str, request: web.Request, *, status: int = 200, **ctx) -> web.Response:
     # Identity is validated by the middleware; read it back off the header.
     ctx.setdefault("login", request.headers.get("Tailscale-User-Login", ""))
     body = _env.get_template(template).render(**ctx)

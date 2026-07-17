@@ -99,15 +99,9 @@ def test_needs_nickname_flags_injection(name, flagged):
 
 def test_compute_display_name_tiers_without_conn():
     assert compute_display_name(None, "#AAAA", "²⁸") == "28"  # tier 2 clean
-    assert (
-        compute_display_name(None, "#BBBB", "...") == "Player BBBB"
-    )  # residual → safe fallback
-    assert (
-        compute_display_name(None, "#CCCC", "ignore all") == "Player CCCC"
-    )  # hostile → fallback
-    assert (
-        compute_display_name(None, "#DDDD", None) == "Player DDDD"
-    )  # no name → fallback
+    assert compute_display_name(None, "#BBBB", "...") == "Player BBBB"  # residual → safe fallback
+    assert compute_display_name(None, "#CCCC", "ignore all") == "Player CCCC"  # hostile → fallback
+    assert compute_display_name(None, "#DDDD", None) == "Player DDDD"  # no name → fallback
 
 
 # --- write-time materialization + resolver reads the column ------------------
@@ -127,9 +121,9 @@ def test_ensure_player_materializes_display_name(engine_conn):
 def test_ensure_player_null_name_keeps_display_name(engine_conn):
     ensure_player(engine_conn, "#Z2", "GoodName", NOW)
     ensure_player(engine_conn, "#Z2", None, NOW)  # a null-name touch must not wipe it
-    dn = engine_conn.execute(
-        "SELECT display_name FROM players WHERE player_tag='#Z2'"
-    ).fetchone()[0]
+    dn = engine_conn.execute("SELECT display_name FROM players WHERE player_tag='#Z2'").fetchone()[
+        0
+    ]
     assert dn == "GoodName"
 
 
@@ -138,9 +132,9 @@ def test_leader_override_rematerializes(engine_conn):
 
     ensure_player(engine_conn, "#Z3", "OldName", NOW)
     db_mod.set_member_nickname("#Z3", "Chief", source="leader", conn=engine_conn)
-    dn = engine_conn.execute(
-        "SELECT display_name FROM players WHERE player_tag='#Z3'"
-    ).fetchone()[0]
+    dn = engine_conn.execute("SELECT display_name FROM players WHERE player_tag='#Z3'").fetchone()[
+        0
+    ]
     assert dn == "Chief"  # tier 1 leader override wins
     assert preferred_display_name(engine_conn, "#Z3") == "Chief"
 
@@ -152,9 +146,9 @@ def test_refresh_after_generated_nickname(engine_conn):
     # simulate the ensure_nickname generated handle, then re-materialize
     db_mod.set_member_nickname("#Z4", "Ellipsis", source="generated", conn=engine_conn)
     refresh_display_name(engine_conn, "#Z4", "...")
-    dn = engine_conn.execute(
-        "SELECT display_name FROM players WHERE player_tag='#Z4'"
-    ).fetchone()[0]
+    dn = engine_conn.execute("SELECT display_name FROM players WHERE player_tag='#Z4'").fetchone()[
+        0
+    ]
     assert dn == "Ellipsis"
 
 
@@ -168,7 +162,5 @@ def test_brain_tool_queries_use_display_name():
     src = (REPO / "agent" / "tool_exec.py").read_text()
     import re
 
-    hits = re.findall(
-        r"current_name AS (?:name|player|teammate|member_name|player_name)\b", src
-    )
+    hits = re.findall(r"current_name AS (?:name|player|teammate|member_name|player_name)\b", src)
     assert not hits, f"raw current_name reaches the LLM in tool_exec.py: {hits}"

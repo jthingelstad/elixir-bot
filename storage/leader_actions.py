@@ -40,7 +40,7 @@ def _json_loads(value) -> dict:
         return {}
     try:
         data = json.loads(value)
-    except (TypeError, json.JSONDecodeError):
+    except TypeError, json.JSONDecodeError:
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -50,7 +50,7 @@ def _json_loads_list(value) -> list:
         return []
     try:
         data = json.loads(value)
-    except (TypeError, json.JSONDecodeError):
+    except TypeError, json.JSONDecodeError:
         return []
     return data if isinstance(data, list) else []
 
@@ -118,9 +118,7 @@ def _format_utc(value: datetime) -> str:
     return value.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def _utc_plus(
-    *, hours: int | float = 0, days: int | float = 0, start: str | None = None
-) -> str:
+def _utc_plus(*, hours: int | float = 0, days: int | float = 0, start: str | None = None) -> str:
     base = _parse_utc(start) or datetime.now(timezone.utc).replace(tzinfo=None)
     return _format_utc(base + timedelta(hours=float(hours or 0), days=float(days or 0)))
 
@@ -171,8 +169,7 @@ def _note_feedback(note: str, *, noted_at: str) -> dict:
             "suppressed_until": _utc_plus(days=7, start=noted_at),
         }
     if any(
-        phrase in text
-        for phrase in ("already done", "already full", "full already", "not needed")
+        phrase in text for phrase in ("already done", "already full", "full already", "not needed")
     ):
         return {
             "note_category": "state_already_satisfied",
@@ -220,9 +217,7 @@ def _member_baseline(tag: str | None, *, conn) -> dict:
         profile = resolved[0] if resolved else {}
     return {
         "player_tag": profile.get("player_tag") or _db._canon_tag(tag),
-        "name": profile.get("member_name")
-        or profile.get("current_name")
-        or profile.get("name"),
+        "name": profile.get("member_name") or profile.get("current_name") or profile.get("name"),
         "status": profile.get("status"),
         "role": profile.get("role"),
         "donations_week": profile.get("donations_week"),
@@ -318,9 +313,7 @@ def evaluate_leader_action(action: dict, *, conn) -> dict:
             "untouched_count": _outcome_delta(
                 base_day.get("untouched_count"), current.get("untouched_count")
             ),
-            "clan_fame": _outcome_delta(
-                base_day.get("clan_fame"), current.get("clan_fame")
-            ),
+            "clan_fame": _outcome_delta(base_day.get("clan_fame"), current.get("clan_fame")),
         }
     elif action_type in {
         "promotion_recommendation",
@@ -368,9 +361,7 @@ def create_leader_action_recommendation(
     if not prompt_text:
         # v5.1: engine-created recommendations (kick/promote/demote state
         # machines) carry their case in objective/rationale; derive the prompt.
-        prompt_text = (
-            " ".join(f"{objective}. {rationale or ''}".split()).strip(". ") + "."
-        )
+        prompt_text = " ".join(f"{objective}. {rationale or ''}".split()).strip(". ") + "."
     if not action_type or not objective or not prompt_text:
         raise ValueError("action_type and objective are required")
     action_key = action_key or _stable_action_key(
@@ -455,9 +446,7 @@ def auto_withdraw_leader_actions(
     """
     clean_type = (action_type or "").strip()
     clean_tag = _db._canon_tag(target_player_tag) if target_player_tag else None
-    clean_reason = " ".join(
-        (reason or "Auto-withdrawn by the management evaluator.").split()
-    )
+    clean_reason = " ".join((reason or "Auto-withdrawn by the management evaluator.").split())
     if not clean_type or not clean_tag:
         return 0
     rows = conn.execute(
@@ -491,9 +480,7 @@ def auto_withdraw_leader_actions(
             *action_ids,
         ),
     )
-    case_ids = sorted(
-        {int(row["case_id"]) for row in rows if row["case_id"] is not None}
-    )
+    case_ids = sorted({int(row["case_id"]) for row in rows if row["case_id"] is not None})
     if case_ids:
         case_placeholders = ",".join("?" for _ in case_ids)
         conn.execute(
@@ -596,9 +583,7 @@ def update_leader_action_copy_text(
     if not row:
         return None
     action = _row_to_action(row)
-    clean = "\n".join(
-        line.strip() for line in str(copy_text or "").splitlines()
-    ).strip()
+    clean = "\n".join(line.strip() for line in str(copy_text or "").splitlines()).strip()
     original = (
         action.get("copy_original_text")
         or action.get("copy_current_text")
@@ -632,9 +617,7 @@ def update_leader_action_copy_text(
 
         _editor.record_copy_edit_pair(conn, int(action_id), original, clean)
     except Exception:
-        log.debug(
-            "editor copy-edit feeder failed for action %s", action_id, exc_info=True
-        )
+        log.debug("editor copy-edit feeder failed for action %s", action_id, exc_info=True)
     return get_leader_action_by_id(action_id, conn=conn)
 
 
@@ -750,14 +733,10 @@ def build_leader_action_feedback_synthesis_context(
     counts = {
         "total": len(actions),
         ACTION_DONE: sum(1 for item in actions if item.get("status") == ACTION_DONE),
-        ACTION_REJECTED: sum(
-            1 for item in actions if item.get("status") == ACTION_REJECTED
-        ),
+        ACTION_REJECTED: sum(1 for item in actions if item.get("status") == ACTION_REJECTED),
         "with_notes": sum(1 for item in actions if item.get("decision_note")),
     }
-    types = sorted(
-        {item.get("action_type") for item in actions if item.get("action_type")}
-    )
+    types = sorted({item.get("action_type") for item in actions if item.get("action_type")})
     return {
         "action_type": clean_type or "all",
         "counts": counts,
@@ -783,21 +762,15 @@ def _profile_body(profile: dict) -> str:
     summary = " ".join(str(profile.get("summary") or "").split())
     if summary:
         lines.append(summary)
-    guidance = [
-        str(item).strip() for item in profile.get("guidance") or [] if str(item).strip()
-    ]
+    guidance = [str(item).strip() for item in profile.get("guidance") or [] if str(item).strip()]
     if guidance:
         lines.append("Guidance:")
         lines.extend(f"- {item}" for item in guidance[:8])
-    avoid = [
-        str(item).strip() for item in profile.get("avoid") or [] if str(item).strip()
-    ]
+    avoid = [str(item).strip() for item in profile.get("avoid") or [] if str(item).strip()]
     if avoid:
         lines.append("Avoid:")
         lines.extend(f"- {item}" for item in avoid[:5])
-    try_next = [
-        str(item).strip() for item in profile.get("try_next") or [] if str(item).strip()
-    ]
+    try_next = [str(item).strip() for item in profile.get("try_next") or [] if str(item).strip()]
     if try_next:
         lines.append("Try next:")
         lines.extend(f"- {item}" for item in try_next[:5])
@@ -1264,9 +1237,7 @@ def classify_departure(
     stamp = decided_at or _db._utcnow()
     clean_comment = " ".join((comment or "").split()) or None
     canon = (
-        _db._canon_tag(action.get("target_player_tag"))
-        if action.get("target_player_tag")
-        else None
+        _db._canon_tag(action.get("target_player_tag")) if action.get("target_player_tag") else None
     )
 
     if canon:

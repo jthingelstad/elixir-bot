@@ -47,10 +47,7 @@ def king_tower_level(card_display_levels: list[int]) -> int:
     threshold is met (the starting level)."""
     level = 1
     for kt, needed, at_level in KING_TOWER_REQUIREMENTS:
-        if (
-            sum(1 for lvl in card_display_levels if lvl is not None and lvl >= at_level)
-            >= needed
-        ):
+        if sum(1 for lvl in card_display_levels if lvl is not None and lvl >= at_level) >= needed:
             level = kt
         # thresholds are monotonic (more cards at higher levels) — but we scan
         # all rows rather than break, so a non-monotonic edge can't strand us low.

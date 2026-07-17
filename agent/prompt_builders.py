@@ -13,9 +13,7 @@ from runtime.emoji import available_emoji_names
 
 def _discord_emoji_guidance(*, allow_in_sensitive: bool = False) -> str:
     names = available_emoji_names()
-    emoji_list = (
-        ", ".join(f":{name}:" for name in names) if names else "(none configured)"
-    )
+    emoji_list = ", ".join(f":{name}:" for name in names) if names else "(none configured)"
     lines = [
         "Emoji in Discord-ready messages — use the literal :name: shortcode syntax and only these sources:",
         f"- Elixir server custom emoji: {emoji_list}. These are the only custom emoji that exist.",
@@ -24,9 +22,7 @@ def _discord_emoji_guidance(*, allow_in_sensitive: bool = False) -> str:
         "Do not invent custom emoji names. Shortcodes that match neither list above (e.g. :poap:, :poap_kings:) are stripped before posting.",
     ]
     if not allow_in_sensitive:
-        lines.append(
-            "Avoid emoji in sensitive, corrective, or serious leadership messages."
-        )
+        lines.append("Avoid emoji in sensitive, corrective, or serious leadership messages.")
     return "\n".join(lines) + "\n\n"
 
 
@@ -98,9 +94,7 @@ def _help_system(channel_name: str, *, role: str) -> str:
     )
 
 
-def _proactive_channel_system(
-    channel_name: str, lane_key: str, *, leadership: bool = False
-):
+def _proactive_channel_system(channel_name: str, lane_key: str, *, leadership: bool = False):
     purpose, knowledge, channel_context = _lane_base(channel_name, lane_key)
     memory_scope = "leadership plus public" if leadership else "public"
     return _build_system_prompt(
@@ -504,9 +498,7 @@ def _clanops_system(channel_name):
     )
 
 
-def _deck_review_system(
-    channel_name, *, mode: str = "regular", subject: str = "review"
-):
+def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "review"):
     """System prompt for the deck_review workflow.
 
     mode: 'regular' (Trophy Road / current deck) or 'war' (the four river-race war decks).
@@ -611,11 +603,7 @@ def _deck_review_system(
         purpose,
         knowledge,
         channel_context,
-        base_guidance
-        + mode_guidance
-        + subject_guidance
-        + closing_guidance
-        + response_format,
+        base_guidance + mode_guidance + subject_guidance + closing_guidance + response_format,
     )
 
 

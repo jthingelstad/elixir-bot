@@ -14,9 +14,7 @@ NOW = "2026-07-01T12:00:00Z"
 
 
 def test_ratified_constants():
-    assert not hasattr(
-        management, "DONOR_WEEK_MIN"
-    )  # removed: donor is median-relative
+    assert not hasattr(management, "DONOR_WEEK_MIN")  # removed: donor is median-relative
     assert management.WAR_QUALIFY_RATE == 0.75
     assert management.BATTLE_DAYS_MIN == 8
     assert management.PROMOTE_TENURE_MIN == 28
@@ -30,16 +28,12 @@ def test_ratified_constants():
     assert management.KICK_CONTRIB_GRACE_MAX == 4
     assert management.ROSTER_CAP == 50
     assert not hasattr(management, "NEW_MEMBER_GRACE")  # newcomer shield removed
-    assert not hasattr(
-        management, "WAR_CONTRIB_FAME_BAR"
-    )  # 3-season fame grace removed
+    assert not hasattr(management, "WAR_CONTRIB_FAME_BAR")  # 3-season fame grace removed
 
 
 def test_state_reset_on_corruption_is_logged(caplog):
     # A well-formed object round-trips untouched, no warning.
-    good = management._state(
-        {"state_json": '{"weeks": [true, false]}', "player_tag": "#A"}
-    )
+    good = management._state({"state_json": '{"weeks": [true, false]}', "player_tag": "#A"})
     assert good == {"weeks": [True, False]}
 
     # Unparseable JSON resets to {} AND logs (so a wiped history leaves a trace).
@@ -152,8 +146,7 @@ def _seed_member(
         (tag, joined, NOW),
     )
     conn.execute(
-        "INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
-        "VALUES (?, ?, 'test')",
+        "INSERT INTO clan_memberships (player_tag, joined_at, join_source) VALUES (?, ?, 'test')",
         (tag, joined),
     )
     conn.execute(
@@ -167,9 +160,7 @@ def _seed_member(
         (tag, NOW, joined_days_ago, role),
     )
     if last_battle_days_ago is not None:
-        bt = (now_dt - timedelta(days=last_battle_days_ago)).strftime(
-            "%Y%m%dT%H%M%S.000Z"
-        )
+        bt = (now_dt - timedelta(days=last_battle_days_ago)).strftime("%Y%m%dT%H%M%S.000Z")
         conn.execute(
             "INSERT INTO battle_events (dedup_key, player_tag, battle_time, observed_at) "
             "VALUES (?, ?, ?, ?)",
@@ -425,8 +416,7 @@ def _seed_ranked(
         (tag, name or tag, joined, NOW),
     )
     conn.execute(
-        "INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
-        "VALUES (?,?, 'test')",
+        "INSERT INTO clan_memberships (player_tag, joined_at, join_source) VALUES (?,?, 'test')",
         (tag, joined),
     )
     conn.execute(
@@ -490,9 +480,7 @@ ANCHOR_NOW = "2026-06-29T07:00:00Z"
 
 
 def test_war_floor_and_scores(engine_conn):
-    _seed_ranked(
-        engine_conn, "#W", war_used=12, war_avail=16, war_days=3, donations=300
-    )
+    _seed_ranked(engine_conn, "#W", war_used=12, war_avail=16, war_days=3, donations=300)
     _seed_ranked(engine_conn, "#N", war_used=0, war_avail=0, war_days=0, donations=900)
     assert management._passes_war_floor(engine_conn, "#W", ANCHOR_NOW) is True
     assert management._passes_war_floor(engine_conn, "#N", ANCHOR_NOW) is False
@@ -519,28 +507,17 @@ def test_ranked_floor_is_participation(engine_conn):
     )  # elite league, but hasn't played ranked
     assert management._passes_ranked_floor(engine_conn, "#PLAYS", ANCHOR_NOW) is True
     assert management._passes_ranked_floor(engine_conn, "#IDLE_UC", ANCHOR_NOW) is False
-    assert (
-        management._passes_competitive_floor(engine_conn, "#PLAYS", ANCHOR_NOW) is True
-    )
-    assert (
-        management._passes_competitive_floor(engine_conn, "#IDLE_UC", ANCHOR_NOW)
-        is False
-    )
+    assert management._passes_competitive_floor(engine_conn, "#PLAYS", ANCHOR_NOW) is True
+    assert management._passes_competitive_floor(engine_conn, "#IDLE_UC", ANCHOR_NOW) is False
 
 
 def test_competitive_headroom_war_primary_ranked_muted(engine_conn):
     # competitive = war_pct + RANKED_WEIGHT*ranked_pct*(1-war_pct): war-primary,
     # ranked muted + participation-based, doing-both wins, bounded 0-1.
     for i in range(6):  # weak filler so percentiles mean something
-        _seed_ranked(
-            engine_conn, f"#F{i}", war_used=1, war_avail=16, war_days=1, donations=50
-        )
-    _seed_ranked(
-        engine_conn, "#WARDOG", war_used=16, war_avail=16, war_days=4, donations=200
-    )
-    _seed_ranked(
-        engine_conn, "#WARONLY", war_used=8, war_avail=16, war_days=2, donations=200
-    )
+        _seed_ranked(engine_conn, f"#F{i}", war_used=1, war_avail=16, war_days=1, donations=50)
+    _seed_ranked(engine_conn, "#WARDOG", war_used=16, war_avail=16, war_days=4, donations=200)
+    _seed_ranked(engine_conn, "#WARONLY", war_used=8, war_avail=16, war_days=2, donations=200)
     _seed_ranked(
         engine_conn,
         "#WARANDRK",
@@ -568,9 +545,7 @@ def test_ranked_playing_elder_not_abandoned_idle_is(engine_conn):
     # ranked IS abandonment-demotable, even if the account once reached UC.
     # (Ranked-only may still be OUTRANKED — that's a different, fair reason.)
     for i in range(11):
-        _seed_ranked(
-            engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200
-        )
+        _seed_ranked(engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200)
     _seed_ranked(
         engine_conn,
         "#RANKER",
@@ -590,12 +565,8 @@ def test_ranked_playing_elder_not_abandoned_idle_is(engine_conn):
         donations=100,
     )
     scores, band = _band(engine_conn)
-    assert (
-        band["demote_reasons"].get("#RANKER") != "abandoned"
-    )  # plays ranked → not abandonment
-    assert (
-        band["demote_reasons"].get("#IDLE") == "abandoned"
-    )  # plays nothing → abandonment
+    assert band["demote_reasons"].get("#RANKER") != "abandoned"  # plays ranked → not abandonment
+    assert band["demote_reasons"].get("#IDLE") == "abandoned"  # plays nothing → abandonment
 
 
 def _band(conn):
@@ -606,16 +577,10 @@ def _band(conn):
 def test_below_floor_promotes_top_worthy_only(engine_conn):
     # 7-member roster, 0 elders → floor round(.15*7)=1. Top worthy member is
     # promotable; a war-absent member never is (fails the floor).
-    _seed_ranked(
-        engine_conn, "#TOP", war_used=16, war_avail=16, war_days=4, donations=800
-    )
+    _seed_ranked(engine_conn, "#TOP", war_used=16, war_avail=16, war_days=4, donations=800)
     for i in range(5):
-        _seed_ranked(
-            engine_conn, f"#M{i}", war_used=4, war_avail=16, war_days=2, donations=100
-        )
-    _seed_ranked(
-        engine_conn, "#NOWAR", war_used=0, war_avail=0, war_days=0, donations=999
-    )
+        _seed_ranked(engine_conn, f"#M{i}", war_used=4, war_avail=16, war_days=2, donations=100)
+    _seed_ranked(engine_conn, "#NOWAR", war_used=0, war_avail=0, war_days=0, donations=999)
     scores, band = _band(engine_conn)
     assert band["floor"] == 1 and band["current_elders"] == 0
     assert "#TOP" in band["promotable"]
@@ -657,9 +622,7 @@ def test_worthiness_floor_blocks_weak_promotion(engine_conn):
 def test_inside_band_no_moves(engine_conn):
     # 13 members, 2 elders → floor round(1.95)=2, ceil round(2.6)=3: in band.
     for i in range(11):
-        _seed_ranked(
-            engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200
-        )
+        _seed_ranked(engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200)
     _seed_ranked(
         engine_conn,
         "#E0",
@@ -686,9 +649,7 @@ def test_inside_band_no_moves(engine_conn):
 
 def test_elder_failing_war_floor_is_demotable(engine_conn):
     for i in range(11):
-        _seed_ranked(
-            engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200
-        )
+        _seed_ranked(engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200)
     _seed_ranked(
         engine_conn,
         "#EGOOD",
@@ -736,9 +697,7 @@ def test_above_ceiling_demotes_lowest_participating(engine_conn):
     # 10 members + 3 elders → N=13, ceiling round(2.6)=3. Four participating
     # elders is one over the ceiling → the single lowest-ranked one is demotable.
     for i in range(10):
-        _seed_ranked(
-            engine_conn, f"#P{i}", war_used=6, war_avail=16, war_days=2, donations=150
-        )
+        _seed_ranked(engine_conn, f"#P{i}", war_used=6, war_avail=16, war_days=2, donations=150)
     _seed_ranked(
         engine_conn,
         "#EA",
@@ -781,13 +740,9 @@ def test_above_ceiling_demotes_lowest_participating(engine_conn):
 
 
 def test_promote_hysteresis_three_weeks(engine_conn):
-    _seed_ranked(
-        engine_conn, "#TOP", war_used=16, war_avail=16, war_days=4, donations=800
-    )
+    _seed_ranked(engine_conn, "#TOP", war_used=16, war_avail=16, war_days=4, donations=800)
     for i in range(5):
-        _seed_ranked(
-            engine_conn, f"#M{i}", war_used=4, war_avail=16, war_days=2, donations=100
-        )
+        _seed_ranked(engine_conn, f"#M{i}", war_used=4, war_avail=16, war_days=2, donations=100)
     saw_eligible = None
     for wk in range(4):
         anchor_dt = datetime(2026, 6, 29, tzinfo=timezone.utc) + timedelta(weeks=wk)
@@ -809,9 +764,7 @@ def test_promote_hysteresis_three_weeks(engine_conn):
 
 def test_demote_hysteresis_two_weeks_no_grace(engine_conn):
     for i in range(11):
-        _seed_ranked(
-            engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200
-        )
+        _seed_ranked(engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200)
     _seed_ranked(
         engine_conn,
         "#EGOOD",
@@ -855,9 +808,7 @@ def test_never_battled_member_anchored_on_own_seen_not_epoch(engine_conn):
     # Seed another member's old battle so the stream epoch is 30d ago...
     _seed_member(engine_conn, tag="#EPOCH", last_battle_days_ago=30)
     # ...and a roster-present member (last_seen_at = NOW) with zero battles.
-    _seed_member(
-        engine_conn, tag="#NOBATTLES", joined_days_ago=60, last_battle_days_ago=None
-    )
+    _seed_member(engine_conn, tag="#NOBATTLES", joined_days_ago=60, last_battle_days_ago=None)
     from engine import management
 
     management.run_tick_evaluators(engine_conn, now=NOW)
@@ -893,9 +844,7 @@ def test_swap_member_outranks_elder_by_margin(engine_conn):
     # weak elder by > SWAP_MARGIN → the member is promotable, the elder demotable
     # with reason 'outranked' (a swap, count-neutral).
     for i in range(11):
-        _seed_ranked(
-            engine_conn, f"#P{i}", war_used=4, war_avail=16, war_days=2, donations=100
-        )
+        _seed_ranked(engine_conn, f"#P{i}", war_used=4, war_avail=16, war_days=2, donations=100)
     # strong member: UC ranked + high war → top of the roster
     _seed_ranked(
         engine_conn,
@@ -936,13 +885,9 @@ def test_swap_member_outranks_elder_by_margin(engine_conn):
 def test_swap_deadband_blocks_hair_lead(engine_conn):
     # A member out-scores an elder by LESS than SWAP_MARGIN → no swap (anti-flap).
     for i in range(11):
-        _seed_ranked(
-            engine_conn, f"#P{i}", war_used=4, war_avail=16, war_days=2, donations=100
-        )
+        _seed_ranked(engine_conn, f"#P{i}", war_used=4, war_avail=16, war_days=2, donations=100)
     # near-tie: member and elder with almost identical output
-    _seed_ranked(
-        engine_conn, "#NEAR_M", war_used=12, war_avail=16, war_days=3, donations=300
-    )
+    _seed_ranked(engine_conn, "#NEAR_M", war_used=12, war_avail=16, war_days=3, donations=300)
     _seed_ranked(
         engine_conn,
         "#NEAR_E",
@@ -972,9 +917,7 @@ def test_outranked_demotion_uses_three_week_cadence(engine_conn):
     # An outranked elder demotes on the 3-week promote cadence (not the 2-week
     # abandonment cadence) so the swap lands with the challenger's promotion.
     for i in range(11):
-        _seed_ranked(
-            engine_conn, f"#P{i}", war_used=4, war_avail=16, war_days=2, donations=100
-        )
+        _seed_ranked(engine_conn, f"#P{i}", war_used=4, war_avail=16, war_days=2, donations=100)
     _seed_ranked(
         engine_conn,
         "#CHALLENGER",
@@ -1118,9 +1061,7 @@ def test_management_read_summary_reflects_engine_states():
 
         _seed("#KREC", "KickRec", kick="recommended")  # actionable kick
         _seed("#KWATCH", "KickWatch", kick="at_risk")  # trending only
-        _seed(
-            "#PROM", "Promote", promote="eligible", role="member"
-        )  # actionable promote
+        _seed("#PROM", "Promote", promote="eligible", role="member")  # actionable promote
         _seed("#DEM", "Demote", demote="recommended", role="elder")  # actionable demote
         _seed("#PLAIN", "Plain")  # nothing
         _seed("#GONE", "Gone", left="2026-07-04", kick="recommended")  # left → excluded
@@ -1132,9 +1073,7 @@ def test_management_read_summary_reflects_engine_states():
         assert kick_tags == {"#KREC"}  # recommended only, #GONE excluded
         assert {m["player_tag"] for m in summary["actionable"]["promote"]} == {"#PROM"}
         assert {m["player_tag"] for m in summary["actionable"]["demote"]} == {"#DEM"}
-        assert (
-            summary["building_counts"]["kick"] == 1
-        )  # #KWATCH trending, not actionable
+        assert summary["building_counts"]["kick"] == 1  # #KWATCH trending, not actionable
         assert summary["members_evaluated"] == 5  # #GONE not counted
     finally:
         conn.close()

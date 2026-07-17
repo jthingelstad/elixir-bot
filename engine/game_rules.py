@@ -23,11 +23,7 @@ def river_race_finish_line(period_type: str | None) -> int | None:
     days.  This was verified against live Season 133 data and is pinned here so
     prompts, reads, and the engine cannot revive the retired 5,000-point myth.
     """
-    return (
-        COLOSSEUM_FINISH_LINE
-        if is_colosseum(period_type)
-        else NORMAL_RIVER_RACE_FINISH_LINE
-    )
+    return COLOSSEUM_FINISH_LINE if is_colosseum(period_type) else NORMAL_RIVER_RACE_FINISH_LINE
 
 
 def river_race_completed_from_score(
@@ -47,7 +43,7 @@ def river_race_completed_from_score(
         return False
     try:
         return int(score or 0) >= finish_line
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
 
 

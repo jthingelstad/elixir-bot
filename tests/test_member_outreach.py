@@ -70,8 +70,7 @@ def test_in_flight_and_cooldown_exclude_then_reeligible(tmp_path):
         assert "#AAA" not in tags and "#DDD" not in tags
         # Once the cooldown passes, the failed member is eligible to retry.
         later = {
-            t["player_tag"]
-            for t in mo.eligible_targets(now="2999-06-01T00:00:00Z", conn=conn)
+            t["player_tag"] for t in mo.eligible_targets(now="2999-06-01T00:00:00Z", conn=conn)
         }
         assert "#DDD" in later
         assert "#AAA" not in later  # 'proposed' is in-flight regardless of time
@@ -101,9 +100,7 @@ def test_upsert_bumps_attempts_and_preserves_untouched_fields(tmp_path):
         mo.upsert_outreach(
             "#AAA", status="sent", discord_user_id="1001", bump_attempts=True, conn=conn
         )
-        mo.upsert_outreach(
-            "#AAA", status="awaiting_reply", bump_attempts=True, conn=conn
-        )
+        mo.upsert_outreach("#AAA", status="awaiting_reply", bump_attempts=True, conn=conn)
         row = mo.get_outreach("#AAA", conn=conn)
         assert row["attempts"] == 2
         assert row["status"] == "awaiting_reply"

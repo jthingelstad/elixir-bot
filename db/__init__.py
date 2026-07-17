@@ -126,9 +126,7 @@ def chicago_date_for_cr_timestamp(value: Optional[str]) -> Optional[str]:
 def chicago_day_bounds_utc(metric_date: str) -> tuple[str, str]:
     local_start = datetime.strptime(metric_date, "%Y-%m-%d").replace(tzinfo=CHICAGO_TZ)
     utc_start = local_start.astimezone(timezone.utc).replace(tzinfo=None)
-    utc_end = (
-        (local_start + timedelta(days=1)).astimezone(timezone.utc).replace(tzinfo=None)
-    )
+    utc_end = (local_start + timedelta(days=1)).astimezone(timezone.utc).replace(tzinfo=None)
     return (
         utc_start.strftime("%Y-%m-%dT%H:%M:%S"),
         utc_end.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -151,11 +149,7 @@ def _rowdicts(rows: Iterable[sqlite3.Row]) -> list[dict]:
 
 
 def _hash_payload(payload) -> str:
-    data = (
-        payload
-        if isinstance(payload, str)
-        else json.dumps(payload, sort_keys=True, default=str)
-    )
+    data = payload if isinstance(payload, str) else json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
@@ -173,7 +167,7 @@ def _parse_iso_time(value: Optional[str]) -> Optional[datetime]:
         return None
     try:
         return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S")
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
 
 
@@ -225,9 +219,7 @@ def _build_form_label(wins: int, losses: int, sample_size: int) -> str:
     return "mixed"
 
 
-def _build_form_summary(
-    wins: int, losses: int, draws: int, sample_size: int, label: str
-) -> str:
+def _build_form_summary(wins: int, losses: int, draws: int, sample_size: int, label: str) -> str:
     if sample_size == 0:
         return "No recent battles recorded."
     return f"{wins}-{losses}-{draws} over the last {sample_size} battles ({label})."
@@ -366,9 +358,7 @@ def _get_current_membership(conn: sqlite3.Connection, player_tag: str):
     ).fetchone()
 
 
-def _trusted_current_joined_at(
-    conn: sqlite3.Connection, player_tag: str
-) -> Optional[str]:
+def _trusted_current_joined_at(conn: sqlite3.Connection, player_tag: str) -> Optional[str]:
     membership = conn.execute(
         # roster_diff = the v5.1 engine OBSERVED the join (most direct evidence
         # there is); its absence here made recent_joins blind to every
@@ -442,9 +432,7 @@ _MEMBER_METADATA_COLUMNS = frozenset(
 )
 
 
-def _upsert_member_metadata(
-    conn: sqlite3.Connection, player_tag: str, **fields
-) -> None:
+def _upsert_member_metadata(conn: sqlite3.Connection, player_tag: str, **fields) -> None:
     bad = set(fields) - _MEMBER_METADATA_COLUMNS
     if bad:
         raise ValueError(f"Invalid player_metadata columns: {bad}")
@@ -1104,8 +1092,7 @@ def _build_facade_exports(groups: dict[str, tuple[str, ...]]) -> dict[str, str]:
             previous = exports.get(name)
             if previous is not None:
                 raise RuntimeError(
-                    f"db facade export {name!r} declared by both "
-                    f"{previous!r} and {module_name!r}"
+                    f"db facade export {name!r} declared by both {previous!r} and {module_name!r}"
                 )
             exports[name] = module_name
     return exports
@@ -1136,8 +1123,7 @@ _CORE_EXPORTS = {
 _core_facade_collisions = _CORE_EXPORTS & set(_FACADE_EXPORTS)
 if _core_facade_collisions:
     raise RuntimeError(
-        "db facade exports collide with core names: "
-        f"{', '.join(sorted(_core_facade_collisions))}"
+        f"db facade exports collide with core names: {', '.join(sorted(_core_facade_collisions))}"
     )
 __all__ = sorted(_CORE_EXPORTS | set(_FACADE_EXPORTS))
 _facade_lock = threading.RLock()

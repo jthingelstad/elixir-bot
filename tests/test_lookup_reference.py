@@ -60,10 +60,7 @@ def test_resolve_leader_action_reference(engine_conn, _isolate_default_sqlite_db
     # case-insensitive + bare-number-with-kind resolve the same row
     assert _execute_lookup_reference({"reference": "r137"})["action_id"] == 137
     assert (
-        _execute_lookup_reference({"reference": "137", "kind": "leader_action"})[
-            "action_id"
-        ]
-        == 137
+        _execute_lookup_reference({"reference": "137", "kind": "leader_action"})["action_id"] == 137
     )
 
 
@@ -107,9 +104,7 @@ def test_resolve_memory_reference(_isolate_default_sqlite_db):
         scope="leadership",
         title="Watch: pokemon",
     )
-    out = _execute_lookup_reference(
-        {"reference": f"M{mem['memory_id']}"}, workflow="clanops"
-    )
+    out = _execute_lookup_reference({"reference": f"M{mem['memory_id']}"}, workflow="clanops")
     assert out["kind"] == "memory"
     assert out["memory_id"] == mem["memory_id"]
     assert out["title"] == "Watch: pokemon"
@@ -120,15 +115,9 @@ def test_reference_error_cases(engine_conn, _isolate_default_sqlite_db):
     from runtime.awareness.store import ensure_awareness_schema
 
     ensure_awareness_schema(engine_conn)  # so an L<n> miss is not_found, not a crash
-    assert (
-        _execute_lookup_reference({"reference": "banana"})["error"]
-        == "unparseable_reference"
-    )
+    assert _execute_lookup_reference({"reference": "banana"})["error"] == "unparseable_reference"
     # bare number with no letter and no kind is ambiguous
-    assert (
-        _execute_lookup_reference({"reference": "500"})["error"]
-        == "ambiguous_reference"
-    )
+    assert _execute_lookup_reference({"reference": "500"})["error"] == "ambiguous_reference"
     # well-formed but nonexistent
     assert _execute_lookup_reference({"reference": "R9999"})["error"] == "not_found"
     assert _execute_lookup_reference({"reference": "L9999"})["error"] == "not_found"

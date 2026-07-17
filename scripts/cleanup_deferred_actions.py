@@ -13,7 +13,7 @@ evidence, not a leader-set clock). Any rows still carrying the legacy
 Idempotent: re-running finds nothing to migrate. ``--dry-run`` only reports.
 
 Run against the live DB with ELIXIR_DB_PATH pointed at it, e.g.:
-    ELIXIR_DB_PATH=elixir-v51.db ./venv/bin/python scripts/cleanup_deferred_actions.py --dry-run
+    ELIXIR_DB_PATH=elixir-v51.db uv run python scripts/cleanup_deferred_actions.py --dry-run
 """
 
 from __future__ import annotations
@@ -31,9 +31,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Migrate legacy 'deferred' rows to their decline equivalents."
     )
-    parser.add_argument(
-        "--dry-run", action="store_true", help="Report counts without writing."
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Report counts without writing.")
     args = parser.parse_args()
 
     conn = db.get_connection()
@@ -48,9 +46,7 @@ def main() -> int:
 
         print(f"decision_cases deferred: {len(cases)}")
         for row in cases:
-            print(
-                f"  case #{row['case_id']} {row['target_player_name']} ({row['case_type']})"
-            )
+            print(f"  case #{row['case_id']} {row['target_player_name']} ({row['case_type']})")
         print(f"leader_action_recommendations deferred: {actions_n}")
 
         if args.dry_run:
@@ -75,9 +71,7 @@ def main() -> int:
             (now,),
         )
         conn.commit()
-        print(
-            f"migrated {len(cases)} case(s) -> dismissed, {actions_n} action(s) -> rejected."
-        )
+        print(f"migrated {len(cases)} case(s) -> dismissed, {actions_n} action(s) -> rejected.")
         return 0
     finally:
         conn.close()

@@ -66,9 +66,7 @@ def test_project_race_aspect_extracts_defense_from_periodlogs():
 def test_upsert_week_persists_defense_fame():
     conn = db.get_connection()
     try:
-        conn.execute(
-            "INSERT INTO war_seasons (season_id, started_at) VALUES (777, '2026-07-01')"
-        )
+        conn.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (777, '2026-07-01')")
         _ensure_war_weeks_defense_column(conn)
         _upsert_week(conn, 777, 0, "warDay", "2026-07-11T00:00:00Z", defense_fame=870)
         conn.commit()

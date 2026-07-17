@@ -161,9 +161,7 @@ CASES = [
 ]
 
 
-@pytest.mark.parametrize(
-    "name,args", CASES, ids=[f"{n}:{json.dumps(a)[:40]}" for n, a in CASES]
-)
+@pytest.mark.parametrize("name,args", CASES, ids=[f"{n}:{json.dumps(a)[:40]}" for n, a in CASES])
 def test_tool_aspect_smoke(seeded_db, name, args):
     _run(name, args)
 

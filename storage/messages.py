@@ -51,7 +51,7 @@ def list_pending_system_signals(
         if row["payload_json"]:
             try:
                 payload = json.loads(row["payload_json"])
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except TypeError, ValueError, json.JSONDecodeError:
                 payload = {}
         item = dict(payload)
         item.setdefault("type", row["signal_type"])
@@ -111,9 +111,7 @@ def save_message(
             ).fetchone()
             if link:
                 member_id = link["member_id"]
-    _ensure_channel(
-        conn, channel_id, channel_name=channel_name, channel_kind=channel_kind
-    )
+    _ensure_channel(conn, channel_id, channel_name=channel_name, channel_kind=channel_kind)
     thread_id = _ensure_thread(
         conn,
         scope,
@@ -305,9 +303,7 @@ def upsert_prompt_feedback(
     feedback_value = (feedback_value or "").strip().lower()
     if feedback_value not in {"up", "down"}:
         raise ValueError(f"invalid feedback value: {feedback_value}")
-    assistant = get_message_by_discord_message_id(
-        assistant_discord_message_id, conn=conn
-    )
+    assistant = get_message_by_discord_message_id(assistant_discord_message_id, conn=conn)
     if not assistant:
         raise ValueError(
             f"assistant message not found for discord id {assistant_discord_message_id}"
@@ -329,9 +325,7 @@ def upsert_prompt_feedback(
             (
                 assistant.get("message_id"),
                 workflow or assistant.get("workflow"),
-                str(channel_id)
-                if channel_id is not None
-                else assistant.get("channel_id"),
+                str(channel_id) if channel_id is not None else assistant.get("channel_id"),
                 channel_name,
                 str(original_asker_discord_user_id)
                 if original_asker_discord_user_id is not None
@@ -355,9 +349,7 @@ def upsert_prompt_feedback(
                 assistant.get("message_id"),
                 str(assistant_discord_message_id),
                 workflow or assistant.get("workflow"),
-                str(channel_id)
-                if channel_id is not None
-                else assistant.get("channel_id"),
+                str(channel_id) if channel_id is not None else assistant.get("channel_id"),
                 channel_name,
                 str(discord_user_id),
                 str(original_asker_discord_user_id)
@@ -374,9 +366,7 @@ def upsert_prompt_feedback(
         previous_value = None
         was_removed = False
     conn.commit()
-    became_active_down = feedback_value == "down" and (
-        previous_value != "down" or was_removed
-    )
+    became_active_down = feedback_value == "down" and (previous_value != "down" or was_removed)
     return {
         "prompt_feedback_id": prompt_feedback_id,
         "feedback_value": feedback_value,
@@ -463,9 +453,7 @@ def list_prompt_review_items(
     include_positive: bool = False,
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
-    failures = list_prompt_failures(
-        limit=max(1, int(limit or 20)), workflow=workflow, conn=conn
-    )
+    failures = list_prompt_failures(limit=max(1, int(limit or 20)), workflow=workflow, conn=conn)
     feedback = list_prompt_feedback(
         limit=max(1, int(limit or 20)),
         workflow=workflow,
@@ -693,23 +681,19 @@ def record_llm_call(
 
 
 @managed_connection
-def get_llm_call(
-    call_id: int, conn: Optional[sqlite3.Connection] = None
-) -> Optional[dict]:
+def get_llm_call(call_id: int, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     """Full detail for one LLM call — metadata + the captured prompt/response
     blobs, JSON-decoded. Powers the Observatory per-call drill-down. None when
     the call doesn't exist; blobs are None once pruned (LLM_PROMPT_RETENTION_DAYS)."""
     _ensure_llm_blob_columns(conn)
-    row = conn.execute(
-        "SELECT * FROM llm_calls WHERE call_id = ?", (int(call_id),)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM llm_calls WHERE call_id = ?", (int(call_id),)).fetchone()
     if row is None:
         return None
     out = dict(row)
     for raw_key, key in (("prompt_json", "prompt"), ("response_json", "response")):
         try:
             out[key] = json.loads(out.get(raw_key) or "null")
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             out[key] = None
     return out
 

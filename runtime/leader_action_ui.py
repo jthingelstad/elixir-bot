@@ -137,9 +137,7 @@ def leader_action_spec(action_type: str | None) -> LeaderActionTypeSpec:
     clean = (action_type or "").strip()
     return ACTION_SPECS.get(
         clean,
-        LeaderActionTypeSpec(
-            clean or "leader_action", "Leader Action", "⚡", 0x95A5A6, "Done"
-        ),
+        LeaderActionTypeSpec(clean or "leader_action", "Leader Action", "⚡", 0x95A5A6, "Done"),
     )
 
 
@@ -161,14 +159,10 @@ def _split_copy_messages(copy_text: str | None) -> list[str]:
     return lines[:5]
 
 
-def action_copy_messages(
-    action: dict, copy_messages: list[str] | None = None
-) -> list[str]:
+def action_copy_messages(action: dict, copy_messages: list[str] | None = None) -> list[str]:
     if copy_messages is not None:
         return [str(item).strip() for item in copy_messages if str(item).strip()]
-    return _split_copy_messages(
-        action.get("copy_current_text") or action.get("copy_original_text")
-    )
+    return _split_copy_messages(action.get("copy_current_text") or action.get("copy_original_text"))
 
 
 def _status_label(action: dict) -> str:
@@ -229,13 +223,9 @@ def build_leader_action_embed(
         description=f"**Target:** {_format_target(action)}\n**Status:** {_status_label(action)}",
         color=spec.color,
     )
-    embed.add_field(
-        name="Decision", value=_clip(action.get("prompt_text"), 900), inline=False
-    )
+    embed.add_field(name="Decision", value=_clip(action.get("prompt_text"), 900), inline=False)
     if action.get("rationale"):
-        embed.add_field(
-            name="Why", value=_clip(action.get("rationale"), 900), inline=False
-        )
+        embed.add_field(name="Why", value=_clip(action.get("rationale"), 900), inline=False)
     copies = action_copy_messages(action, copy_messages)
     if copies:
         if len(copies) == 1:
@@ -250,9 +240,7 @@ def build_leader_action_embed(
     if note:
         embed.add_field(name="Leader Note", value=_clip(note, 700), inline=False)
     _add_note_interpret_field(embed, action)
-    footer = (
-        f"{action.get('action_type') or 'leader_action'} | {LEADER_ACTION_UI_VERSION}"
-    )
+    footer = f"{action.get('action_type') or 'leader_action'} | {LEADER_ACTION_UI_VERSION}"
     if action.get("is_test"):
         footer += " | test card"
     embed.set_footer(text=footer)
@@ -392,9 +380,7 @@ class CopyEditModal(discord.ui.Modal):
         if not await _ensure_leader(interaction):
             return
         copies = [
-            str(item.value or "").strip()
-            for item in self.inputs
-            if str(item.value or "").strip()
+            str(item.value or "").strip() for item in self.inputs if str(item.value or "").strip()
         ]
         if not copies:
             await _send_ephemeral(interaction, "No copy text submitted.")
@@ -409,10 +395,7 @@ class CopyEditModal(discord.ui.Modal):
             await _send_ephemeral(interaction, "Action not found.")
             return
         await _edit_copy_messages(interaction, action, copies)
-        action = (
-            await asyncio.to_thread(db.get_leader_action_by_id, self.action_id)
-            or action
-        )
+        action = await asyncio.to_thread(db.get_leader_action_by_id, self.action_id) or action
         queue_leader_action_feedback_refresh(action.get("action_type"))
         await _apply_card_update(interaction, action)
 
@@ -745,10 +728,7 @@ def leader_action_view_for(action: dict) -> LeaderActionView | None:
     # A view is needed while the card is open, or once it carries an
     # interpretation (so the Undo / Fix-reading controls are live on a decided
     # card). Otherwise a resolved card is inert and needs no view.
-    if (
-        action_is_open(action)
-        or (action.get("note_interpret_status") or "") == "interpreted"
-    ):
+    if action_is_open(action) or (action.get("note_interpret_status") or "") == "interpreted":
         return LeaderActionView(action)
     return None
 
@@ -800,9 +780,7 @@ async def restore_leader_action_views(
     )
     # Decided-but-interpreted cards keep live Undo / Fix-reading buttons, so their
     # persistent views must be re-registered too (they're not in the open set).
-    interpreted_actions = await asyncio.to_thread(
-        db.list_interpreted_leader_actions, limit=limit
-    )
+    interpreted_actions = await asyncio.to_thread(db.list_interpreted_leader_actions, limit=limit)
     actions_by_id = {}
     for action in recent_actions + interpreted_actions + open_actions:
         action_id = action.get("action_id")
@@ -845,7 +823,7 @@ async def refresh_leader_action_card(bot: discord.Client, action: dict) -> bool:
     try:
         channel_id_int = int(channel_id)
         message_id_int = int(message_id)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
 
     channel = None
@@ -891,9 +869,7 @@ def default_test_copy(action_type: str) -> list[str]:
             "TEST ONLY: Discord invite relay interaction check.",
             "TEST ONLY: Do not paste this into Clash Royale.",
         ]
-    return [
-        f"TEST ONLY: {spec.label} interaction check. Do not paste this into Clash Royale."
-    ]
+    return [f"TEST ONLY: {spec.label} interaction check. Do not paste this into Clash Royale."]
 
 
 def default_test_prompt(action_type: str, target_name: str | None = None) -> str:
@@ -947,10 +923,7 @@ async def post_test_leader_action_card(
         },
     )
     await post_leader_action_card(channel, action, copy_messages=copies)
-    return (
-        await asyncio.to_thread(db.get_leader_action_by_id, action["action_id"])
-        or action
-    )
+    return await asyncio.to_thread(db.get_leader_action_by_id, action["action_id"]) or action
 
 
 __all__ = [

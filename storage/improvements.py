@@ -73,7 +73,7 @@ def _loads_dict(value) -> dict:
         return {}
     try:
         loaded = json.loads(value)
-    except (TypeError, json.JSONDecodeError):
+    except TypeError, json.JSONDecodeError:
         return {}
     return loaded if isinstance(loaded, dict) else {}
 
@@ -100,14 +100,14 @@ def _normalize_category(category: str | None) -> str:
 def _clamp_severity(value) -> int:
     try:
         return max(1, min(int(value), 5))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 3
 
 
 def _clamp_confidence(value) -> float:
     try:
         return max(0.0, min(float(value), 1.0))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0.5
 
 
@@ -306,14 +306,10 @@ def build_improvement_github_issue_body(suggestion: dict) -> str:
         if not isinstance(item, dict):
             continue
         label = _clean_text(item.get("label") or item.get("type") or "evidence")
-        detail = _clean_text(
-            item.get("detail") or item.get("summary") or item.get("note")
-        )
+        detail = _clean_text(item.get("detail") or item.get("summary") or item.get("note"))
         if detail:
             evidence_lines.append(f"- {label}: {detail}")
-    metrics = (
-        evidence.get("metrics") if isinstance(evidence.get("metrics"), dict) else {}
-    )
+    metrics = evidence.get("metrics") if isinstance(evidence.get("metrics"), dict) else {}
     metric_lines = [f"- {key}: {value}" for key, value in sorted(metrics.items())]
     if not evidence_lines and evidence.get("summary"):
         evidence_lines.append(f"- summary: {_clean_text(evidence.get('summary'))}")

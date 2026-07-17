@@ -98,11 +98,7 @@ def _tracked_markdown() -> list[Path]:
         capture_output=True,
         text=True,
     )
-    return [
-        ROOT / line
-        for line in result.stdout.splitlines()
-        if line and (ROOT / line).exists()
-    ]
+    return [ROOT / line for line in result.stdout.splitlines() if line and (ROOT / line).exists()]
 
 
 def _link_path(raw_target: str) -> str:
@@ -136,9 +132,7 @@ def _link_findings(path: Path) -> list[str]:
                 continue
             destination = (path.parent / target).resolve()
             if not destination.exists():
-                findings.append(
-                    f"{relative}:{line_number}: missing local link target: {target}"
-                )
+                findings.append(f"{relative}:{line_number}: missing local link target: {target}")
     return findings
 
 

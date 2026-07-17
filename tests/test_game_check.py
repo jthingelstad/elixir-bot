@@ -11,9 +11,7 @@ from engine import game_check as g
 
 def test_card_level_mismatch_flags():
     # "maxed to 15" while the facts say the milestone was 16
-    out = g.check_post(
-        "just maxed Balloon to level 15", {"card_name": "Balloon", "milestone": 16}
-    )
+    out = g.check_post("just maxed Balloon to level 15", {"card_name": "Balloon", "milestone": 16})
     assert any("15" in f["claim"] for f in out) and out[0]["severity"] == "error"
 
 
@@ -24,26 +22,20 @@ def test_impossible_card_level_flags():
 
 def test_clean_maxed_card_passes():
     assert (
-        g.check_post(
-            "just maxed Balloon to level 16", {"card_name": "Balloon", "milestone": 16}
-        )
+        g.check_post("just maxed Balloon to level 16", {"card_name": "Balloon", "milestone": 16})
         == []
     )
 
 
 def test_seasonal_arena_narrated_as_arena_up_flags():
     # PANCAKES! (id above the road-arena ceiling) is a seasonal-league arena
-    out = g.check_post(
-        "moved up to PANCAKES!", {"arena_id": 55000000, "arena_name": "PANCAKES!"}
-    )
+    out = g.check_post("moved up to PANCAKES!", {"arena_id": 55000000, "arena_name": "PANCAKES!"})
     assert any("SEASONAL" in f["issue"] for f in out)
 
 
 def test_road_arena_up_passes():
     assert (
-        g.check_post(
-            "moved up to Boot Camp", {"arena_id": 54000010, "arena_name": "Boot Camp"}
-        )
+        g.check_post("moved up to Boot Camp", {"arena_id": 54000010, "arena_name": "Boot Camp"})
         == []
     )
 
@@ -54,12 +46,7 @@ def test_impossible_war_day_flags():
 
 
 def test_clean_war_day_passes():
-    assert (
-        g.check_post(
-            "battle day 3 of 4 is open", {"war_day_human": "battle day 3 of 4"}
-        )
-        == []
-    )
+    assert g.check_post("battle day 3 of 4 is open", {"war_day_human": "battle day 3 of 4"}) == []
 
 
 def test_colosseum_finish_line_and_no_count_claims_are_rejected():
@@ -81,12 +68,7 @@ def test_correct_colosseum_mechanics_pass():
         )
         == []
     )
-    assert (
-        g.check_post(
-            "These battles are not purely about personal chest rewards.", facts
-        )
-        == []
-    )
+    assert g.check_post("These battles are not purely about personal chest rewards.", facts) == []
 
 
 def test_league_mismatch_flags():

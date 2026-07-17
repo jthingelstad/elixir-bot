@@ -20,9 +20,7 @@ class _EscapeRawHtmlPostprocessor(_RawHtmlPostprocessor):
     def run(self, text: str) -> str:
         for i in range(self.md.htmlStash.html_counter):
             raw = self.md.htmlStash.rawHtmlBlocks[i]
-            text = text.replace(
-                self.md.htmlStash.get_placeholder(i), html.escape(str(raw))
-            )
+            text = text.replace(self.md.htmlStash.get_placeholder(i), html.escape(str(raw)))
         return text
 
 

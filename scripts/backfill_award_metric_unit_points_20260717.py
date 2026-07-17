@@ -94,9 +94,7 @@ def main() -> None:
             meta = json.loads(row["metadata_json"])
             if "avg_fame" in meta:
                 # Preserve key order: rebuild with avg_fame renamed in place.
-                meta = {
-                    ("avg_points" if k == "avg_fame" else k): v for k, v in meta.items()
-                }
+                meta = {("avg_points" if k == "avg_fame" else k): v for k, v in meta.items()}
                 conn.execute(
                     "UPDATE awards SET metadata_json = ? WHERE award_id = ?",
                     (json.dumps(meta), row["award_id"]),

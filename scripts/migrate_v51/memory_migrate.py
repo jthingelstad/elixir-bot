@@ -7,7 +7,7 @@ deploy). memory_episodes already live in the engine DB (T12) and stay in
 place — M2 is a verify, not a copy.
 
 Usage:
-    ./venv/bin/python scripts/migrate_v51/memory_migrate.py \
+    uv run python scripts/migrate_v51/memory_migrate.py \
         --db elixir-v51.db --memory-db elixir-v5-memory.db
 """
 
@@ -18,9 +18,7 @@ import os
 import sqlite3
 import sys
 
-sys.path.insert(
-    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 KIND_MAP = {
     "leader_note": "leader_note",
@@ -100,15 +98,12 @@ def run(db_path: str, memory_db_path: str) -> int:
     # M2 re-key — member episodes carried Gen-A integer member_id keys
     # (found live 2026-07-04: tag lookups returned nothing since the cut).
     # Map via the archive's members table; idempotent (skips '#'-keyed rows).
-    archive = os.path.join(
-        os.path.dirname(db_path) or ".", "elixir-v5-archive-2026H2.db"
-    )
+    archive = os.path.join(os.path.dirname(db_path) or ".", "elixir-v5-archive-2026H2.db")
     rekeyed = 0
     if os.path.exists(archive):
         arch = sqlite3.connect(f"file:{archive}?immutable=1", uri=True)
         id_to_tag = {
-            str(r[0]): r[1]
-            for r in arch.execute("SELECT member_id, player_tag FROM members")
+            str(r[0]): r[1] for r in arch.execute("SELECT member_id, player_tag FROM members")
         }
         arch.close()
         for r in new.execute(
@@ -130,9 +125,7 @@ def run(db_path: str, memory_db_path: str) -> int:
             "SELECT subject_type, subject_key, fact_type, fact_value, updated_at "
             "FROM memory_facts ORDER BY subject_type, subject_key"
         ).fetchall()
-        if new.execute(
-            "SELECT 1 FROM sqlite_master WHERE name='memory_facts'"
-        ).fetchone()
+        if new.execute("SELECT 1 FROM sqlite_master WHERE name='memory_facts'").fetchone()
         else []
     )
     legacy_added = 0

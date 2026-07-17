@@ -29,9 +29,7 @@ DEFAULT_PROMOTION_CONFIDENCE = 0.72
 
 
 def _cutoff(days: int) -> str:
-    dt = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
-        days=max(1, int(days or 1))
-    )
+    dt = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=max(1, int(days or 1)))
     return dt.strftime("%Y-%m-%dT%H:%M:%S")
 
 
@@ -51,7 +49,7 @@ def _loads_dict(value) -> dict:
         return {}
     try:
         loaded = json.loads(value)
-    except (TypeError, json.JSONDecodeError):
+    except TypeError, json.JSONDecodeError:
         return {}
     return loaded if isinstance(loaded, dict) else {}
 
@@ -178,9 +176,7 @@ def _leader_action_feedback_spec(conn, *, days: int) -> dict | None:
         "rejected": by_status.get("rejected", 0),
         "deferred": by_status.get("deferred", 0),
     }
-    metrics.update(
-        {f"action_type_{key}": value for key, value in by_type.most_common(5)}
-    )
+    metrics.update({f"action_type_{key}": value for key, value in by_type.most_common(5)})
     return {
         "category": "routing_quality",
         "title": "Fold leader-action feedback into Elixir recommendation policy",
@@ -298,17 +294,13 @@ def store_improvement_specs(specs: Iterable[dict], *, conn=None) -> list[dict]:
 
 def _format_suggestion(suggestion: dict) -> str:
     evidence = suggestion.get("evidence") or {}
-    metrics = (
-        evidence.get("metrics") if isinstance(evidence.get("metrics"), dict) else {}
-    )
+    metrics = evidence.get("metrics") if isinstance(evidence.get("metrics"), dict) else {}
     sample = ""
     samples = evidence.get("samples") or []
     if samples:
         first = samples[0]
         sample = f"\n  sample: {first.get('label')}: {first.get('detail')}"
-    metric_text = ", ".join(
-        f"{key}={value}" for key, value in sorted(metrics.items())[:6]
-    )
+    metric_text = ", ".join(f"{key}={value}" for key, value in sorted(metrics.items())[:6])
     metric_line = f"\n  metrics: {metric_text}" if metric_text else ""
     return (
         f"[{suggestion.get('category')}] {suggestion.get('title')}\n"
@@ -487,9 +479,7 @@ def promote_suggestions_to_github(
             updated = db.mark_improvement_suggestion_promoted(
                 suggestion["suggestion_key"],
                 github_issue_number=issue_number,
-                github_issue_url=output
-                if output.startswith("http")
-                else github_issue_url,
+                github_issue_url=output if output.startswith("http") else github_issue_url,
                 conn=conn,
             )
             suggestion.update(updated or {})
@@ -506,21 +496,15 @@ def promote_suggestions_to_github(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Review Elixir improvement opportunities."
-    )
-    parser.add_argument(
-        "--days", type=int, default=30, help="Lookback window for source evidence."
-    )
+    parser = argparse.ArgumentParser(description="Review Elixir improvement opportunities.")
+    parser.add_argument("--days", type=int, default=30, help="Lookback window for source evidence.")
     parser.add_argument(
         "--limit",
         type=int,
         default=50,
         help="Maximum stored suggestions to print/promote.",
     )
-    parser.add_argument(
-        "--json", action="store_true", help="Emit JSON instead of a text report."
-    )
+    parser.add_argument("--json", action="store_true", help="Emit JSON instead of a text report.")
     parser.add_argument(
         "--no-store", action="store_true", help="Do not persist collected suggestions."
     )
@@ -534,9 +518,7 @@ def main() -> None:
         action="store_true",
         help="Actually create/update GitHub issues. Implies --promote-github.",
     )
-    parser.add_argument(
-        "--repo", default=DEFAULT_REPO, help="GitHub repository owner/name."
-    )
+    parser.add_argument("--repo", default=DEFAULT_REPO, help="GitHub repository owner/name.")
     parser.add_argument(
         "--min-confidence",
         type=float,
@@ -592,9 +574,7 @@ def main() -> None:
             for item in promotion:
                 status = _format_promotion_result_status(item)
                 issue = (
-                    f" #{item['github_issue_number']}"
-                    if item.get("github_issue_number")
-                    else ""
+                    f" #{item['github_issue_number']}" if item.get("github_issue_number") else ""
                 )
                 reason = f" ({item['reason']})" if item.get("reason") else ""
                 print(

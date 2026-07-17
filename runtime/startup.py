@@ -31,19 +31,13 @@ def _member_role_grant_status() -> dict:
     }
     if not runtime_app.MEMBER_ROLE_ID:
         return status
-    guild = (
-        runtime_app.bot.get_guild(runtime_app.GUILD_ID)
-        if runtime_app.GUILD_ID
-        else None
-    )
+    guild = runtime_app.bot.get_guild(runtime_app.GUILD_ID) if runtime_app.GUILD_ID else None
     if guild is None:
         status["reason"] = "guild not cached"
         return status
     status["guild_found"] = True
     member_role = guild.get_role(runtime_app.MEMBER_ROLE_ID)
-    bot_role = (
-        guild.get_role(runtime_app.BOT_ROLE_ID) if runtime_app.BOT_ROLE_ID else None
-    )
+    bot_role = guild.get_role(runtime_app.BOT_ROLE_ID) if runtime_app.BOT_ROLE_ID else None
     me = guild.me
     if member_role is None:
         status["reason"] = "member role not found"
@@ -85,9 +79,7 @@ async def _startup_channel_audit_summary() -> str:
     from runtime import app as runtime_app
 
     active_channels = [
-        channel
-        for channel in prompts.discord_channel_configs()
-        if channel.get("workflow")
+        channel for channel in prompts.discord_channel_configs() if channel.get("workflow")
     ]
     if not active_channels:
         return "Channel audit: no active configured channels found."
@@ -130,9 +122,7 @@ async def _startup_channel_audit_summary() -> str:
                 if not getattr(perms, "use_external_emojis", True):
                     missing_soft.append("use_external_emojis")
                 if missing_soft:
-                    issues.append(
-                        f"{channel_name} missing perms: {', '.join(missing_soft)}"
-                    )
+                    issues.append(f"{channel_name} missing perms: {', '.join(missing_soft)}")
                     continue
         ok_names.append(channel_name)
     if not issues:

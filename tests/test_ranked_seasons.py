@@ -94,9 +94,7 @@ def test_ranked_league_names_are_era_aware():
     assert ranked_league_name(7) == "Ultimate Champion"
     assert ranked_league_name(1) == "Master 1"
     assert ranked_league_name(10) is None  # no league 10 in the current scheme
-    assert (
-        ranked_league_name(10, legacy=True) == "Ultimate Champion (Path of Legends era)"
-    )
+    assert ranked_league_name(10, legacy=True) == "Ultimate Champion (Path of Legends era)"
     assert ranked_league_name(None) is None
 
 
@@ -126,9 +124,7 @@ def test_ultimate_champion_fires_at_league_7():
         )
         events = [
             r["event_type"]
-            for r in conn.execute(
-                "SELECT event_type FROM player_events WHERE player_tag = '#UC1'"
-            )
+            for r in conn.execute("SELECT event_type FROM player_events WHERE player_tag = '#UC1'")
         ]
         assert "pol_promotion" in events
         assert "ultimate_champion_reached" in events
@@ -176,12 +172,7 @@ def test_shape_change_alone_emits_nothing():
             ).fetchone()[0]
             == 0
         )
-        assert (
-            conn.execute(
-                "SELECT COUNT(*) FROM pol_seasons WHERE closed = 1"
-            ).fetchone()[0]
-            == 0
-        )
+        assert conn.execute("SELECT COUNT(*) FROM pol_seasons WHERE closed = 1").fetchone()[0] == 0
     finally:
         conn.close()
 
@@ -378,11 +369,7 @@ def test_rollover_closes_season_and_posts_podium():
             """SELECT m.body FROM memories m JOIN memory_tags t ON t.memory_id = m.memory_id
                WHERE t.tag = 'ranked-season-2026-06'"""
         ).fetchone()
-        assert (
-            chron
-            and "Atternam" in chron["body"]
-            and "Ultimate Champion" in chron["body"]
-        )
+        assert chron and "Atternam" in chron["body"] and "Ultimate Champion" in chron["body"]
 
         # OllieTurtle's later rollover: own row upserted, nothing else re-fires
         _emit_player(
@@ -401,9 +388,7 @@ def test_rollover_closes_season_and_posts_podium():
             == 1
         )
         assert (
-            conn.execute(
-                "SELECT COUNT(*) FROM awards WHERE award_type = 'pol_champ'"
-            ).fetchone()[0]
+            conn.execute("SELECT COUNT(*) FROM awards WHERE award_type = 'pol_champ'").fetchone()[0]
             == 3
         )
         assert (
@@ -482,9 +467,7 @@ def test_teammate_extracted_from_2v2():
 def _profile_conn_with(conn, tag: str, mode_battles: dict[str, tuple[int, int]]):
     _seed_member(conn, tag, tag.strip("#"))
     for mode, (battles, wins) in mode_battles.items():
-        _seed_rollups(
-            conn, tag, battles, wins, mode=mode, dates=("2026-06-25", "2026-06-28")
-        )
+        _seed_rollups(conn, tag, battles, wins, mode=mode, dates=("2026-06-25", "2026-06-28"))
 
 
 def test_identity_labels_at_thresholds():
@@ -496,9 +479,7 @@ def test_identity_labels_at_thresholds():
         p = profiles.player_mode_profile(conn, "#GRIND", today=today)
         assert p["identity"] == "Ranked grinder"
         # threshold edge: largest mode at 34% share → all-rounder
-        _profile_conn_with(
-            conn, "#EDGE", {"ladder": (34, 20), "war": (33, 15), "ranked": (33, 15)}
-        )
+        _profile_conn_with(conn, "#EDGE", {"ladder": (34, 20), "war": (33, 15), "ranked": (33, 15)})
         p = profiles.player_mode_profile(conn, "#EDGE", today=today)
         assert p["identity"] == "all-rounder"
         # battles floor: 50% share but only 6 battles in the top mode, 11 total

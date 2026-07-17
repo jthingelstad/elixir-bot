@@ -124,9 +124,7 @@ def test_fts_round_trip_and_query_selection():
             body="POAP KINGS won colosseum with a xylophone strategy.",
         )
         _seed(conn, title="Noise", body="Unrelated donation chatter.")
-        hits = memory_store.search_memories(
-            "xylophone", viewer_scope="leadership", conn=conn
-        )
+        hits = memory_store.search_memories("xylophone", viewer_scope="leadership", conn=conn)
         assert hits and hits[0].memory["memory_id"] == target
         picked = memory_store.select_memories(
             query="xylophone strategy", viewer_scope="public", limit=3, conn=conn
@@ -221,9 +219,7 @@ def test_migration_parity_seeded_source(tmp_path):
     try:
         rows = {
             r["memory_id"]: dict(r)
-            for r in conn.execute(
-                "SELECT * FROM memories WHERE created_by = 't'"
-            ).fetchall()
+            for r in conn.execute("SELECT * FROM memories WHERE created_by = 't'").fetchall()
         }
         assert rows[1]["kind"] == "inference" and rows[1]["member_tag"] == "#AAA111"
         assert rows[2]["kind"] == "synthesis"
@@ -231,8 +227,7 @@ def test_migration_parity_seeded_source(tmp_path):
         assert rows[2]["retired_at"] is not None  # archived → retired
         assert rows[2]["source_event_key"] == "war:w133"
         tags = {
-            (r[0], r[1])
-            for r in conn.execute("SELECT memory_id, tag FROM memory_tags").fetchall()
+            (r[0], r[1]) for r in conn.execute("SELECT memory_id, tag FROM memory_tags").fetchall()
         }
         assert (1, "war") in tags and (2, "arc") in tags
     finally:
@@ -340,9 +335,7 @@ def test_unfiltered_selection_still_has_recency_backstop():
             confidence=0.9,
             age_days=0,
         )
-        got = memory_store.select_memories(
-            viewer_scope="leadership", limit=5, conn=conn
-        )
+        got = memory_store.select_memories(viewer_scope="leadership", limit=5, conn=conn)
         assert any(m["title"] == "fresh clanwide" for m in got)
     finally:
         conn.close()

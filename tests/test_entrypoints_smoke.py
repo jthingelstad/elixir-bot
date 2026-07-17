@@ -94,9 +94,7 @@ def _discover_modules():
         pkg = importlib.import_module(pkg_name)
         names.append(pkg_name)
         for info in pkgutil.walk_packages(pkg.__path__, prefix=pkg_name + "."):
-            if info.name.rsplit(".", 1)[-1].startswith("_") and info.name.endswith(
-                "__main__"
-            ):
+            if info.name.rsplit(".", 1)[-1].startswith("_") and info.name.endswith("__main__"):
                 continue
             names.append(info.name)
     return sorted(set(names))
@@ -147,9 +145,7 @@ def test_registered_job_functions_resolve():
         fn = getattr(app, activity.job_function, None)
         if not callable(fn):
             missing.append(f"{activity.activity_key} -> {activity.job_function}")
-    assert not missing, "job_function not a callable on runtime.app:\n" + "\n".join(
-        missing
-    )
+    assert not missing, "job_function not a callable on runtime.app:\n" + "\n".join(missing)
 
 
 def test_every_advertised_tool_has_an_executor():
@@ -159,9 +155,7 @@ def test_every_advertised_tool_has_an_executor():
     from agent.workflow_registry import ALL_TOOLS
 
     advertised = {tool["name"] for tool in ALL_TOOLS}
-    dispatch_tree = ast.parse(
-        textwrap.dedent(inspect.getsource(tool_exec._execute_tool))
-    )
+    dispatch_tree = ast.parse(textwrap.dedent(inspect.getsource(tool_exec._execute_tool)))
     dispatched = {
         node.comparators[0].value
         for node in ast.walk(dispatch_tree)
@@ -236,12 +230,8 @@ _INTENT_CASES = [
 ]
 
 
-@pytest.mark.parametrize(
-    "intent_type,payload", _INTENT_CASES, ids=[c[0] for c in _INTENT_CASES]
-)
-def test_compose_ask_builds_for_every_intent_type(
-    legacy_engine_conn, intent_type, payload
-):
+@pytest.mark.parametrize("intent_type,payload", _INTENT_CASES, ids=[c[0] for c in _INTENT_CASES])
+def test_compose_ask_builds_for_every_intent_type(legacy_engine_conn, intent_type, payload):
     """intent_context builds a non-empty ask for every intent branch — exercises
     each branch's lazy imports / enrichment (the CLASH_COPY_MAX_LENGTH class
     lived in exactly this kind of path)."""
@@ -252,12 +242,8 @@ def test_compose_ask_builds_for_every_intent_type(
     assert isinstance(ask, str) and ask.strip(), f"empty ask for {intent_type}"
 
 
-@pytest.mark.parametrize(
-    "intent_type,payload", _INTENT_CASES, ids=[c[0] for c in _INTENT_CASES]
-)
-def test_render_intent_fallback_for_every_intent_type(
-    legacy_engine_conn, intent_type, payload
-):
+@pytest.mark.parametrize("intent_type,payload", _INTENT_CASES, ids=[c[0] for c in _INTENT_CASES])
+def test_render_intent_fallback_for_every_intent_type(legacy_engine_conn, intent_type, payload):
     """The deterministic fallback copy renders for every branch (delivery falls
     back to this when compose/gate fail — it must never itself raise)."""
     from engine.recognition import compose

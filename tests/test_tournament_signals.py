@@ -68,9 +68,7 @@ def test_poll_tournament_emits_join_signal_for_each_new_participant():
         ]
         result = poll_tournament("#2QG9Y9UR", _api_payload(members=expanded), conn=conn)
         join_signals = [
-            s
-            for s in result["live_signals"]
-            if s["type"] == "tournament_participant_joined"
+            s for s in result["live_signals"] if s["type"] == "tournament_participant_joined"
         ]
         assert len(join_signals) == 2
         by_tag = {s["player_tag"]: s for s in join_signals}
@@ -79,10 +77,7 @@ def test_poll_tournament_emits_join_signal_for_each_new_participant():
         assert by_tag["#GHI789"]["player_name"] == "Ditika"
         # signal_key should dedupe per (tournament, player) so the awareness
         # pipeline never double-posts the same join.
-        assert (
-            by_tag["#DEF456"]["signal_key"]
-            == "tournament_participant_joined|#2QG9Y9UR|#DEF456"
-        )
+        assert by_tag["#DEF456"]["signal_key"] == "tournament_participant_joined|#2QG9Y9UR|#DEF456"
     finally:
         conn.close()
 
@@ -158,9 +153,7 @@ def test_store_tournament_battle_returns_signal_ready_dict_on_insert():
             ),
             conn=conn,
         )
-        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()[
-            "tournament_id"
-        ]
+        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()["tournament_id"]
         info = store_tournament_battle(tid, _battle_payload(), conn=conn)
         assert info is not None
         # Canonical order is lex-smallest tag first: #ABC123 < #DEF456
@@ -201,9 +194,7 @@ def test_store_tournament_battle_enriches_deck_and_computes_shared_cards():
             ),
             conn=conn,
         )
-        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()[
-            "tournament_id"
-        ]
+        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()["tournament_id"]
         # Both players share Hog Rider; p1 runs cheap cycle, p2 runs heavy.
         battle = {
             "battleTime": "20260418T150000.000Z",
@@ -263,9 +254,7 @@ def test_store_tournament_battle_returns_none_on_duplicate():
             ),
             conn=conn,
         )
-        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()[
-            "tournament_id"
-        ]
+        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()["tournament_id"]
         first = store_tournament_battle(tid, _battle_payload(), conn=conn)
         assert first is not None
         # Same battle fetched from the other player's log — should dedup.
@@ -395,9 +384,7 @@ def test_build_tournament_recap_context_enriches_decks_and_audience():
             ),
             conn=conn,
         )
-        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()[
-            "tournament_id"
-        ]
+        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()["tournament_id"]
 
         battle = {
             "battleTime": "20260418T150000.000Z",
@@ -491,8 +478,7 @@ def test_format_tournament_close_post_truncates_to_top_n():
     api_data = {
         "name": "Big Tourney",
         "membersList": [
-            {"tag": f"#P{i}", "name": f"P{i}", "score": 50 - i, "rank": i + 1}
-            for i in range(15)
+            {"tag": f"#P{i}", "name": f"P{i}", "score": 50 - i, "rank": i + 1} for i in range(15)
         ],
     }
     text = _format_tournament_close_post("Big Tourney", api_data, top_n=10)

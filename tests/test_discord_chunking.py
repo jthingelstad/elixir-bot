@@ -57,7 +57,9 @@ def test_hard_char_split_when_no_whitespace():
 
 
 def test_all_content_preserved_across_chunks():
-    text = "Paragraph one with several sentences.\n\nParagraph two.\n\nParagraph three has more words."
+    text = (
+        "Paragraph one with several sentences.\n\nParagraph two.\n\nParagraph three has more words."
+    )
     chunks = _chunk_for_discord(text, size=40)
     # Rejoin and compare ignoring whitespace (strip/lstrip semantics mean adjacent
     # whitespace gets normalized, but no content should be lost).
@@ -73,19 +75,13 @@ def test_never_exceeds_size_ceiling():
 
 
 def _guild(*emojis):
-    items = [
-        SimpleNamespace(name=name, id=emoji_id, animated=False)
-        for name, emoji_id in emojis
-    ]
+    items = [SimpleNamespace(name=name, id=emoji_id, animated=False) for name, emoji_id in emojis]
     return SimpleNamespace(emojis=items)
 
 
 def test_resolve_custom_emoji_rewrites_known_shortcodes():
     guild = _guild(("elixir_trophy", 1001))
-    assert (
-        _resolve_custom_emoji(":elixir_trophy: win", guild)
-        == "<:elixir_trophy:1001> win"
-    )
+    assert _resolve_custom_emoji(":elixir_trophy: win", guild) == "<:elixir_trophy:1001> win"
 
 
 def test_resolve_custom_emoji_strips_hallucinated_names():

@@ -111,13 +111,9 @@ _REPORT_CALLS = {
 
 
 def _sources() -> list[Path]:
-    paths = [
-        path for directory in SOURCE_DIRS for path in (ROOT / directory).rglob("*.py")
-    ]
+    paths = [path for directory in SOURCE_DIRS for path in (ROOT / directory).rglob("*.py")]
     paths.extend(ROOT / name for name in ROOT_SOURCES)
-    return sorted(
-        path for path in paths if path.relative_to(ROOT).as_posix() not in EXCLUDED
-    )
+    return sorted(path for path in paths if path.relative_to(ROOT).as_posix() not in EXCLUDED)
 
 
 def _exception_name(handler: ast.ExceptHandler) -> str | None:
@@ -176,9 +172,7 @@ def check() -> tuple[list[str], Counter]:
     for path in _sources():
         relative = path.relative_to(ROOT).as_posix()
         tree = ast.parse(path.read_text(), filename=relative)
-        for handler in (
-            node for node in ast.walk(tree) if isinstance(node, ast.ExceptHandler)
-        ):
+        for handler in (node for node in ast.walk(tree) if isinstance(node, ast.ExceptHandler)):
             name = _exception_name(handler)
             if name not in {None, "BaseException", "Exception"}:
                 continue

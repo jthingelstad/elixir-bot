@@ -82,9 +82,7 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
         if len(team) > 1:
             for tm in team:
                 tm_tag = (
-                    canon_tag(tm.get("tag"))
-                    if isinstance(tm, dict) and tm.get("tag")
-                    else None
+                    canon_tag(tm.get("tag")) if isinstance(tm, dict) and tm.get("tag") else None
                 )
                 if tm_tag and tm_tag != tag:
                     teammate = tm_tag
@@ -109,9 +107,7 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
                 "battle_type": b.get("type") or "unknown",
                 "opponent_tag": o0.get("tag") or "",
                 "crowns_for": t0.get("crowns") if t0.get("crowns") is not None else -1,
-                "crowns_against": o0.get("crowns")
-                if o0.get("crowns") is not None
-                else -1,
+                "crowns_against": o0.get("crowns") if o0.get("crowns") is not None else -1,
                 "game_mode_id": gm.get("id"),
                 "game_mode_name": gm.get("name"),
                 "mode_group": mode_group,

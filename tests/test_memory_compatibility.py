@@ -147,10 +147,7 @@ def test_message_summary_updates_current_channel_and_user_paths():
             conn=conn,
         )
         state = db.get_channel_state("ch100", conn=conn)
-        assert (
-            state["last_summary"]
-            == "War recap covering rankings and player highlights."
-        )
+        assert state["last_summary"] == "War recap covering rankings and player highlights."
 
         user_message_id = db.save_message(
             "leader:user789",

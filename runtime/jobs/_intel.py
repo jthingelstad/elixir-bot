@@ -44,9 +44,7 @@ async def _clan_wars_intel_report():
     try:
         channel_id = _get_singleton_channel_id("elixir")
     except Exception as exc:
-        runtime_status.mark_job_failure(
-            "clan_wars_intel", f"channel config error: {exc}"
-        )
+        runtime_status.mark_job_failure("clan_wars_intel", f"channel config error: {exc}")
         return
 
     channel = _bot().get_channel(channel_id)
@@ -73,9 +71,7 @@ async def _clan_wars_intel_report():
         and (c.get("tag") or "").lstrip("#").upper() != our_tag
     ]
     if not competitors:
-        runtime_status.mark_job_success(
-            "clan_wars_intel", "no competitors in current war"
-        )
+        runtime_status.mark_job_success("clan_wars_intel", "no competitors in current war")
         return
 
     season_id = war.get("seasonId")

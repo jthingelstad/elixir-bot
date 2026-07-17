@@ -46,9 +46,7 @@ def season_id_for(on: date) -> str:
     fm = first_monday(on.year, on.month)
     if on >= fm:
         return f"{on.year:04d}-{on.month:02d}"
-    prev_year, prev_month = (
-        (on.year, on.month - 1) if on.month > 1 else (on.year - 1, 12)
-    )
+    prev_year, prev_month = (on.year, on.month - 1) if on.month > 1 else (on.year - 1, 12)
     return f"{prev_year:04d}-{prev_month:02d}"
 
 
@@ -86,8 +84,7 @@ def ensure_open_season(conn, observed_at: str) -> str:
 
 def _open_season(conn) -> str | None:
     row = conn.execute(
-        "SELECT pol_season_id FROM pol_seasons WHERE closed = 0 "
-        "ORDER BY pol_season_id DESC LIMIT 1"
+        "SELECT pol_season_id FROM pol_seasons WHERE closed = 0 ORDER BY pol_season_id DESC LIMIT 1"
     ).fetchone()
     return row["pol_season_id"] if row else None
 
@@ -120,7 +117,7 @@ def _snapshot_results(conn, season_id: str, observed_at: str) -> int:
     for r in rows:
         try:
             p = json.loads(r["payload_json"]) or {}
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         league, rating, rank = p.get("league"), p.get("trophies"), p.get("rank")
         if league is None and rating is None:
@@ -146,9 +143,7 @@ def _snapshot_results(conn, season_id: str, observed_at: str) -> int:
     return n
 
 
-def _upsert_own_result(
-    conn, season_id: str, tag: str, last: dict, observed_at: str
-) -> None:
+def _upsert_own_result(conn, season_id: str, tag: str, last: dict, observed_at: str) -> None:
     """The player's own rollover observation carries authoritative season-end
     values in `last` — overwrite the snapshot row."""
     battles, wins = _season_window_battles(conn, tag, season_id)
@@ -212,8 +207,7 @@ def _close_season_once(conn, season_id: str, observed_at: str) -> None:
     flag flip). Awards + podium event + chronicle, each unable to lose the
     close itself."""
     cur = conn.execute(
-        "UPDATE pol_seasons SET closed = 1, ended_at = ? "
-        "WHERE pol_season_id = ? AND closed = 0",
+        "UPDATE pol_seasons SET closed = 1, ended_at = ? WHERE pol_season_id = ? AND closed = 0",
         (observed_at, season_id),
     )
     if not cur.rowcount:
