@@ -1,6 +1,18 @@
 # Elixir v5.1 — The Editor (internal output evaluation)
 
-> **Status:** 🟡 Spec'd 2026-07-04, build authorized same day (Jamie: "you
+> **Status:** 🔴 **Critic REMOVED 2026-07-17.** The post-compose LLM critic
+> described below (§2 the inline/post-delivery gate, the `judge` seam, and the
+> `editor_verdicts` ledger) was wired in 2026-07-16, backed out the same day (it
+> held the delivery write lock and false-grounded on thin post-facts), and then
+> removed entirely along with the `ELIXIR_EDITOR_GATE` flag and the
+> `editor_verdicts` table (schema v8). **The living rubric / feeders (§3) stay
+> live** in `engine/editor.py` (`record_deleted_post`, `record_copy_edit_pair`,
+> `record_active_awareness_quality`, `record_post_quality_feedback`) — they never
+> used the critic or its ledger. This doc is kept for design reference; if a
+> critic is ever rebuilt it must run OUTSIDE the delivery transaction with the
+> brain's full facts.
+>
+> **Original status:** 🟡 Spec'd 2026-07-04, build authorized same day (Jamie: "you
 > should build it because this code has never gone through a season end —
 > it reduces risk"). Same conventions as the v5.1 set.
 > **Owner:** Jamie · **Last worked:** 2026-07-04

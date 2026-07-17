@@ -298,14 +298,12 @@ def record_awareness_post(
                 content=content,
                 discord_message_id=message_id,
             )
-            # NOTE: the observe-and-learn editorial critic is intentionally NOT
-            # invoked here. Running its LLM call inside this delivery write path
-            # held the DB write lock for the call's duration (lock contention;
-            # #172 2026-07-16), and it only received awareness_post_facts — not
-            # the brain's tool-derived numbers — so it false-flagged grounding.
-            # It must run OUTSIDE the delivery transaction (post-commit, fresh
-            # conn) with the full facts before it is re-enabled. See
-            # engine.editor.judge_delivered_post.
+            # NOTE: only the deterministic feeder runs on the delivery path. The
+            # observe-and-learn LLM critic that briefly lived here was removed
+            # 2026-07-17: run inside this write path it held the DB write lock for
+            # the call's duration (#172 2026-07-16) and false-flagged grounding
+            # from thin post-facts. If a post-compose critic is ever rebuilt it
+            # must run OUTSIDE the delivery transaction with the full brain facts.
     except Exception as exc:
         log.exception("record_awareness_post: failed to record %s post", lane)
         # The post is already visible in Discord, so this remains fail-soft to

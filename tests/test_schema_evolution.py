@@ -127,19 +127,26 @@ def test_empty_get_connection_builds_complete_current_schema(tmp_path):
         conn.close()
 
 
-def test_v5_migration_adds_editor_verdicts_forward_from_v4(tmp_path):
-    """A live v4 database (no editor_verdicts) migrates forward to v5, gaining
-    the editorial-critic verdict ledger. The migration is idempotent and the
-    result matches the committed fingerprint."""
-    path = tmp_path / "v4.db"
+def test_v8_migration_drops_editor_verdicts_forward_from_v7(tmp_path):
+    """A live v7 database still carrying editor_verdicts (the post-compose critic
+    was backed out, then the feature removed) migrates forward to v8, dropping the
+    ledger. Idempotent, and the result matches the committed fingerprint."""
+    path = tmp_path / "v7.db"
     build(str(path), None)
     conn = sqlite3.connect(path)
     try:
-        # Simulate a pre-V5 database: drop the table, roll user_version back.
-        conn.execute("DROP TABLE editor_verdicts")
-        conn.execute("PRAGMA user_version = 4")
+        # Simulate a pre-v8 database that still has the critic's ledger.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS editor_verdicts ("
+            "verdict_id INTEGER PRIMARY KEY AUTOINCREMENT, intent_key TEXT, "
+            "loop_number INTEGER, lane TEXT NOT NULL, "
+            "verdict TEXT NOT NULL DEFAULT 'pass', dimensions_json TEXT, "
+            "critique TEXT, original_copy TEXT, final_copy TEXT, "
+            "covers_json TEXT, model TEXT, at TEXT NOT NULL)"
+        )
+        conn.execute("PRAGMA user_version = 7")
         conn.commit()
-        assert not conn.execute(
+        assert conn.execute(
             "SELECT 1 FROM sqlite_master WHERE name='editor_verdicts'"
         ).fetchone()
 
@@ -148,20 +155,10 @@ def test_v5_migration_adds_editor_verdicts_forward_from_v4(tmp_path):
         assert (
             conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
         )
-        assert conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='editor_verdicts'"
+        assert not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='editor_verdicts'"
         ).fetchone()
-        # Verdict CHECK constraint is enforced.
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(editor_verdicts)")}
-        assert {
-            "verdict_id",
-            "intent_key",
-            "loop_number",
-            "lane",
-            "verdict",
-            "at",
-        } <= cols
-        # Re-running is a no-op (idempotent) and stays on the committed fingerprint.
+        # Re-running is a no-op and stays on the committed fingerprint.
         apply_schema_migrations(conn)
         assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
     finally:

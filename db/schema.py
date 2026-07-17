@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 
 _V1_STATEMENTS = (
@@ -271,13 +271,6 @@ REQUIRED_SCHEMA = {
         "judgment_reason",
         "evidence_as_of",
         "materialization_id",
-    },
-    "editor_verdicts": {
-        "verdict_id",
-        "loop_number",
-        "lane",
-        "verdict",
-        "at",
     },
     "leader_action_recommendations": {
         "action_id",
@@ -727,6 +720,19 @@ def _apply_v7(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v8(conn: sqlite3.Connection) -> None:
+    """Drop the ``editor_verdicts`` ledger with the post-compose editorial critic.
+
+    The critic (added in ``_apply_v5``) was wired into the awareness delivery
+    path 2026-07-16, backed out the same day (it held the delivery write lock and
+    false-grounded on thin facts), and removed entirely 2026-07-17 along with its
+    ``ELIXIR_EDITOR_GATE`` flag. Nothing wrote the ledger after the back-out, so
+    the table only ever held rows during the one-day live window. The editorial
+    *feeders* (``engine.editor.record_*``) stay — they never used this table.
+    """
+    conn.execute("DROP TABLE IF EXISTS editor_verdicts")
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -804,6 +810,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 7
+    if version < 8:
+        try:
+            _apply_v8(conn)
+            conn.execute("PRAGMA user_version = 8")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -863,7 +878,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 # Updated deliberately whenever the fresh-build schema changes.
 CURRENT_SCHEMA_FINGERPRINT = (
-    "b209f52982e67a1e021597a987a05fd2ab5f36f632c12af8cb98f103021b1e2d"
+    "e55d8dc65f7f91bca834341504d8bca7570f46a47c369144d4b8b1f0d74d75cb"
 )
 
 
