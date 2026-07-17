@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Command{% endblock %}
+{% block head %}<meta http-equiv="refresh" content="30">{% endblock %}
+{% block content %}
+<h1>Command <span class="muted" style="font-size:.8rem;">running the clan at a glance · auto-refreshes 30s</span></h1>
+{% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
+
+<div class="cards">
+
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2 style="margin-top:0;">Needs your decision
+      <span class="badge {{ 'bad' if (open_actions|length + open_cases|length) else 'ok' }}">{{ open_actions|length + open_cases|length }}</span>
+    </h2>
+    {% if open_actions %}
+      <table>
+        <thead><tr><th>Card</th><th>Member</th><th>What</th><th>Raised</th></tr></thead>
+        <tbody>
+        {% for a in open_actions %}
+          <tr>
+            <td><span class="badge">{{ a.get('action_type','') }}</span></td>
+            <td>{{ a.get('target_player_name') or '—' }}</td>
+            <td class="muted">{{ (a.get('objective') or a.get('rationale') or '')[:70] }}</td>
+            <td class="muted">{{ a.get('proposed_at','') | reltime }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+    {% if open_cases %}
+      <h3 style="margin:.7rem 0 .2rem;">Decision cases due</h3>
+      <table>
+        <thead><tr><th>Case</th><th>Member</th><th>Due</th></tr></thead>
+        <tbody>
+        {% for c in open_cases %}
+          <tr>
+            <td>{{ c.get('title') or c.get('case_type','') }}</td>
+            <td>{{ c.get('target_player_name') or '—' }}</td>
+            <td class="muted">{{ c.get('due_at','') | reltime }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+    {% if not open_actions and not open_cases %}
+      <p class="muted">Nothing waiting on you — no open cards or due cases. ✅</p>
+    {% endif %}
+    <p style="margin:.5rem 0 0;"><a href="/management" class="muted">All management detail →</a></p>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Who needs attention</h2>
+    {% if attention %}
+      <table>
+        <thead><tr><th>Member</th><th>Flag</th></tr></thead>
+        <tbody>
+        {% for m in attention %}
+          <tr>
+            <td>{{ m.get('name') or m.get('player_tag') }}</td>
+            <td>
+              {% if m.get('kick_state') and m.get('kick_state') != 'none' %}<span class="badge bad">kick: {{ m.get('kick_state') }}</span>{% endif %}
+              {% if m.get('promote_state') in ('eligible','recommended') %}<span class="badge ok">promote: {{ m.get('promote_state') }}</span>{% endif %}
+              {% if m.get('demote_state') in ('eligible','recommended') %}<span class="badge">demote: {{ m.get('demote_state') }}</span>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No members flagged for promotion, demotion, or removal.</p>
+    {% endif %}
+    <p style="margin:.5rem 0 0;"><a href="/members" class="muted">Full roster →</a></p>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Clan pulse</h2>
+    <dl class="kv">
+      <dt>roster</dt><dd>{{ roster_count if roster_count is not none else '—' }} members</dd>
+      {% if war_clock %}
+        <dt>war</dt><dd>{{ war_clock.get('phase_display') or war_clock.get('phase','') }}{% if war_clock.get('day_number') %} · day {{ war_clock.get('day_number') }}{% endif %}</dd>
+      {% endif %}
+    </dl>
+    {% if war_standings %}
+      <table>
+        <thead><tr><th>#</th><th>Clan</th><th>Fame</th></tr></thead>
+        <tbody>
+        {% for s in war_standings %}
+          <tr {% if s.get('name') == 'POAP KINGS' %}style="font-weight:600;"{% endif %}>
+            <td>{{ s.get('rank') if s.get('rank') is not none else '–' }}</td>
+            <td>{{ s.get('name') or '—' }}</td>
+            <td>{{ s.get('fame') }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+    <p style="margin:.5rem 0 0;"><a href="/war" class="muted">War detail →</a></p>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Elixir lately</h2>
+    {% if recent_posts %}
+      <ul style="margin:.2rem 0; padding-left:1rem;">
+      {% for p in recent_posts %}
+        <li style="margin-bottom:.35rem;">
+          <span class="badge">#{{ p.get('lane') }}</span>
+          <span class="muted">{{ p.get('posted_at','') | reltime }}</span><br>
+          {{ (p.get('content_preview') or '')[:120] }}
+        </li>
+      {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No posts recorded.</p>
+    {% endif %}
+    <p style="margin:.5rem 0 0;"><a href="/awareness" class="muted">Awareness detail →</a></p>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Health</h2>
+    <dl class="kv">
+      <dt>open incidents</dt>
+      <dd>{% if open_incidents %}<span class="badge bad">{{ open_incidents }}</span> <a href="/incidents" class="muted">view →</a>{% else %}<span class="badge ok">0</span>{% endif %}</dd>
+    </dl>
+    <p class="muted" style="margin:.4rem 0 0;">System internals live under the System nav group.</p>
+  </div>
+
+</div>
+{% endblock %}

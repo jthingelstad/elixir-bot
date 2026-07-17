@@ -869,6 +869,86 @@ def polling_page() -> dict:
         conn.close()
 
 
+def command_page() -> dict:
+    """Operator home: what needs your decision, who needs attention, the clan at a
+    glance, and what Elixir's been saying — organized around running the clan, not
+    Elixir's subsystems. Reuses the same sources as the deeper pages."""
+    conn = db.get_connection()
+    try:
+        open_actions = leader_actions.list_leader_actions(
+            status="proposed", limit=25, conn=conn
+        )
+        open_cases = cases.list_decision_cases(limit=25, conn=conn)
+        pending_revisits = revisits.list_pending_revisits(limit=15, conn=conn)
+
+        attention = _rows(
+            conn,
+            """
+            SELECT p.current_name AS name, mm.player_tag,
+                   mm.kick_state, mm.promote_state, mm.demote_state
+            FROM member_management mm
+            LEFT JOIN players p ON p.player_tag = mm.player_tag
+            WHERE mm.kick_state != 'none'
+               OR mm.promote_state IN ('eligible', 'recommended')
+               OR mm.demote_state IN ('eligible', 'recommended')
+            ORDER BY (mm.kick_state != 'none') DESC,
+                     (mm.promote_state = 'recommended') DESC,
+                     p.current_name COLLATE NOCASE
+            LIMIT 30
+            """,
+        )
+
+        clock = _war_clock_dict(conn)
+        war_standings = []
+        sid = (clock or {}).get("season_id")
+        sec = (clock or {}).get("section_index")
+        if sid is not None and sec is not None:
+            war_standings = _rows(
+                conn,
+                """
+                SELECT c.name, wwc.fame, wwc.rank
+                FROM war_week_clans wwc LEFT JOIN clans c ON c.clan_tag = wwc.clan_tag
+                WHERE wwc.season_id = ? AND wwc.section_index = ?
+                ORDER BY wwc.fame DESC LIMIT 5
+                """,
+                (sid, sec),
+            )
+
+        roster_count = (
+            _one(
+                conn,
+                "SELECT COUNT(*) AS n FROM clan_memberships WHERE left_at IS NULL",
+            )
+            or {}
+        ).get("n")
+        recent_posts = _rows(
+            conn,
+            "SELECT lane, content_preview, posted_at FROM awareness_posts "
+            "ORDER BY posted_at DESC LIMIT 6",
+        )
+        open_incidents = (
+            _one(
+                conn,
+                "SELECT COUNT(*) AS n FROM runtime_incidents WHERE resolved_at IS NULL",
+            )
+            or {}
+        ).get("n")
+
+        return {
+            "open_actions": open_actions,
+            "open_cases": open_cases,
+            "pending_revisits": pending_revisits,
+            "attention": attention,
+            "war_clock": clock,
+            "war_standings": war_standings,
+            "roster_count": roster_count,
+            "recent_posts": recent_posts,
+            "open_incidents": open_incidents,
+        }
+    finally:
+        conn.close()
+
+
 def management_page() -> dict:
     conn = db.get_connection()
     try:
