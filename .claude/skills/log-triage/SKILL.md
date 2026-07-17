@@ -89,7 +89,7 @@ Keep the whole report tight — under ~40 lines for a healthy day. If nothing is
 
 Do not write "investigate the error." Point to the file and what to check. Examples of the level of specificity expected:
 
-- "Recurring `validation_failure workflow=channel_update reason=schema_error detail=null response is not allowed`. The model is returning bare `null` when it should return an object or allowed null sentinel. Check `_proactive_channel_system` in `agent/prompts.py` — the schema instruction may be ambiguous about when null is allowed."
+- "Recurring `validation_failure workflow=channel_update reason=schema_error detail=null response is not allowed`. The model is returning bare `null` when it should return an object or allowed null sentinel. Check `_proactive_channel_system` in `agent/prompt_builders.py` — the schema instruction may be ambiguous about when null is allowed."
 - "Three Discord reconnects in 20 minutes around 03:29. Likely transient gateway flap; only act if this repeats. If it does, check network / token health on the host."
 - "Heartbeat gap from 04:12 → 08:21 (4 hours, expected ~30 min cadence). APScheduler may have stalled — check for missed-job warnings and confirm the process didn't get OOM-killed."
 

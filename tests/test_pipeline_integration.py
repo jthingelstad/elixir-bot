@@ -39,7 +39,7 @@ def _run(conn, compose_fn):
         sent.append((lane, copy))
         return f"msg-{len(sent)}"
 
-    counters = delivery.consume(conn, send_fn, compose_fn, NOW, editor_gate=None)
+    counters = delivery.consume(conn, send_fn, compose_fn, NOW)
     return counters, sent
 
 
