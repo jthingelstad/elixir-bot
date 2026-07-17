@@ -11,6 +11,7 @@ calls the LLM — the job wires generation in between build and render.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import db
@@ -19,6 +20,7 @@ from engine.normalize import humanize_badge, humanize_game_mode
 from engine.profiles import MODE_DISPLAY, playstyle_line
 from storage import game_events
 from storage._formatting import preferred_display_name
+from storage.game_modes import mode_group_label
 
 _ISO_CUTOFF = "%Y-%m-%dT%H:%M:%S"
 
@@ -57,7 +59,7 @@ def _window_battles(conn, tag: str, cutoff: str, until: str | None = None) -> li
         params.append(until)
     rows = conn.execute(
         f"SELECT battle_time, game_mode_name, mode_group, outcome, crowns_for, crowns_against, "
-        f"trophy_change, is_war, is_ranked, is_special_event, teammate_tag "
+        f"trophy_change, is_war, is_ranked, is_special_event, teammate_tag, deck_json "
         f"FROM battle_events WHERE {where} ORDER BY battle_time DESC",
         tuple(params),
     ).fetchall()
@@ -113,6 +115,53 @@ def _battle_of_week(battles: list[dict]) -> dict | None:
 
 def _mode_label(mode_group: str) -> str:
     return MODE_DISPLAY.get(mode_group, (mode_group or "other").replace("_", " "))
+
+
+def _deck_card_names(deck_json) -> list[str]:
+    """Card names from a battle's stored deck (`deck_json` is `[{id,name,level},…]`)."""
+    if not deck_json:
+        return []
+    try:
+        cards = json.loads(deck_json) if isinstance(deck_json, str) else deck_json
+    except ValueError, TypeError:
+        return []
+    return [str(c["name"]) for c in (cards or []) if isinstance(c, dict) and c.get("name")]
+
+
+def _battles_by_type(battles: list[dict]) -> dict:
+    """Group the week's battles into mode families (Trophy Road / River Race /
+    Ranked / Events / 2v2 / Friendly), ordered by battles played. Each family
+    carries its rows (for the table) plus the cards the member leaned on there and
+    their record (for the card-aware intro)."""
+    groups: dict[str, dict] = {}
+    for b in battles:
+        mg = b.get("mode_group") or "other"
+        g = groups.setdefault(
+            mg,
+            {
+                "type": mg,
+                "label": mode_group_label(mg),
+                "rows": [],
+                "count": 0,
+                "wins": 0,
+                "losses": 0,
+                "net_trophies": 0,
+                "_card_counts": {},
+            },
+        )
+        g["rows"].append(b)
+        g["count"] += 1
+        if b.get("outcome") == "W":
+            g["wins"] += 1
+        elif b.get("outcome") == "L":
+            g["losses"] += 1
+        g["net_trophies"] += int(b.get("trophy_change") or 0)
+        for name in _deck_card_names(b.get("deck_json")):
+            g["_card_counts"][name] = g["_card_counts"].get(name, 0) + 1
+    for g in groups.values():
+        top = sorted(g.pop("_card_counts").items(), key=lambda kv: (-kv[1], kv[0]))
+        g["top_cards"] = [name for name, _ in top[:6]]
+    return dict(sorted(groups.items(), key=lambda kv: -kv[1]["count"]))
 
 
 def _battles_rank(conn, tag: str, cutoff: str) -> dict | None:
@@ -173,7 +222,7 @@ def build_member_report_context(
         botw = _battle_of_week(battles)
 
         events = db.list_recent_events(days=days, subject_key=tag, limit=200, conn=conn)
-        badges, cards, ranked, other = [], [], [], []
+        badges, cards, ranked, other, arena_changes = [], [], [], [], []
         for e in events:
             et, payload = e.get("event_type"), e.get("payload") or {}
             if et == "badge_earned":
@@ -191,6 +240,7 @@ def build_member_report_context(
                         "type": et,
                         "card_name": payload.get("card_name"),
                         "rarity": payload.get("rarity"),
+                        "level": payload.get("level"),
                         "milestone": payload.get("milestone") or payload.get("collection_level"),
                         "observed_at": e.get("observed_at"),
                     }
@@ -211,6 +261,8 @@ def build_member_report_context(
                         "observed_at": e.get("observed_at"),
                     }
                 )
+            elif et == "arena_changed":
+                arena_changes.append({"payload": payload, "observed_at": e.get("observed_at")})
 
         war = member_read.get("war")
 
@@ -218,7 +270,7 @@ def build_member_report_context(
         new_cards = [s["payload"] for s in stream if s["event_type"] == "card_added"]
         new_events = [s["payload"] for s in stream if s["event_type"] == "event_started"]
 
-        return {
+        ctx = {
             "tag": tag,
             "name": display,
             "days": days,
@@ -249,11 +301,13 @@ def build_member_report_context(
                 "prior_tally": prior,
                 "battle_of_week": botw,
                 "log": battles,
+                "by_type": _battles_by_type(battles),
             },
             "badges": badges,
             "cards": cards,
             "ranked": ranked,
             "milestones": other,
+            "arena_changes": arena_changes,
             "war": war,
             "clan_standing": _battles_rank(conn, tag, cutoff_c),
             "game_stream": {
@@ -262,6 +316,8 @@ def build_member_report_context(
                 "trending_cards": _clan_trending_cards(conn, cutoff),
             },
         }
+        ctx["progress"] = _progress_items(ctx)
+        return ctx
     finally:
         conn.close()
 
@@ -270,6 +326,97 @@ def _sig_names(sig) -> list[str]:
     if isinstance(sig, dict):
         sig = sig.get("cards") or []
     return [c.get("name") for c in (sig or []) if isinstance(c, dict) and c.get("name")][:6]
+
+
+def _progress_items(ctx: dict) -> list[dict]:
+    """The week's concrete progress signals as grounded ``{emoji, text}`` rows —
+    new trophy peak (with week-over-week delta), arena climb, card unlocks, badges,
+    card levels, collection level, Path-of-Legends. Pulled only from real events
+    already read into ``ctx``; empty when the member had a quiet week."""
+    prof = ctx.get("profile") or {}
+    t = ctx["battles"]["tally"]
+    prior = ctx["battles"].get("prior_tally") or {}
+    cards = ctx.get("cards") or []
+    items: list[dict] = []
+
+    if any(m.get("event_type") == "best_trophies_peak" for m in ctx.get("milestones") or []):
+        delta = f"{t['net_trophies']:+d} this week"
+        if prior.get("net_trophies") is not None:
+            delta += f" vs {prior['net_trophies']:+d} last"
+        # Use the higher of stored best and current live trophies so the peak
+        # never reads lower than the scorecard headline.
+        peak = max(
+            (v for v in (prof.get("best_trophies"), prof.get("trophies")) if isinstance(v, int)),
+            default=None,
+        )
+        text = (
+            f"New peak: {peak:,} ({delta})"
+            if isinstance(peak, int)
+            else f"New trophy peak ({delta})"
+        )
+        items.append({"emoji": "🏆", "text": text})
+
+    for a in ctx.get("arena_changes") or []:
+        arena = (a.get("payload") or {}).get("arena_name") or prof.get("arena")
+        if arena:
+            items.append({"emoji": "🏟️", "text": f"Up to {arena}"})
+            break
+
+    for c in cards:
+        if c.get("type") == "card_unlocked" and c.get("card_name"):
+            rarity = f" ({c['rarity']})" if c.get("rarity") else ""
+            items.append({"emoji": "🆕", "text": f"Unlocked {c['card_name']}{rarity}"})
+
+    # Badges: list notable ones individually; collapse a flurry of routine
+    # card-mastery badges into a single line so a big week isn't a wall of bullets.
+    badges = ctx.get("badges") or []
+    mastery = [b for b in badges if str(b.get("label") or "").startswith("Card Mastery")]
+    for b in badges:
+        if b in mastery:
+            continue
+        lvl = f" (lvl {b['level']})" if b.get("level") else ""
+        items.append({"emoji": "🏅", "text": f"{b['label']} badge{lvl}"})
+    if len(mastery) >= 4:
+        names = [str(b["label"]).split(":", 1)[-1].strip() for b in mastery[:3]]
+        items.append(
+            {
+                "emoji": "🏅",
+                "text": f"{len(mastery)} card-mastery badges ({', '.join(names)} +{len(mastery) - 3} more)",
+            }
+        )
+    else:
+        for b in mastery:
+            lvl = f" (lvl {b['level']})" if b.get("level") else ""
+            items.append({"emoji": "🏅", "text": f"{b['label']} badge{lvl}"})
+
+    for c in cards:
+        if c.get("type") == "card_level_milestone" and c.get("card_name"):
+            lvl = c.get("level") or c.get("milestone")
+            items.append(
+                {
+                    "emoji": "⬆️",
+                    "text": f"{c['card_name']} → level {lvl}"
+                    if lvl
+                    else f"{c['card_name']} leveled",
+                }
+            )
+
+    for c in cards:
+        if c.get("type") == "collection_level_milestone" and c.get("milestone"):
+            items.append({"emoji": "📚", "text": f"Collection Level {c['milestone']}"})
+
+    for r in ctx.get("ranked") or []:
+        if r.get("event_type") == "pol_promotion":
+            payload = r.get("payload") or {}
+            league = payload.get("league_name") or payload.get("league") or payload.get("to_league")
+            items.append(
+                {
+                    "emoji": "⚔️",
+                    "text": f"Path of Legends: {league}" if league else "Path of Legends promotion",
+                }
+            )
+
+    return items
 
 
 def _achievements(ctx: dict) -> list[str]:
@@ -292,6 +439,30 @@ def _achievements(ctx: dict) -> list[str]:
     return out
 
 
+def _battle_types_brief(ctx: dict) -> str:
+    by_type = ctx["battles"].get("by_type") or {}
+    if not by_type:
+        return "BATTLE TYPES THIS WEEK: none"
+    out = [
+        'BATTLE TYPES THIS WEEK (write one <battle_intro type="KEY"> paragraph per '
+        "type below, leaning into its cards and battles played):"
+    ]
+    for key, g in by_type.items():
+        top = ", ".join(g.get("top_cards") or []) or "n/a"
+        out.append(
+            f'  - type "{key}" ({g["label"]}): {g["count"]} battles, '
+            f"{g['wins']}-{g['losses']}, {g['net_trophies']:+d} trophies; top cards: {top}"
+        )
+    return "\n".join(out)
+
+
+def _progress_brief(ctx: dict) -> str | None:
+    items = ctx.get("progress") or []
+    if not items:
+        return None
+    return "PROGRESS THIS WEEK: " + "; ".join(i["text"] for i in items)
+
+
 def facts_for_model(ctx: dict) -> str:
     """A compact, numbers-only brief the narrative model may speak to — and only
     this. Keeps the voice grounded: no card/number/event appears here that isn't
@@ -309,11 +480,7 @@ def facts_for_model(ctx: dict) -> str:
         f"RECORD: {t['battles']} battles, {t['wins']}-{t['losses']} "
         f"({_pct(t['win_rate'])}% win rate)",
         f"PLAYSTYLE: {p.get('identity')}" + (f" — {p['line']}" if p.get("line") else ""),
-        "MODES: "
-        + (
-            ", ".join(f"{_mode_label(m)} {v['battles']}" for m, v in (t["by_mode"] or {}).items())
-            or "none"
-        ),
+        _battle_types_brief(ctx),
     ]
     if prof.get("donations_week") is not None:
         lines.append(f"DONATIONS THIS WEEK: {prof['donations_week']} cards")
@@ -328,17 +495,9 @@ def facts_for_model(ctx: dict) -> str:
             f"BATTLE OF THE WEEK: {b['outcome']} {b['crowns_for']}-{b['crowns_against']} "
             f"in {b['mode']} (trophy {int(b['trophy_change'] or 0):+d})"
         )
-    if ctx["badges"]:
-        lines.append("BADGES THIS WEEK: " + ", ".join(b["label"] for b in ctx["badges"]))
-    if ctx["cards"]:
-        lines.append(
-            "CARD ACTIVITY: "
-            + ", ".join(
-                f"{c['card_name']} ({c['type'].replace('_', ' ')})"
-                for c in ctx["cards"]
-                if c.get("card_name")
-            )
-        )
+    prog = _progress_brief(ctx)
+    if prog:
+        lines.append(prog)
     if ctx["war"]:
         s = (ctx["war"] or {}).get("season") or {}
         lines.append(
@@ -416,11 +575,25 @@ def _fallback_standouts(ctx: dict) -> str:
     return " ".join(bits)
 
 
+def _fallback_battle_intro(g: dict) -> str:
+    cards = ", ".join((g.get("top_cards") or [])[:4])
+    intro = f"**{g['wins']}–{g['losses']}** across **{g['count']}** battles for **{g['net_trophies']:+d}** trophies."
+    if cards:
+        intro += f" Mostly on {cards}."
+    return intro
+
+
+def _fallback_progress(ctx: dict) -> str:
+    n = len(ctx.get("progress") or [])
+    return f"You stacked up {n} milestone{'s' if n != 1 else ''} worth flagging this week:"
+
+
 def render_member_report(ctx: dict, narrative: dict | None = None) -> tuple[str, str]:
-    """Assemble the email. The deterministic layer owns only the scorecard and the
-    full battle-log table; everything between is grounded narrative the model shapes
-    around what actually mattered that week — no fixed section grid, no images, and
-    no title (the subject line is the title). Returns (subject, markdown)."""
+    """Assemble the email. The deterministic layer owns the scorecard, the progress
+    milestone bullets, and a per-mode-family battle table under each type's intro;
+    the model supplies the grounded narrative (overview/standouts/progress lead-in/
+    meta/per-type intros/closer). No title — the subject line is the title. Returns
+    (subject, markdown)."""
     nar = narrative or {}
     name = ctx["name"]
     t = ctx["battles"]["tally"]
@@ -447,28 +620,44 @@ def render_member_report(ctx: dict, narrative: dict | None = None) -> tuple[str,
     standouts = nar.get("standouts") or _fallback_standouts(ctx)
     if standouts:
         parts.append(standouts)
+
+    # Progress this week — a warm lead-in plus the grounded milestone inventory.
+    progress = ctx.get("progress") or []
+    if progress:
+        block = [
+            "**Your progress this week**",
+            "",
+            nar.get("progress") or _fallback_progress(ctx),
+            "",
+        ]
+        block.extend(f"- {p['emoji']} {p['text']}" for p in progress)
+        parts.append("\n".join(block))
+
     if nar.get("meta"):
         parts.append(nar["meta"])
 
-    # The full tape — the one structured reference.
-    log = ctx["battles"]["log"]
-    if log:
-        tape = [
-            "## The full tape",
+    # Battle log, segmented by mode family — a card-aware intro then that type's table.
+    intros = nar.get("battle_intros") or {}
+    by_type = ctx["battles"].get("by_type") or {}
+    for key, g in by_type.items():
+        section = [
+            f"## {g['label']} ({g['count']} battles)",
+            "",
+            intros.get(key) or _fallback_battle_intro(g),
             "",
             "| When | Mode | Result | Crowns | 🏆 |",
             "|---|---|---|---|---|",
         ]
-        for b in log:
+        for b in g["rows"]:
             mode = humanize_game_mode(b.get("game_mode_name")) or _mode_label(b.get("mode_group"))
             crowns = f"{b.get('crowns_for', 0)}–{b.get('crowns_against', 0)}"
             tc = b.get("trophy_change")
             tro = f"{int(tc):+d}" if tc is not None else ""
-            tape.append(
+            section.append(
                 f"| {_fmt_dt(b.get('battle_time'))} | {mode} | "
                 f"{_outcome_cell(b.get('outcome'))} | {crowns} | {tro} |"
             )
-        parts.append("\n".join(tape))
+        parts.append("\n".join(section))
 
     parts.append(nar.get("closer") or "Same time next week. Keep the crowns coming. — E")
 
