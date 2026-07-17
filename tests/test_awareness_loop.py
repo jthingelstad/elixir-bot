@@ -359,6 +359,35 @@ def test_run_awareness_tick_uses_the_write_surface():
     assert allowed_names & write_names
 
 
+def test_repair_awareness_plan_has_headroom_for_multi_post_plans():
+    """#177 regression (2026-07-16): the repair truncated a 2-post plan at
+    max_tokens=4096, dropping a post → deliver rejected repair.changed_post_count
+    → failed tick. The repair must echo the FULL plan back, so it needs headroom
+    for multiple posts."""
+    import agent.workflows as workflows
+
+    captured = {}
+
+    def _capture(*args, **kwargs):
+        captured["max_tokens"] = kwargs.get("max_tokens")
+        return {"posts": []}
+
+    two_post_plan = {
+        "posts": [
+            {"channel": "elixir", "content": "post one", "covers_signal_keys": ["a"]},
+            {"channel": "elixir", "content": "post two", "covers_signal_keys": ["b"]},
+        ]
+    }
+    with patch.object(workflows, "_chat_with_tools", side_effect=_capture):
+        workflows.repair_awareness_plan(
+            {"time": None},
+            two_post_plan,
+            ["post[1].current_rank_while_unranked"],
+        )
+
+    assert captured["max_tokens"] >= 8192
+
+
 def test_run_awareness_tick_serializes_the_full_read_compactly():
     """Prompt compaction removes formatting tokens without dropping data."""
     import agent.workflows as workflows
