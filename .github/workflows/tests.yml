@@ -3,7 +3,7 @@ name: tests
 on:
   push:
     branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,6 +11,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -22,6 +23,10 @@ jobs:
       - run: uv sync --locked
       - name: Verify dependency lock
         run: uv lock --check
+      - name: Audit locked dependencies
+        run: |
+          uv export --locked --no-dev --no-emit-project --format requirements-txt > /tmp/requirements.txt
+          uvx --from pip-audit==2.10.1 pip-audit --requirement /tmp/requirements.txt --disable-pip
       - name: Verify documentation
         run: uv run --locked python scripts/check_docs.py
       - name: Verify exception policy
