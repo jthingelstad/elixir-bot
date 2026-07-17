@@ -152,7 +152,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         purpose="DM-outreach (Phase 1): pick current members missing a verified "
         "email and offer up to a few leader-gated 'Profile Outreach' cards in "
         "#actions. FULLY DORMANT unless ELIXIR_DM_OUTREACH=1; a leader approves "
-        "each card before any DM, and ELIXIR_DM_OUTREACH_SEND gates real delivery.",
+        "each card before any DM is delivered.",
         job_id="member-outreach-propose",
         job_function="_member_outreach_propose",
         schedule_kind="cron",

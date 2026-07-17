@@ -1,11 +1,10 @@
 """DM-outreach flow (Phase 1): propose leader-gated cards to collect missing
 member profile info, and act on the leader's decision.
 
-The whole feature is member-facing, so it is double-gated and OFF by default:
-- ``ELIXIR_DM_OUTREACH=1`` — raise #actions cards at all (else fully dormant).
-- ``ELIXIR_DM_OUTREACH_SEND=1`` — actually deliver a DM on approve (else dry-run:
-  log what *would* be sent). Approving a card without this flag advances state but
-  never messages a member — so the whole flow can be exercised and reviewed first.
+The whole feature is member-facing, so it is gated by ``ELIXIR_DM_OUTREACH=1``
+(OFF by default → fully dormant): the flag both raises #actions cards and, on a
+leader's approval, delivers the DM. (The former ``ELIXIR_DM_OUTREACH_SEND``
+dry-run gate was collapsed away 2026-07-17 once the flow was trusted in prod.)
 
 A leader approves every card before any DM. The Discord + DB side effects are
 injected so this module stays unit-testable. See storage/member_outreach.py for
@@ -49,7 +48,10 @@ def outreach_enabled() -> bool:
 
 
 def send_enabled() -> bool:
-    return os.getenv("ELIXIR_DM_OUTREACH_SEND", "0") == "1"
+    # Collapsed onto the single ELIXIR_DM_OUTREACH gate (2026-07-17): when
+    # outreach is enabled, an approved card delivers the DM for real. Kept as a
+    # named helper so the approve path reads intently.
+    return outreach_enabled()
 
 
 def _now(now: Optional[str]) -> str:
