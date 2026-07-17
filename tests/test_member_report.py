@@ -111,6 +111,38 @@ def test_render_segments_battle_log_by_type():
     assert "The full tape" not in body  # the old single table is gone
 
 
+def test_special_events_split_by_specific_mode():
+    # Crazy Arena and Showdown are both special_event but different games — they
+    # must land in separate sections, not one lumped "Events".
+    log = [
+        {
+            "battle_time": "20260707T144643.000Z",
+            "game_mode_name": "Crazy_Arena",
+            "mode_group": "special_event",
+            "outcome": "W",
+            "crowns_for": 3,
+            "crowns_against": 0,
+            "trophy_change": 0,
+            "deck_json": '[{"id":1,"name":"Ronin","level":11}]',
+        },
+        {
+            "battle_time": "20260707T120000.000Z",
+            "game_mode_name": "Showdown",
+            "mode_group": "special_event",
+            "outcome": "L",
+            "crowns_for": 0,
+            "crowns_against": 1,
+            "trophy_change": 0,
+            "deck_json": '[{"id":2,"name":"Knight","level":11}]',
+        },
+    ]
+    by_type = member_report._battles_by_type(log)
+    assert set(by_type) == {"Crazy Arena", "Showdown"}
+    _, body = member_report.render_member_report(_ctx(log=log), {})
+    assert "## Crazy Arena (1 battles)" in body
+    assert "## Showdown (1 battles)" in body
+
+
 def test_render_battle_intro_falls_back_when_absent():
     ctx = _ctx()
     _, body = member_report.render_member_report(ctx, {})  # no battle_intros

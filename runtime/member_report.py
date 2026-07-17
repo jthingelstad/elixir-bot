@@ -128,19 +128,30 @@ def _deck_card_names(deck_json) -> list[str]:
     return [str(c["name"]) for c in (cards or []) if isinstance(c, dict) and c.get("name")]
 
 
+def _section_label(b: dict) -> tuple[str, str]:
+    """(key, label) for the battle's report section. Special events split by their
+    SPECIFIC mode — Crazy Arena and Showdown are different games and shouldn't share
+    a section — while every other family (Trophy Road / River Race / Ranked / 2v2 /
+    Friendly) is a single mode and stays one section."""
+    mg = b.get("mode_group") or "other"
+    if mg == "special_event":
+        label = humanize_game_mode(b.get("game_mode_name")) or "Events"
+        return label, label  # e.g. "Crazy Arena" — Title Case, never collides with a family key
+    return mg, mode_group_label(mg)
+
+
 def _battles_by_type(battles: list[dict]) -> dict:
-    """Group the week's battles into mode families (Trophy Road / River Race /
-    Ranked / Events / 2v2 / Friendly), ordered by battles played. Each family
-    carries its rows (for the table) plus the cards the member leaned on there and
-    their record (for the card-aware intro)."""
+    """Group the week's battles into report sections (a mode family, or a specific
+    event mode), ordered by battles played. Each carries its rows (for the table)
+    plus the cards the member leaned on there and their record (for the intro)."""
     groups: dict[str, dict] = {}
     for b in battles:
-        mg = b.get("mode_group") or "other"
+        key, label = _section_label(b)
         g = groups.setdefault(
-            mg,
+            key,
             {
-                "type": mg,
-                "label": mode_group_label(mg),
+                "type": key,
+                "label": label,
                 "rows": [],
                 "count": 0,
                 "wins": 0,
