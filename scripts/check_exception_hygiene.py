@@ -38,13 +38,14 @@ BROAD_EXCEPTION_BASELINE = {
     "capabilities/war.py": 1,
     "cr_api.py": 4,
     "db/__init__.py": 2,
-    "db/schema.py": 6,  # +1: V6 migration rollback/re-raise (same pattern as v2-v5)
+    "db/schema.py": 7,  # +1: V7 migration rollback/re-raise (same pattern as v2-v6)
     "engine/chronicles.py": 1,
     "engine/delivery.py": 3,
     "engine/editor.py": 2,  # judge()/judge_delivered_post fail-open: the critic may never block a post
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
-    "engine/management.py": 2,
+    "engine/leader_note_effects.py": 2,  # apply/revert leader-note effects fail-open (never break the interpreter)
+    "engine/management.py": 5,  # +3: v7 leader-note gates (premise fingerprint, member shield) fail-open to False
     "engine/materialize.py": 2,
     "engine/nicknames.py": 1,
     "engine/pol_seasons.py": 2,
@@ -78,6 +79,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/jobs/_tournament.py": 6,
     "runtime/leader_action_feedback.py": 1,
     "runtime/leader_action_ui.py": 8,
+    "runtime/leader_note_interpreter.py": 5,  # interpret/apply/undo/fix all fail-open off the delivery path
     "runtime/onboarding.py": 3,
     "runtime/outreach.py": 3,  # raise_card + send_dm + compose fail-soft in the flow loop
     "runtime/prompt_feedback.py": 5,  # +1: member_outreach decision handling

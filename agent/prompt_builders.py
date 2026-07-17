@@ -229,6 +229,56 @@ def _leader_action_feedback_system():
     )
 
 
+def _leader_note_interpret_system():
+    """System prompt for classifying a leader's free-text note on an #actions
+    card into one structured, behaviour-changing effect."""
+    return _build_system_prompt(
+        "You classify a clan leader's free-text note on a POAP KINGS #actions "
+        "card (a kick / promotion / demotion / departure recommendation) into "
+        "EXACTLY ONE structured effect for the engine. You do not write anything "
+        "the leader or members will read — you only route intent.\n\n"
+        "The four effect kinds:\n"
+        "- `timing_hold`: the leader wants to WAIT before acting or re-raising — "
+        '"give him more time", "after war", "revisit next week", "check '
+        'again in a month". Set `hold_days` from their words (a week=7, two '
+        "weeks=14, a month=30, 'after war'≈4). Default 7 if they clearly mean "
+        "'later' without a span.\n"
+        "- `invalidate_premise`: the leader judges the recommendation itself WRONG "
+        'or no longer valid — "no longer relevant to the clan", "wrong call", '
+        '"he\'s fine now", "not a real problem", "disagree". They are '
+        "rejecting the PREMISE, not asking to wait. This stops the engine "
+        "re-raising the same card until the evidence materially changes.\n"
+        "- `persist_context`: the leader states a DURABLE fact about the member "
+        "that should protect them going forward. Set `context_kind` to `alt` "
+        '("alt account", "my second account"), `loa` ("on leave", "away '
+        'for exams", "family stuff" — add `hold_days` if they give a span), or '
+        '`never_flag` ("my brother, never flag him", "leave him alone '
+        'permanently"). Put the fact itself in `context_fact`.\n'
+        "- `none`: the note is an acknowledgement, an FYI with no forward effect, "
+        "or you are not confident it maps to one of the above.\n\n"
+        "Rules:\n"
+        "- Choose the SINGLE best-fitting kind. If torn between `timing_hold` and "
+        "`invalidate_premise`, ask whether the leader wants to wait (hold) or "
+        "thinks the recommendation is wrong (premise).\n"
+        "- Be conservative: when the intent is unclear or the note is generic "
+        "praise/venting, return `none`. A wrong `invalidate_premise` or "
+        "`persist_context` can hide a member who should be actioned — set "
+        "`confidence` below 0.6 when unsure and prefer `none`.\n"
+        "- `reading` is a SHORT (≤ 8 words) plain-language echo of what you did, "
+        'shown back to the leader on the card. Examples: "hold 1 month", '
+        '"premise rejected", "logged as alt account", "no action".\n'
+        "- Ground only in the note text and the card facts provided. Do not invent "
+        "reasons the leader did not give.\n\n"
+        "Respond with JSON only (no markdown wrapper):\n"
+        "{"
+        '"effect": {"kind": "timing_hold", "hold_days": 30, '
+        '"context_kind": null, "context_fact": null, "confidence": 0.0}, '
+        '"reading": "hold 1 month", '
+        '"rationale": "one short line on why"'
+        "}\n",
+    )
+
+
 def _clan_chat_copy_system():
     """System prompt for Clash Royale in-game clan chat copy."""
     return _build_system_prompt(

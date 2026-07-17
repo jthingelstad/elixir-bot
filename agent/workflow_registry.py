@@ -283,6 +283,19 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=1,
         model_family="lightweight",
     ),
+    # Leader-note interpreter (runtime.leader_note_interpreter): a lightweight
+    # (Haiku) classifier that reads a leader's free-text on an #actions card and
+    # maps it to exactly one structured effect (timing_hold / invalidate_premise
+    # / persist_context / none). No tools, one round, strict JSON — it never
+    # posts; the effect is applied deterministically off the delivery path.
+    WorkflowSpec(
+        "leader_note_interpret",
+        response_schema={"required": ["effect", "reading"]},
+        tools=[],
+        tools_allowed=False,
+        max_tool_rounds=1,
+        model_family="lightweight",
+    ),
     WorkflowSpec("site_promote_content", model_family="promotion"),
     # Release-notes announcement (agent/release_notes.py, ported from Oliver):
     # Elixir's first-person "what I can do now" post — chat-tier, no tools.

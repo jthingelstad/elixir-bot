@@ -32,6 +32,7 @@ from agent.prompt_builders import (
     _intel_report_system,
     _interactive_system,
     _leader_action_feedback_system,
+    _leader_note_interpret_system,
     _member_outreach_ask_system,
     _member_report_system,
     _memory_synthesis_system,
@@ -469,6 +470,28 @@ def synthesize_leader_action_feedback(context: dict):
         strict_json=True,
         return_errors=True,
         max_tokens=1200,
+    )
+
+
+def interpret_leader_note(context: dict):
+    """Classify a leader's free-text note on an #actions card into one structured
+    effect (timing_hold / invalidate_premise / persist_context / none). Cheap,
+    tool-less, strict-JSON. Returns the parsed dict, or ``{"_error": ...}`` on
+    failure (the caller then leaves the note as a plain, uninterpreted annotation)."""
+    public_context = {k: v for k, v in (context or {}).items() if not k.startswith("_")}
+    user_msg = (
+        "Classify this leader note into one effect per your instructions.\n\n"
+        f"```json\n{json.dumps(public_context, indent=2, default=str)}\n```\n"
+    )
+    return _chat_with_tools(
+        _leader_note_interpret_system(),
+        user_msg,
+        workflow="leader_note_interpret",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["leader_note_interpret"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["leader_note_interpret"],
+        strict_json=True,
+        return_errors=True,
+        max_tokens=400,
     )
 
 

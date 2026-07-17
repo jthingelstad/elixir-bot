@@ -196,6 +196,58 @@ def test_v6_migration_adds_member_outreach_forward_from_v5(tmp_path):
         conn.close()
 
 
+def test_v7_migration_adds_leader_note_feedback_columns_forward_from_v6(tmp_path):
+    """A live v6 database (no leader-note interpretation columns) migrates forward
+    to v7, gaining the note-interpretation lifecycle and premise-rejection columns
+    on leader_action_recommendations. Idempotent, matches the committed fingerprint."""
+    path = tmp_path / "v6.db"
+    build(str(path), None)
+    conn = sqlite3.connect(path)
+    try:
+        # Simulate a pre-v7 database: drop the index, then the added columns,
+        # and roll user_version back.
+        conn.execute("DROP INDEX IF EXISTS idx_leader_action_note_interpret")
+        for column in (
+            "note_interpret_status",
+            "note_interpret_json",
+            "note_interpret_note_hash",
+            "premise_rejected",
+            "premise_fingerprint",
+        ):
+            conn.execute(
+                f"ALTER TABLE leader_action_recommendations DROP COLUMN {column}"
+            )
+        conn.execute("PRAGMA user_version = 6")
+        conn.commit()
+        cols = {
+            r[1]
+            for r in conn.execute("PRAGMA table_info(leader_action_recommendations)")
+        }
+        assert "note_interpret_status" not in cols
+
+        apply_schema_migrations(conn)
+
+        assert (
+            conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        )
+        cols = {
+            r[1]
+            for r in conn.execute("PRAGMA table_info(leader_action_recommendations)")
+        }
+        assert {
+            "note_interpret_status",
+            "note_interpret_json",
+            "note_interpret_note_hash",
+            "premise_rejected",
+            "premise_fingerprint",
+        } <= cols
+        # Re-running is a no-op and stays on the committed fingerprint.
+        apply_schema_migrations(conn)
+        assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
+    finally:
+        conn.close()
+
+
 def test_wrong_generation_database_is_refused_without_enabling_wal(tmp_path):
     path = tmp_path / "old.db"
     conn = sqlite3.connect(path)

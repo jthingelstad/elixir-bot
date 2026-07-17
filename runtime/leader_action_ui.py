@@ -11,6 +11,7 @@ import discord
 
 import db
 from runtime.leader_action_feedback import queue_leader_action_feedback_refresh
+from runtime.leader_note_interpreter import queue_leader_note_interpretation
 from storage.incidents import record_incident
 
 log = logging.getLogger("elixir.leader_action_ui")
@@ -191,6 +192,32 @@ def _format_target(action: dict) -> str:
     return name or (f"`{tag}`" if tag else "Clan")
 
 
+def _note_interpretation(action: dict) -> dict | None:
+    """The applied interpretation blob for this card, if one exists."""
+    interp = action.get("note_interpret")
+    return interp if isinstance(interp, dict) else None
+
+
+def _has_undoable_interpretation(action: dict) -> bool:
+    if (action.get("note_interpret_status") or "") != "interpreted":
+        return False
+    interp = _note_interpretation(action)
+    return bool(interp and interp.get("applied"))
+
+
+def _add_note_interpret_field(embed: discord.Embed, action: dict) -> None:
+    status = action.get("note_interpret_status") or ""
+    if status == "interpreted":
+        interp = _note_interpretation(action) or {}
+        reading = str(interp.get("reading") or "").strip()
+        if reading:
+            embed.add_field(name="Read as", value=_clip(reading, 300), inline=False)
+    elif status == "failed":
+        embed.add_field(name="Read as", value="Not interpreted", inline=False)
+    elif status == "undone":
+        embed.add_field(name="Read as", value="(undone)", inline=False)
+
+
 def build_leader_action_embed(
     action: dict, *, copy_messages: list[str] | None = None
 ) -> discord.Embed:
@@ -222,6 +249,7 @@ def build_leader_action_embed(
     note = action.get("decision_note")
     if note:
         embed.add_field(name="Leader Note", value=_clip(note, 700), inline=False)
+    _add_note_interpret_field(embed, action)
     footer = (
         f"{action.get('action_type') or 'leader_action'} | {LEADER_ACTION_UI_VERSION}"
     )
@@ -418,6 +446,7 @@ class DecisionReasonModal(discord.ui.Modal):
             await _send_ephemeral(interaction, "Action not found.")
             return
         queue_leader_action_feedback_refresh(action.get("action_type"))
+        queue_leader_note_interpretation(self.action_id, bot=interaction.client)
         await _apply_card_update(interaction, action)
 
 
@@ -457,6 +486,7 @@ class NoteModal(discord.ui.Modal):
             await _send_ephemeral(interaction, "Action not found.")
             return
         queue_leader_action_feedback_refresh(updated.get("action_type"))
+        queue_leader_note_interpretation(self.action_id, bot=interaction.client)
         await _apply_card_update(interaction, updated)
 
 
@@ -495,6 +525,42 @@ class DepartureClassifyModal(discord.ui.Modal):
             await _send_ephemeral(interaction, "Action not found.")
             return
         queue_leader_action_feedback_refresh(updated.get("action_type"))
+        queue_leader_note_interpretation(self.action_id, bot=interaction.client)
+        await _apply_card_update(interaction, updated)
+
+
+class FixReadingModal(discord.ui.Modal):
+    """Correct a misread note: the leader re-types (or refines) the note, the
+    current effect is reverted, and interpretation re-runs on the new text."""
+
+    def __init__(self, action: dict):
+        super().__init__(title=f"Fix reading R{action.get('action_id')}")
+        self.action_id = int(action["action_id"])
+        self.note = discord.ui.TextInput(
+            label="Corrected note",
+            style=discord.TextStyle.paragraph,
+            max_length=300,
+            required=True,
+            default=action.get("decision_note") or None,
+            placeholder="Reword so it reads correctly, e.g. 'on leave until August'.",
+        )
+        self.add_item(self.note)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not await _ensure_leader(interaction):
+            return
+        from runtime.leader_note_interpreter import revert_and_reset_note
+
+        updated = await asyncio.to_thread(
+            revert_and_reset_note,
+            self.action_id,
+            str(self.note.value or ""),
+            interaction.user.id,
+        )
+        if not updated:
+            await _send_ephemeral(interaction, "Action not found.")
+            return
+        queue_leader_note_interpretation(self.action_id, bot=interaction.client)
         await _apply_card_update(interaction, updated)
 
 
@@ -556,6 +622,15 @@ class LeaderActionButton(discord.ui.Button):
                 DepartureClassifyModal(action, _CLASSIFY_KIND_VALUE[self.kind])
             )
             return
+        if self.kind == "note_undo":
+            from runtime.leader_note_interpreter import undo_note_interpretation
+
+            updated = await asyncio.to_thread(undo_note_interpretation, self.action_id)
+            await _apply_card_update(interaction, updated or action)
+            return
+        if self.kind == "note_fix":
+            await interaction.response.send_modal(FixReadingModal(action))
+            return
 
 
 class LeaderActionView(discord.ui.View):
@@ -563,10 +638,15 @@ class LeaderActionView(discord.ui.View):
         super().__init__(timeout=None)
         spec = leader_action_spec(action.get("action_type"))
         proposed = action_is_open(action)
-        if not proposed:
-            return
-        copies = action_copy_messages(action)
+        if proposed:
+            self._add_primary_buttons(action, spec)
+        # Interpretation controls survive past the decision: a note (and its
+        # applied effect) can land on an already-decided card, so these render on
+        # open AND closed cards whenever an interpretation exists.
+        self._add_interpretation_buttons(action)
 
+    def _add_primary_buttons(self, action: dict, spec) -> None:
+        copies = action_copy_messages(action)
         if spec.classify_choices:
             # Two-way classification card (e.g. departure_verification): render the
             # choice buttons instead of done/decline. Both resolve the card.
@@ -579,7 +659,6 @@ class LeaderActionView(discord.ui.View):
                         emoji=emoji,
                         style=discord.ButtonStyle.primary,
                         row=0,
-                        disabled=not proposed,
                     )
                 )
             self.add_item(
@@ -602,7 +681,6 @@ class LeaderActionView(discord.ui.View):
                 emoji="✅",
                 style=discord.ButtonStyle.success,
                 row=0,
-                disabled=not proposed,
             )
         )
         self.add_item(
@@ -613,7 +691,6 @@ class LeaderActionView(discord.ui.View):
                 emoji="❌",
                 style=discord.ButtonStyle.danger,
                 row=0,
-                disabled=not proposed,
             )
         )
         if spec.allow_copy_edit and copies:
@@ -625,7 +702,6 @@ class LeaderActionView(discord.ui.View):
                     emoji="✏️",
                     style=discord.ButtonStyle.primary,
                     row=1,
-                    disabled=not proposed,
                 )
             )
         self.add_item(
@@ -639,11 +715,42 @@ class LeaderActionView(discord.ui.View):
             )
         )
 
+    def _add_interpretation_buttons(self, action: dict) -> None:
+        if (action.get("note_interpret_status") or "") != "interpreted":
+            return
+        if _has_undoable_interpretation(action):
+            self.add_item(
+                LeaderActionButton(
+                    action,
+                    kind="note_undo",
+                    label="Undo",
+                    emoji="↩️",
+                    style=discord.ButtonStyle.danger,
+                    row=3,
+                )
+            )
+        self.add_item(
+            LeaderActionButton(
+                action,
+                kind="note_fix",
+                label="Fix reading",
+                emoji="🔧",
+                style=discord.ButtonStyle.secondary,
+                row=3,
+            )
+        )
+
 
 def leader_action_view_for(action: dict) -> LeaderActionView | None:
-    if not action_is_open(action):
-        return None
-    return LeaderActionView(action)
+    # A view is needed while the card is open, or once it carries an
+    # interpretation (so the Undo / Fix-reading controls are live on a decided
+    # card). Otherwise a resolved card is inert and needs no view.
+    if (
+        action_is_open(action)
+        or (action.get("note_interpret_status") or "") == "interpreted"
+    ):
+        return LeaderActionView(action)
+    return None
 
 
 async def post_leader_action_card(
@@ -691,8 +798,13 @@ async def restore_leader_action_views(
         db.list_leader_actions,
         limit=max(0, min(int(terminal_cleanup_limit or 0), int(limit or 0))),
     )
+    # Decided-but-interpreted cards keep live Undo / Fix-reading buttons, so their
+    # persistent views must be re-registered too (they're not in the open set).
+    interpreted_actions = await asyncio.to_thread(
+        db.list_interpreted_leader_actions, limit=limit
+    )
     actions_by_id = {}
-    for action in recent_actions + open_actions:
+    for action in recent_actions + interpreted_actions + open_actions:
         action_id = action.get("action_id")
         if action_id is not None:
             actions_by_id[int(action_id)] = action

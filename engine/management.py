@@ -13,6 +13,7 @@ answerable (management.md §4).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import datetime, timedelta
@@ -767,7 +768,9 @@ def run_tick_evaluators(
             # an open leadership watch memory (a member who told leaders they'll
             # be away) suppresses 'recommended' → grace until it lapses.
             if new_state == "recommended" and (
-                (m["role"] or "member") in ELDER_PLUS or _has_leadership_hold(tag)
+                (m["role"] or "member") in ELDER_PLUS
+                or _has_leadership_hold(tag)
+                or _has_member_shield(tag)
             ):
                 new_state = "at_risk"
 
@@ -938,6 +941,8 @@ def renominate_after_cooldown(conn, now: str | None = None) -> list[dict]:
     ).fetchall()
     fired: list[dict] = []
     for row in rows:
+        if _premise_still_rejected(conn, row["player_tag"], "kick_recommendation"):
+            continue  # leader rejected the premise; evidence unchanged → stay blocked
         blocked_until = _renomination_blocked_until(
             conn,
             row["player_tag"],
@@ -991,6 +996,128 @@ def _has_leadership_hold(tag: str) -> bool:
                       OR m.title LIKE 'LOA:%')
                  AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%S', 'now'))
                LIMIT 1""",
+            (tag,),
+        ).fetchone()
+        mconn.close()
+        return row is not None
+    except Exception:
+        return False
+
+
+# --------------------------------------------------- leader-note effects (v7)
+#
+# A leader who declines a card can reject its PREMISE ("no longer relevant to
+# the clan", "wrong call") rather than just decline-for-now. That must stop the
+# engine re-raising the SAME card on the SAME evidence, while still re-raising
+# when materially new evidence appears. We pin the evidence with a fingerprint at
+# rejection time and compare it live in the re-nomination gate.
+#
+# The anchor is the member's last MATERIAL evidence — for a kick, the last battle
+# (or, for a never-battled member, their clan join). It deliberately excludes
+# players.last_seen_at (being "seen online" without battling is not new kick
+# evidence, and would wrongly unblock a rejected premise). For a role
+# recommendation the material event is a role change, so the anchor is the
+# member's current role. Both write (reject) and read (gate) call the same helper,
+# so the fingerprint is reproducible for an unchanged member.
+
+
+def _kick_evidence_anchor(conn, tag: str) -> str | None:
+    row = conn.execute(
+        "SELECT MAX(battle_time) FROM battle_events WHERE player_tag = ?", (tag,)
+    ).fetchone()
+    if row and row[0]:
+        return str(row[0])
+    row = conn.execute(
+        "SELECT MAX(joined_at) FROM clan_memberships "
+        "WHERE player_tag = ? AND left_at IS NULL",
+        (tag,),
+    ).fetchone()
+    if row and row[0]:
+        return str(row[0])
+    return None
+
+
+def _premise_evidence_anchor(conn, tag: str, action_type: str) -> str | None:
+    if action_type == "kick_recommendation":
+        return _kick_evidence_anchor(conn, tag)
+    if action_type in ("promotion_recommendation", "demotion_recommendation"):
+        row = conn.execute(
+            "SELECT role FROM member_management WHERE player_tag = ?", (tag,)
+        ).fetchone()
+        if row and row[0]:
+            return f"role:{row[0]}"
+        return None
+    return None
+
+
+def _premise_fingerprint(conn, tag: str, action_type: str) -> str | None:
+    anchor = _premise_evidence_anchor(conn, tag, action_type)
+    if anchor is None:
+        return None
+    return hashlib.sha256(f"{action_type}|{anchor}".encode("utf-8")).hexdigest()[:16]
+
+
+def compute_premise_fingerprint(tag: str, action_type: str) -> str | None:
+    """Fingerprint the current evidence for (tag, action_type), opening a
+    short-lived connection. Called from the async note interpreter at rejection
+    time; the gate recomputes it live via ``_premise_fingerprint``."""
+    try:
+        from engine.db import connect
+
+        conn = connect()
+        try:
+            return _premise_fingerprint(conn, tag, action_type)
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
+def _premise_still_rejected(conn, tag: str, action_type: str) -> bool:
+    """True when the leader rejected this recommendation's premise AND the
+    evidence is unchanged since — so re-nomination stays blocked. A materially
+    changed anchor (a fresh battle, a role change) flips this to False and the
+    normal cooldown gate takes over. Fail-open to False so a hiccup never blocks
+    the pipeline silently."""
+    try:
+        row = conn.execute(
+            """SELECT premise_rejected, premise_fingerprint
+                 FROM leader_action_recommendations
+                WHERE target_player_tag = ? AND action_type = ?
+                  AND status IN ('done', 'rejected')
+                  AND COALESCE(is_test, 0) = 0
+                ORDER BY decided_at DESC, action_id DESC LIMIT 1""",
+            (tag, action_type),
+        ).fetchone()
+    except Exception:
+        return False
+    if row is None or not row["premise_rejected"]:
+        return False
+    stored = row["premise_fingerprint"]
+    if not stored:
+        return False
+    return _premise_fingerprint(conn, tag, action_type) == stored
+
+
+def _has_member_shield(tag: str) -> bool:
+    """True when a leader recorded a durable protective context on this member —
+    an ``alt account`` or an explicit ``never flag``. Gated on a structured
+    ``memory_tags`` tag (``shield:alt`` / ``shield:never_flag``), NOT a title
+    prefix (title-LIKE matching caused the xOMENKILLER false-shield). Time-boxed
+    LOAs keep flowing through the ``Hold:``/``LOA:`` title path in
+    ``_has_leadership_hold``. Fail-open to False."""
+    try:
+        from engine.db import connect
+
+        mconn = connect()
+        row = mconn.execute(
+            """SELECT 1 FROM memories m
+                 JOIN memory_tags t ON t.memory_id = m.memory_id
+                WHERE m.member_tag = ? AND m.retired_at IS NULL
+                  AND t.tag IN ('shield:alt', 'shield:never_flag')
+                  AND (m.expires_at IS NULL
+                       OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+                LIMIT 1""",
             (tag,),
         ).fetchone()
         mconn.close()
@@ -1172,6 +1299,13 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
         cooldown = _RENOMINATE_COOLDOWN_DAYS[action_type]
         kept: list[dict] = []
         for r in rows:
+            # A member with a durable protective context (alt / never-flag) is
+            # neither promoted nor demoted; a leader-rejected premise stays
+            # blocked until the member's role materially changes.
+            if _has_member_shield(r["player_tag"]):
+                continue
+            if _premise_still_rejected(conn, r["player_tag"], action_type):
+                continue
             blocked = _renomination_blocked_until(
                 conn, r["player_tag"], action_type, cooldown
             )
