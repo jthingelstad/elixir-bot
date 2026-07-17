@@ -49,6 +49,17 @@ async def healthz(request: web.Request) -> web.Response:
 # ------------------------------------------------------------------ pages
 
 
+async def command_page(request: web.Request) -> web.Response:
+    data = await asyncio.to_thread(queries.command_page)
+    return render(
+        "command.html",
+        request,
+        nav="command",
+        flash=request.query.get("ok", ""),
+        **data,
+    )
+
+
 async def overview(request: web.Request) -> web.Response:
     data = await asyncio.to_thread(queries.overview)
     live = ticks.recent_ticks(1)
@@ -321,7 +332,9 @@ def add_routes(app: web.Application) -> None:
     app.add_routes(
         [
             web.get("/healthz", healthz),
-            web.get("/", overview),
+            web.get("/", command_page),
+            web.get("/command", command_page),
+            web.get("/overview", overview),
             web.get("/members", members_page),
             web.get("/awards", awards_page),
             web.get("/baseline", baseline_page),

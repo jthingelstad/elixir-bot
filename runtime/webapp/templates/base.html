@@ -60,7 +60,7 @@
 <body>
   <header class="top">
     <span class="brand">Elixir</span>
-    <a href="/" class="{{ 'active' if nav=='overview' else '' }}" title="System health at a glance: latest tick, war clock, awareness 24h, errors">Overview</a>
+    <a href="/" class="{{ 'active' if nav=='command' else '' }}" title="Operator home: what needs your decision, who needs attention, the clan at a glance, what Elixir's been saying">Command</a>
     <span class="navsep" title="The 10-minute engine tick: poll → materialize → emit">Ingest</span>
     <a href="/ticks" class="{{ 'active' if nav=='ticks' else '' }}" title="Engine-tick history + event-stream cursor positions">Ticks</a>
     <a href="/polling" class="{{ 'active' if nav=='polling' else '' }}" title="Adaptive per-member poll heat + next-tick fetch plan">Polling</a>
@@ -77,6 +77,7 @@
     <a href="/editorial" class="{{ 'active' if nav=='editorial' else '' }}" title="Editorial rubric (exemplars/anti-patterns) + weekly retrospectives">Editorial</a>
     <a href="/memories" class="{{ 'active' if nav=='memories' else '' }}" title="Memory store — searchable, by kind/member">Memories</a>
     <span class="navsep" title="Scheduled jobs, model calls, cost, and runtime health">System</span>
+    <a href="/overview" class="{{ 'active' if nav=='overview' else '' }}" title="System health at a glance: latest tick, war clock, awareness 24h, errors">Overview</a>
     <a href="/activities" class="{{ 'active' if nav=='activities' else '' }}" title="Scheduled-job registry: schedule, next run, last outcome">Activities</a>
     <a href="/llm" class="{{ 'active' if nav=='llm' else '' }}" title="LLM call history with full prompt/response drill-down">LLM</a>
     <a href="/cost" class="{{ 'active' if nav=='cost' else '' }}" title="LLM spend by workflow and model (7d/30d)">Cost</a>
