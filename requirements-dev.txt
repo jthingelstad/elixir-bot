@@ -1,6 +1,6 @@
 # Development-only tools; install alongside requirements.lock in CI.
 pytest>=9.1.1,<10
 ruff>=0.15.21,<1
-packaging>=26.0,<27
+packaging>=26.2,<27
 pytest-cov>=6,<8
 mypy>=1.15,<2
