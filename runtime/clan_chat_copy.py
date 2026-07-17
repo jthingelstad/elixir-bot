@@ -9,7 +9,7 @@ from typing import Any
 
 import elixir_agent
 
-CLAN_CHAT_DEFAULT_MAX_CHARS = 240
+CLAN_CHAT_DEFAULT_MAX_CHARS = 200
 CLAN_CHAT_WELCOME_MAX_CHARS = 120
 CLAN_CHAT_SIGNATURE_TEXT = "- E"
 DISCORD_INVITE_ROUTE = "POAPKINGS . COM > Members"
@@ -25,6 +25,9 @@ _DISCORD_MENTION_RE = re.compile(r"<[@#!&][^>]+>|@(everyone|here)\b", re.IGNOREC
 _MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\([^)]+\)")
 _MESSAGE_LABEL_RE = re.compile(r"^\s*(?:copy|message)\s*\d*\s*:", re.IGNORECASE)
 _NUMBERED_LABEL_RE = re.compile(r"^\s*\d+[.)]\s+")
+# A real sentence break: .!? followed by whitespace or end-of-string. The
+# look-ahead skips decimals/abbreviations mid-word (e.g. "7.0d", "13,750").
+_SENTENCE_END_RE = re.compile(r"[.!?](?=\s|$)")
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,13 @@ def clip_clan_chat_text(text: str, *, limit: int = CLAN_CHAT_DEFAULT_MAX_CHARS) 
     body = " ".join((text or "").split())
     if len(body) <= limit:
         return body
+    # Prefer ending on a COMPLETE sentence so clan-chat copy never trails off
+    # mid-thought ("...and still... - E"). Only fall back to a mid-word cut with
+    # an ellipsis when there's no usable sentence break in the front half.
+    window = body[:limit]
+    sentence_ends = [m.end() for m in _SENTENCE_END_RE.finditer(window)]
+    if sentence_ends and sentence_ends[-1] >= limit // 2:
+        return window[: sentence_ends[-1]].rstrip()
     clipped = body[: max(0, limit - 3)]
     word_boundary = clipped.rfind(" ")
     if word_boundary > 0:

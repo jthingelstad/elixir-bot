@@ -16,7 +16,7 @@ from storage.incidents import record_incident
 log = logging.getLogger("elixir.leader_action_ui")
 
 LEADER_ACTION_UI_VERSION = "leader-action-ui-v1"
-CLASH_COPY_MAX_LENGTH = 180
+CLASH_COPY_MAX_LENGTH = 200
 
 
 @dataclass(frozen=True)
