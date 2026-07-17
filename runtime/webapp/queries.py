@@ -934,6 +934,20 @@ def command_page() -> dict:
             or {}
         ).get("n")
 
+        outreach_counts = {
+            row["status"]: row["n"]
+            for row in _rows(
+                conn,
+                "SELECT status, COUNT(*) AS n FROM member_outreach GROUP BY status",
+            )
+        }
+        outreach_recent = _rows(
+            conn,
+            "SELECT mo.status, mo.updated_at, p.current_name AS name "
+            "FROM member_outreach mo LEFT JOIN players p ON p.player_tag = mo.player_tag "
+            "ORDER BY mo.updated_at DESC LIMIT 6",
+        )
+
         return {
             "open_actions": open_actions,
             "open_cases": open_cases,
@@ -944,6 +958,9 @@ def command_page() -> dict:
             "roster_count": roster_count,
             "recent_posts": recent_posts,
             "open_incidents": open_incidents,
+            "outreach_counts": outreach_counts,
+            "outreach_total": sum(outreach_counts.values()),
+            "outreach_recent": outreach_recent,
         }
     finally:
         conn.close()
