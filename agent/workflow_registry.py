@@ -238,19 +238,6 @@ _WORKFLOW_SPECS = (
         model_family="chat",
         tools_allowed=False,
     ),
-    # Editorial critic (engine.editor.judge): a post-compose verdict on each
-    # awareness post before send — grounding/substance/freshness/lane-fit. No
-    # tools, one round; Sonnet-tier so it reliably catches grounding drift.
-    # Fail-open by contract; gated by ELIXIR_EDITOR_GATE. (This is the rebuilt
-    # critic; the original second-LLM version was retired 2026-07-10 and this
-    # keys to the live awareness delivery, not the old communication_intents.)
-    WorkflowSpec(
-        "awareness_editor",
-        tools=[],
-        max_tool_rounds=1,
-        tools_allowed=False,
-        model_family="chat",
-    ),
     # weekly_digest: brain-powered Weekly Clan Recap (rebuilt 2026-07-11 to
     # compose from the awareness read via tools, like ask_elixir_daily). The
     # workflow key stays "weekly_digest" for lane-routing stability.

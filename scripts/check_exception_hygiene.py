@@ -38,10 +38,9 @@ BROAD_EXCEPTION_BASELINE = {
     "capabilities/war.py": 1,
     "cr_api.py": 4,
     "db/__init__.py": 2,
-    "db/schema.py": 7,  # +1: V7 migration rollback/re-raise (same pattern as v2-v6)
+    "db/schema.py": 8,  # +1: V8 migration rollback/re-raise (same pattern as v2-v7)
     "engine/chronicles.py": 1,
     "engine/delivery.py": 3,
-    "engine/editor.py": 2,  # judge()/judge_delivered_post fail-open: the critic may never block a post
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
     "engine/leader_note_effects.py": 2,  # apply/revert leader-note effects fail-open (never break the interpreter)

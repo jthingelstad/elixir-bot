@@ -1,24 +1,18 @@
-"""Elixir's editorial-learning loop and post-compose critic.
+"""Elixir's editorial-learning loop: feeders that turn human actions into
+editorial rubric memories.
 
-Two halves work together:
+Human actions become composition guidance on the next awareness read:
+``record_deleted_post`` (an admin deletes an Elixir post),
+``record_copy_edit_pair`` (a leader rewrites action-card copy), immediate
+repetition feedback from the awareness delivery path
+(``record_active_awareness_quality``), and retrospective feedback from
+``scripts/eval_post_quality.py`` (``record_post_quality_feedback``).
 
-1. **Feeders (always live).** Human actions become editorial rubric memories:
-   ``record_deleted_post`` (an admin deletes an Elixir post),
-   ``record_copy_edit_pair`` (a leader rewrites action-card copy), immediate
-   repetition feedback from the awareness delivery path, and retrospective
-   feedback from ``scripts/eval_post_quality.py``. Each becomes composition
-   guidance on the next awareness read.
-
-2. **The critic (rebuilt 2026-07-16, gated by ``ELIXIR_EDITOR_GATE``).**
-   ``judge`` scores a composed awareness post before it is sent — grounding,
-   substance, freshness, lane-fit — reading the same 'editorial' memory pool as
-   its rubric. It is **fail-open by contract**: any error, timeout, or malformed
-   verdict returns ``error`` and the original copy ships unchanged. The critic
-   can only improve a post or defer to the deterministic fallback; it never
-   blocks delivery. Verdicts persist to ``editor_verdicts`` for the Observatory.
-   (The original 2026-07-10 critic was retired with the old proactive-delivery
-   path; this one keys to the live awareness delivery — see the migration note
-   in db/schema.py ``_apply_v5``.)
+(A post-compose LLM critic once lived here too — wired into delivery 2026-07-16,
+backed out the same day for holding the delivery write lock and false-grounding
+on thin facts, and removed entirely 2026-07-17 along with its
+``ELIXIR_EDITOR_GATE`` flag and the ``editor_verdicts`` ledger. The feeders were
+always the durable, decision-safe half.)
 """
 
 from __future__ import annotations
@@ -26,16 +20,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import re
-import sqlite3
 from difflib import SequenceMatcher
 
 log = logging.getLogger("elixir.engine.editor")
-
-_EDITOR_WORKFLOW = "awareness_editor"
-_VALID_VERDICTS = ("pass", "revise", "fallback", "error")
-_EDITOR_DIMENSIONS = ("grounding", "substance", "freshness", "lane_fit")
 
 
 # ------------------------------------------------- editorial rubric memories
@@ -306,279 +294,3 @@ def record_post_quality_feedback(
         created_by="editor-post-quality",
         extra_tags=("quality-eval", f"lane:{lane}", f"source:{source}"),
     )
-
-
-# --------------------------------------------- post-compose editorial critic
-
-
-def editor_enabled() -> bool:
-    """The critic runs unless explicitly disabled (mirrors the
-    ELIXIR_AWARENESS_GATE toggle). This only controls whether ``judge`` is
-    invoked; delivery is fail-open regardless."""
-    return os.getenv("ELIXIR_EDITOR_GATE", "1").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-        "off",
-    )
-
-
-def build_rubric_context(
-    conn, *, lane: str | None = None, limit: int = 6
-) -> list[dict]:
-    """Ranked editorial exemplars + anti-patterns for the judge's rubric.
-
-    Reuses the exact memory pool the awareness brain reads (tag ``editorial``),
-    split by kind so the judge sees both what good looks like and what to avoid.
-    Ranking (confidence + recency) is memory_store's; we just take the top few
-    of each. ``lane`` is accepted for future lane-scoped pools; today the pool
-    is shared and lane-fit is judged from the post itself.
-    """
-    import memory_store
-
-    rubric: list[dict] = []
-    for kind in ("exemplar", "anti-pattern"):
-        for mem in memory_store.select_memories(
-            viewer_scope="leadership",
-            tags=["editorial", kind],
-            limit=limit,
-            conn=conn,
-        ):
-            rubric.append(
-                {
-                    "kind": kind,
-                    "title": mem.get("title") or "",
-                    "lesson": str(mem.get("body") or "")[:500],
-                    "confidence": mem.get("confidence"),
-                }
-            )
-    return rubric
-
-
-def _editor_system() -> str:
-    import prompts
-
-    return prompts.agent_prompt("editor")
-
-
-def _parse_verdict(raw: str | None) -> dict:
-    """Tolerant parse of the judge's JSON verdict. Anything unparseable or
-    off-contract resolves to ``error`` so delivery fails open to original copy."""
-    err = lambda why: {"verdict": "error", "critique": why, "dimensions": {}}  # noqa: E731
-    if not raw or not raw.strip():
-        return err("empty editor response")
-    text = raw.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?", "", text).rstrip("`").strip()
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        text = text[start : end + 1]
-    try:
-        obj = json.loads(text)
-    except (TypeError, ValueError):
-        return err("unparseable editor verdict")
-    if not isinstance(obj, dict):
-        return err("editor verdict was not an object")
-    verdict = str(obj.get("verdict") or "").strip().lower()
-    if verdict not in _VALID_VERDICTS:
-        return err(f"unknown verdict {verdict!r}")
-    dims = obj.get("dimensions")
-    return {
-        "verdict": verdict,
-        "critique": str(obj.get("critique") or "").strip(),
-        "dimensions": dims if isinstance(dims, dict) else {},
-    }
-
-
-def judge(
-    *,
-    copy: str,
-    facts: dict | None,
-    recent_copies: list[str] | None = None,
-    rubric: list[dict] | None = None,
-    lane: str | None = None,
-    llm_fn=None,
-) -> dict:
-    """Post-compose editorial verdict on one awareness post.
-
-    Returns ``{"verdict": pass|revise|fallback|error, "critique": str,
-    "dimensions": {...}}``. **Fail-open**: any error, timeout, or malformed
-    response returns ``error`` and the caller ships the original copy unchanged.
-    ``llm_fn`` is a test seam (given a user string, returns the raw verdict text)
-    so the engine never touches the network under test.
-    """
-    payload = {
-        "lane": lane,
-        "post_copy": copy,
-        "facts": facts or {},
-        "recent_copies": (recent_copies or [])[-5:],
-        "rubric": rubric or [],
-    }
-    user = (
-        "Judge this awareness post before it is sent. Return ONLY the JSON "
-        "verdict object.\n\n" + json.dumps(payload, indent=2, default=str)
-    )
-    try:
-        if llm_fn is not None:
-            raw = llm_fn(user)
-        else:
-            from agent.core import _create_chat_completion, response_text
-
-            resp = _create_chat_completion(
-                workflow=_EDITOR_WORKFLOW,
-                system=_editor_system(),
-                messages=[{"role": "user", "content": user}],
-                temperature=0.0,
-                max_tokens=700,
-                timeout=45,
-            )
-            raw = response_text(resp)
-    except Exception:  # fail-open: nothing the critic does may block a post
-        log.exception("editor judge failed; failing open to original copy")
-        return {"verdict": "error", "critique": "editor call raised", "dimensions": {}}
-    return _parse_verdict(raw)
-
-
-def _recent_lane_copies(
-    conn, lane: str, *, exclude_message_id: str | None = None, limit: int = 8
-) -> list[str]:
-    """Recent delivered copy in this lane (for the judge's freshness check),
-    newest first, excluding the post just recorded."""
-    rows = conn.execute(
-        "SELECT content_preview FROM awareness_posts WHERE lane = ? "
-        "AND (? IS NULL OR discord_message_id != ?) "
-        "ORDER BY posted_at DESC LIMIT ?",
-        (lane, exclude_message_id, exclude_message_id, limit),
-    ).fetchall()
-    return [row[0] for row in rows if row[0]]
-
-
-def _editor_model() -> str | None:
-    from agent.core import _model_for_workflow
-
-    return _model_for_workflow(_EDITOR_WORKFLOW)
-
-
-def judge_delivered_post(
-    conn,
-    *,
-    post: dict,
-    evidence: dict | None,
-    lane: str,
-    content: str,
-    discord_message_id: str | int | None,
-    loop_number: int | None = None,
-    intent_key: str | None = None,
-) -> dict | None:
-    """Observe-and-learn critic (Jamie, 2026-07-16): judge a post that has
-    ALREADY been delivered, record the verdict, and — on a revise/fallback —
-    feed an editorial anti-pattern memory so the next compose improves. It never
-    changes or blocks what shipped; the awareness deliver path stays fail-hard
-    and untouched. Fully isolated and fail-open: any error here is swallowed so
-    a quality read can never disturb the delivery record. Returns the verdict
-    dict, or None when disabled or on error.
-    """
-    if not editor_enabled():
-        return None
-    message_id = str(discord_message_id) if discord_message_id is not None else None
-    try:
-        rubric = build_rubric_context(conn, lane=lane)
-        recent = _recent_lane_copies(conn, lane, exclude_message_id=message_id)
-        result = judge(
-            copy=content,
-            facts=evidence or {},
-            recent_copies=recent,
-            rubric=rubric,
-            lane=lane,
-        )
-        record_verdict(
-            conn,
-            result=result,
-            intent_key=intent_key,
-            loop_number=loop_number,
-            lane=lane,
-            original_copy=content,
-            final_copy=content,  # observe-only: nothing was rewritten
-            covers=post.get("covers_signal_keys"),
-            model=_editor_model(),
-        )
-        if result.get("verdict") in ("revise", "fallback"):
-            _feed_editor_lesson(conn, result, lane, content, message_id)
-        return result
-    except Exception:  # fully isolated: a quality read may never disturb delivery
-        log.exception("editor judge_delivered_post failed (non-fatal)")
-        return None
-
-
-def _feed_editor_lesson(
-    conn, result: dict, lane: str, content: str, message_id: str | None
-) -> None:
-    """Turn a downgraded verdict into an editorial anti-pattern memory — the
-    learning half of the observe-and-learn loop. Deduped on the message id."""
-    verdict = result.get("verdict")
-    critique = (result.get("critique") or "").strip() or "(no critique given)"
-    failed_dims = [
-        dim
-        for dim, detail in (result.get("dimensions") or {}).items()
-        if isinstance(detail, dict) and detail.get("ok") is False
-    ]
-    stable_id = message_id or hashlib.sha1(content.encode("utf-8")).hexdigest()[:16]
-    _add_editorial_memory(
-        conn,
-        title=f"Anti-pattern: editor flagged a live post ({verdict})",
-        body=(
-            f"The editorial critic returned '{verdict}' on a live #{lane} post. "
-            "Future composition should heed this.\n\n"
-            f"- Critique: {critique}\n"
-            + (f"- Weak dimensions: {', '.join(failed_dims)}\n" if failed_dims else "")
-            + f"\nPOST: {content[:600]}"
-        ),
-        kind_tag="anti-pattern",
-        event_key=f"editor_verdict:{stable_id}",
-        confidence=0.8 if verdict == "fallback" else 0.7,
-        created_by="editor-critic",
-        extra_tags=("quality-eval", f"lane:{lane}"),
-    )
-    conn.commit()
-
-
-def record_verdict(
-    conn,
-    *,
-    result: dict,
-    intent_key: str | None,
-    loop_number: int | None,
-    lane: str,
-    original_copy: str,
-    final_copy: str,
-    covers: list | None = None,
-    model: str | None = None,
-) -> int | None:
-    """Persist one editor verdict to the ledger. Best-effort — a failed write
-    never blocks a post that already shipped or is about to."""
-    try:
-        cur = conn.execute(
-            "INSERT INTO editor_verdicts (intent_key, loop_number, lane, verdict, "
-            "dimensions_json, critique, original_copy, final_copy, covers_json, "
-            "model, at) VALUES (?,?,?,?,?,?,?,?,?,?, "
-            "strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
-            (
-                intent_key,
-                loop_number,
-                lane,
-                str(result.get("verdict") or "error"),
-                json.dumps(result.get("dimensions") or {}, default=str),
-                (result.get("critique") or None),
-                original_copy,
-                final_copy,
-                json.dumps(covers or []),
-                model,
-            ),
-        )
-        conn.commit()
-        return cur.lastrowid
-    except sqlite3.Error:
-        log.exception(
-            "failed to record editor verdict (lane=%s loop=%s)", lane, loop_number
-        )
-        return None
