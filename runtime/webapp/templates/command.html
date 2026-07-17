@@ -115,6 +115,28 @@
   </div>
 
   <div class="card">
+    <h2 style="margin-top:0;">DM outreach
+      {% if outreach_counts.get('fulfilled') %}<span class="badge ok">{{ outreach_counts.get('fulfilled') }} verified</span>{% endif %}
+    </h2>
+    {% if outreach_total %}
+      <dl class="kv">
+        {% for status, label in [('proposed','proposed (awaiting you)'), ('sent','sent'), ('awaiting_reply','awaiting reply'), ('verifying','verifying'), ('fulfilled','verified ✓'), ('opted_out','opted out'), ('skipped','skipped'), ('failed','failed')] %}
+          {% if outreach_counts.get(status) %}<dt>{{ label }}</dt><dd>{{ outreach_counts.get(status) }}</dd>{% endif %}
+        {% endfor %}
+      </dl>
+      {% if outreach_recent %}
+        <ul style="margin:.3rem 0 0; padding-left:1rem; font-size:.85rem;">
+        {% for o in outreach_recent %}
+          <li class="muted">{{ o.get('name') or '—' }} · {{ o.get('status') }} · {{ o.get('updated_at','') | reltime }}</li>
+        {% endfor %}
+        </ul>
+      {% endif %}
+    {% else %}
+      <p class="muted">No outreach yet — first cards at the daily run (14:30 CT), pending you approve them.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
     <h2 style="margin-top:0;">Health</h2>
     <dl class="kv">
       <dt>open incidents</dt>
