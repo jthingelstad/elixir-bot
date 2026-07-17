@@ -1214,6 +1214,32 @@ async def _member_outreach_decision(action: dict, status: str) -> None:
     await asyncio.to_thread(outreach.on_decision, action, status, send_dm=_send_sync)
 
 
+async def _handle_outreach_dm(message) -> None:
+    """Phase 2: a member's DM reply drives the email-collection state machine
+    (reply with email -> emailed code -> reply with code -> verified). Only acts
+    for a linked member who is mid-outreach; otherwise stays silent so Elixir
+    isn't a general DM bot."""
+    from runtime import email_verification, outreach
+
+    member = await asyncio.to_thread(
+        db.get_linked_member_for_discord_user, message.author.id
+    )
+    if not member:
+        return
+    reply = await asyncio.to_thread(
+        outreach.handle_dm_reply,
+        member["player_tag"],
+        message.content or "",
+        start_verification=email_verification.start_verification,
+        check_code=email_verification.check_code,
+    )
+    if reply:
+        try:
+            await message.channel.send(reply)
+        except Exception:
+            log.warning("outreach DM reply send failed", exc_info=True)
+
+
 # _editorial_sweep + _editorial_review retired 2026-07-10 with the Editor (their
 # ActivityDefinitions are gone, so nothing schedules them). The brain composes
 # with depth natively — no template gate to feed or self-review.

@@ -132,3 +132,127 @@ def test_on_decision_ignores_other_action_types(tmp_path):
         assert result is None
     finally:
         conn.close()
+
+
+# -- Phase 2: DM-receive state machine -------------------------------------
+
+
+def test_classify_reply():
+    assert outreach.classify_reply("no thanks")[0] == "opt_out"
+    assert outreach.classify_reply("STOP")[0] == "opt_out"
+    assert outreach.classify_reply("sure, it's me@example.com!") == (
+        "email",
+        "me@example.com",
+    )
+    assert outreach.classify_reply("123456") == ("code", "123456")
+    assert outreach.classify_reply("the code is 004521 I think") == ("code", "004521")
+    assert outreach.classify_reply("hey what's this about")[0] == "other"
+    # An address containing "no" is never mistaken for an opt-out.
+    assert outreach.classify_reply("no-reply@x.com")[0] == "email"
+
+
+def _fake_verify():
+    started, checked = [], []
+
+    def start(tag, email):
+        started.append((tag, email))
+        return {"ok": True, "email": email}
+
+    def check(tag, code):
+        checked.append((tag, code))
+        return (
+            {"ok": True, "email": "me@example.com"}
+            if code == "123456"
+            else {
+                "ok": False,
+                "error": "that code didn't match. 4 attempt(s) left.",
+            }
+        )
+
+    return start, check, started, checked
+
+
+def test_dm_reply_ignored_when_not_mid_flow(tmp_path):
+    conn = db.get_connection(str(tmp_path / "t.db"))
+    try:
+        _seed(conn)  # no outreach row -> not mid-flow
+        start, check, *_ = _fake_verify()
+        out = outreach.handle_dm_reply(
+            "#AAA",
+            "me@example.com",
+            start_verification=start,
+            check_code=check,
+            conn=conn,
+        )
+        assert out is None
+    finally:
+        conn.close()
+
+
+def test_dm_email_triggers_verification_and_moves_to_verifying(tmp_path):
+    conn = db.get_connection(str(tmp_path / "t.db"))
+    try:
+        _seed(conn)
+        mo.upsert_outreach("#AAA", status="awaiting_reply", conn=conn)
+        start, check, started, _ = _fake_verify()
+        out = outreach.handle_dm_reply(
+            "#AAA",
+            "ok it's me@example.com",
+            start_verification=start,
+            check_code=check,
+            conn=conn,
+        )
+        assert started == [("#AAA", "me@example.com")]
+        assert "code" in out.lower()
+        row = mo.get_outreach("#AAA", conn=conn)
+        assert row["status"] == "verifying"
+        assert row["pending_email"] == "me@example.com"
+    finally:
+        conn.close()
+
+
+def test_dm_correct_code_verifies_and_fulfills(tmp_path):
+    conn = db.get_connection(str(tmp_path / "t.db"))
+    try:
+        _seed(conn)
+        mo.upsert_outreach("#AAA", status="verifying", conn=conn)
+        start, check, _, checked = _fake_verify()
+        out = outreach.handle_dm_reply(
+            "#AAA", "123456", start_verification=start, check_code=check, conn=conn
+        )
+        assert checked == [("#AAA", "123456")]
+        assert "verified" in out.lower()
+        assert mo.get_outreach("#AAA", conn=conn)["status"] == "fulfilled"
+    finally:
+        conn.close()
+
+
+def test_dm_wrong_code_stays_verifying_with_error(tmp_path):
+    conn = db.get_connection(str(tmp_path / "t.db"))
+    try:
+        _seed(conn)
+        mo.upsert_outreach("#AAA", status="verifying", conn=conn)
+        start, check, *_ = _fake_verify()
+        out = outreach.handle_dm_reply(
+            "#AAA", "000000", start_verification=start, check_code=check, conn=conn
+        )
+        assert "didn't match" in out
+        assert mo.get_outreach("#AAA", conn=conn)["status"] == "verifying"
+    finally:
+        conn.close()
+
+
+def test_dm_opt_out_marks_skipped_and_confirms(tmp_path):
+    conn = db.get_connection(str(tmp_path / "t.db"))
+    try:
+        _seed(conn)
+        mo.upsert_outreach("#AAA", status="awaiting_reply", conn=conn)
+        start, check, started, _ = _fake_verify()
+        out = outreach.handle_dm_reply(
+            "#AAA", "no thanks", start_verification=start, check_code=check, conn=conn
+        )
+        assert started == []  # never starts verification on an opt-out
+        assert "won't ask again" in out.lower()
+        assert mo.get_outreach("#AAA", conn=conn)["status"] == "opted_out"
+    finally:
+        conn.close()
