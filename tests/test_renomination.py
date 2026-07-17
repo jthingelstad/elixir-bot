@@ -58,6 +58,63 @@ def _insert_kick_card(
     conn.commit()
 
 
+# ----------------------------------------------------- premise rejection (v7)
+
+
+def _seed_anchor(conn, tag="#AAA", *, days_ago=40, dedup="anchor"):
+    """Give the member a stable evidence anchor (their last battle) so the premise
+    fingerprint is reproducible."""
+    conn.execute(
+        "INSERT INTO battle_events (dedup_key, player_tag, battle_time, observed_at) "
+        "VALUES (?, ?, ?, ?)",
+        (dedup, tag, _stamp(days_ago), _stamp(days_ago)),
+    )
+    conn.commit()
+
+
+def _reject_premise(conn, tag="#AAA"):
+    """Mark the latest decided kick card premise-rejected, pinning the current
+    evidence fingerprint (mirrors engine.leader_note_effects.apply)."""
+    fp = management._premise_fingerprint(conn, tag, "kick_recommendation")
+    conn.execute(
+        "UPDATE leader_action_recommendations "
+        "SET premise_rejected = 1, premise_fingerprint = ? "
+        "WHERE target_player_tag = ? AND action_type = 'kick_recommendation'",
+        (fp, tag),
+    )
+    conn.commit()
+    return fp
+
+
+def test_premise_rejection_blocks_renomination_while_evidence_unchanged(engine_conn):
+    _seed_recommended(engine_conn)
+    _seed_anchor(engine_conn)
+    # Declined 10 days ago (past the 7d cooldown → would normally re-raise)...
+    _insert_kick_card(engine_conn, status="rejected", decided_at=_stamp(10))
+    _reject_premise(engine_conn)
+    # ...but the leader rejected the premise and the anchor is unchanged → blocked.
+    assert management.renominate_after_cooldown(engine_conn, now=NOW) == []
+
+
+def test_premise_rejection_lifts_on_materially_new_evidence(engine_conn):
+    _seed_recommended(engine_conn)
+    _seed_anchor(engine_conn)
+    _insert_kick_card(engine_conn, status="rejected", decided_at=_stamp(10))
+    _reject_premise(engine_conn)
+    assert management.renominate_after_cooldown(engine_conn, now=NOW) == []
+
+    # A fresh battle moves the evidence anchor → fingerprint no longer matches →
+    # the premise no longer applies and the normal cooldown gate re-raises.
+    engine_conn.execute(
+        "INSERT INTO battle_events (dedup_key, player_tag, battle_time, observed_at) "
+        "VALUES ('b1', '#AAA', ?, ?)",
+        (_stamp(1), _stamp(1)),
+    )
+    engine_conn.commit()
+    fired = management.renominate_after_cooldown(engine_conn, now=NOW)
+    assert [f["player_tag"] for f in fired] == ["#AAA"]
+
+
 # --------------------------------------------------------------- kick sweep
 
 

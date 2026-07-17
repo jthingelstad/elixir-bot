@@ -67,6 +67,8 @@ def _row_to_action(row) -> dict:
     item["outcome"] = _json_loads(item.pop("outcome_json", None))
     item["copy_message_ids"] = _json_loads_list(item.pop("copy_message_ids_json", None))
     item["copy_edit_diff"] = _json_loads(item.pop("copy_edit_diff_json", None))
+    item["note_interpret"] = _json_loads(item.get("note_interpret_json"))
+    item["premise_rejected"] = bool(item.get("premise_rejected"))
     item["is_test"] = bool(item.get("is_test"))
     return item
 
@@ -177,6 +179,36 @@ def _note_feedback(note: str, *, noted_at: str) -> dict:
             "suppressed_until": _utc_plus(days=1, start=noted_at),
         }
     return {}
+
+
+def note_text_hash(note: str | None) -> str | None:
+    """Stable hash of a leader note's text, used to make async interpretation
+    idempotent (skip an already-interpreted note; re-interpret an edited one)."""
+    body = " ".join((note or "").split())
+    if not body:
+        return None
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+
+
+def _mark_note_pending(conn, action_id: int, note: str | None) -> None:
+    """Flag a freshly-written leader note for async interpretation. Deterministic,
+    inside the same transaction as the note write — no LLM here. A NULL/blank note
+    clears the interpretation state (nothing to read)."""
+    body_hash = note_text_hash(note)
+    if body_hash is None:
+        conn.execute(
+            "UPDATE leader_action_recommendations "
+            "SET note_interpret_status = NULL, note_interpret_note_hash = NULL "
+            "WHERE action_id = ?",
+            (int(action_id),),
+        )
+        return
+    conn.execute(
+        "UPDATE leader_action_recommendations "
+        "SET note_interpret_status = 'pending', note_interpret_note_hash = ? "
+        "WHERE action_id = ?",
+        (body_hash, int(action_id)),
+    )
 
 
 def _member_baseline(tag: str | None, *, conn) -> dict:
@@ -1143,6 +1175,8 @@ def decide_leader_action(
             action["action_id"],
         ),
     )
+    if status == ACTION_REJECTED:
+        _mark_note_pending(conn, action["action_id"], clean_note)
     updated = get_leader_action_by_id(action["action_id"], conn=conn)
     if updated and updated.get("case_id"):
         try:
@@ -1297,6 +1331,7 @@ def classify_departure(
         except Exception:
             log.warning("departure memory write failed for %s", canon, exc_info=True)
 
+    _mark_note_pending(conn, action["action_id"], clean_comment)
     return get_leader_action_by_id(action["action_id"], conn=conn)
 
 
@@ -1374,7 +1409,143 @@ def record_leader_action_note_by_message(
             action["action_id"],
         ),
     )
+    _mark_note_pending(conn, action["action_id"], body)
     return get_leader_action_by_message(source_message_id, conn=conn)
+
+
+# ---------------------------------------------------------------------------
+# Leader-note feedback loop (v7): async interpretation persistence + the two
+# behaviour-changing effect setters (a timing hold on re-nomination, and a
+# premise rejection). Interpretation runs off the delivery transaction, so these
+# are called from the background interpreter thread with their own connection.
+# ---------------------------------------------------------------------------
+
+
+@managed_connection
+def record_note_interpretation(
+    action_id: int,
+    *,
+    status: str,
+    effect: dict | None = None,
+    note_hash: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    """Persist the outcome of an async note interpretation: the lifecycle status
+    (``interpreted`` / ``failed`` / ``undone`` / ``none``), the effect blob
+    (effect kind + params + the human ``reading`` echoed on the card + a
+    prior-state snapshot for Undo), and the note hash that was interpreted."""
+    conn.execute(
+        "UPDATE leader_action_recommendations "
+        "SET note_interpret_status = ?, note_interpret_json = ?, "
+        "    note_interpret_note_hash = COALESCE(?, note_interpret_note_hash), "
+        "    updated_at = ? "
+        "WHERE action_id = ?",
+        (
+            (status or "").strip() or None,
+            _json_dumps(effect) if effect is not None else None,
+            note_hash,
+            _db._utcnow(),
+            int(action_id),
+        ),
+    )
+    return get_leader_action_by_id(action_id, conn=conn)
+
+
+@managed_connection
+def set_leader_action_suppression(
+    action_id: int,
+    suppressed_until: str | None,
+    *,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[str]:
+    """Timing-hold effect: write ``expires_at`` (the re-nomination hold window).
+    Returns the PRIOR ``expires_at`` so the interpreter can snapshot it for an
+    exact Undo (restore the prior value, never NULL)."""
+    row = conn.execute(
+        "SELECT expires_at FROM leader_action_recommendations WHERE action_id = ?",
+        (int(action_id),),
+    ).fetchone()
+    if row is None:
+        return None
+    prior = row["expires_at"]
+    conn.execute(
+        "UPDATE leader_action_recommendations SET expires_at = ?, updated_at = ? "
+        "WHERE action_id = ?",
+        (suppressed_until, _db._utcnow(), int(action_id)),
+    )
+    return prior
+
+
+@managed_connection
+def set_leader_action_premise(
+    action_id: int,
+    *,
+    rejected: bool,
+    fingerprint: str | None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    """Premise effect: set/clear ``premise_rejected`` + ``premise_fingerprint``.
+    Returns the PRIOR values as a snapshot for Undo."""
+    row = conn.execute(
+        "SELECT premise_rejected, premise_fingerprint "
+        "FROM leader_action_recommendations WHERE action_id = ?",
+        (int(action_id),),
+    ).fetchone()
+    if row is None:
+        return None
+    prior = {
+        "premise_rejected": bool(row["premise_rejected"]),
+        "premise_fingerprint": row["premise_fingerprint"],
+    }
+    conn.execute(
+        "UPDATE leader_action_recommendations "
+        "SET premise_rejected = ?, premise_fingerprint = ?, updated_at = ? "
+        "WHERE action_id = ?",
+        (1 if rejected else 0, fingerprint, _db._utcnow(), int(action_id)),
+    )
+    return prior
+
+
+@managed_connection
+def set_leader_action_note_text(
+    action_id: int,
+    *,
+    note: str | None,
+    discord_user_id: str | int,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    """Replace a card's leader-note text (the Fix-reading flow) and re-flag it for
+    interpretation. Works on open or decided cards."""
+    body = " ".join((note or "").split()) or None
+    now = _db._utcnow()
+    conn.execute(
+        "UPDATE leader_action_recommendations "
+        "SET decision_note = ?, decision_note_at = ?, "
+        "    decision_note_by_discord_user_id = ?, updated_at = ? "
+        "WHERE action_id = ?",
+        (body, now, str(discord_user_id), now, int(action_id)),
+    )
+    _mark_note_pending(conn, action_id, body)
+    return get_leader_action_by_id(action_id, conn=conn)
+
+
+@managed_connection
+def list_interpreted_leader_actions(
+    *,
+    limit: int = 50,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Decided-but-interpreted cards whose Undo / Fix-reading buttons must be
+    re-registered as persistent views on startup."""
+    rows = conn.execute(
+        "SELECT * FROM leader_action_recommendations "
+        "WHERE note_interpret_status = 'interpreted' "
+        "  AND source_message_id IS NOT NULL "
+        "  AND status != 'proposed' "
+        "ORDER BY updated_at DESC LIMIT ?",
+        (int(limit),),
+    ).fetchall()
+    return [_row_to_action(row) for row in rows]
 
 
 @managed_connection

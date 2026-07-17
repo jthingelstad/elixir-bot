@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 
 
 _V1_STATEMENTS = (
@@ -278,6 +278,15 @@ REQUIRED_SCHEMA = {
         "lane",
         "verdict",
         "at",
+    },
+    "leader_action_recommendations": {
+        "action_id",
+        "decision_note",
+        "note_interpret_status",
+        "note_interpret_json",
+        "note_interpret_note_hash",
+        "premise_rejected",
+        "premise_fingerprint",
     },
 }
 
@@ -678,6 +687,46 @@ def _apply_v6(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v7(conn: sqlite3.Connection) -> None:
+    """Make a leader's free-text on an #actions card a real feedback loop.
+
+    A note the leader types is captured deterministically, then interpreted
+    asynchronously (out of the delivery transaction) into exactly one structured
+    effect. Two column groups on ``leader_action_recommendations`` back this:
+
+    - ``note_interpret_*`` — the interpretation lifecycle: ``note_interpret_status``
+      (pending → interpreted / failed / undone / none), ``note_interpret_json``
+      (the effect, the human-readable "reading" echoed on the card, and a
+      prior-state snapshot for exact Undo), and ``note_interpret_note_hash`` (hash
+      of the interpreted note text, so an edited/re-added note re-interprets and an
+      unchanged one is skipped).
+    - ``premise_*`` — the "invalidate premise" effect: when a leader rejects the
+      recommendation's premise ("no longer relevant"), ``premise_rejected`` is set
+      and ``premise_fingerprint`` pins the evidence anchor, so re-nomination stays
+      blocked while the evidence is unchanged and re-fires only on materially new
+      evidence.
+    """
+    columns = _columns(conn, "leader_action_recommendations")
+    additions = (
+        ("note_interpret_status", "TEXT"),
+        ("note_interpret_json", "TEXT"),
+        ("note_interpret_note_hash", "TEXT"),
+        ("premise_rejected", "INTEGER NOT NULL DEFAULT 0"),
+        ("premise_fingerprint", "TEXT"),
+    )
+    for column, declaration in additions:
+        if column not in columns:
+            conn.execute(
+                "ALTER TABLE leader_action_recommendations "
+                f"ADD COLUMN {column} {declaration}"
+            )
+            columns.add(column)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leader_action_note_interpret "
+        "ON leader_action_recommendations(note_interpret_status)"
+    )
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -746,6 +795,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 6
+    if version < 7:
+        try:
+            _apply_v7(conn)
+            conn.execute("PRAGMA user_version = 7")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -805,7 +863,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 # Updated deliberately whenever the fresh-build schema changes.
 CURRENT_SCHEMA_FINGERPRINT = (
-    "1163995b4a31042509d221fa98227c035427c8a742560dc5ea8ebd2f0db401b9"
+    "b209f52982e67a1e021597a987a05fd2ab5f36f632c12af8cb98f103021b1e2d"
 )
 
 
