@@ -75,8 +75,12 @@
     <h2 style="margin-top:0;">Clan pulse</h2>
     <dl class="kv">
       <dt>roster</dt><dd>{{ roster_count if roster_count is not none else '—' }} members</dd>
-      {% if war_clock %}
-        <dt>war</dt><dd>{{ war_clock.get('phase_display') or war_clock.get('phase','') }}{% if war_clock.get('day_number') %} · day {{ war_clock.get('day_number') }}{% endif %}</dd>
+      {% if war_state %}
+        <dt>war</dt><dd>{{ war_state.get('phase_display') or 'war' }}{% if war_state.get('week') %} · week {{ war_state.get('week') }}{% endif %}</dd>
+        {% set race = war_state.get('race') or {} %}
+        {% if race.get('race_ranked') %}
+          <dt>our race</dt><dd>rank <b>{{ race.get('race_rank') }}</b> · {{ race.get('fame') }} fame</dd>
+        {% endif %}
       {% endif %}
     </dl>
     {% if war_standings %}
