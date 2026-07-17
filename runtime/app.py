@@ -1082,6 +1082,26 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
 # runtime/outreach.py; these are the thin Discord bridges.
 
 
+def _outreach_tenure(joined_date) -> str | None:
+    """A loose, warm tenure phrase from a join date — guarding the 2026-03-07
+    'tracking start' artifact (pre-tracking joins are stamped that day, not real)."""
+    if not joined_date:
+        return None
+    day = str(joined_date)[:10]
+    if day <= "2026-03-07":
+        return "a long-time member (here since before our records began)"
+    try:
+        jd = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    days = (datetime.now(timezone.utc) - jd).days
+    if days < 21:
+        return "a recent addition to the clan"
+    if days < 60:
+        return f"about {max(1, days // 7)} weeks in the clan"
+    return f"about {max(1, round(days / 30))} months in the clan"
+
+
 async def _send_member_dm(discord_user_id: str, content: str) -> tuple[bool, str]:
     """Deliver an outreach DM to a member. Returns (ok, detail). When
     ELIXIR_DM_OUTREACH_SEND is off, logs what would be sent and reports 'dry_run'
@@ -1186,17 +1206,35 @@ async def _member_outreach_propose():
         return fut.result(timeout=60)
 
     def _compose(target):
-        # Elixir writes the ask in its own voice from a small facts brief; the flow
-        # falls back to the deterministic template if this returns "" / raises.
+        # Elixir writes the ask in its own voice from a grounded facts brief (so it
+        # nods to who they actually are); the flow falls back to the deterministic
+        # template if this returns "" / raises.
         from agent.workflows import generate_outreach_ask
 
-        name = target.get("member_name") or target.get("player_tag") or "there"
-        facts = (
-            f"Member name: {name}\n"
-            "Context: a current POAP KINGS clan member. You do not have their email "
-            "on file yet — this DM asks for it to build a fuller profile."
-        )
-        return generate_outreach_ask(facts)
+        tag = target.get("player_tag")
+        name = target.get("member_name") or tag or "there"
+        lines = [f"Member name: {name}"]
+        try:
+            from storage.roster import get_member_profile
+
+            profile = get_member_profile(tag) or {}
+            tenure = _outreach_tenure(profile.get("joined_date"))
+            if tenure:
+                lines.append(f"Time in the clan: {tenure}")
+            trophies = profile.get("trophies")
+            if trophies:
+                arena = profile.get("arena_name")
+                lines.append(
+                    f"Current trophies: {trophies}"
+                    + (f" (in {arena})" if arena else "")
+                )
+            fav = profile.get("current_favourite_card_name")
+            if fav:
+                lines.append(f"Favorite card: {fav}")
+        except Exception:
+            log.warning("outreach compose: profile lookup failed for %s", tag)
+        lines.append("Context: a current POAP KINGS member with no email on file yet.")
+        return generate_outreach_ask("\n".join(lines))
 
     try:
         proposed = await asyncio.to_thread(
