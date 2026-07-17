@@ -147,6 +147,27 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         activity_role="communicator",
     ),
     ActivityDefinition(
+        activity_key="member-outreach-propose",
+        owner_lane="arena-relay",
+        purpose="DM-outreach (Phase 1): pick current members missing a verified "
+        "email and offer up to a few leader-gated 'Profile Outreach' cards in "
+        "#actions. FULLY DORMANT unless ELIXIR_DM_OUTREACH=1; a leader approves "
+        "each card before any DM, and ELIXIR_DM_OUTREACH_SEND gates real delivery.",
+        job_id="member-outreach-propose",
+        job_function="_member_outreach_propose",
+        schedule_kind="cron",
+        schedule_config={
+            "hour": _attr("MEMBER_OUTREACH_HOUR", 14),
+            "minute": 30,
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=(
+            "Discord: #actions Profile Outreach card (leader-gated + flag-gated)",
+        ),
+        activity_role="communicator",
+    ),
+    ActivityDefinition(
         activity_key="memory-synthesis",
         owner_lane="leader-lounge",
         purpose="Weekly pass that writes arc memories, retires stale entries, and flags contradictions against live state.",

@@ -1074,6 +1074,146 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
     return bool(card_messages)
 
 
+# -- DM outreach (Phase 1) -------------------------------------------------
+#
+# Double-gated and OFF by default. ELIXIR_DM_OUTREACH raises cards at all;
+# ELIXIR_DM_OUTREACH_SEND actually delivers a DM on approve (else dry-run-log). A
+# leader approves every card before any member is messaged. Flow logic lives in
+# runtime/outreach.py; these are the thin Discord bridges.
+
+
+async def _send_member_dm(discord_user_id: str, content: str) -> tuple[bool, str]:
+    """Deliver an outreach DM to a member. Returns (ok, detail). When
+    ELIXIR_DM_OUTREACH_SEND is off, logs what would be sent and reports 'dry_run'
+    so the flow can be exercised without messaging anyone."""
+    from runtime import outreach
+
+    if not outreach.send_enabled():
+        log.info(
+            "member outreach [dry-run]: would DM %s (%d chars)",
+            discord_user_id,
+            len(content or ""),
+        )
+        return True, "dry_run"
+    try:
+        uid = int(discord_user_id)
+    except (TypeError, ValueError):
+        return False, "bad discord_user_id"
+    try:
+        user = bot.get_user(uid) or await bot.fetch_user(uid)
+    except Exception as exc:
+        log.warning(
+            "member outreach: could not fetch user %s: %s", discord_user_id, exc
+        )
+        return False, f"fetch failed: {exc}"
+    if user is None:
+        return False, "user not found"
+    try:
+        await user.send(content)
+    except discord.Forbidden:
+        return False, "member has DMs closed"
+    except Exception as exc:
+        log.warning("member outreach DM send failed: %s", exc, exc_info=True)
+        return False, f"send error: {exc}"
+    log.info("member outreach: DM sent to %s", discord_user_id)
+    return True, "sent"
+
+
+async def _raise_outreach_card(target: dict, copy: str):
+    """Create and post one leader-gated 'Profile Outreach' card to #actions.
+    Returns the action dict (or None). Never raises into the proposal loop."""
+    try:
+        channel_config = _channel_config_by_key("arena-relay")
+    except Exception:
+        log.warning("member outreach: arena-relay unavailable")
+        return None
+    relay_channel = bot.get_channel(int(channel_config["id"]))
+    if relay_channel is None:
+        log.warning("member outreach: arena-relay channel not found")
+        return None
+    tag = target.get("player_tag")
+    name = target.get("member_name") or tag
+    try:
+        baseline = await asyncio.to_thread(
+            db.build_leader_action_baseline,
+            action_type="member_outreach",
+            target_player_tag=tag,
+        )
+        action = await asyncio.to_thread(
+            db.create_leader_action_recommendation,
+            action_type="member_outreach",
+            objective=f"member_outreach:email:{tag}",
+            prompt_text=f"DM {name} to ask for their email — approve to send, or Skip:",
+            rationale=(
+                f"{name} is a current member with no email on file; a DM builds a "
+                "fuller profile. Leader-gated — nothing sends until you approve."
+            ),
+            target_channel_key="arena-relay",
+            target_channel_id=channel_config["id"],
+            target_player_tag=tag,
+            target_player_name=name,
+            source_signal_key=f"member_outreach:email:{tag}",
+            source_signal_type="member_outreach",
+            copy_original_text=copy,
+            copy_current_text=copy,
+            action_key=f"member-outreach:email:{tag}",
+            ui_version=LEADER_ACTION_UI_VERSION,
+            baseline=baseline,
+        )
+    except Exception:
+        log.exception("member outreach: failed to create card for %s", tag)
+        return None
+    if not action or action.get("source_message_id"):
+        return None
+    card_messages = await post_leader_action_card(
+        relay_channel, action, copy_messages=[copy]
+    )
+    return action if card_messages else None
+
+
+async def _member_outreach_propose():
+    """Scheduled: offer a few leader-gated outreach cards. No-op unless
+    ELIXIR_DM_OUTREACH=1. Runs the (sync, tested) propose_cards with an async
+    card-raise bridge."""
+    from runtime import outreach
+
+    if not outreach.outreach_enabled():
+        return
+    loop = asyncio.get_running_loop()
+
+    def _raise_sync(target, copy):
+        fut = asyncio.run_coroutine_threadsafe(_raise_outreach_card(target, copy), loop)
+        return fut.result(timeout=60)
+
+    try:
+        proposed = await asyncio.to_thread(
+            outreach.propose_cards, raise_card=_raise_sync
+        )
+    except Exception:
+        log.exception("member outreach propose failed")
+        return
+    runtime_status.mark_job_success(
+        "member_outreach_propose", f"proposed {len(proposed)}"
+    )
+    return proposed
+
+
+async def _member_outreach_decision(action: dict, status: str) -> None:
+    """Bridge a leader's decision on a member_outreach card into the flow: send
+    the DM on approve, mark skipped on decline. Called from prompt_feedback."""
+    from runtime import outreach
+
+    loop = asyncio.get_running_loop()
+
+    def _send_sync(discord_user_id, content):
+        fut = asyncio.run_coroutine_threadsafe(
+            _send_member_dm(discord_user_id, content), loop
+        )
+        return fut.result(timeout=60)
+
+    await asyncio.to_thread(outreach.on_decision, action, status, send_dm=_send_sync)
+
+
 # _editorial_sweep + _editorial_review retired 2026-07-10 with the Editor (their
 # ActivityDefinitions are gone, so nothing schedules them). The brain composes
 # with depth natively — no template gate to feed or self-review.
