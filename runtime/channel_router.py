@@ -9,6 +9,7 @@ import logging
 import mimetypes
 from datetime import timezone
 
+import discord
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 import cr_api
@@ -1427,15 +1428,18 @@ async def route_message(message):
     )
     # Direct messages: the only DM flow is profile outreach (Phase 2), and only
     # when the feature is enabled. Everything else in a DM is ignored — Elixir is
-    # not a general DM bot. A DM channel carries a `recipient`; guild channels do
-    # not, which is the reliable signal here.
-    if (
-        getattr(message, "guild", None) is None
-        and getattr(message.channel, "recipient", None) is not None
-    ):
+    # not a general DM bot. Detect a DM by channel TYPE, not by `.recipient`:
+    # discord.py builds an INBOUND DM's channel via DMChannel._from_message, which
+    # sets recipients=[] (bots don't get the private-channel cache), so
+    # message.channel.recipient is ALWAYS None here — the old recipient check
+    # never fired and every member reply was silently dropped to process_commands.
+    if isinstance(message.channel, discord.DMChannel):
         from runtime import outreach
 
         if outreach.outreach_enabled():
+            _log.info(
+                "DM received from discord_user_id=%s — routing to outreach", message.author.id
+            )
             await app._handle_outreach_dm(message)
         return
 
