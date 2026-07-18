@@ -4672,3 +4672,61 @@ def test_share_channel_result_rewrites_member_refs_before_posting():
 
     mock_post.assert_awaited_once_with(channel, {"content": "King Levy had a great week."})
     assert mock_save.call_args.args[2] == "King Levy had a great week."
+
+
+def _make_inbound_dm_message(discord_user_id, content):
+    """A DM as discord.py delivers it: the channel is built via
+    DMChannel._from_message, so recipients=[] and channel.recipient is None.
+    Regression guard for the bug where route_message keyed DM detection on
+    `.recipient` (always None inbound) and silently dropped every member reply."""
+    import discord
+
+    state = SimpleNamespace(user=SimpleNamespace(id=1))
+    dm_channel = discord.DMChannel._from_message(state, channel_id=999)
+    assert dm_channel.recipient is None  # documents the exact trap
+    author = SimpleNamespace(
+        bot=False,
+        id=discord_user_id,
+        name="sam.storie",
+        display_name="Sam Storie",
+        global_name="Sam Storie",
+    )
+    return SimpleNamespace(author=author, channel=dm_channel, guild=None, content=content)
+
+
+def test_inbound_dm_routes_to_outreach_when_enabled():
+    message = _make_inbound_dm_message(922500832962957343, "sure — storie@gmail.com")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.channel_router.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.channel_router.db.upsert_discord_user"),
+        patch("runtime.outreach.outreach_enabled", return_value=True),
+        patch("runtime.app._handle_outreach_dm", new=AsyncMock()) as mock_handle,
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+    ):
+        asyncio.run(channel_router.route_message(message))
+
+    mock_handle.assert_awaited_once_with(message)
+    mock_process.assert_not_awaited()  # a DM must never fall through to command processing
+
+
+def test_inbound_dm_ignored_when_outreach_disabled():
+    message = _make_inbound_dm_message(922500832962957343, "hello?")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.channel_router.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.channel_router.db.upsert_discord_user"),
+        patch("runtime.outreach.outreach_enabled", return_value=False),
+        patch("runtime.app._handle_outreach_dm", new=AsyncMock()) as mock_handle,
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+    ):
+        asyncio.run(channel_router.route_message(message))
+
+    mock_handle.assert_not_awaited()
+    mock_process.assert_not_awaited()  # still short-circuits — Elixir is not a general DM bot
