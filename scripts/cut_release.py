@@ -79,14 +79,25 @@ def _bump_core_defaults(*, name: str, date: str) -> None:
 
 
 def _run(args: list[str], *, timeout: int = 60) -> None:
-    subprocess.run(
-        args,
-        cwd=rn.REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    try:
+        subprocess.run(
+            args,
+            cwd=rn.REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.CalledProcessError as exc:
+        # Surface the captured output. Otherwise a swallowed gate failure (e.g. a
+        # transient pre-commit hook rejection on `git commit`) reads as an
+        # inscrutable CalledProcessError traceback with zero diagnostics.
+        sys.stderr.write(f"\ncut_release: command failed ({exc.returncode}): {' '.join(args)}\n")
+        if exc.stdout:
+            sys.stderr.write(exc.stdout)
+        if exc.stderr:
+            sys.stderr.write(exc.stderr)
+        sys.exit(1)
 
 
 def _derive_tag(name: str, *, head: str | None, date: str) -> str:
