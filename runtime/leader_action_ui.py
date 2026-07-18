@@ -302,6 +302,24 @@ async def _refresh_card_message(interaction: discord.Interaction, action: dict) 
         )
 
 
+async def _dispatch_member_outreach_decision(action: dict, status: str) -> None:
+    """A member_outreach card delivers (or skips) the member DM only when the
+    outreach flow is told of the leader's decision. The emoji-reaction path does
+    this in runtime.prompt_feedback; the button/modal UI must do the same or an
+    approved card is marked done while the member never gets a DM. Lazy app
+    import avoids the app -> leader_action_ui load cycle."""
+    if (action or {}).get("action_type") != "member_outreach":
+        return
+    import runtime.app as app
+
+    try:
+        await app._member_outreach_decision(action, status)
+    except Exception:
+        log.exception(
+            "member outreach decision handling failed action_id=%s", (action or {}).get("action_id")
+        )
+
+
 async def _apply_card_update(interaction: discord.Interaction, action: dict) -> None:
     embed = build_leader_action_embed(action)
     view = leader_action_view_for(action)
@@ -431,6 +449,7 @@ class DecisionReasonModal(discord.ui.Modal):
         queue_leader_action_feedback_refresh(action.get("action_type"))
         queue_leader_note_interpretation(self.action_id, bot=interaction.client)
         await _apply_card_update(interaction, action)
+        await _dispatch_member_outreach_decision(action, db.ACTION_REJECTED)
 
 
 class NoteModal(discord.ui.Modal):
@@ -587,6 +606,7 @@ class LeaderActionButton(discord.ui.Button):
             )
             queue_leader_action_feedback_refresh(action.get("action_type"))
             await _apply_card_update(interaction, updated or action)
+            await _dispatch_member_outreach_decision(updated or action, db.ACTION_DONE)
             return
         if self.kind == "decline":
             await interaction.response.send_modal(DecisionReasonModal(action))
