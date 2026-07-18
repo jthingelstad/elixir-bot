@@ -20,6 +20,11 @@ ACTION_DONE = "done"
 ACTION_DEFERRED = "deferred"
 ACTION_PROPOSED = "proposed"
 ACTION_REJECTED = "rejected"
+# Sentinel written to source_message_id the instant BEFORE a card is posted, so a
+# crash mid-post can't double-post next tick. A card carrying it has NOT landed on
+# Discord yet — treat it as unposted (see count_open_leader_actions, and the
+# Forbidden-clear path in runtime.app._post_pending_leader_action_cards).
+POSTING_SENTINEL = "posting"
 # Action types resolved by a two-way classification (not done/decline). Their
 # cards ignore the ✅/❌ reaction path and resolve only via their own buttons.
 _CLASSIFICATION_ACTION_TYPES = {"departure_verification"}
@@ -508,6 +513,24 @@ def update_leader_action_message(
     conn.execute(
         "UPDATE leader_action_recommendations SET source_message_id = ?, updated_at = ? WHERE action_id = ?",
         (str(source_message_id), _db._utcnow(), int(action_id)),
+    )
+
+
+@managed_connection
+def clear_leader_action_source_message(
+    action_id, conn: Optional[sqlite3.Connection] = None
+) -> None:
+    """Reset source_message_id to NULL so the poster will retry the card.
+
+    update_leader_action_message() cannot do this — it treats source_message_id=None
+    as 'no change' — so a post that failed AFTER claiming the POSTING_SENTINEL would
+    otherwise be stranded at 'posting' forever, invisible on Discord yet still on the
+    books. Used when we KNOW the post never landed (e.g. a 403)."""
+    if not action_id:
+        return
+    conn.execute(
+        "UPDATE leader_action_recommendations SET source_message_id = NULL, updated_at = ? WHERE action_id = ?",
+        (_db._utcnow(), int(action_id)),
     )
 
 
@@ -1600,6 +1623,8 @@ __all__ = [
     "refresh_leader_action_outcome",
     "update_leader_action_copy_messages",
     "update_leader_action_message",
+    "clear_leader_action_source_message",
+    "POSTING_SENTINEL",
     "update_leader_action_copy_message",
     "update_leader_action_copy_text",
     "upsert_leader_action_feedback_profile",

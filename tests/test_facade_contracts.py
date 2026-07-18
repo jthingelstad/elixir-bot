@@ -27,8 +27,8 @@ def test_db_facade_public_surface_is_reviewed():
         *(f"{name}:db" for name in db._CORE_EXPORTS),
         *(f"{name}:{module}" for name, module in db._FACADE_EXPORTS.items()),
     ]
-    assert len(entries) == 329
-    assert _digest(entries) == "1b12228bc778266f1028bddac8c7f34fa8036a02e046e77193d47e633845ecb7"
+    assert len(entries) == 331
+    assert _digest(entries) == "5f70187dd2cf0b7bd773084f58ff686c12d5b5abc01a899145bec88b64b8e72e"
     assert db._CORE_EXPORTS.isdisjoint(db._FACADE_EXPORTS)
     assert db.__all__ == sorted(db._CORE_EXPORTS | set(db._FACADE_EXPORTS))
 

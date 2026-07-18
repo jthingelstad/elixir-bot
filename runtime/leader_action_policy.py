@@ -52,7 +52,14 @@ LEADER_ACTION_IN_GAME_RELAY_OBJECTIVE_COOLDOWN_HOURS = int(
 
 
 def count_open_leader_actions(*, conn=None, now: datetime | None = None) -> int:
-    """Undecided, unsuppressed cards proposed within the backlog window."""
+    """Undecided cards actually IN FRONT OF leaders — i.e. posted to Discord and
+    still proposed, within the backlog window.
+
+    Counts only cards with a real Discord message (source_message_id set and not the
+    POSTING_SENTINEL). A proposed-but-unposted card (queued, or stranded at the
+    sentinel by a failed post) is not yet on anyone's board, so counting it would
+    let unpostable cards deadlock the very cap that gates their posting — exactly
+    what the 2026-07-18 #actions permission outage triggered."""
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None:
         current = current.replace(tzinfo=timezone.utc)
@@ -68,9 +75,10 @@ def count_open_leader_actions(*, conn=None, now: datetime | None = None) -> int:
         row = conn.execute(
             "SELECT COUNT(*) AS cnt FROM leader_action_recommendations "
             "WHERE status = 'proposed' AND COALESCE(is_test, 0) = 0 "
+            "AND source_message_id IS NOT NULL AND source_message_id != ? "
             "AND proposed_at >= ? "
             "AND (expires_at IS NULL OR expires_at <= ?)",
-            (cutoff, now_text),
+            (db.POSTING_SENTINEL, cutoff, now_text),
         ).fetchone()
         return int(row["cnt"] if row else 0)
     finally:
