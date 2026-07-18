@@ -458,7 +458,7 @@ async def _post_pending_leader_action_cards(limit: int = 4) -> int:
         try:
             await asyncio.to_thread(
                 lambda a=action: db.update_leader_action_message(
-                    a["action_id"], source_message_id="posting"
+                    a["action_id"], source_message_id=db.POSTING_SENTINEL
                 )
             )
             post_attempted = True
@@ -472,22 +472,29 @@ async def _post_pending_leader_action_cards(limit: int = 4) -> int:
                     )
                 )
             posted += 1
+        except discord.Forbidden:
+            # A 403 is UNAMBIGUOUS: Discord rejected the post, so it definitively
+            # did not land — clear the sentinel so the next tick retries once the
+            # missing permission is restored, rather than stranding the card at
+            # 'posting' forever (the 2026-07-18 #actions outage failure mode).
+            log.exception(
+                "engine leader-action card post forbidden for %s", action.get("action_id")
+            )
+            await _clear_posting_sentinel(action)
         except Exception:
             log.exception("engine leader-action card post failed for %s", action.get("action_id"))
-            if not post_attempted:
-                try:  # sentinel write itself failed pre-post — safe to retry
-                    await asyncio.to_thread(
-                        lambda a=action: db.update_leader_action_message(
-                            a["action_id"], source_message_id=None
-                        )
-                    )
-                except Exception:
-                    log.debug(
-                        "sentinel clear failed for %s",
-                        action.get("action_id"),
-                        exc_info=True,
-                    )
+            if not post_attempted:  # sentinel write itself failed pre-post — safe to retry
+                await _clear_posting_sentinel(action)
     return posted
+
+
+async def _clear_posting_sentinel(action: dict) -> None:
+    try:
+        await asyncio.to_thread(
+            lambda a=action: db.clear_leader_action_source_message(a["action_id"])
+        )
+    except Exception:
+        log.debug("sentinel clear failed for %s", action.get("action_id"), exc_info=True)
 
 
 async def _ensure_role_action_clan_chat_copy(action: dict) -> dict:

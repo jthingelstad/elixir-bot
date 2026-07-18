@@ -1505,6 +1505,7 @@ def test_post_startup_message_posts_build_hash_to_elixir_log_webhook():
             "elixir.prompts.discord_channels_by_workflow",
             return_value=[{"id": 200, "name": "#leader-lounge"}],
         ),
+        patch("runtime.app.THINKING_CHANNEL_ID", None),
         patch("elixir.prompts.discord_channel_configs", return_value=proactive_channels),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir.db.list_channel_messages", return_value=[]),
@@ -1548,6 +1549,7 @@ def test_post_startup_message_fetches_channel_when_not_cached():
             "elixir.prompts.discord_channels_by_workflow",
             return_value=[{"id": 200, "name": "#leader-lounge"}],
         ),
+        patch("runtime.app.THINKING_CHANNEL_ID", None),
         patch(
             "elixir.prompts.discord_channel_configs",
             return_value=[{"id": 200, "name": "#leader-lounge", "workflow": "clanops"}],
@@ -1685,6 +1687,7 @@ def test_startup_channel_audit_reports_missing_or_unwritable_channels():
             new_callable=PropertyMock,
             return_value=SimpleNamespace(id=999),
         ),
+        patch("runtime.app.THINKING_CHANNEL_ID", None),
         patch(
             "elixir.prompts.discord_channel_configs",
             return_value=[
@@ -1765,6 +1768,7 @@ def test_startup_channel_audit_flags_missing_soft_perms():
             new_callable=PropertyMock,
             return_value=SimpleNamespace(id=999),
         ),
+        patch("runtime.app.THINKING_CHANNEL_ID", None),
         patch(
             "elixir.prompts.discord_channel_configs",
             return_value=[
@@ -1779,6 +1783,73 @@ def test_startup_channel_audit_flags_missing_soft_perms():
     assert "Channel audit: 1/3 active channels reachable and writable." in summary
     assert "#welcome missing perms: read_message_history" in summary
     assert "#ask-elixir missing perms: add_reactions, use_external_emojis" in summary
+
+
+def test_startup_channel_audit_checks_thinking_embed_and_thread_perms():
+    # #thinking is env-configured (not in discord_channel_configs) and posts an
+    # embed then opens a thread — the audit must include it and flag embed_links /
+    # thread perms, and flag embed_links on the arena-relay (#actions) lane.
+    guild = SimpleNamespace(id=1, me=object())
+    actions_perms = SimpleNamespace(
+        view_channel=True,
+        send_messages=True,
+        embed_links=False,
+        read_message_history=True,
+        add_reactions=True,
+        use_external_emojis=True,
+    )
+    thinking_perms = SimpleNamespace(
+        view_channel=True,
+        send_messages=True,
+        embed_links=True,
+        create_public_threads=True,
+        send_messages_in_threads=False,
+        read_message_history=True,
+        add_reactions=True,
+        use_external_emojis=True,
+    )
+    actions_channel = SimpleNamespace(
+        id=400,
+        name="actions",
+        type="text",
+        guild=guild,
+        permissions_for=lambda m: actions_perms,
+    )
+    thinking_channel = SimpleNamespace(
+        id=777,
+        name="thinking",
+        type="text",
+        guild=guild,
+        permissions_for=lambda m: thinking_perms,
+    )
+
+    def fake_get_channel(channel_id):
+        return {400: actions_channel, 777: thinking_channel}.get(channel_id)
+
+    with (
+        patch.object(elixir.bot, "get_channel", side_effect=fake_get_channel),
+        patch.object(
+            elixir.bot, "fetch_channel", new=AsyncMock(side_effect=RuntimeError("unused"))
+        ),
+        patch.object(
+            type(elixir.bot),
+            "user",
+            new_callable=PropertyMock,
+            return_value=SimpleNamespace(id=999),
+        ),
+        patch("runtime.app.THINKING_CHANNEL_ID", 777),
+        patch(
+            "elixir.prompts.discord_channel_configs",
+            return_value=[
+                {"id": 400, "name": "#actions", "workflow": "channel_update", "lane": "arena-relay"}
+            ],
+        ),
+    ):
+        summary = asyncio.run(elixir._startup_channel_audit_summary())
+
+    assert "Channel audit: 0/2 active channels reachable and writable." in summary
+    assert "#actions missing perms: embed_links" in summary
+    assert "#thinking missing perms: send_messages_in_threads" in summary
 
 
 def test_on_message_replies_with_fallback_when_channel_agent_returns_none():

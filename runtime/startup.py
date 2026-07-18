@@ -75,18 +75,42 @@ async def _resolve_runtime_channel(channel_id: int):
         return None
 
 
+def _audit_targets(runtime_app) -> list[tuple[dict, list[str]]]:
+    """(channel_config, extra-required perms) for every channel Elixir must post to.
+
+    Beyond View + Send, some channels need perms the generic check used to miss:
+    embed_links wherever Elixir posts embeds (leader-action cards on the arena-relay
+    lane), and — for #thinking — embed_links plus thread perms (it posts an embed
+    then opens a per-tick thread). #thinking is env-configured, NOT in
+    discord_channel_configs, so it must be added explicitly or it audits as clean
+    while silently 403'ing (the 2026-07-18 outage)."""
+    targets: list[tuple[dict, list[str]]] = []
+    for cfg in prompts.discord_channel_configs():
+        if not cfg.get("workflow"):
+            continue
+        extra = ["embed_links"] if cfg.get("lane") == "arena-relay" else []
+        targets.append((cfg, extra))
+    thinking_id = getattr(runtime_app, "THINKING_CHANNEL_ID", None)
+    if thinking_id:
+        targets.append(
+            (
+                {"id": thinking_id, "name": "#thinking"},
+                ["embed_links", "create_public_threads", "send_messages_in_threads"],
+            )
+        )
+    return targets
+
+
 async def _startup_channel_audit_summary() -> str:
     from runtime import app as runtime_app
 
-    active_channels = [
-        channel for channel in prompts.discord_channel_configs() if channel.get("workflow")
-    ]
-    if not active_channels:
+    active_targets = _audit_targets(runtime_app)
+    if not active_targets:
         return "Channel audit: no active configured channels found."
     ok_names = []
     issues = []
     bot_member_cache = {}
-    for channel_config in active_channels:
+    for channel_config, extra_required in active_targets:
         channel = await _resolve_runtime_channel(channel_config["id"])
         channel_name = channel_config.get("name") or f"#{channel_config['id']}"
         if channel is None:
@@ -114,20 +138,22 @@ async def _startup_channel_audit_summary() -> str:
                 if not getattr(perms, "send_messages", True):
                     issues.append(f"{channel_name} not writable")
                     continue
-                missing_soft = []
-                if not getattr(perms, "read_message_history", True):
-                    missing_soft.append("read_message_history")
-                if not getattr(perms, "add_reactions", True):
-                    missing_soft.append("add_reactions")
-                if not getattr(perms, "use_external_emojis", True):
-                    missing_soft.append("use_external_emojis")
-                if missing_soft:
-                    issues.append(f"{channel_name} missing perms: {', '.join(missing_soft)}")
+                # embed_links / thread perms are hard for the channels that need
+                # them: a missing embed_links 403s every card even when Send is fine.
+                missing = [p for p in extra_required if not getattr(perms, p, True)]
+                for soft in ("read_message_history", "add_reactions", "use_external_emojis"):
+                    if not getattr(perms, soft, True):
+                        missing.append(soft)
+                if missing:
+                    issues.append(f"{channel_name} missing perms: {', '.join(missing)}")
                     continue
         ok_names.append(channel_name)
+    ok_text = (
+        f"Channel audit: {len(ok_names)}/{len(active_targets)} "
+        "active channels reachable and writable."
+    )
     if not issues:
-        return f"Channel audit: {len(ok_names)}/{len(active_channels)} active channels reachable and writable."
-    ok_text = f"Channel audit: {len(ok_names)}/{len(active_channels)} active channels reachable and writable."
+        return ok_text
     issue_text = "Issues: " + "; ".join(issues[:6])
     if len(issues) > 6:
         issue_text += f"; +{len(issues) - 6} more"
