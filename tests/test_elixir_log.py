@@ -66,6 +66,39 @@ def test_alert_admin_strips_mentions_from_elixir_log_webhook():
     assert mock_log.await_args.args[0] == "King Thing CR API failed"
 
 
+def test_discord_post_failure_alert_dedups_then_refires_after_clear():
+    alerts._ALERT_SIGNATURES.clear()
+    surface = "#actions (leader-action cards)"
+
+    with (
+        patch(
+            "runtime.alerts.elixir_log.post_event_async", new=AsyncMock(return_value=True)
+        ) as mock_log,
+        patch("runtime.alerts._admin_mention_ref", return_value="King Thing"),
+    ):
+        first = asyncio.run(
+            alerts.alert_discord_post_failure(surface, "403 Forbidden posting R168.")
+        )
+        # Same surface+detail again → suppressed (one alert, not one per tick).
+        second = asyncio.run(
+            alerts.alert_discord_post_failure(surface, "403 Forbidden posting R168.")
+        )
+        assert first is True
+        assert second is False
+        assert mock_log.await_count == 1
+        assert surface in mock_log.await_args.args[0]
+
+        # A recovery clears the dedup so a later re-break alerts again.
+        alerts.clear_discord_post_failure_alert(surface)
+        third = asyncio.run(
+            alerts.alert_discord_post_failure(surface, "403 Forbidden posting R168.")
+        )
+        assert third is True
+        assert mock_log.await_count == 2
+
+    alerts._ALERT_SIGNATURES.clear()
+
+
 def test_leader_action_skip_posts_structured_elixir_log_event():
     with (
         patch("runtime.leader_action_observability.elixir_log.enabled", return_value=True),

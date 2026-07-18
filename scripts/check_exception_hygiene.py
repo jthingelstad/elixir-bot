@@ -55,7 +55,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/activity_runner.py": 3,
     "runtime/admin.py": 4,
     "runtime/alerts.py": 1,
-    "runtime/app.py": 39,  # +7: DM-outreach bridges + ask facts-brief profile lookup
+    "runtime/app.py": 40,  # +7: DM-outreach bridges + ask facts-brief profile lookup; +1: _outreach_log webhook guard
     "runtime/awareness/deliver.py": 10,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,

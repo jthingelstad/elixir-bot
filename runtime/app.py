@@ -217,6 +217,8 @@ from runtime.alerts import (  # noqa: E402,F401
     _llm_outage_signature,
     _maybe_alert_cr_api_failure,
     _maybe_alert_llm_failure,
+    alert_discord_post_failure,
+    clear_discord_post_failure_alert,
     schedule_llm_failure_alert,
 )
 from runtime.discord_posting import (  # noqa: E402,F401
@@ -427,6 +429,9 @@ def _engine_startup_cursors() -> int:
     return initialized
 
 
+_LEADER_CARD_SURFACE = "#actions (leader-action cards)"
+
+
 async def _post_pending_leader_action_cards(limit: int = 4) -> int:
     """Post interactive cards for engine-created leader actions that have no
     Discord message yet (kick recs from the tick, promote/demote from the
@@ -481,10 +486,18 @@ async def _post_pending_leader_action_cards(limit: int = 4) -> int:
                 "engine leader-action card post forbidden for %s", action.get("action_id")
             )
             await _clear_posting_sentinel(action)
+            await alert_discord_post_failure(
+                _LEADER_CARD_SURFACE,
+                f"403 Forbidden posting R{action.get('action_id')} `{action.get('action_type')}`.",
+            )
         except Exception:
             log.exception("engine leader-action card post failed for %s", action.get("action_id"))
             if not post_attempted:  # sentinel write itself failed pre-post — safe to retry
                 await _clear_posting_sentinel(action)
+    if posted:
+        # A successful post proves the permission is back — reset the dedup so a
+        # future revocation alerts again instead of being silently suppressed.
+        clear_discord_post_failure_alert(_LEADER_CARD_SURFACE)
     return posted
 
 
@@ -831,6 +844,9 @@ async def _awareness_event(event: dict) -> None:
             )
             _thinking_session.clear()
             _thinking_session.update(message=msg, thread=thread)
+            # A successful start proves #thinking perms are back — reset the alert
+            # dedup so a future revocation alerts again.
+            clear_discord_post_failure_alert("#thinking")
             await thread.send(
                 "_Live train of thought — tool calls stream in below._",
                 allowed_mentions=none,
@@ -883,6 +899,14 @@ async def _awareness_event(event: dict) -> None:
                 except Exception:
                     log.debug("awareness: #thinking header edit failed", exc_info=True)
             _thinking_session.clear()
+    except discord.Forbidden:
+        # Missing permission on #thinking — this 403'd hourly and silently for a
+        # full day during the 2026-07-18 outage. Alert #elixir-log (deduped, so
+        # one notice, not one per tick).
+        log.exception("awareness: #thinking event %s forbidden", etype)
+        await alert_discord_post_failure(
+            "#thinking", f"403 Forbidden on the #thinking `{etype}` event."
+        )
     except Exception:
         log.exception("awareness: #thinking event %s failed", etype)
 
@@ -1154,6 +1178,17 @@ async def _raise_outreach_card(target: dict, copy: str):
     return action if card_messages else None
 
 
+async def _outreach_log(message: str) -> None:
+    """One-line #elixir-log ping for a profile-outreach lifecycle event. Never
+    raises into the flow — a webhook hiccup must not break outreach."""
+    from runtime import elixir_log
+
+    try:
+        await elixir_log.post_event_async(message)
+    except Exception:
+        log.debug("outreach elixir-log post failed", exc_info=True)
+
+
 async def _member_outreach_propose():
     """Scheduled: offer a few leader-gated outreach cards. No-op unless
     ELIXIR_DM_OUTREACH=1. Runs the (sync, tested) propose_cards with an async
@@ -1204,6 +1239,10 @@ async def _member_outreach_propose():
         log.exception("member outreach propose failed")
         return
     runtime_status.mark_job_success("member_outreach_propose", f"proposed {len(proposed)}")
+    if proposed:
+        await _outreach_log(
+            f"📧 Proposed {len(proposed)} profile-outreach card(s) in #actions for leader review."
+        )
     return proposed
 
 
@@ -1218,7 +1257,19 @@ async def _member_outreach_decision(action: dict, status: str) -> None:
         fut = asyncio.run_coroutine_threadsafe(_send_member_dm(discord_user_id, content), loop)
         return fut.result(timeout=60)
 
-    await asyncio.to_thread(outreach.on_decision, action, status, send_dm=_send_sync)
+    row = await asyncio.to_thread(outreach.on_decision, action, status, send_dm=_send_sync)
+    if not row:
+        return
+    name = action.get("target_player_name") or action.get("target_player_tag") or "a member"
+    new_status = row.get("status")
+    if new_status == "awaiting_reply":
+        await _outreach_log(f"📧 Sent profile-outreach DM to **{name}** — awaiting reply.")
+    elif new_status == "failed":
+        await _outreach_log(
+            f"⚠️ Profile-outreach DM to **{name}** failed: {row.get('last_error') or 'unknown error'}."
+        )
+    elif new_status == "skipped":
+        await _outreach_log(f"📧 Leader skipped profile outreach for **{name}**.")
 
 
 async def _handle_outreach_dm(message) -> None:
@@ -1231,9 +1282,13 @@ async def _handle_outreach_dm(message) -> None:
     member = await asyncio.to_thread(db.get_linked_member_for_discord_user, message.author.id)
     if not member:
         return
+    from storage import member_outreach as mo
+
+    tag = member["player_tag"]
+    before = await asyncio.to_thread(mo.get_outreach, tag)
     reply = await asyncio.to_thread(
         outreach.handle_dm_reply,
-        member["player_tag"],
+        tag,
         message.content or "",
         start_verification=email_verification.start_verification,
         check_code=email_verification.check_code,
@@ -1243,6 +1298,20 @@ async def _handle_outreach_dm(message) -> None:
             await message.channel.send(reply)
         except Exception:
             log.warning("outreach DM reply send failed", exc_info=True)
+    # Log only real milestone transitions (a plain nudge doesn't move status, so
+    # comparing before/after keeps #elixir-log to the moments that matter).
+    after = await asyncio.to_thread(mo.get_outreach, tag)
+    before_status = (before or {}).get("status")
+    after_status = (after or {}).get("status")
+    if after_status != before_status:
+        name = member.get("member_name") or tag
+        if after_status == "verifying":
+            await _outreach_log(f"📧 **{name}** shared an email — verification code sent.")
+        elif after_status == "fulfilled":
+            email = (after or {}).get("pending_email") or "their email"
+            await _outreach_log(f"✅ **{name}** verified {email} — profile updated.")
+        elif after_status == "opted_out":
+            await _outreach_log(f"🚫 **{name}** opted out of profile outreach.")
 
 
 # _editorial_sweep + _editorial_review retired 2026-07-10 with the Editor (their

@@ -77,6 +77,26 @@ def _clear_alert(*event_types: str) -> None:
         _ALERT_SIGNATURES.pop(et, None)
 
 
+async def alert_discord_post_failure(surface: str, detail: str) -> bool:
+    """Surface a Discord POST failure (typically a 403 after a permission change)
+    to #elixir-log. Deduped per surface+detail so a recurring hourly failure
+    alerts ONCE, not every tick. Pair with clear_discord_post_failure_alert() on
+    the next success so a later re-break alerts again. This is the signal that was
+    missing during the 2026-07-18 outage — posting perms were revoked and nothing
+    said so."""
+    admin_ref = await asyncio.to_thread(_admin_mention_ref)
+    content = (
+        f"{admin_ref} ⚠️ Elixir can't post to {surface} — likely a missing Discord "
+        f"permission.\n{detail}\nCheck Elixir's permissions on that channel."
+    )
+    return await _alert_admin(content, f"discord_post_failure:{surface}", detail[:160])
+
+
+def clear_discord_post_failure_alert(surface: str) -> None:
+    """Reset the dedup for a surface once it posts again, so a future break re-alerts."""
+    _clear_alert(f"discord_post_failure:{surface}")
+
+
 def _clear_cr_api_failure_alert_if_recovered() -> None:
     api = runtime_status.snapshot().get("api") or {}
     if api.get("last_ok") is True:
