@@ -20,7 +20,7 @@ Every run:
 1. Run the shared git preflight (AGENT-TEAM/scripts/preflight.sh).
 2. Pull the recent quality signal:
    * `scripts/review_agent_feedback.py` — 👎 reactions and prompt failures.
-   * `uv run python scripts/confidence_report.py --quick --json` — incidents, output silence, confidence tests, and deterministic post-quality checks.
+   * `uv run --locked python scripts/confidence_report.py --quick --json` — incidents, output silence, confidence tests, and deterministic post-quality checks.
    * `runtime_job_status`, stream cursors, event streams, awareness thoughts/posts, and management/case evidence in `elixir-v51.db`.
    * Exact delivered copy and traces from `awareness_posts`, `awareness_thoughts`, `messages`, and `leader_action_recommendations`.
    * `prompt_failures` in the operational DB. Legacy tables such as `awareness_ticks`, `signal_outcomes`, and `game_event_stream` exist only in the immutable cold archive and are relevant only to an explicitly historical audit.

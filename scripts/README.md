@@ -6,7 +6,7 @@ Run everything from the repo root through the locked uv environment:
 
 ```bash
 uv sync --locked
-uv run python scripts/<name>.py [args]
+uv run --locked python scripts/<name>.py [args]
 ```
 
 ## Operations
@@ -20,7 +20,7 @@ scripts/admin.sh start      # launchctl bootstrap
 scripts/admin.sh stop       # launchctl bootout
 scripts/admin.sh restart    # backup → stop → start
 scripts/admin.sh status
-scripts/admin.sh upgrade    # stop → git pull → pip install -r → start
+scripts/admin.sh upgrade    # stop → git pull --ff-only → uv sync --locked → start
 scripts/admin.sh backup     # invokes backup_db.py
 ```
 
@@ -33,7 +33,7 @@ the bot) plus tiered retention pruning. Also imported by the db-maintenance
 job.
 
 ```bash
-python scripts/backup_db.py
+uv run --locked python scripts/backup_db.py
 ```
 
 - Source: the single operational database (engine + durable memory)
@@ -50,11 +50,11 @@ Read-only inspection of Elixir's event streams, awareness activity, war state,
 and decision cases.
 
 ```bash
-python scripts/elixir_state.py summary
-python scripts/elixir_state.py events --days 28 --scope leadership
-python scripts/elixir_state.py awareness --limit 25
-python scripts/elixir_state.py war --json
-python scripts/elixir_state.py cases --status due
+uv run --locked python scripts/elixir_state.py summary
+uv run --locked python scripts/elixir_state.py events --days 28 --scope leadership
+uv run --locked python scripts/elixir_state.py awareness --limit 25
+uv run --locked python scripts/elixir_state.py war --json
+uv run --locked python scripts/elixir_state.py cases --status due
 ```
 
 Use this when you need to answer "what is Elixir monitoring?", "what
@@ -65,8 +65,8 @@ without reading raw Discord history.
 Remove local cache/build cruft.
 
 ```bash
-python scripts/clean.py           # removes __pycache__, .pytest_cache, .mypy_cache, .ruff_cache
-python scripts/clean.py --db      # also removes elixir.db and elixir.pid (destructive)
+uv run --locked python scripts/clean.py           # removes __pycache__, .pytest_cache, .mypy_cache, .ruff_cache
+uv run --locked python scripts/clean.py --db      # also removes elixir.db and elixir.pid (destructive)
 ```
 
 ## Quality & feedback
@@ -76,10 +76,10 @@ Print recent prompt failures and the 👍/👎 reaction feedback recorded agains
 agent replies. Useful for triaging what went wrong in production.
 
 ```bash
-python scripts/review_agent_feedback.py --limit 20
-python scripts/review_agent_feedback.py --workflow clanops
-python scripts/review_agent_feedback.py --json --raw          # copy-paste into a model
-python scripts/review_agent_feedback.py --include-positive    # also show 👍
+uv run --locked python scripts/review_agent_feedback.py --limit 20
+uv run --locked python scripts/review_agent_feedback.py --workflow clanops
+uv run --locked python scripts/review_agent_feedback.py --json --raw          # copy-paste into a model
+uv run --locked python scripts/review_agent_feedback.py --include-positive    # also show 👍
 ```
 
 ## Eval harnesses
@@ -95,7 +95,7 @@ gitignored.
 suspicious classifications.
 
 ```bash
-python scripts/eval_intent_router.py --rounds 2 --per-round 50
+uv run --locked python scripts/eval_intent_router.py --rounds 2 --per-round 50
 ```
 
 Use when you've changed the intent router prompt, added a route, or want to
@@ -108,8 +108,8 @@ conversation tuned to each member's profile, then runs each turn through the
 real deck workflow with tool-call capture and conversation-history carry.
 
 ```bash
-python scripts/eval_deck_conversations.py --members 6 --turns 3
-python scripts/eval_deck_conversations.py --members 6 --seed 42
+uv run --locked python scripts/eval_deck_conversations.py --members 6 --turns 3
+uv run --locked python scripts/eval_deck_conversations.py --members 6 --seed 42
 ```
 
 Summary covers route + mode distribution, tool calls, errors, mode
@@ -129,8 +129,8 @@ Runs each prompt through the real pipeline (`respond_in_channel` or
 rate on tag prompts, and output previews.
 
 ```bash
-python scripts/eval_all_requests.py --rounds 2 --per-bucket 4
-python scripts/eval_all_requests.py --rounds 1 --per-bucket 2 --seed 1   # smoke test
+uv run --locked python scripts/eval_all_requests.py --rounds 2 --per-bucket 4
+uv run --locked python scripts/eval_all_requests.py --rounds 1 --per-bucket 2 --seed 1   # smoke test
 ```
 
 Tag fixtures (external clans, external players, our members) are sampled from

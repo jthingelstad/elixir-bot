@@ -86,7 +86,7 @@ Python 3.14 is the supported runtime.
 ```bash
 uv sync --locked
 # Create .env with the required secrets below.
-uv run python elixir.py
+uv run --locked python elixir.py
 ```
 
 Required secrets:
@@ -146,25 +146,25 @@ Use the locked uv environment:
 
 ```bash
 uv lock --check
-uv run python scripts/check_docs.py
-uv run python scripts/check_exception_hygiene.py
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy capabilities/contracts.py
-uv run pytest tests/ -q --cov=capabilities --cov-report=term-missing --cov-fail-under=80
+uv run --locked python scripts/check_docs.py
+uv run --locked python scripts/check_exception_hygiene.py
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked mypy capabilities/contracts.py
+uv run --locked pytest tests/ -q --cov=capabilities --cov-report=term-missing --cov-fail-under=80
 ```
 
 Before deploying engine changes, also run:
 
 ```bash
-uv run python scripts/replay_gate.py
-uv run python scripts/simulate.py
+uv run --locked python scripts/replay_gate.py
+uv run --locked python scripts/simulate.py
 ```
 
 For one consolidated health answer:
 
 ```bash
-uv run python scripts/confidence_report.py --json
+uv run --locked python scripts/confidence_report.py --json
 ```
 
 The suite uses isolated SQLite databases and mocked external services. Real CR
@@ -188,15 +188,15 @@ Observatory web app, not general Discord commands.
 Review model/channel failures with:
 
 ```bash
-uv run python scripts/review_agent_feedback.py --limit 20
-uv run python scripts/review_agent_feedback.py --workflow clanops --json
+uv run --locked python scripts/review_agent_feedback.py --limit 20
+uv run --locked python scripts/review_agent_feedback.py --workflow clanops --json
 ```
 
 ## Cleanup and portability
 
 ```bash
-uv run python scripts/clean.py
-uv run python scripts/clean.py --db
+uv run --locked python scripts/clean.py
+uv run --locked python scripts/clean.py --db
 ```
 
 The database cleanup option removes only legacy local runtime files; it never

@@ -12,7 +12,7 @@ Elixir supports Python 3.14. Reproduce the locked development environment:
 cd ~/Projects/elixir-bot
 uv sync --locked
 uv lock --check
-uv run pytest tests/ -q
+uv run --locked pytest tests/ -q
 ```
 
 Production uses `uv sync --locked --no-dev`. Direct dependencies live in
@@ -69,7 +69,7 @@ bash scripts/admin.sh backup
 ## Local run
 
 ```bash
-uv run python elixir.py
+uv run --locked python elixir.py
 ```
 
 A healthy startup connects to Discord, registers enabled activities from the
@@ -114,7 +114,7 @@ After any runtime change, verify both process state and fresh behavior:
 ```bash
 bash scripts/admin.sh status
 tail -100 elixir-v5.log
-uv run python scripts/confidence_report.py --json
+uv run --locked python scripts/confidence_report.py --json
 ```
 
 Do not call a deployment complete merely because the test suite passed. Inspect
@@ -144,7 +144,7 @@ Discord gateway session:
 
 ```bash
 bash scripts/admin.sh activity run engine-health
-uv run python -m runtime.activity_runner run daily-clan-insight
+uv run --locked python -m runtime.activity_runner run daily-clan-insight
 ```
 
 Activities with `manual_trigger_allowed=False` will refuse a manual run.
@@ -175,7 +175,7 @@ and other management views removed from Discord.
 Run the consolidated report:
 
 ```bash
-uv run python scripts/confidence_report.py --json
+uv run --locked python scripts/confidence_report.py --json
 ```
 
 Inspect unresolved best-effort failures directly when needed:
@@ -188,15 +188,15 @@ sqlite3 elixir-v51.db \
 For model, validation, or channel failures:
 
 ```bash
-uv run python scripts/review_agent_feedback.py --limit 20
-uv run python scripts/review_agent_feedback.py --workflow clanops --json
+uv run --locked python scripts/review_agent_feedback.py --limit 20
+uv run --locked python scripts/review_agent_feedback.py --workflow clanops --json
 ```
 
 For engine changes, run the reality gates before deployment:
 
 ```bash
-uv run python scripts/replay_gate.py
-uv run python scripts/simulate.py
+uv run --locked python scripts/replay_gate.py
+uv run --locked python scripts/simulate.py
 ```
 
 ## Logs
@@ -231,13 +231,13 @@ memory are durable. `db-maintenance` applies the configured retention policy.
 Remove caches:
 
 ```bash
-uv run python scripts/clean.py
+uv run --locked python scripts/clean.py
 ```
 
 Also remove known legacy runtime files:
 
 ```bash
-uv run python scripts/clean.py --db
+uv run --locked python scripts/clean.py --db
 ```
 
 The cleanup command never removes `elixir-v51.db` or either archive.

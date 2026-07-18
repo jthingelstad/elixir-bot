@@ -18,7 +18,7 @@ Every run:
 2. **`needs-deploy` first — before anything else.** Any open issue labeled `needs-deploy` is a change committed but not yet live (usually a DB migration). Deploy it **now**, atomically: pull the commit and restart so the new code and its migration go live together — never let a migration sit applied-but-un-deployed or committed-but-un-migrated (that interim breaks the running process). Then remove `needs-deploy` and close/return the issue. Only after the deploy queue is clear do you move on.
 3. Check production status (scripts/admin.sh status).
 4. Review recent logs, failures, and telemetry. For v5.1, include:
-   - `uv run python scripts/confidence_report.py --quick --json`
+   - `uv run --locked python scripts/confidence_report.py --quick --json`
    - open `runtime_incidents` plus recent `runtime_job_status` rows
    - recent repo-root `elixir-v5.log` entries
 5. Review operational metrics: errors, latency
