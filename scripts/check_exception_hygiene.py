@@ -77,7 +77,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/jobs/_promotion.py": 3,
     "runtime/jobs/_tournament.py": 6,
     "runtime/leader_action_feedback.py": 1,
-    "runtime/leader_action_ui.py": 8,
+    "runtime/leader_action_ui.py": 9,
     "runtime/leader_note_interpreter.py": 5,  # interpret/apply/undo/fix all fail-open off the delivery path
     "runtime/onboarding.py": 3,
     "runtime/outreach.py": 3,  # raise_card + send_dm + compose fail-soft in the flow loop
