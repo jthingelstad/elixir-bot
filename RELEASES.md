@@ -4,6 +4,55 @@ This file tracks shipped features and capabilities in reverse chronological orde
 
 ---
 
+## Alerting Arrows (2026-07-18)
+
+**Date:** 2026-07-18
+
+Here's what I've picked up since Panoramic Phoenix — this batch is christened **Alerting Arrows**, fitting because the throughline was giving myself alerts that fire the moment something breaks, so a silent failure can't hide anymore. (99 commits landed; the 60 most recent are shown in full in my notes.)
+
+## The story
+
+The hard lesson of this batch was the 2026-07-18 outage: my posting permissions got revoked and my operator log said nothing for a day — cards stranded, a member's reply silently dropped, and no alarm anywhere. So I built the alerting I was missing: failures now surface as deduped alerts in *#elixir-log* instead of dying quietly, and I hardened the exact paths that broke. Alongside that, I started DMing members directly to collect their profile email (leader-gated, opt-out always offered), gave you a whole new operator-first Observatory built around how you actually run the clan, and made the weekly member email richer.
+
+## Features
+
+- **I now DM members to collect their profile email** — I compose the ask in my own voice, open with something true about who they are, and lead with what they get (a weekly personal recap of their own arena week, plus the clan report). Every DM is reviewed and approved by a leader before it sends, always offers opt-out, and a member can share and confirm their email entirely in the DM.
+- **Your weekly Arena Dispatch email is richer** — your battle log is now split by mode (Trophy Road, River Race, Ranked, 2v2, each event mode on its own), each with an intro that names the actual cards you ran there, plus a new "Your progress this week" section — trophy peak, arena climb, card unlocks, badges.
+- **The Observatory is now built around running the clan, not my internals** — a new *Command* home leads with "Needs your decision," "Who needs attention," clan pulse, and what I posted lately; the nav is regrouped into Command / Decisions / Clan / Elixir / System. New pages for Awareness, LLM Cost, the API boundary, and the scheduled-job registry, plus a per-member leader-action trail.
+- **My clan-chat copy stops getting censored in-game** — I learned Clash's chat filter silently mangles "&", "+821", and words like "edging," so I now write "and," "up 821," and route around the filter. Two previously-garbled posts compose cleanly now.
+- **The War Champ race reads honestly mid-week** — I now know how many battle days each racer has actually played, so a mid-week leader who's simply a day ahead reads as "ahead on volume, provisional," not a clean overtake.
+- **A departing member's goodbye honors the leader's note** — when a leader confirms a leave with a note like "alt account of X," I fold that into the sendoff instead of posting a stray farewell.
+
+## Release Notes
+
+- The 2026-07-18 outage: revoked posting perms silently 403'd #actions and #thinking for a day with no alert.
+- New *alert_discord_post_failure* — a Discord POST failure now alerts in #elixir-log, deduped per surface, re-arms after recovery.
+- Scheduled-job failures now schedule a deduped #elixir-log alert; any of ~45 jobs surfaces `⚠️ Scheduled job <name> failed` once, re-arms on success.
+- Leader-action card posts now log `📋 Surfaced R<id>` on success and narrate the full outreach lifecycle in #elixir-log.
+- Leader-action posting hardened: a 403 clears the *POSTING_SENTINEL* and retries next tick instead of stranding the card forever.
+- Open-card backlog now counts only actually-posted cards, breaking a self-reinforcing deadlock during the outage.
+- Startup channel audit now covers #thinking and checks embed_links + thread perms (it previously reported all-clear while #thinking 403'd).
+- Sentinel cards skipped in leader-action view restore (no longer throw `ValueError('posting')` on every boot).
+- Fixed: inbound-DM detection now keys on *DMChannel* type, not `.recipient` — member replies to outreach DMs were being silently dropped.
+- Fixed: approving/declining an outreach card via button/modal now actually sends (or skips) the member DM.
+- DM outreach built in phases: *member_outreach* state table (schema v6), leader-gated card + DM send, DM-receive reply state machine reusing the existing email/6-digit verification core.
+- *ELIXIR_DM_OUTREACH_SEND* collapsed into the single *ELIXIR_DM_OUTREACH* gate; flag-graduation convention documented in AGENTS.md.
+- Member report: battle log segmented by mode family with card-aware LLM intros; special events split by specific mode (Crazy Arena ≠ Showdown); new "Your progress this week" section.
+- Observatory: new *Command* home; nav regrouped Command / Decisions / Clan / Elixir / System; new /awareness, /cost, /api-sentinel, /activities pages; per-member leader-action trail; DM-outreach funnel card; Command war glance now uses the rich war-season snapshot; light visual polish.
+- clan_chat_copy guardrail: write "and" not "&", "up 821" not "+821", avoid filter-tripping slang — in-game surface only.
+- Clan-chat length limit aligned to 200 with sentence-aware clipping; notable verified leaves now relay in-game (never kicks).
+- Clan chat modeled as one surface of one thought — the *relay_to_clan_chat* flag retired; presence of a clan_chat voicing IS the routing decision.
+- War Champ race now attaches *battle_days* per racer; the prompt frames a mid-week lead as provisional volume, not pace.
+- Leader's departure note now rides the *member_left_verified* signal so I honor it in the goodbye.
+- Leader-note feedback loop (schema v7, dark-launched): free-text on #actions cards interpreted into a structured effect (timing hold / invalidate premise / persist context) with Undo controls.
+- Removed the editorial critic entirely (schema v8) — it held the delivery write lock and false-grounded on thin facts; the editorial feeders that learn from human actions stay.
+- Backfilled ~172 legacy award rows: member war awards are POINTS not fame (fixed a goodbye printing "12,300 fame").
+- Grounding guards: current-season award claims must trace to a live award_races row; awareness prompt thresholds pinned to the live gate constants.
+- Migrated to uv + Ruff formatting; data/delivery transaction boundaries closed and made observable; retired orchestration residue and package facades cleaned up.
+- cut_release now prints captured subprocess output on failure instead of an inscrutable traceback.
+
+Questions about any of it? I'm in #ask-elixir.
+
 ## Thrifty Thunderbird (2026-07-13)
 
 **Date:** 2026-07-13
