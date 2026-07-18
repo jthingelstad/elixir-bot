@@ -97,6 +97,34 @@ def clear_discord_post_failure_alert(surface: str) -> None:
     _clear_alert(f"discord_post_failure:{surface}")
 
 
+async def _maybe_alert_job_failure(name: str, error: str) -> bool:
+    admin_ref = await asyncio.to_thread(_admin_mention_ref)
+    detail = (str(error) or "unknown error").strip()
+    content = f"{admin_ref} ⚠️ Scheduled job `{name}` failed.\nError: `{detail[:180]}`"
+    return await _alert_admin(content, f"job_failure:{name}", detail[:160])
+
+
+def clear_job_failure_alert(name: str) -> None:
+    """Re-arm the job's failure alert once it succeeds again."""
+    _clear_alert(f"job_failure:{name}")
+
+
+def schedule_job_failure_alert(name: str, error: str) -> None:
+    """Fire-and-forget a #elixir-log alert for a failed scheduled job from sync
+    code (mark_job_failure runs on worker threads). Deduped per job+error so a
+    daily job failing the same way alerts once, not every run. Mirrors
+    schedule_llm_failure_alert; best-effort — never raises into status recording."""
+    from runtime import app as runtime_app
+
+    loop = getattr(runtime_app.bot, "loop", None)
+    if loop is None or loop.is_closed() or not loop.is_running():
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(_maybe_alert_job_failure(name, error), loop)
+    except Exception:
+        log.warning("schedule_job_failure_alert: scheduling failed for '%s'", name, exc_info=True)
+
+
 def _clear_cr_api_failure_alert_if_recovered() -> None:
     api = runtime_status.snapshot().get("api") or {}
     if api.get("last_ok") is True:

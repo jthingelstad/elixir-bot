@@ -477,6 +477,11 @@ async def _post_pending_leader_action_cards(limit: int = 4) -> int:
                     )
                 )
             posted += 1
+            target = action.get("target_player_name") or action.get("target_player_tag")
+            await _ops_log(
+                f"📋 Surfaced R{action.get('action_id')} `{action.get('action_type')}` in #actions"
+                + (f" — **{target}**." if target else ".")
+            )
         except discord.Forbidden:
             # A 403 is UNAMBIGUOUS: Discord rejected the post, so it definitively
             # did not land — clear the sentinel so the next tick retries once the
@@ -1178,15 +1183,16 @@ async def _raise_outreach_card(target: dict, copy: str):
     return action if card_messages else None
 
 
-async def _outreach_log(message: str) -> None:
-    """One-line #elixir-log ping for a profile-outreach lifecycle event. Never
-    raises into the flow — a webhook hiccup must not break outreach."""
+async def _ops_log(message: str) -> None:
+    """One-line #elixir-log ping for an operational event (outreach lifecycle,
+    card posted, …). Never raises into the flow — a webhook hiccup must not break
+    the path it observes."""
     from runtime import elixir_log
 
     try:
         await elixir_log.post_event_async(message)
     except Exception:
-        log.debug("outreach elixir-log post failed", exc_info=True)
+        log.debug("ops elixir-log post failed", exc_info=True)
 
 
 async def _member_outreach_propose():
@@ -1240,7 +1246,7 @@ async def _member_outreach_propose():
         return
     runtime_status.mark_job_success("member_outreach_propose", f"proposed {len(proposed)}")
     if proposed:
-        await _outreach_log(
+        await _ops_log(
             f"📧 Proposed {len(proposed)} profile-outreach card(s) in #actions for leader review."
         )
     return proposed
@@ -1263,13 +1269,13 @@ async def _member_outreach_decision(action: dict, status: str) -> None:
     name = action.get("target_player_name") or action.get("target_player_tag") or "a member"
     new_status = row.get("status")
     if new_status == "awaiting_reply":
-        await _outreach_log(f"📧 Sent profile-outreach DM to **{name}** — awaiting reply.")
+        await _ops_log(f"📧 Sent profile-outreach DM to **{name}** — awaiting reply.")
     elif new_status == "failed":
-        await _outreach_log(
+        await _ops_log(
             f"⚠️ Profile-outreach DM to **{name}** failed: {row.get('last_error') or 'unknown error'}."
         )
     elif new_status == "skipped":
-        await _outreach_log(f"📧 Leader skipped profile outreach for **{name}**.")
+        await _ops_log(f"📧 Leader skipped profile outreach for **{name}**.")
 
 
 async def _handle_outreach_dm(message) -> None:
@@ -1306,12 +1312,12 @@ async def _handle_outreach_dm(message) -> None:
     if after_status != before_status:
         name = member.get("member_name") or tag
         if after_status == "verifying":
-            await _outreach_log(f"📧 **{name}** shared an email — verification code sent.")
+            await _ops_log(f"📧 **{name}** shared an email — verification code sent.")
         elif after_status == "fulfilled":
             email = (after or {}).get("pending_email") or "their email"
-            await _outreach_log(f"✅ **{name}** verified {email} — profile updated.")
+            await _ops_log(f"✅ **{name}** verified {email} — profile updated.")
         elif after_status == "opted_out":
-            await _outreach_log(f"🚫 **{name}** opted out of profile outreach.")
+            await _ops_log(f"🚫 **{name}** opted out of profile outreach.")
 
 
 # _editorial_sweep + _editorial_review retired 2026-07-10 with the Editor (their

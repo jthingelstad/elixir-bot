@@ -54,7 +54,7 @@ BROAD_EXCEPTION_BASELINE = {
     "memory_store/__init__.py": 1,
     "runtime/activity_runner.py": 3,
     "runtime/admin.py": 4,
-    "runtime/alerts.py": 1,
+    "runtime/alerts.py": 2,  # +1: schedule_job_failure_alert best-effort loop-schedule guard
     "runtime/app.py": 40,  # +7: DM-outreach bridges + ask facts-brief profile lookup; +1: _outreach_log webhook guard
     "runtime/awareness/deliver.py": 10,
     "runtime/awareness/gate.py": 2,
