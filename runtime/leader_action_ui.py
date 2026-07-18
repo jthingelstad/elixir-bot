@@ -811,7 +811,10 @@ async def restore_leader_action_views(
     refreshed = 0
     for action in actions_by_id.values():
         message_id = action.get("source_message_id")
-        if not message_id:
+        # A card still carrying the POSTING_SENTINEL never actually posted (its
+        # post was interrupted/403'd), so there is no Discord message to bind a
+        # view to — skip it rather than throwing int('posting') on every boot.
+        if not message_id or message_id == db.POSTING_SENTINEL:
             continue
         try:
             view = leader_action_view_for(action)

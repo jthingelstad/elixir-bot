@@ -141,6 +141,24 @@ def test_restore_refreshes_open_card_components():
     assert isinstance(message.edit.await_args.kwargs["view"], LeaderActionView)
 
 
+def test_restore_skips_cards_stranded_at_posting_sentinel():
+    # A card still at the POSTING_SENTINEL never posted — restore must skip it,
+    # not throw int('posting') (the boot-time noise during the #actions outage).
+    action = _action(
+        "kick_recommendation",
+        source_message_id=db.POSTING_SENTINEL,
+        target_channel_id="123",
+    )
+    bot = SimpleNamespace(get_channel=Mock(), add_view=Mock())
+
+    with patch.object(leader_action_ui.db, "list_leader_actions", return_value=[action]):
+        restored = asyncio.run(leader_action_ui.restore_leader_action_views(bot))
+
+    assert restored == 0
+    bot.add_view.assert_not_called()
+    bot.get_channel.assert_not_called()
+
+
 def test_restore_refreshes_terminal_cards_without_components():
     action = _action(
         "kick_recommendation",
