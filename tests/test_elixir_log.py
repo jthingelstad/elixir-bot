@@ -99,6 +99,31 @@ def test_discord_post_failure_alert_dedups_then_refires_after_clear():
     alerts._ALERT_SIGNATURES.clear()
 
 
+def test_job_failure_alert_dedups_then_refires_after_success():
+    alerts._ALERT_SIGNATURES.clear()
+
+    with (
+        patch(
+            "runtime.alerts.elixir_log.post_event_async", new=AsyncMock(return_value=True)
+        ) as mock_log,
+        patch("runtime.alerts._admin_mention_ref", return_value="King Thing"),
+    ):
+        first = asyncio.run(alerts._maybe_alert_job_failure("db_backup", "disk full"))
+        second = asyncio.run(alerts._maybe_alert_job_failure("db_backup", "disk full"))
+        assert first is True
+        assert second is False  # same job+error → one alert, not one per run
+        assert mock_log.await_count == 1
+        assert "`db_backup`" in mock_log.await_args.args[0]
+
+        # A later success re-arms the alert (the recovery clear).
+        alerts.clear_job_failure_alert("db_backup")
+        third = asyncio.run(alerts._maybe_alert_job_failure("db_backup", "disk full"))
+        assert third is True
+        assert mock_log.await_count == 2
+
+    alerts._ALERT_SIGNATURES.clear()
+
+
 def test_leader_action_skip_posts_structured_elixir_log_event():
     with (
         patch("runtime.leader_action_observability.elixir_log.enabled", return_value=True),

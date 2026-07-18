@@ -171,6 +171,10 @@ def mark_job_success(name: str, summary: str | None = None) -> None:
         state["running"] = False
         snapshot_state = copy.deepcopy(state)
     _persist_job_status(name, snapshot_state)
+    # A success re-arms the failure alert so the next real failure is heard again.
+    from runtime import alerts
+
+    alerts.clear_job_failure_alert(name)
 
 
 def mark_job_failure(name: str, error: str) -> None:
@@ -184,6 +188,11 @@ def mark_job_failure(name: str, error: str) -> None:
         state["running"] = False
         snapshot_state = copy.deepcopy(state)
     _persist_job_status(name, snapshot_state)
+    # Surface the failure in #elixir-log (deduped) — scheduled-job failures used to
+    # live only in the log + status page.
+    from runtime import alerts
+
+    alerts.schedule_job_failure_alert(name, str(error))
 
 
 def record_api_call(
