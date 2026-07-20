@@ -12,6 +12,7 @@ from collections import Counter
 
 from capabilities.game_truth import awareness_post_facts
 from engine.game_check import check_post
+from runtime.editorial_policy import positive_war_messaging_enabled
 
 _GENDERED_MEMBER_PRONOUN = re.compile(
     r"\b(?:he|him|his|himself|she|her|hers|herself)\b",
@@ -38,6 +39,50 @@ _UNRANKED_CURRENT_RANK = tuple(
 
 _NUMBER = re.compile(r"(?<!\w)[+-]?\d[\d,]*(?:\.\d+)?%?(?!\w)")
 
+_NEGATIVE_WAR_PARTICIPATION = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\b(?:last\s+(?:chance|shot)|final\s+chance)\b[^.!?\n]{0,100}"
+        r"\b(?:war|decks?|battle\s+day|river\s+race)\b",
+        r"\b\d+(?:\s+of\s+\d+)?\s+(?:members?|players?)\s+"
+        r"(?:still\s+)?(?:haven['’]?t|have\s+not|hasn['’]?t|has\s+not|"
+        r"didn['’]?t|did\s+not)\b[^.!?\n]{0,60}\b(?:play|played|use|used|"
+        r"touch|touched|start|started|decks?|war)\b",
+        r"\b(?:haven['’]?t|have\s+not|hasn['’]?t|has\s+not|didn['’]?t|"
+        r"did\s+not)\b[^.!?\n]{0,60}\b(?:play|played|use|used|touch|touched|"
+        r"start|started)\b[^.!?\n]{0,40}\b(?:war|decks?)\b",
+        r"\b\d+\s+(?:more\s+)?(?:members?\s+|players?\s+)?(?:are\s+)?"
+        r"(?:still\s+|only\s+)?(?:partial|untouched)\b",
+        r"\b(?:untouched|no[- ]?shows?|nonparticipants?|non-participants?)\b",
+        r"\b(?:has|have|with)\s+(?:(?:\d+|all|some|several|multiple)\s+)?"
+        r"(?:war\s+)?decks?\s+(?:left|remaining|unused|to\s+play)\b",
+        r"\b\d+\s+(?:remaining|unused)\s+(?:war\s+)?decks?\b",
+        r"\b\d+\s+(?:war\s+)?decks?\s+(?:left|remaining|unused|to\s+play)\b",
+        r"\b(?:get|play|use|run)\s+(?:your|those|the\s+remaining)\s+"
+        r"(?:war\s+)?decks?\b",
+        r"\bonly\s+\d+(?:\s+of\s+\d+)?\s+(?:members?|players?)\s+"
+        r"(?:have\s+)?(?:played|used|finished|completed)\b",
+        r"\b\d+\s*(?:/|of)\s*\d+\s+(?:members?\s+|players?\s+)?"
+        r"(?:have\s+|has\s+)?(?:played|used|participated|finished|completed)\b",
+        r"\b(?:war\s+)?(?:participation|turnout)\s+(?:is|looks|remains|sits|stands)\s+"
+        r"(?:at\s+)?(?:only\s+)?(?:low|light|thin|weak|\d+\s*(?:/|of)\s*\d+|"
+        r"\d+(?:\.\d+)?%)(?=\s|[.!?,;:]|$)",
+        r"\b(?:low|light|thin|weak)\s+(?:war\s+)?(?:participation|turnout)\b",
+        r"\b\d+(?:\.\d+)?%\s+(?:war\s+)?(?:participation|turnout)\b",
+        r"\b(?:at|on)\s+(?:zero|0)\s+(?:war\s+)?(?:decks?|battles?|participation)\b",
+        r"\b(?:zero|no)\s+war\s+participation\b",
+        r"\b(?:waiting\s+on|still\s+need)\s+(?:the\s+)?\d+\s+"
+        r"(?:members?|players?)?\b",
+        r"\b\d+\s+(?:members?|players?)?\s*(?:still\s+)?to\s+go\b",
+        r"\b(?:join|jump\s+into|get\s+into|head\s+into)\s+(?:clan\s+)?wars?\b",
+        r"\b(?:play|participate|battle)\s+in\s+(?:clan\s+)?wars?\b",
+        r"\b(?:everyone|members?|players?)\s+(?:should|must|needs?\s+to)\s+"
+        r"(?:play|participate|battle)\b[^.!?\n]{0,40}\b(?:war|decks?)\b",
+        r"\b(?:missed|skipped|sat\s+out)\b[^.!?\n]{0,60}"
+        r"\b(?:war|war\s+battle|battle\s+day|decks?)\b",
+    )
+)
+
 
 def _post_text(post: dict) -> str:
     values = [post.get("content"), post.get("clan_chat")]
@@ -57,6 +102,19 @@ def _race_is_explicitly_unranked(read: dict) -> bool:
         (((read.get("war_season") or {}).get("state") or {}).get("race") or {}).get("race_ranked"),
     ]
     return any(value is False for value in candidates)
+
+
+def _negative_war_participation(text: str) -> bool:
+    return any(pattern.search(text) for pattern in _NEGATIVE_WAR_PARTICIPATION)
+
+
+def _negative_participation_numbers(text: str) -> Counter[str]:
+    """Numbers a wording-only repair may remove with a rejected nagging sentence."""
+    removable: Counter[str] = Counter()
+    for segment in re.split(r"(?<=[.!?])\s+|\n+", text):
+        if _negative_war_participation(segment):
+            removable.update(_NUMBER.findall(segment))
+    return removable
 
 
 def apply_editorial_admission(read: dict, plan: dict) -> tuple[dict, list[dict]]:
@@ -138,6 +196,8 @@ def validate_plan(read: dict, plan: dict) -> list[str]:
         text = _post_text(post)
         if _GENDERED_MEMBER_PRONOUN.search(text):
             violations.append(f"post[{index}].gendered_member_pronoun")
+        if positive_war_messaging_enabled() and _negative_war_participation(text):
+            violations.append(f"post[{index}].negative_war_participation")
         if unranked and post.get("leads_with") == "war":
             if any(pattern.search(text) for pattern in _UNRANKED_CURRENT_RANK):
                 violations.append(f"post[{index}].current_rank_while_unranked")
@@ -214,6 +274,8 @@ def validate_repair(original: dict, repaired: dict) -> list[str]:
         for pattern in _UNRANKED_CURRENT_RANK:
             for match in pattern.finditer(before_text):
                 removable.update(_NUMBER.findall(match.group(0)))
+        if positive_war_messaging_enabled():
+            removable.update(_negative_participation_numbers(before_text))
         required = before_numbers - removable
         if required - after_numbers:
             violations.append(f"repair.post[{index}].removed_factual_number")

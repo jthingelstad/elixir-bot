@@ -719,6 +719,175 @@ def test_copy_policy_rank_repair_may_remove_only_bad_rank_number():
     assert result["failed"] is False
 
 
+def test_positive_war_policy_blocks_nonparticipant_nag_before_send(monkeypatch):
+    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+    sent = []
+    plan = {
+        "posts": [
+            {
+                "channel": "elixir",
+                "leads_with": "war",
+                "content": (
+                    "Battle Day 4 resets in ~14 hours. 36 of 45 members haven't touched "
+                    "a deck yet, with 4 more only partial. Aaqib Javed and Fullboat "
+                    "already ran their full 4 today."
+                ),
+            }
+        ]
+    }
+
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {},
+            plan,
+            post_fn=lambda *args: sent.append(args),
+            record_fn=lambda **_: None,
+        )
+
+    assert result["failed"] is True
+    assert "negative_war_participation" in result["reason"]
+    assert sent == []
+
+
+def test_positive_war_policy_allows_participant_recognition(monkeypatch):
+    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+    sent = []
+    plan = {
+        "posts": [
+            {
+                "channel": "elixir",
+                "leads_with": "war",
+                "content": (
+                    "Nine members have played war decks today. "
+                    "Aaqib Javed and Fullboat completed all 4."
+                ),
+            }
+        ]
+    }
+
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {},
+            plan,
+            post_fn=lambda channel_id, copy: sent.append((channel_id, copy)) or 91,
+            record_fn=lambda **_: None,
+        )
+
+    assert result["failed"] is False
+    assert sent == [
+        (222, "Nine members have played war decks today. Aaqib Javed and Fullboat completed all 4.")
+    ]
+
+
+def test_positive_war_policy_blocks_participant_count_as_roster_ratio(monkeypatch):
+    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+    plan = {
+        "posts": [
+            {
+                "channel": "elixir",
+                "leads_with": "war",
+                "content": "9 of 45 members have played war decks today.",
+            }
+        ]
+    }
+
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {},
+            plan,
+            post_fn=lambda *_: 92,
+            record_fn=lambda **_: None,
+        )
+
+    assert result["failed"] is True
+    assert "negative_war_participation" in result["reason"]
+
+
+def test_positive_war_policy_allows_completed_member_with_no_decks_remaining(monkeypatch):
+    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+    plan = {
+        "posts": [
+            {
+                "channel": "elixir",
+                "leads_with": "war",
+                "content": "Aaqib has no decks remaining after completing all 4 today.",
+            }
+        ]
+    }
+
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {},
+            plan,
+            post_fn=lambda *_: 92,
+            record_fn=lambda **_: None,
+        )
+
+    assert result["failed"] is False
+
+
+def test_positive_war_policy_checks_in_game_copy_too(monkeypatch):
+    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+    plan = {
+        "posts": [
+            {
+                "channel": "elixir",
+                "leads_with": "war",
+                "content": "Nine members have played war decks today.",
+                "clan_chat": "Last chance to use your war decks before reset.",
+            }
+        ]
+    }
+
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {},
+            plan,
+            post_fn=lambda *_: 92,
+            record_fn=lambda **_: None,
+        )
+
+    assert result["failed"] is True
+    assert "negative_war_participation" in result["reason"]
+
+
+def test_positive_war_policy_repair_may_remove_only_negative_counts(monkeypatch):
+    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+    plan = {
+        "posts": [
+            {
+                "channel": "elixir",
+                "leads_with": "war",
+                "content": (
+                    "36 of 45 members haven't touched a deck yet. "
+                    "Aaqib Javed completed all 4 today."
+                ),
+            }
+        ]
+    }
+
+    def repair(*_):
+        return {
+            "posts": [
+                {
+                    **plan["posts"][0],
+                    "content": "Aaqib Javed completed all 4 today.",
+                }
+            ]
+        }
+
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {},
+            plan,
+            post_fn=lambda *_: 92,
+            record_fn=lambda **_: None,
+            repair_fn=repair,
+        )
+
+    assert result["failed"] is False
+
+
 def test_copy_policy_allows_historical_rank_streak_when_current_race_is_unranked():
     plan = {
         "posts": [

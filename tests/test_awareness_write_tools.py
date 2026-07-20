@@ -12,6 +12,7 @@ Covers:
 """
 
 import json
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -119,23 +120,24 @@ def test_flag_member_watch_away_until_records_leave_hold(memdb):
         [{"tag": "#ABC123", "name": "Vijay", "role": "member"}],
     )
 
+    away_until = (datetime.now(timezone.utc) + timedelta(days=2)).date().isoformat()
     raw = tool_exec._execute_tool(
         "flag_member_watch",
         {
             "member_tag": "Vijay",
             "reason": "Told us he's travelling, back after the 20th",
-            "away_until": "2026-07-20",
+            "away_until": away_until,
         },
         workflow="awareness",
     )
     result = json.loads(raw)
     assert result["success"] is True
     assert result["type"] == "hold"
-    assert result["away_until"] == "2026-07-20"
+    assert result["away_until"] == away_until
 
     memory = list_memories(viewer_scope="leadership")[0]
     assert memory["title"].startswith("Hold:")
-    assert memory["expires_at"].startswith("2026-07-20")
+    assert memory["expires_at"].startswith(away_until)
     assert "leave-hold" in (memory.get("tags") or [])
     assert "watch-list" not in (memory.get("tags") or [])
 

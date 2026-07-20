@@ -208,6 +208,17 @@ def test_awareness_prompt_enforces_they_them_at_compose_time():
     assert "they/them" in agent_prompts._awareness_system().lower()
 
 
+def test_positive_war_messaging_override_is_dark_launched(monkeypatch):
+    monkeypatch.delenv("ELIXIR_POSITIVE_WAR_MESSAGING", raising=False)
+    assert "positive recognition only" not in agent_prompts._awareness_system().lower()
+
+    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+    system = agent_prompts._awareness_system().lower()
+    assert "positive recognition only" in system
+    assert "do not count, name, call out, remind, pressure" in system
+    assert "engagement.participation_recognition" in system
+
+
 def test_awareness_prompt_grounds_current_award_status_in_live_races():
     """Regression (#143): the poster restated a member's *past* Iron King (S131,
     from their trophy case) as a *current-season* 'on the Iron King track' claim,

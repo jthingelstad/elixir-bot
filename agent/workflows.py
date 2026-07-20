@@ -633,19 +633,33 @@ def repair_awareness_plan(situation: dict, plan: dict, violations: list[str]):
     """One no-tools repair for a plan rejected by deterministic copy policy.
 
     The repair model may change wording only. Channel choice, coverage keys,
-    factual values, and relay decisions must survive unchanged; delivery runs
-    the deterministic validator again and fails closed if this attempt misses.
+    member identity fields, and relay decisions must survive unchanged. Factual
+    values survive except rejected nonparticipation framing; delivery runs the
+    deterministic validator again and fails closed if this attempt misses.
     """
+    participation_repair = ""
+    if any("negative_war_participation" in violation for violation in violations):
+        participation_repair = (
+            " For a negative_war_participation violation, remove the nag, deficit framing, "
+            "nonparticipant count or roll call, and any command to play decks. You may remove "
+            "names and numbers from the copy when they belong to that rejected framing, while "
+            "preserving structured member identity fields. Keep positive facts already present "
+            "about members who played or completed decks. Do not calculate, infer, or introduce "
+            "a replacement participation count; if no positive fact remains, make the smallest "
+            "grounded recognition statement the existing plan supports."
+        )
     system = (
         "You repair a structured Discord post plan that failed deterministic copy policy. "
         "Return JSON only with the same awareness plan shape. Preserve every channel, "
-        "covers_signal_keys value, leads_with value, factual number, member identity, and "
-        "relay decision. Change only the minimum wording needed to clear the violations. "
+        "covers_signal_keys value, leads_with value, member identity fields, and relay decision. "
+        "Preserve every factual number unless a violation-specific instruction explicitly "
+        "allows removing it. Change only the minimum wording needed to clear the violations. "
         "Refer to every member with they/them/their or repeat the member name; never guess "
         "gender. If the race is explicitly unranked, remove any claim about its current "
         "numeric rank without inventing a replacement. Colosseum has NO finish line and "
         "every battle across all four battle days continues to count toward clan and member "
         "standings; remove any contrary claim. Do not add posts, facts, or tools."
+        + participation_repair
     )
     from capabilities.game_truth import get_game_truth
 
