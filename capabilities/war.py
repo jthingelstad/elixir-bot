@@ -18,7 +18,7 @@ from engine.readiness import generation_snapshot
 from storage import war as war_storage
 
 CAPABILITY_ID = "war_intelligence"
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2
 
 
 def _source(source):
@@ -96,6 +96,29 @@ def _remaining_decks(day: dict) -> dict:
             f"{remaining} participants have decks left today: "
             f"{untouched} untouched, {partial} partial."
         ),
+    }
+
+
+def _participation_recognition(day: dict) -> dict:
+    """Package the same attendance evidence around contribution, not deficit."""
+    played = int(day.get("engaged_count") or 0)
+    completed = int(day.get("finished_count") or 0)
+    participant_word = "member" if played == 1 else "members"
+    participant_verb = "has" if played == 1 else "have"
+    completed_word = "member" if completed == 1 else "members"
+    return {
+        "played_today": played,
+        "completed_all_4": completed,
+        "count_source": "engaged_count + finished_count",
+        "summary": (
+            f"{played} {participant_word} {participant_verb} played war decks today; "
+            f"{completed} {completed_word} completed all 4."
+        ),
+        "participants": [
+            _participant(member)
+            for member in (day.get("used_all_4") or []) + (day.get("used_some") or [])
+        ],
+        "completed_members": [_participant(member) for member in (day.get("used_all_4") or [])],
     }
 
 
@@ -208,6 +231,7 @@ def get_war_intelligence(*, source=None, conn=None) -> WarIntelligenceResult:
             "engaged_count": day.get("engaged_count"),
             "finished_count": day.get("finished_count"),
             "untouched_count": day.get("untouched_count"),
+            "participation_recognition": _participation_recognition(day),
             "remaining_decks": _remaining_decks(day),
             "top_points_total": day.get("top_points_total") or [],
             "used_all_4": [_participant(m) for m in (day.get("used_all_4") or [])],

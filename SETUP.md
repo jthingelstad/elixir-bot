@@ -40,6 +40,16 @@ ENGINE_TICK_MINUTES=10
 AWARENESS_LOOP_MINUTE=5
 ```
 
+Behavior changes dark-launch OFF by default. To evaluate participant-positive
+proactive war copy without changing management evidence or leader actions, set:
+
+```env
+ELIXIR_POSITIVE_WAR_MESSAGING=1
+```
+
+Once the behavior is trusted, graduate it by removing this flag and making the
+policy unconditional; feature flags are not permanent configuration.
+
 Activity-specific schedule overrides are read by
 [runtime/activities.py](runtime/activities.py) from the runtime module. Prefer
 the registry defaults unless there is an operational reason to change them.

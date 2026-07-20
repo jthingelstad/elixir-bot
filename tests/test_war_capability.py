@@ -57,7 +57,7 @@ def test_war_contract_keeps_weekly_and_daily_races_distinct():
     result = get_war_intelligence(source=_WarSource())
 
     assert result["capability"] == "war_intelligence"
-    assert result["contract_version"] == 1
+    assert result["contract_version"] == 2
     assert result["weekly_race"]["metric"] == "fame"
     assert result["weekly_race"]["rank"] is None
     assert result["weekly_race"]["standings"][0]["rank"] is None
@@ -67,6 +67,40 @@ def test_war_contract_keeps_weekly_and_daily_races_distinct():
     assert result["daily_race"]["rank"] == 1
     assert result["engagement"]["remaining_decks"]["total"] == 2
     assert result["engagement"]["remaining_decks"]["partial"] == 1
+    assert result["engagement"]["participation_recognition"] == {
+        "played_today": 2,
+        "completed_all_4": 1,
+        "count_source": "engaged_count + finished_count",
+        "summary": "2 members have played war decks today; 1 member completed all 4.",
+        "participants": [
+            {
+                "member_ref": "Alpha",
+                "player_tag": "#A",
+                "decks_used_today": 4,
+                "decks_used_total": None,
+                "points_today": None,
+                "points_total": None,
+            },
+            {
+                "member_ref": "Bravo",
+                "player_tag": "#B",
+                "decks_used_today": 2,
+                "decks_used_total": None,
+                "points_today": None,
+                "points_total": None,
+            },
+        ],
+        "completed_members": [
+            {
+                "member_ref": "Alpha",
+                "player_tag": "#A",
+                "decks_used_today": 4,
+                "decks_used_total": None,
+                "points_today": None,
+                "points_total": None,
+            }
+        ],
+    }
     assert result["game_truth"]["mechanics"]["finish_line"] == 10000
 
 
