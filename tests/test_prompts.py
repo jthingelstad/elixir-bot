@@ -208,15 +208,13 @@ def test_awareness_prompt_enforces_they_them_at_compose_time():
     assert "they/them" in agent_prompts._awareness_system().lower()
 
 
-def test_positive_war_messaging_override_is_dark_launched(monkeypatch):
-    monkeypatch.delenv("ELIXIR_POSITIVE_WAR_MESSAGING", raising=False)
-    assert "positive recognition only" not in agent_prompts._awareness_system().lower()
-
-    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+def test_positive_war_messaging_is_the_default_policy():
     system = agent_prompts._awareness_system().lower()
-    assert "positive recognition only" in system
-    assert "do not count, name, call out, remind, pressure" in system
-    assert "engagement.participation_recognition" in system
+    assert "public war messaging recognizes participation" in system
+    assert "never count, name, call out, remind, pressure" in system
+    assert "do not use the roster total as a denominator" in system
+    assert "remind members who have not started" not in system
+    assert "get your decks in" not in system
 
 
 def test_awareness_prompt_grounds_current_award_status_in_live_races():

@@ -12,7 +12,6 @@ from collections import Counter
 
 from capabilities.game_truth import awareness_post_facts
 from engine.game_check import check_post
-from runtime.editorial_policy import positive_war_messaging_enabled
 
 _GENDERED_MEMBER_PRONOUN = re.compile(
     r"\b(?:he|him|his|himself|she|her|hers|herself)\b",
@@ -196,7 +195,7 @@ def validate_plan(read: dict, plan: dict) -> list[str]:
         text = _post_text(post)
         if _GENDERED_MEMBER_PRONOUN.search(text):
             violations.append(f"post[{index}].gendered_member_pronoun")
-        if positive_war_messaging_enabled() and _negative_war_participation(text):
+        if _negative_war_participation(text):
             violations.append(f"post[{index}].negative_war_participation")
         if unranked and post.get("leads_with") == "war":
             if any(pattern.search(text) for pattern in _UNRANKED_CURRENT_RANK):
@@ -274,8 +273,7 @@ def validate_repair(original: dict, repaired: dict) -> list[str]:
         for pattern in _UNRANKED_CURRENT_RANK:
             for match in pattern.finditer(before_text):
                 removable.update(_NUMBER.findall(match.group(0)))
-        if positive_war_messaging_enabled():
-            removable.update(_negative_participation_numbers(before_text))
+        removable.update(_negative_participation_numbers(before_text))
         required = before_numbers - removable
         if required - after_numbers:
             violations.append(f"repair.post[{index}].removed_factual_number")

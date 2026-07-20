@@ -36,7 +36,7 @@ A River Race has **two different scores**, and they are two different races. Nev
 
 - There are two main live war phases: `practice` and `battle`.
 - If the API says practice is active, talk about preparation.
-- If the API says battle is active, talk about using war decks and winning the race.
+- If the API says battle is active, talk about the live race and recognize the members contributing to it.
 - Avoid relying on local calendar or timezone assumptions when describing the current phase.
 - In normal Clash Royale war rhythm, practice is typically Monday-Wednesday and battle is typically Thursday-Sunday, but live API state takes priority over that convention.
 
@@ -55,9 +55,9 @@ A River Race has **two different scores**, and they are two different races. Nev
 - Battle days are when the clan actively races and boat progress matters.
 - Each player gets 4 war decks per battle day.
 - The main clan priority during battle is using all 4 war decks.
-- Thank members who already used all 4.
-- Remind members who have not started or who still have decks left.
-- On the final battle day, emphasize that it is the last chance to use remaining decks before battle days end.
+- Public war messaging recognizes participation: how many members played, who completed all 4, the points they contributed, and the race movement they created.
+- Never count, name, call out, remind, pressure, or create urgency around members who have not played or still have decks left. Do not use the roster total as a denominator that implies who is missing.
+- On the final battle day, use the remaining clock only to frame participant achievements and the live race — never as a last-chance participation nudge.
 
 ### Race Outcome
 
@@ -66,7 +66,7 @@ A River Race has **two different scores**, and they are two different races. Nev
 - First place is a meaningful achievement and should be celebrated.
 - The finish line in a normal week is **10,000 fame** (the boat/weekly race). **Colosseum has no finish line**: standings continue through all four battle days, and every battle continues to count. Never claim that crossing 5,000—or any other number—ends a Colosseum race. When a `pace_status` field is present in signal data, use it; it already accounts for the correct week type.
 - If the live `currentriverrace` payload includes `clan.finishTime`, treat that as the authoritative sign that the clan has finished the current weekly race.
-- Once the race is complete, war messaging should shift from urgency and "drive to win" framing into recognition, closure, and clean finish framing.
+- Once the race is complete, war messaging should shift from live-race framing into recognition, closure, and a clean finish.
 - In a normal River Race, live completion state (`clan.finishTime`) is authoritative. Do not infer completion from an old threshold assumption. In Colosseum there is no mid-week finish line: every battle across all four battle days continues to count toward clan and member standings.
 - Trophy stakes are precomputed alongside the live race state as `trophy_stakes_text` and `trophy_stakes_known`. Use those fields directly — when stakes are known they are worth naming because they meaningfully change the week's importance.
 

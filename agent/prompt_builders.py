@@ -8,10 +8,6 @@ system prompts (deck review, promotion, war observations, etc.).
 
 import prompts
 from agent.core import _build_system_prompt
-from runtime.editorial_policy import (
-    POSITIVE_WAR_MESSAGING_GUIDANCE,
-    positive_war_messaging_enabled,
-)
 from runtime.emoji import available_emoji_names
 
 
@@ -144,16 +140,14 @@ def _awareness_system():
     policy blocks come along so the agent can reason in voice and reference
     leadership-context rules when a tick warrants a #leaders post.
     """
-    blocks = [
+    return _build_system_prompt(
         prompts.identity_block(),
         prompts.knowledge_block(),
         prompts.policy(),
         prompts.agent_prompt("awareness"),
-    ]
-    if positive_war_messaging_enabled():
-        blocks.append(POSITIVE_WAR_MESSAGING_GUIDANCE)
-    blocks.extend((_discord_formatting_guidance(), _discord_emoji_guidance()))
-    return _build_system_prompt(*blocks)
+        _discord_formatting_guidance(),
+        _discord_emoji_guidance(),
+    )
 
 
 def _ask_elixir_daily_system():

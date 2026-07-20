@@ -719,8 +719,7 @@ def test_copy_policy_rank_repair_may_remove_only_bad_rank_number():
     assert result["failed"] is False
 
 
-def test_positive_war_policy_blocks_nonparticipant_nag_before_send(monkeypatch):
-    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+def test_positive_war_policy_blocks_nonparticipant_nag_before_send():
     sent = []
     plan = {
         "posts": [
@@ -749,8 +748,7 @@ def test_positive_war_policy_blocks_nonparticipant_nag_before_send(monkeypatch):
     assert sent == []
 
 
-def test_positive_war_policy_allows_participant_recognition(monkeypatch):
-    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+def test_positive_war_policy_allows_participant_recognition():
     sent = []
     plan = {
         "posts": [
@@ -779,8 +777,7 @@ def test_positive_war_policy_allows_participant_recognition(monkeypatch):
     ]
 
 
-def test_positive_war_policy_blocks_participant_count_as_roster_ratio(monkeypatch):
-    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+def test_positive_war_policy_blocks_participant_count_as_roster_ratio():
     plan = {
         "posts": [
             {
@@ -803,8 +800,7 @@ def test_positive_war_policy_blocks_participant_count_as_roster_ratio(monkeypatc
     assert "negative_war_participation" in result["reason"]
 
 
-def test_positive_war_policy_allows_completed_member_with_no_decks_remaining(monkeypatch):
-    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+def test_positive_war_policy_allows_completed_member_with_no_decks_remaining():
     plan = {
         "posts": [
             {
@@ -826,8 +822,7 @@ def test_positive_war_policy_allows_completed_member_with_no_decks_remaining(mon
     assert result["failed"] is False
 
 
-def test_positive_war_policy_checks_in_game_copy_too(monkeypatch):
-    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+def test_positive_war_policy_checks_in_game_copy_too():
     plan = {
         "posts": [
             {
@@ -851,8 +846,7 @@ def test_positive_war_policy_checks_in_game_copy_too(monkeypatch):
     assert "negative_war_participation" in result["reason"]
 
 
-def test_positive_war_policy_repair_may_remove_only_negative_counts(monkeypatch):
-    monkeypatch.setenv("ELIXIR_POSITIVE_WAR_MESSAGING", "1")
+def test_positive_war_policy_repair_may_remove_only_negative_counts():
     plan = {
         "posts": [
             {
