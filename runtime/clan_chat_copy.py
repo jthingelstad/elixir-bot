@@ -29,6 +29,30 @@ _NUMBERED_LABEL_RE = re.compile(r"^\s*\d+[.)]\s+")
 # look-ahead skips decimals/abbreviations mid-word (e.g. "7.0d", "13,750").
 _SENTENCE_END_RE = re.compile(r"[.!?](?=\s|$)")
 
+# Clash Royale's in-game chat filter silently blanks handle/link-like tokens:
+# `&` (plus the words flanking it), `+`digits (read as a phone number), and an
+# internal `word-word` hyphen — a member name like "L-Drxgo" reads as a handle
+# and the whole token disappears to asterisks. The copy LLM is told to avoid
+# these, but member names flow through verbatim and can't be reworded, so also
+# neutralize them deterministically on every outgoing message.
+_CENSOR_AMP_RE = re.compile(r"\s*&\s*")
+_CENSOR_PLUS_NUM_RE = re.compile(r"\+(?=\d)")
+_CENSOR_INNER_HYPHEN_RE = re.compile(r"(?<=\w)-(?=\w)")
+
+
+def censor_safe_clan_chat(text: str) -> str:
+    """Neutralize the in-game chat filter's silent-censor triggers so a message —
+    or a member name inside it, e.g. "L-Drxgo" — is never blanked to asterisks.
+    Surface-specific and cosmetic: applied only to in-game clan-chat output, never
+    to Discord or the stored display name (both keep the real name). The `- E`
+    signature is untouched: its hyphen is space-flanked, not a `word-word` token."""
+    if not text:
+        return text
+    out = _CENSOR_AMP_RE.sub(" and ", text)
+    out = _CENSOR_PLUS_NUM_RE.sub("", out)
+    out = _CENSOR_INNER_HYPHEN_RE.sub(" ", out)
+    return " ".join(out.split())
+
 
 @dataclass(frozen=True)
 class ClanChatCopyResult:
@@ -88,10 +112,13 @@ def sign_clan_chat_text(
     limit: int = CLAN_CHAT_DEFAULT_MAX_CHARS,
     signature: dict[str, Any] | None = None,
 ) -> str:
+    # Neutralize in-game censor triggers first, so a member name like "L-Drxgo"
+    # (or `&`/`+`digits phrasing) is never silently blanked to asterisks.
+    text = censor_safe_clan_chat(text or "")
     sig = _signature_text(signature)
     if not sig:
         return clip_clan_chat_text(text, limit=limit)
-    body = " ".join((text or "").split())
+    body = " ".join(text.split())
     body = body.replace(sig, "").strip()
     if not body:
         return clip_clan_chat_text(sig, limit=limit)
@@ -380,6 +407,7 @@ __all__ = [
     "CLAN_CHAT_WELCOME_MAX_CHARS",
     "DISCORD_INVITE_ROUTE",
     "ClanChatCopyResult",
+    "censor_safe_clan_chat",
     "clip_clan_chat_text",
     "generate_clan_chat_copy",
     "messages_from_agent_result",
