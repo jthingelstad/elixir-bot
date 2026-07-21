@@ -100,6 +100,25 @@ def test_sign_clan_chat_text_appends_signature_inside_limit():
     assert len(copy) <= 80
 
 
+def test_censor_safe_neutralizes_in_game_filter_triggers():
+    # The in-game filter blanks a `word-word` hyphen token (member name),
+    # `&` + its flanking words, and `+`digits (phone-number heuristic).
+    assert clan_chat_copy.censor_safe_clan_chat("L-Drxgo") == "L Drxgo"
+    assert clan_chat_copy.censor_safe_clan_chat("war & ranked play") == "war and ranked play"
+    assert clan_chat_copy.censor_safe_clan_chat("gained +821 this week") == "gained 821 this week"
+    assert clan_chat_copy.censor_safe_clan_chat("ranked-play") == "ranked play"
+
+
+def test_sign_clan_chat_text_desanitizes_member_name_and_keeps_signature():
+    # Regression for the L-Drxgo censor: the name is de-hyphenated for the
+    # in-game surface, and the `- E` signature (space-flanked hyphen) survives.
+    signed = clan_chat_copy.sign_clan_chat_text("moving L-Drxgo out of elder, ranking shifts.")
+
+    assert "L-Drxgo" not in signed
+    assert "L Drxgo" in signed
+    assert signed.endswith(clan_chat_copy.CLAN_CHAT_SIGNATURE_TEXT)
+
+
 def test_generate_clan_chat_copy_uses_fallback_when_llm_violates_guardrails():
     with patch(
         "runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy",
