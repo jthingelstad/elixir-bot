@@ -79,6 +79,59 @@ def _clock_block() -> dict:
     }
 
 
+def _delivery_block() -> dict:
+    """How and when my voice actually reaches members — the delivery reality the
+    brain must weigh before proposing anything time-sensitive.
+
+    Two facts drive it: (1) I run on a FIXED CADENCE, not continuously, so anything
+    I don't voice this run waits until my next run; (2) the in-game `clan_chat`
+    surface has no post API — a clan_chat voicing becomes an #actions card a leader
+    must manually paste, adding hours of unpredictable human latency (and it may be
+    declined). A time-critical ask with less runway than that cannot land. Cadence
+    is read from the same env the scheduler uses (AWARENESS_LOOP_HOURS/MINUTE) so
+    the brain's self-knowledge never drifts from the actual schedule.
+    """
+    import os
+
+    now = _now()
+    block: dict = {
+        "not_continuous": (
+            "I run on a fixed cadence, not continuously. Anything I do not voice "
+            "this run waits until my next run."
+        ),
+        "clan_chat_is_leader_gated": (
+            "A clan_chat voicing is not posted directly — it becomes an #actions "
+            "card a leader must manually paste into the game (clan chat has no post "
+            "API), adding hours of unpredictable human latency, and can be declined."
+        ),
+    }
+    try:
+        from zoneinfo import ZoneInfo
+
+        from apscheduler.triggers.cron import CronTrigger
+
+        hours = os.getenv("AWARENESS_LOOP_HOURS", "*/3")
+        minute = int(os.getenv("AWARENESS_LOOP_MINUTE", "5"))
+        trig = CronTrigger(hour=hours, minute=minute, timezone=ZoneInfo("America/Chicago"))
+        nxt = trig.get_next_fire_time(None, now)
+        if nxt is not None:
+            block["next_run_utc"] = nxt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            block["minutes_until_next_run"] = max(0, int((nxt - now).total_seconds() // 60))
+            after = trig.get_next_fire_time(nxt, nxt)
+            if after is not None:
+                gap_h = (after - nxt).total_seconds() / 3600
+                block["typical_interval"] = (
+                    f"~{int(gap_h)}h" if abs(gap_h - round(gap_h)) < 0.05 else f"~{gap_h:.1f}h"
+                )
+    except ValueError, TypeError:
+        # A malformed AWARENESS_LOOP_HOURS/MINUTE (bad cron field) must never break
+        # the read — the two prose facts above still give the brain the runway
+        # reality without the exact clock. Anything unexpected bubbles to _load,
+        # which degrades this one block and logs it.
+        pass
+    return block
+
+
 # The signal feed is a durable, oldest-first event-id backlog — not a rolling
 # timestamp window. Player / clan / war are pure deltas; game events share the
 # same acknowledgement boundary but also remain standing background context.
@@ -748,6 +801,7 @@ def build_read(conn=None) -> dict:
                 None,
             ),
             "clock": _load("clock", _clock_block, None),
+            "delivery": _load("delivery", _delivery_block, None),
             "time": _load("time", lambda: _time_block(conn, war), None),
             "standing": _load("standing", lambda: _standing_block(war), None),
             "war_season": _load(
