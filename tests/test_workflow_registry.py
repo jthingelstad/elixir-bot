@@ -37,7 +37,8 @@ def test_registry_model_selection_matches_existing_defaults(monkeypatch):
     assert elixir_agent._model_for_workflow("interactive") == "chat-model"
     assert elixir_agent._model_for_workflow("site_promote_content") == "promotion-model"
     assert elixir_agent._model_for_workflow("intel_report") == "intensive-model"
-    assert elixir_agent._model_for_workflow("leader_action_feedback") == "intensive-model"
+    # leader_action_feedback demoted intensive->chat 2026-07-23 (Sonnet at parity, ~half cost)
+    assert elixir_agent._model_for_workflow("leader_action_feedback") == "chat-model"
     assert elixir_agent._model_for_workflow("memory_synthesis") == "intensive-model"
     assert elixir_agent._model_for_workflow("clan_chat_copy") == "chat-model"
 

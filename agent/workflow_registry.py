@@ -221,7 +221,12 @@ _WORKFLOW_SPECS = (
         },
         tools=[],
         max_tool_rounds=1,
-        model_family="intensive",
+        # Was "intensive" (Opus). Demoted to chat (Sonnet 5) 2026-07-23 for cost:
+        # this is a single-shot structured synthesis of a leader-action sample into
+        # internal guidance the brain reads (not a public post). A head-to-head replay
+        # of real captured prompts showed Sonnet 5 at parity with Opus here at ~half
+        # the cost; the response parser already strips the ```json fences Sonnet emits.
+        model_family="chat",
         tools_allowed=False,
     ),
     WorkflowSpec(
