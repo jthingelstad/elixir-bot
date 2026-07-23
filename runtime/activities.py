@@ -357,13 +357,15 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         "sole proactive poster.",
         job_id="awareness-loop",
         job_function="_awareness_loop",
-        # Wall-clock cron, not an interval: pinned to :05 of every hour so the
-        # cadence is deterministic across restarts (an interval trigger re-phases
-        # to "startup + 60min" every restart). :05 lands just after the top-of-
-        # hour engine tick, so the brain reads freshly-refreshed state and dodges
-        # the :00 cron crowd. Tunable via AWARENESS_LOOP_MINUTE.
+        # Wall-clock cron, not an interval: pinned to :05 past the scheduled hours
+        # so the cadence is deterministic across restarts (an interval trigger
+        # re-phases to "startup + N" every restart). :05 lands just after the top-
+        # of-hour engine tick, so the brain reads freshly-refreshed state and dodges
+        # the :00 cron crowd. AWARENESS_LOOP_HOURS ("*/3" = every 3h, widened from
+        # hourly 2026-07-23 for cost) and AWARENESS_LOOP_MINUTE are the tunables.
         schedule_kind="cron",
         schedule_config={
+            "hour": _attr("AWARENESS_LOOP_HOURS", "*/3"),
             "minute": _attr("AWARENESS_LOOP_MINUTE", 5),
             "max_instances": 1,
             "coalesce": True,
@@ -475,7 +477,13 @@ def _format_schedule_description(resolved: dict[str, Any]) -> str:
         return f"Every {_format_day(day_of_week)} at {hour:02d}:{minute:02d} CT."
     if "hour" in schedule_config:
         hour = schedule_config.get("hour", 0)
-        return f"Daily at {hour:02d}:{minute:02d} CT."
+        # hour may be a cron expression (e.g. "*/3" every 3h, "0,6,12,18" a list),
+        # not just a fixed int — describe those without int-formatting them.
+        if isinstance(hour, str) and hour.startswith("*/"):
+            return f"Every {hour[2:]} hours at :{minute:02d} CT."
+        if isinstance(hour, str) and not hour.isdigit():
+            return f"At hours {hour}, :{minute:02d} CT."
+        return f"Daily at {int(hour):02d}:{minute:02d} CT."
     return f"Every hour at :{minute:02d} CT."
 
 
