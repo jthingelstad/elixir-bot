@@ -1593,7 +1593,15 @@ def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
         patch("agent.core._get_client", return_value=mock_client),
         patch("elixir_agent.runtime_status.record_llm_call"),
     ):
-        for workflow in ("clan_chat_copy", "interactive", "channel_update", "clanops"):
+        # leader_action_feedback demoted opus->sonnet 2026-07-23 (internal guidance
+        # synthesis; Sonnet at parity with Opus on replayed prompts, ~half the cost).
+        for workflow in (
+            "clan_chat_copy",
+            "interactive",
+            "channel_update",
+            "clanops",
+            "leader_action_feedback",
+        ):
             elixir_agent._create_chat_completion(
                 workflow=workflow,
                 messages=[{"role": "user", "content": "status"}],
@@ -1604,7 +1612,6 @@ def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
             "tournament_recap",
             "intel_report",
             "memory_synthesis",
-            "leader_action_feedback",
             "release_notes",
         ):
             elixir_agent._create_chat_completion(
