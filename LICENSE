@@ -1,0 +1,43 @@
+MIT License
+
+Copyright (c) 2026 Jamie Thingelstad
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+THIRD-PARTY ASSETS (NOT COVERED BY THE MIT LICENSE ABOVE)
+
+The MIT license above covers the source code of this project only. It does NOT
+cover Clash Royale intellectual property that this project reads, stores, or
+displays, including Clash Royale card names, card and badge artwork, and card
+and clan game data retrieved from the official Clash Royale API.
+
+Those materials are © Supercell and are used under Supercell's Fan Content
+Policy (https://www.supercell.com/fan-content-policy): non-commercial,
+attributed, and not affiliated with or endorsed by Supercell. Card and badge
+imagery posted to Discord is served live from Supercell's CDN
+(api-assets.clashroyale.com) and is not redistributed or bundled in this
+repository. These materials are not the author's to relicense. If you fork or
+reuse this project, you are responsible for your own compliance with Supercell's
+Fan Content Policy.
+
+This material is unofficial and is not endorsed by Supercell. For more
+information see Supercell's Fan Content Policy:
+www.supercell.com/fan-content-policy.
