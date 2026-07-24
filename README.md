@@ -205,3 +205,17 @@ touches `elixir-v51.db` or the archives.
 A new clan primarily rewrites `prompts/CLAN.md`, `prompts/DISCORD.md`, and any
 culture-specific lane prompts. Elixir no longer publishes poapkings.com; the
 site has its own standalone update process.
+
+## Fan Content and Attribution
+
+Elixir is an unofficial, non-commercial fan project. It is not affiliated with,
+authorized, or endorsed by Supercell. Clash Royale and the Clash Royale API are
+trademarks of Supercell, and the card names, card/badge artwork, and game data
+Elixir reads and displays are Supercell's intellectual property, used under
+Supercell's [Fan Content Policy](https://www.supercell.com/fan-content-policy).
+Card and badge imagery posted to Discord is served live from Supercell's own CDN
+(`api-assets.clashroyale.com`); this project does not redistribute or bundle it.
+See [`LICENSE`](LICENSE) for the third-party carve-out.
+
+> This material is unofficial and is not endorsed by Supercell. For more
+> information see Supercell's Fan Content Policy: www.supercell.com/fan-content-policy.
