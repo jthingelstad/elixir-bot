@@ -9,7 +9,6 @@
 | `tasks/` | Active long-form designs and product-team reports only. | Move completed work to `archive/`. |
 | `archive/` | Shipped plans, point-in-time assessments, and completed reports. | Frozen provenance; links must still resolve. |
 | `cr-api-docs/` | Vendored Clash Royale API reference with its own tooling. | Update through its own workflow. |
-| `poap-api-docs/` | Vendored POAP API reference. | External reference. |
 
 ## Source-of-truth order
 
