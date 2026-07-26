@@ -219,7 +219,12 @@ def _join_member_bits(members, formatter, limit=3):
 
 
 def _bare_tag(tag):
-    return str(tag or "").strip().upper().lstrip("#")
+    """'ABC123' form. Thin alias for the canonical ``engine.normalize.bare_tag``
+    (kept as a name here for its existing importers) so there is ONE tag
+    normalizer, not a second hand-rolled copy that can drift from it."""
+    from engine.normalize import bare_tag
+
+    return bare_tag(tag)
 
 
 def _format_relative_join_age(joined_date):

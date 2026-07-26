@@ -51,14 +51,6 @@ def set_baseline(
     )
 
 
-def payload_changed(conn, entity_kind: str, entity_tag: str, aspect: str, payload: dict) -> bool:
-    """Cheap no-change check: hash compare against the stored baseline."""
-    row = get_baseline(conn, entity_kind, entity_tag, aspect)
-    if row is None:
-        return True
-    return row["payload_hash"] != payload_hash(payload)
-
-
 def baseline_payload(row: sqlite3.Row | None) -> dict | None:
     if row is None:
         return None
