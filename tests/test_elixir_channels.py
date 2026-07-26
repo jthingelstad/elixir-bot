@@ -4801,3 +4801,43 @@ def test_inbound_dm_ignored_when_outreach_disabled():
 
     mock_handle.assert_not_awaited()
     mock_process.assert_not_awaited()  # still short-circuits — Elixir is not a general DM bot
+
+
+def test_mention_overrides_not_for_bot_to_llm_chat():
+    """An explicit @-mention must always engage the bot, even in clanops/#leaders
+    and even when the classifier calls it not_for_bot (the 2026-07-26 miss where a
+    leader tagged Elixir with an LOA note and it stayed silent)."""
+    from runtime.channel_router import _normalize_open_channel_intent
+
+    base = {"route": "not_for_bot", "confidence": 0.95, "rationale": "team note"}
+
+    # @-mention in clanops/#leaders -> must fall back to chat, not stay silent.
+    mentioned_ctx = {
+        "mentioned": True,
+        "workflow": "clanops",
+        "allows_open_channel_reply": False,
+        "raw_question": "1spaceO2 and pigsareus are away a week; don't flag them",
+    }
+    out = _normalize_open_channel_intent(mentioned_ctx, dict(base))
+    assert out["route"] == "llm_chat"
+    assert out["fallback_reason"] == "mention_not_for_bot_override"
+
+    # Not mentioned in a mention-only clanops channel -> unchanged (stays silent).
+    quiet_ctx = {
+        "mentioned": False,
+        "workflow": "clanops",
+        "allows_open_channel_reply": False,
+        "raw_question": "human chatter",
+    }
+    assert _normalize_open_channel_intent(quiet_ctx, dict(base))["route"] == "not_for_bot"
+
+    # Open interactive lane (not mentioned) keeps the existing open-channel rescue.
+    open_ctx = {
+        "mentioned": False,
+        "workflow": "interactive",
+        "allows_open_channel_reply": True,
+        "raw_question": "who donates the most?",
+    }
+    out_open = _normalize_open_channel_intent(open_ctx, dict(base))
+    assert out_open["route"] == "llm_chat"
+    assert out_open["fallback_reason"] == "open_channel_not_for_bot_override"

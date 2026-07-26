@@ -40,6 +40,7 @@ _WRITE_TOOL_NAMES = {
     "update_member",
     "save_clan_memory",
     "flag_member_watch",
+    "raise_clan_chat_relay",
     "record_leadership_followup",
     "schedule_revisit",
 }

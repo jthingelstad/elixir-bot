@@ -1240,6 +1240,77 @@ def _execute_flag_member_watch(arguments):
     return result
 
 
+def _execute_raise_clan_chat_relay(arguments):
+    """Raise an in-game clan-chat relay card to #actions so a leader can paste
+    a short message into the game's clan chat — the surface that reaches EVERY
+    member, not just the Discord subset. Creates a ``proposed`` ``in_game_relay``
+    leader-action recommendation; the pending-card poster surfaces it to #actions.
+
+    The copy runs through the SAME deterministic clan-chat guardrails the
+    awareness brain's voicings do (<=200 chars, no markdown/links/@mentions, no
+    Supercell-filtered terms). If it misses them, nothing is raised and the
+    caller is asked to reword — never post unsigned/invalid copy.
+    """
+    import hashlib
+
+    from runtime.clan_chat_copy import signed_valid_messages
+    from runtime.leader_action_ui import CLASH_COPY_MAX_LENGTH, LEADER_ACTION_UI_VERSION
+
+    copy_in = (arguments.get("copy") or arguments.get("message") or "").strip()
+    reason = (arguments.get("reason") or "").strip()
+    member_tag_input = (arguments.get("member_tag") or "").strip()
+
+    if not copy_in:
+        return {"error": "raise_clan_chat_relay requires `copy` (the clan-chat message)"}
+
+    copies = signed_valid_messages(copy_in, max_chars=CLASH_COPY_MAX_LENGTH)
+    if not copies:
+        return {
+            "error": "clan_chat_copy_rejected",
+            "detail": (
+                f"Copy missed the clan-chat guardrails (<={CLASH_COPY_MAX_LENGTH} chars, "
+                "plain text — no markdown/links/@mentions — and no filtered terms like '&' "
+                "or '+<digits>'). Reword (e.g. 'and' for '&') and retry."
+            ),
+        }
+    copy_text = "\n".join(c.strip() for c in copies if c and c.strip())
+    resolved_tag = _resolve_member_tag(member_tag_input) if member_tag_input else None
+
+    key_hash = hashlib.sha1(copy_text.encode("utf-8")).hexdigest()[:12]
+    objective = f"interactive_relay:{key_hash}"
+    action_key = f"interactive-relay:{key_hash}"
+
+    try:
+        baseline = db.build_leader_action_baseline(
+            action_type="in_game_relay", target_player_tag=resolved_tag
+        )
+        action = db.create_leader_action_recommendation(
+            action_type="in_game_relay",
+            objective=objective,
+            prompt_text=f"Paste this clan-chat note: {copy_text}",
+            rationale=reason or "Leader-requested clan-chat relay",
+            target_channel_key="arena-relay",
+            target_player_tag=resolved_tag,
+            source_signal_key=action_key,
+            source_signal_type="interactive_relay",
+            copy_original_text=copy_text,
+            copy_current_text=copy_text,
+            baseline=baseline,
+            action_key=action_key,
+            ui_version=LEADER_ACTION_UI_VERSION,
+        )
+    except Exception as exc:
+        log.warning("raise_clan_chat_relay failed: %s", exc)
+        return {"error": "raise_clan_chat_relay_failed", "detail": str(exc)}
+
+    return {
+        "success": True,
+        "action_id": (action or {}).get("action_id"),
+        "clan_chat_copy": copy_text,
+        "posts_to": "#actions",
+    }
+
+
 def _execute_schedule_revisit(arguments):
     """Awareness-loop self-scheduling: queue a reminder to look at a signal
     again at a later tick. Persists to the ``revisits`` table; surfaces in
@@ -1525,6 +1596,7 @@ TOOL_EXECUTOR_NAMES = frozenset(
         "update_member",
         "save_clan_memory",
         "flag_member_watch",
+        "raise_clan_chat_relay",
         "record_leadership_followup",
         "schedule_revisit",
         "get_awards",
@@ -1701,6 +1773,8 @@ def _execute_tool(name, arguments, workflow=None):
                 }
         elif name == "flag_member_watch":
             result = _execute_flag_member_watch(arguments)
+        elif name == "raise_clan_chat_relay":
+            result = _execute_raise_clan_chat_relay(arguments)
         elif name == "record_leadership_followup":
             result = _execute_record_leadership_followup(arguments)
         elif name == "schedule_revisit":
