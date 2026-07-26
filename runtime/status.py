@@ -311,6 +311,35 @@ def record_llm_call(
         per_workflow["last_total_tokens"] = total_tokens
 
 
+# The environment Elixir needs, named once. Elixir deliberately has no central
+# config module (each module reads os.getenv directly — see agent/mail), so this
+# is only a manifest of the critical names, not a config layer: REQUIRED_SECRETS
+# are fatal at startup (runtime.app.main), OPTIONAL_ENV is reported but never
+# blocks boot. The status keys are spelled out to keep the snapshot API stable.
+REQUIRED_SECRETS = ("DISCORD_TOKEN", "CLAUDE_API_KEY", "CR_API_KEY")
+OPTIONAL_ENV = ("ELIXIR_LOG_WEBHOOK_URL",)
+_STATUS_ENV_KEYS = {
+    "DISCORD_TOKEN": "has_discord_token",
+    "CLAUDE_API_KEY": "has_claude_api_key",
+    "CR_API_KEY": "has_cr_api_key",
+    "ELIXIR_LOG_WEBHOOK_URL": "has_elixir_log_webhook",
+}
+
+
+def _env_present(name: str) -> bool:
+    return bool((os.getenv(name) or "").strip())
+
+
+def missing_required_secrets() -> list[str]:
+    """Required env vars that are unset/blank, in declaration order.
+
+    Without this, a missing DISCORD_TOKEN or CLAUDE_API_KEY surfaces late and
+    obscurely — as a None token deep inside discord.py, or an auth error on the
+    first LLM call hours after boot.
+    """
+    return [name for name in REQUIRED_SECRETS if not _env_present(name)]
+
+
 def snapshot() -> dict:
     persisted_jobs = _load_persisted_job_status()
     with _LOCK:
@@ -319,10 +348,8 @@ def snapshot() -> dict:
         return {
             "started_at": STARTED_AT,
             "env": {
-                "has_discord_token": bool(os.getenv("DISCORD_TOKEN")),
-                "has_claude_api_key": bool(os.getenv("CLAUDE_API_KEY")),
-                "has_cr_api_key": bool(os.getenv("CR_API_KEY")),
-                "has_elixir_log_webhook": bool(os.getenv("ELIXIR_LOG_WEBHOOK_URL")),
+                _STATUS_ENV_KEYS[name]: _env_present(name)
+                for name in REQUIRED_SECRETS + OPTIONAL_ENV
             },
             "jobs": jobs,
             "api": copy.deepcopy(_API_STATUS),

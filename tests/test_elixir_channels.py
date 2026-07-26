@@ -4864,3 +4864,39 @@ def test_report_route_builders_exist_on_app():
 
     unknown = [route for route in specs if route not in ROUTE_KEYS]
     assert not unknown, f"report routes not in ROUTE_KEYS: {unknown}"
+
+
+def test_missing_required_secrets_detects_blank_and_unset(monkeypatch):
+    """Elixir refuses to boot when a required secret is unset or blank, naming
+    every missing one — instead of failing later inside discord.py / the first
+    LLM call."""
+    from runtime import status as runtime_status
+
+    for name in runtime_status.REQUIRED_SECRETS:
+        monkeypatch.setenv(name, "present")
+    assert runtime_status.missing_required_secrets() == []
+
+    monkeypatch.delenv("DISCORD_TOKEN", raising=False)
+    monkeypatch.setenv("CLAUDE_API_KEY", "   ")  # blank counts as missing
+    missing = runtime_status.missing_required_secrets()
+    assert "DISCORD_TOKEN" in missing and "CLAUDE_API_KEY" in missing
+    assert "CR_API_KEY" not in missing
+
+
+def test_status_snapshot_env_keys_are_stable(monkeypatch):
+    """The snapshot env keys are consumed by the status report badges, so the
+    key names must not drift when the env manifest changes."""
+    from runtime import status as runtime_status
+
+    monkeypatch.setenv("DISCORD_TOKEN", "x")
+    monkeypatch.setenv("CLAUDE_API_KEY", "x")
+    monkeypatch.delenv("CR_API_KEY", raising=False)
+    env = runtime_status.snapshot()["env"]
+    assert set(env) == {
+        "has_discord_token",
+        "has_claude_api_key",
+        "has_cr_api_key",
+        "has_elixir_log_webhook",
+    }
+    assert env["has_discord_token"] is True
+    assert env["has_cr_api_key"] is False

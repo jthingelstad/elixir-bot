@@ -1629,4 +1629,13 @@ PID_FILE = _process_service.PID_FILE
 
 
 def main():
+    # Fail fast and by name. A missing secret used to surface late and cryptically
+    # (a None token inside discord.py, or an auth error on the first LLM call);
+    # refusing to boot names every missing variable at once instead.
+    missing = runtime_status.missing_required_secrets()
+    if missing:
+        raise SystemExit(
+            "Elixir cannot start — missing required environment variable(s): "
+            f"{', '.join(missing)}. Set them in .env and retry."
+        )
     return _process_service.main(TOKEN, bot)
