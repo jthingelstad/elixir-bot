@@ -1396,21 +1396,37 @@ def _has_readable_user_request(ctx: dict) -> bool:
 
 
 def _normalize_open_channel_intent(ctx: dict, intent: dict) -> dict:
-    """Keep open bot lanes from silently dropping ordinary user questions."""
-    if (
-        ctx.get("workflow") == "interactive"
-        and ctx.get("allows_open_channel_reply")
-        and str(ctx.get("raw_question") or "").strip()
-        and intent.get("route") == "not_for_bot"
-    ):
-        normalized = dict(intent)
-        normalized["route"] = "llm_chat"
+    """Rescue messages the bot must not silently drop from a not_for_bot verdict.
+
+    Two cases fall back to llm_chat instead of staying silent:
+      - the bot was explicitly @-mentioned — an @-mention is unambiguously
+        addressed to the bot, so it must always engage, in any workflow
+        (including clanops/leader-lounge); and
+      - an open bot lane shouldn't drop an ordinary user question.
+    """
+    if intent.get("route") != "not_for_bot":
+        return intent
+    if not str(ctx.get("raw_question") or "").strip():
+        return intent
+
+    mentioned = bool(ctx.get("mentioned"))
+    open_channel = bool(
+        ctx.get("workflow") == "interactive" and ctx.get("allows_open_channel_reply")
+    )
+    if not (mentioned or open_channel):
+        return intent
+
+    normalized = dict(intent)
+    normalized["route"] = "llm_chat"
+    if mentioned:
+        normalized["fallback_reason"] = "mention_not_for_bot_override"
+        normalized["rationale"] = "Bot was explicitly @-mentioned; not_for_bot overridden to chat."
+    else:
         normalized["fallback_reason"] = "open_channel_not_for_bot_override"
         normalized["rationale"] = (
             "Open bot lane question classified not_for_bot; falling back to chat."
         )
-        return normalized
-    return intent
+    return normalized
 
 
 async def route_message(message):

@@ -974,6 +974,51 @@ TOOLS = [
         },
     },
     {
+        "name": "raise_clan_chat_relay",
+        "description": (
+            "Raise an in-game clan-chat relay card to #actions so a human leader can paste a "
+            "short note into the game's clan chat — the ONE surface that reaches every member, "
+            "not just the Discord subset. Use to acknowledge something members should see in "
+            "game: most importantly, confirming a leave of absence a leader just told you about "
+            "('X and Y are away for a week'). The workflow for an away/LOA notice is TWO steps — "
+            "first call flag_member_watch with away_until for EACH member (records the leave "
+            "hold that pauses their kick clock), THEN call this once to relay a warm "
+            "acknowledgement to clan chat. "
+            "Copy rules (enforced — invalid copy is rejected, not posted): <=200 characters, "
+            "plain text only (no markdown, links, or @mentions), and avoid the in-game chat "
+            "filter — write 'and' not '&', and never '+<number>'. Name the members and keep it "
+            "warm (e.g. 'Noted 1spaceO2 and pigsareus are on leave for the week — see you when "
+            "you're back!')."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "copy": {
+                    "type": "string",
+                    "description": (
+                        "The exact clan-chat message to relay: <=200 chars, plain text. Name "
+                        "the members. This is what a leader pastes into clan chat verbatim."
+                    ),
+                },
+                "reason": {
+                    "type": "string",
+                    "description": (
+                        "Short internal rationale for the card (why it's being relayed). Not "
+                        "shown in clan chat."
+                    ),
+                },
+                "member_tag": {
+                    "type": "string",
+                    "description": (
+                        "Optional player tag/name/handle when the relay is about one specific "
+                        "member (links the card to them)."
+                    ),
+                },
+            },
+            "required": ["copy"],
+        },
+    },
+    {
         "name": "record_leadership_followup",
         "description": (
             "Queue an operational suggestion for the leadership channel. Use when you detect a "
