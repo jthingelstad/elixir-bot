@@ -4841,3 +4841,26 @@ def test_mention_overrides_not_for_bot_to_llm_chat():
     out_open = _normalize_open_channel_intent(open_ctx, dict(base))
     assert out_open["route"] == "llm_chat"
     assert out_open["fallback_reason"] == "open_channel_not_for_bot_override"
+
+
+def test_report_route_builders_exist_on_app():
+    """The table-driven report routes resolve their builder by name via getattr,
+    so a renamed/removed builder would fail at RUNTIME (mid-conversation) rather
+    than at import. Pin every builder name to a real attribute on runtime.app."""
+    import runtime.app as app
+    from runtime.channel_router import _LOGGED_REPORT_ROUTES, _REPORT_ROUTES
+
+    specs = {**_REPORT_ROUTES, **_LOGGED_REPORT_ROUTES}
+    assert specs, "report route tables should not be empty"
+    missing = [
+        f"{route} -> app.{spec.builder}"
+        for route, spec in specs.items()
+        if not hasattr(app, spec.builder)
+    ]
+    assert not missing, f"report route builders missing on runtime.app: {missing}"
+
+    # Every route key must be a real route the intent router can emit.
+    from runtime.intent_registry import ROUTE_KEYS
+
+    unknown = [route for route in specs if route not in ROUTE_KEYS]
+    assert not unknown, f"report routes not in ROUTE_KEYS: {unknown}"
