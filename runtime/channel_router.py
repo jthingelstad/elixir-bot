@@ -1429,6 +1429,315 @@ def _normalize_open_channel_intent(ctx: dict, intent: dict) -> dict:
     return normalized
 
 
+async def _handle_reception_message(app, message, ctx, channel_config, scope) -> None:
+    """Reception lane: onboarding Q&A for the welcome channel.
+
+    Extracted verbatim from route_message (2026-07-26) — behavior unchanged.
+    """
+    raw_question = ctx["raw_question"]
+    async with message.channel.typing():
+        try:
+            clan = await asyncio.to_thread(cr_api.get_clan)
+            question = raw_question
+            memory_context = await asyncio.to_thread(
+                db.build_memory_context,
+                discord_user_id=message.author.id,
+                channel_id=message.channel.id,
+                viewer_scope=channel_config.get("memory_scope") or "public",
+            )
+            ch = app._channel_msg_kwargs(message.channel)
+            author = app._author_msg_kwargs(message.author)
+            _reception_user_msg_id = await asyncio.to_thread(
+                db.save_message,
+                scope,
+                "user",
+                question,
+                **ch,
+                **author,
+                workflow="reception",
+                discord_message_id=message.id,
+            )
+            result = await asyncio.to_thread(
+                elixir_agent.respond_in_reception,
+                question=question,
+                author_name=message.author.display_name,
+                clan_data=clan,
+                memory_context=memory_context,
+            )
+            failure = _classify_agent_result(result)
+            if failure:
+                failure_kind, agent_error = failure
+                failure_kwargs = {
+                    "question": question,
+                    "workflow": "reception",
+                    "failure_type": failure_kind,
+                    "failure_stage": "respond_in_reception",
+                    "channel": message.channel,
+                    "author": message.author,
+                    "discord_message_id": message.id,
+                }
+                if agent_error:
+                    failure_kwargs["detail"] = _agent_failure_detail(agent_error)
+                    failure_kwargs["result_preview"] = agent_error.get("result_preview")
+                    failure_kwargs["raw_json"] = agent_error.get("raw_json") or {
+                        "response_text": agent_error.get("response_text")
+                    }
+                elif failure_kind == "invalid_result_type":
+                    failure_kwargs["detail"] = type(result).__name__
+                    failure_kwargs["result_preview"] = app._preview_text(result)
+                app._log_prompt_failure(**failure_kwargs)
+                await app._safe_reply(message, "Having a hiccup. Try again in a sec.")
+                return
+            content = result.get("content", result.get("summary", ""))
+            if not content:
+                app._log_prompt_failure(
+                    question=question,
+                    workflow="reception",
+                    failure_type="empty_result",
+                    failure_stage="respond_in_reception",
+                    channel=message.channel,
+                    author=message.author,
+                    discord_message_id=message.id,
+                    result_preview=app._preview_text(result),
+                    raw_json=result,
+                )
+                await app._safe_reply(message, "Having a hiccup. Try again in a sec.")
+                return
+            sent_messages = await app._reply_text(message, content)
+            _reception_asst_msg_id = None
+            try:
+                _reception_asst_msg_id = await asyncio.to_thread(
+                    db.save_message,
+                    scope,
+                    "assistant",
+                    _stored_assistant_content(content),
+                    **ch,
+                    workflow="reception",
+                    event_type=result.get("event_type"),
+                    discord_message_id=_primary_discord_message_id(sent_messages),
+                )
+            except Exception as exc:
+                app.log.error("reception reply save error: %s", exc, exc_info=True)
+            app._safe_create_task(
+                _post_conversation_memory(
+                    _reception_user_msg_id,
+                    _reception_asst_msg_id,
+                    question,
+                    _stored_assistant_content(content),
+                    message.channel.id,
+                    message.author.id,
+                    "reception",
+                    message.author.display_name,
+                ),
+                name="reception_memory",
+            )
+        except Exception as e:
+            app.log.error("reception error: %s", e)
+            app._log_prompt_failure(
+                question=raw_question,
+                workflow="reception",
+                failure_type="exception",
+                failure_stage="on_message_reception",
+                channel=message.channel,
+                author=message.author,
+                discord_message_id=message.id,
+                detail=str(e),
+            )
+            await app._safe_reply(message, "Hit an error. Try again in a moment.")
+
+
+async def _handle_channel_llm_message(app, message, ctx, channel_config) -> None:
+    """Generic interactive/clanops LLM channel reply (the `llm_chat` path).
+
+    Extracted verbatim from route_message (2026-07-26) — behavior unchanged.
+    """
+    mentioned = ctx["mentioned"]
+    lane = ctx["lane"]
+    workflow = ctx["workflow"]
+    raw_question = ctx["raw_question"]
+    conversation_scope = ctx["conversation_scope"]
+    allows_open_channel_reply = ctx["allows_open_channel_reply"]
+    app.log.info(
+        "message_route route=channel_llm channel_id=%s author_id=%s mentioned=%s lane=%s workflow=%s proactive=%s raw_question=%r original=%r",
+        message.channel.id,
+        message.author.id,
+        mentioned,
+        lane,
+        workflow,
+        False,
+        raw_question,
+        message.content,
+    )
+    async with message.channel.typing():
+        try:
+            clan, war = await app._load_live_clan_context()
+            question = raw_question
+            # Reuse the history loaded for the intent router when present,
+            # otherwise fetch fresh (router path skipped for this workflow).
+            conversation_history = ctx.get("conversation_history")
+            if conversation_history is None:
+                conversation_history = await asyncio.to_thread(
+                    db.list_thread_messages,
+                    conversation_scope,
+                    app.CHANNEL_CONVERSATION_LIMIT,
+                )
+            memory_context = await asyncio.to_thread(
+                db.build_memory_context,
+                discord_user_id=message.author.id,
+                channel_id=message.channel.id,
+                viewer_scope=channel_config.get("memory_scope") or "public",
+            )
+
+            ch = app._channel_msg_kwargs(message.channel)
+            author = app._author_msg_kwargs(message.author)
+            _channel_user_msg_id = await asyncio.to_thread(
+                db.save_message,
+                conversation_scope,
+                "user",
+                question,
+                **ch,
+                **author,
+                workflow=workflow,
+                discord_message_id=message.id,
+            )
+
+            author_identity = None
+            try:
+                from storage.identity import get_linked_member_for_discord_user
+
+                author_identity = await asyncio.to_thread(
+                    get_linked_member_for_discord_user, message.author.id
+                )
+            except Exception:
+                app.log.debug("asker link lookup failed", exc_info=True)
+            result = await asyncio.to_thread(
+                elixir_agent.respond_in_channel,
+                question=question,
+                author_name=message.author.display_name,
+                channel_name=app._channel_reply_target_name(channel_config),
+                workflow=workflow,
+                clan_data=clan,
+                war_data=war,
+                conversation_history=conversation_history,
+                memory_context=memory_context,
+                image_blocks=ctx.get("image_blocks"),
+                author_identity=author_identity,
+            )
+            failure = _classify_agent_result(result)
+            if failure:
+                failure_kind, agent_error = failure
+                if failure_kind == "invalid_result_type":
+                    app.log.error(
+                        "%s channel error: invalid result type %s",
+                        workflow,
+                        type(result).__name__,
+                    )
+                failure_kwargs = {
+                    "question": raw_question,
+                    "workflow": workflow,
+                    "failure_type": failure_kind,
+                    "failure_stage": "respond_in_channel",
+                    "channel": message.channel,
+                    "author": message.author,
+                    "discord_message_id": message.id,
+                }
+                if agent_error:
+                    failure_kwargs["detail"] = _agent_failure_detail(agent_error)
+                    failure_kwargs["result_preview"] = agent_error.get("result_preview")
+                    failure_kwargs["raw_json"] = agent_error.get("raw_json") or {
+                        "response_text": agent_error.get("response_text")
+                    }
+                elif failure_kind == "invalid_result_type":
+                    failure_kwargs["detail"] = type(result).__name__
+                    failure_kwargs["result_preview"] = app._preview_text(result)
+                app._log_prompt_failure(**failure_kwargs)
+                if mentioned or allows_open_channel_reply:
+                    await app._safe_reply(
+                        message,
+                        app._fallback_channel_response(raw_question, workflow),
+                    )
+                return
+
+            inline_memories = result.pop("memories", None) or []
+            if inline_memories:
+                try:
+                    await asyncio.to_thread(
+                        _persist_inline_memories,
+                        inline_memories,
+                        message.channel.id,
+                        workflow,
+                    )
+                except Exception:
+                    _log.error("inline memory persistence failed", exc_info=True)
+            content = result.get("content", result.get("summary", ""))
+            if not content:
+                app.log.error("%s channel error: empty result payload %s", workflow, result)
+                app._log_prompt_failure(
+                    question=raw_question,
+                    workflow=workflow,
+                    failure_type="empty_result",
+                    failure_stage="respond_in_channel",
+                    channel=message.channel,
+                    author=message.author,
+                    discord_message_id=message.id,
+                    result_preview=app._preview_text(result),
+                    raw_json=result,
+                )
+                if mentioned or allows_open_channel_reply:
+                    await app._safe_reply(
+                        message,
+                        app._fallback_channel_response(raw_question, workflow),
+                    )
+                return
+            sent_messages = await app._reply_text(message, content)
+            try:
+                await app._share_channel_result(result, workflow)
+            except Exception as exc:
+                app.log.error("%s channel share error: %s", workflow, exc, exc_info=True)
+            _channel_asst_msg_id = None
+            try:
+                _channel_asst_msg_id = await asyncio.to_thread(
+                    db.save_message,
+                    conversation_scope,
+                    "assistant",
+                    _stored_assistant_content(content),
+                    **ch,
+                    **author,
+                    workflow=workflow,
+                    event_type=result.get("event_type"),
+                    discord_message_id=_primary_discord_message_id(sent_messages),
+                )
+            except Exception as exc:
+                app.log.error("%s channel reply save error: %s", workflow, exc, exc_info=True)
+            app._safe_create_task(
+                _post_conversation_memory(
+                    _channel_user_msg_id,
+                    _channel_asst_msg_id,
+                    question,
+                    _stored_assistant_content(content),
+                    message.channel.id,
+                    message.author.id,
+                    workflow,
+                    message.author.display_name,
+                ),
+                name=f"{workflow}_memory",
+            )
+        except Exception as e:
+            app.log.error("%s channel error: %s", workflow, e)
+            app._log_prompt_failure(
+                question=raw_question,
+                workflow=workflow,
+                failure_type="exception",
+                failure_stage="on_message_channel",
+                channel=message.channel,
+                author=message.author,
+                discord_message_id=message.id,
+                detail=str(e),
+            )
+            if mentioned:
+                await app._safe_reply(message, "Hit an error. Try again in a moment.")
+
+
 async def route_message(message):
     import runtime.app as app
     from agent import intent_router as _intent_router
@@ -1568,297 +1877,11 @@ async def route_message(message):
         return
 
     if lane == "reception" or workflow == "reception":
-        async with message.channel.typing():
-            try:
-                clan = await asyncio.to_thread(cr_api.get_clan)
-                question = raw_question
-                memory_context = await asyncio.to_thread(
-                    db.build_memory_context,
-                    discord_user_id=message.author.id,
-                    channel_id=message.channel.id,
-                    viewer_scope=channel_config.get("memory_scope") or "public",
-                )
-                ch = app._channel_msg_kwargs(message.channel)
-                author = app._author_msg_kwargs(message.author)
-                _reception_user_msg_id = await asyncio.to_thread(
-                    db.save_message,
-                    scope,
-                    "user",
-                    question,
-                    **ch,
-                    **author,
-                    workflow="reception",
-                    discord_message_id=message.id,
-                )
-                result = await asyncio.to_thread(
-                    elixir_agent.respond_in_reception,
-                    question=question,
-                    author_name=message.author.display_name,
-                    clan_data=clan,
-                    memory_context=memory_context,
-                )
-                failure = _classify_agent_result(result)
-                if failure:
-                    failure_kind, agent_error = failure
-                    failure_kwargs = {
-                        "question": question,
-                        "workflow": "reception",
-                        "failure_type": failure_kind,
-                        "failure_stage": "respond_in_reception",
-                        "channel": message.channel,
-                        "author": message.author,
-                        "discord_message_id": message.id,
-                    }
-                    if agent_error:
-                        failure_kwargs["detail"] = _agent_failure_detail(agent_error)
-                        failure_kwargs["result_preview"] = agent_error.get("result_preview")
-                        failure_kwargs["raw_json"] = agent_error.get("raw_json") or {
-                            "response_text": agent_error.get("response_text")
-                        }
-                    elif failure_kind == "invalid_result_type":
-                        failure_kwargs["detail"] = type(result).__name__
-                        failure_kwargs["result_preview"] = app._preview_text(result)
-                    app._log_prompt_failure(**failure_kwargs)
-                    await app._safe_reply(message, "Having a hiccup. Try again in a sec.")
-                    return
-                content = result.get("content", result.get("summary", ""))
-                if not content:
-                    app._log_prompt_failure(
-                        question=question,
-                        workflow="reception",
-                        failure_type="empty_result",
-                        failure_stage="respond_in_reception",
-                        channel=message.channel,
-                        author=message.author,
-                        discord_message_id=message.id,
-                        result_preview=app._preview_text(result),
-                        raw_json=result,
-                    )
-                    await app._safe_reply(message, "Having a hiccup. Try again in a sec.")
-                    return
-                sent_messages = await app._reply_text(message, content)
-                _reception_asst_msg_id = None
-                try:
-                    _reception_asst_msg_id = await asyncio.to_thread(
-                        db.save_message,
-                        scope,
-                        "assistant",
-                        _stored_assistant_content(content),
-                        **ch,
-                        workflow="reception",
-                        event_type=result.get("event_type"),
-                        discord_message_id=_primary_discord_message_id(sent_messages),
-                    )
-                except Exception as exc:
-                    app.log.error("reception reply save error: %s", exc, exc_info=True)
-                app._safe_create_task(
-                    _post_conversation_memory(
-                        _reception_user_msg_id,
-                        _reception_asst_msg_id,
-                        question,
-                        _stored_assistant_content(content),
-                        message.channel.id,
-                        message.author.id,
-                        "reception",
-                        message.author.display_name,
-                    ),
-                    name="reception_memory",
-                )
-            except Exception as e:
-                app.log.error("reception error: %s", e)
-                app._log_prompt_failure(
-                    question=raw_question,
-                    workflow="reception",
-                    failure_type="exception",
-                    failure_stage="on_message_reception",
-                    channel=message.channel,
-                    author=message.author,
-                    discord_message_id=message.id,
-                    detail=str(e),
-                )
-                await app._safe_reply(message, "Hit an error. Try again in a moment.")
+        await _handle_reception_message(app, message, ctx, channel_config, scope)
         return
 
     if workflow in {"interactive", "clanops"}:
-        app.log.info(
-            "message_route route=channel_llm channel_id=%s author_id=%s mentioned=%s lane=%s workflow=%s proactive=%s raw_question=%r original=%r",
-            message.channel.id,
-            message.author.id,
-            mentioned,
-            lane,
-            workflow,
-            False,
-            raw_question,
-            message.content,
-        )
-        async with message.channel.typing():
-            try:
-                clan, war = await app._load_live_clan_context()
-                question = raw_question
-                # Reuse the history loaded for the intent router when present,
-                # otherwise fetch fresh (router path skipped for this workflow).
-                conversation_history = ctx.get("conversation_history")
-                if conversation_history is None:
-                    conversation_history = await asyncio.to_thread(
-                        db.list_thread_messages,
-                        conversation_scope,
-                        app.CHANNEL_CONVERSATION_LIMIT,
-                    )
-                memory_context = await asyncio.to_thread(
-                    db.build_memory_context,
-                    discord_user_id=message.author.id,
-                    channel_id=message.channel.id,
-                    viewer_scope=channel_config.get("memory_scope") or "public",
-                )
-
-                ch = app._channel_msg_kwargs(message.channel)
-                author = app._author_msg_kwargs(message.author)
-                _channel_user_msg_id = await asyncio.to_thread(
-                    db.save_message,
-                    conversation_scope,
-                    "user",
-                    question,
-                    **ch,
-                    **author,
-                    workflow=workflow,
-                    discord_message_id=message.id,
-                )
-
-                author_identity = None
-                try:
-                    from storage.identity import get_linked_member_for_discord_user
-
-                    author_identity = await asyncio.to_thread(
-                        get_linked_member_for_discord_user, message.author.id
-                    )
-                except Exception:
-                    app.log.debug("asker link lookup failed", exc_info=True)
-                result = await asyncio.to_thread(
-                    elixir_agent.respond_in_channel,
-                    question=question,
-                    author_name=message.author.display_name,
-                    channel_name=app._channel_reply_target_name(channel_config),
-                    workflow=workflow,
-                    clan_data=clan,
-                    war_data=war,
-                    conversation_history=conversation_history,
-                    memory_context=memory_context,
-                    image_blocks=ctx.get("image_blocks"),
-                    author_identity=author_identity,
-                )
-                failure = _classify_agent_result(result)
-                if failure:
-                    failure_kind, agent_error = failure
-                    if failure_kind == "invalid_result_type":
-                        app.log.error(
-                            "%s channel error: invalid result type %s",
-                            workflow,
-                            type(result).__name__,
-                        )
-                    failure_kwargs = {
-                        "question": raw_question,
-                        "workflow": workflow,
-                        "failure_type": failure_kind,
-                        "failure_stage": "respond_in_channel",
-                        "channel": message.channel,
-                        "author": message.author,
-                        "discord_message_id": message.id,
-                    }
-                    if agent_error:
-                        failure_kwargs["detail"] = _agent_failure_detail(agent_error)
-                        failure_kwargs["result_preview"] = agent_error.get("result_preview")
-                        failure_kwargs["raw_json"] = agent_error.get("raw_json") or {
-                            "response_text": agent_error.get("response_text")
-                        }
-                    elif failure_kind == "invalid_result_type":
-                        failure_kwargs["detail"] = type(result).__name__
-                        failure_kwargs["result_preview"] = app._preview_text(result)
-                    app._log_prompt_failure(**failure_kwargs)
-                    if mentioned or allows_open_channel_reply:
-                        await app._safe_reply(
-                            message,
-                            app._fallback_channel_response(raw_question, workflow),
-                        )
-                    return
-
-                inline_memories = result.pop("memories", None) or []
-                if inline_memories:
-                    try:
-                        await asyncio.to_thread(
-                            _persist_inline_memories,
-                            inline_memories,
-                            message.channel.id,
-                            workflow,
-                        )
-                    except Exception:
-                        _log.error("inline memory persistence failed", exc_info=True)
-                content = result.get("content", result.get("summary", ""))
-                if not content:
-                    app.log.error("%s channel error: empty result payload %s", workflow, result)
-                    app._log_prompt_failure(
-                        question=raw_question,
-                        workflow=workflow,
-                        failure_type="empty_result",
-                        failure_stage="respond_in_channel",
-                        channel=message.channel,
-                        author=message.author,
-                        discord_message_id=message.id,
-                        result_preview=app._preview_text(result),
-                        raw_json=result,
-                    )
-                    if mentioned or allows_open_channel_reply:
-                        await app._safe_reply(
-                            message,
-                            app._fallback_channel_response(raw_question, workflow),
-                        )
-                    return
-                sent_messages = await app._reply_text(message, content)
-                try:
-                    await app._share_channel_result(result, workflow)
-                except Exception as exc:
-                    app.log.error("%s channel share error: %s", workflow, exc, exc_info=True)
-                _channel_asst_msg_id = None
-                try:
-                    _channel_asst_msg_id = await asyncio.to_thread(
-                        db.save_message,
-                        conversation_scope,
-                        "assistant",
-                        _stored_assistant_content(content),
-                        **ch,
-                        **author,
-                        workflow=workflow,
-                        event_type=result.get("event_type"),
-                        discord_message_id=_primary_discord_message_id(sent_messages),
-                    )
-                except Exception as exc:
-                    app.log.error("%s channel reply save error: %s", workflow, exc, exc_info=True)
-                app._safe_create_task(
-                    _post_conversation_memory(
-                        _channel_user_msg_id,
-                        _channel_asst_msg_id,
-                        question,
-                        _stored_assistant_content(content),
-                        message.channel.id,
-                        message.author.id,
-                        workflow,
-                        message.author.display_name,
-                    ),
-                    name=f"{workflow}_memory",
-                )
-            except Exception as e:
-                app.log.error("%s channel error: %s", workflow, e)
-                app._log_prompt_failure(
-                    question=raw_question,
-                    workflow=workflow,
-                    failure_type="exception",
-                    failure_stage="on_message_channel",
-                    channel=message.channel,
-                    author=message.author,
-                    discord_message_id=message.id,
-                    detail=str(e),
-                )
-                if mentioned:
-                    await app._safe_reply(message, "Hit an error. Try again in a moment.")
+        await _handle_channel_llm_message(app, message, ctx, channel_config)
         return
 
     await app.bot.process_commands(message)
