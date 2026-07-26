@@ -238,16 +238,17 @@ ROUTES: list[dict] = [
         "key": "not_for_bot",
         "label": "Not addressed to the bot",
         "router_description": (
-            "Message is conversation between humans, not directed at Elixir. "
-            "Pick this when there's no question, no command, no mention, and "
-            "nothing the bot should respond to."
+            "Ambient conversation between humans, not directed at Elixir. Valid "
+            "ONLY when the bot was NOT mentioned — an @-mention always means the "
+            "message is for the bot, so never pick this if the bot was mentioned. "
+            "Pick this for un-mentioned chatter with no question, command, or request."
         ),
         "help_summary": "",  # not shown in help
         "examples": [
             "lol",
             "thanks!",
             "yeah I agree",
-            "see you tomorrow",
+            "see you tomorrow (no @Elixir mention)",
         ],
         "workflows": {"interactive", "clanops"},
         "requires_mention": False,
