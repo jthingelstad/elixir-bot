@@ -446,12 +446,6 @@ def archive_memory(
     return update_memory(memory_id, actor=actor, status="archived", conn=conn)
 
 
-def soft_delete_memory(
-    memory_id: int, *, actor: str, conn: Optional[sqlite3.Connection] = None
-) -> dict:
-    return update_memory(memory_id, actor=actor, status="deleted", conn=conn)
-
-
 @managed_memory_connection
 def purge_expired_memories(*, conn=None) -> int:
     """Real expiry (memory.md §2.4): hard-delete rows past expires_at, and
@@ -769,7 +763,6 @@ __all__ = [
     "create_memory",
     "update_memory",
     "archive_memory",
-    "soft_delete_memory",
     "attach_tags",
     "attach_evidence_ref",
     "get_memory",

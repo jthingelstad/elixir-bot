@@ -138,97 +138,6 @@ def upsert_weekly_summary_memory(
     )
 
 
-def upsert_war_recap_memory(
-    *,
-    signals: list[dict],
-    body: str,
-    channel_id: int | str | None = None,
-    workflow: str = "observation",
-    created_by: str = "elixir:observation",
-    conn=None,
-) -> dict | None:
-    signals = signals or []
-    text = (body or "").strip()
-    if not text:
-        return None
-
-    by_type = {signal.get("type"): signal for signal in signals if signal.get("type")}
-    metadata = {"workflow": workflow}
-    if channel_id is not None:
-        metadata["channel_id"] = str(channel_id)
-
-    if "war_season_complete" in by_type:
-        signal = by_type["war_season_complete"]
-        season_id = signal.get("season_id")
-        if season_id is None:
-            return None
-        return upsert_summary_memory(
-            event_type="war_season_recap",
-            event_id=str(season_id),
-            title=f"War Season {season_id} Recap",
-            body=text,
-            scope="public",
-            created_by=created_by,
-            tags=["war", "season-recap", f"season-{season_id}"],
-            metadata=metadata,
-            war_season_id=str(season_id),
-            conn=conn,
-        )
-
-    if "war_week_complete" in by_type or "war_completed" in by_type:
-        signal = by_type.get("war_week_complete") or by_type.get("war_completed") or {}
-        season_id = signal.get("season_id")
-        week = signal.get("week")
-        if week is None and signal.get("section_index") is not None:
-            week = int(signal["section_index"]) + 1
-        if season_id is None or week is None:
-            return None
-        week_token = f"{season_id}:{week}"
-        return upsert_summary_memory(
-            event_type="war_week_recap",
-            event_id=week_token,
-            title=f"War Season {season_id} Week {week} Recap",
-            body=text,
-            scope="public",
-            created_by=created_by,
-            tags=["war", "week-recap", f"season-{season_id}", f"week-{week}"],
-            metadata=metadata,
-            war_season_id=str(season_id),
-            war_week_id=week_token,
-            conn=conn,
-        )
-
-    if "war_battle_day_complete" in by_type:
-        signal = by_type["war_battle_day_complete"]
-        season_id = signal.get("season_id")
-        week = signal.get("week")
-        day_number = signal.get("day_number")
-        if season_id is None or week is None or day_number is None:
-            return None
-        event_id = f"{season_id}:{week}:{day_number}"
-        return upsert_summary_memory(
-            event_type="war_battle_day_recap",
-            event_id=event_id,
-            title=f"War Season {season_id} Week {week} Battle Day {day_number} Recap",
-            body=text,
-            scope="public",
-            created_by=created_by,
-            tags=[
-                "war",
-                "battle-day-recap",
-                f"season-{season_id}",
-                f"week-{week}",
-                f"day-{day_number}",
-            ],
-            metadata=metadata,
-            war_season_id=str(season_id),
-            war_week_id=f"{season_id}:{week}",
-            conn=conn,
-        )
-
-    return None
-
-
 def upsert_member_note_memory(
     *,
     member_tag: str,
@@ -457,5 +366,4 @@ __all__ = [
     "upsert_release_memory",
     "upsert_summary_memory",
     "upsert_weekly_summary_memory",
-    "upsert_war_recap_memory",
 ]

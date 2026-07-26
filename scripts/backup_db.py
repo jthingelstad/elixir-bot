@@ -179,7 +179,9 @@ def create_backup(
 
             record_incident("backup.create", exc, context={"dest": str(dest)})
         except Exception:
-            pass
+            # Best-effort: the real failure is already in result["error"], but a
+            # broken incident ledger shouldn't itself vanish without a trace.
+            log.warning("backup incident recording failed", exc_info=True)
         # Clean up partial output on failure.
         try:
             dest.unlink(missing_ok=True)
