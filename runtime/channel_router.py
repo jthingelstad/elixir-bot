@@ -8,6 +8,7 @@ import io
 import logging
 import mimetypes
 from datetime import timezone
+from typing import NamedTuple
 
 import discord
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -1139,6 +1140,187 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
     return True
 
 
+class _ReportRouteSpec(NamedTuple):
+    """One canned-report route: who may ask, what builds it, what it's logged as."""
+
+    workflows: frozenset  # workflows allowed to use this route
+    builder: str  # attribute name on runtime.app that builds the content
+    event: str  # event/report name used for logging and storage
+
+
+# Routes that just build a report and post it. Builder names are spelled out
+# (not derived from `route`) so they stay greppable from the call site.
+_REPORT_ROUTES = {
+    "roster_join_dates": _ReportRouteSpec(
+        frozenset({"clanops", "interactive"}),
+        "_build_roster_join_dates_report",
+        "roster_join_dates_report",
+    ),
+    "kick_risk": _ReportRouteSpec(
+        frozenset({"clanops"}), "_build_kick_risk_report", "kick_risk_report"
+    ),
+    "top_war_contributors": _ReportRouteSpec(
+        frozenset({"clanops"}),
+        "_build_top_war_contributors_report",
+        "top_war_contributors_report",
+    ),
+}
+
+# Same, but these also emit a route log line and save the reply to the thread.
+_LOGGED_REPORT_ROUTES = {
+    "status_report": _ReportRouteSpec(
+        frozenset({"clanops"}), "_build_status_report", "status_report"
+    ),
+    "schedule_report": _ReportRouteSpec(
+        frozenset({"clanops"}), "_build_schedule_report", "schedule_report"
+    ),
+}
+
+
+async def _route_help(app, message, ctx) -> bool:
+    """`help` route handler. Extracted verbatim from _dispatch_intent
+    (2026-07-26) — behavior unchanged.
+    """
+    workflow = ctx["workflow"]
+    role = "clanops" if workflow == "clanops" else "interactive"
+    event = "clanops_help" if role == "clanops" else "interactive_help"
+    _log_route(
+        app,
+        event,
+        message,
+        ctx["mentioned"],
+        ctx["lane"],
+        workflow,
+        ctx["raw_question"],
+    )
+    channel_config = app._get_channel_behavior(message.channel.id) or {}
+    memory_context = await asyncio.to_thread(
+        db.build_memory_context,
+        discord_user_id=message.author.id,
+        channel_id=message.channel.id,
+        viewer_scope=channel_config.get("memory_scope") or "public",
+        query=ctx.get("raw_question"),
+    )
+    result = await asyncio.to_thread(
+        elixir_agent.respond_to_help_request,
+        ctx["raw_question"],
+        author_name=message.author.display_name,
+        channel_name=app._channel_reply_target_name(channel_config),
+        role=role,
+        memory_context=memory_context,
+    )
+    content = (result or {}).get("content")
+    if not content:
+        # LLM call failed or returned empty — fall back to the static report
+        # so the user always gets a useful answer.
+        app.log.warning("help_llm_empty: falling back to static help report")
+        content = await asyncio.to_thread(app._build_help_report, role)
+    await _save_reply_save(
+        app,
+        message,
+        ctx["conversation_scope"],
+        ctx["raw_question"],
+        content,
+        workflow,
+        event,
+    )
+    return True
+
+
+async def _route_clan_status(app, message, ctx, intent) -> bool:
+    """`clan_status` route handler. Extracted verbatim from _dispatch_intent
+    (2026-07-26) — behavior unchanged.
+    """
+    workflow = ctx["workflow"]
+    if workflow != "clanops":
+        return False
+    mode = intent.get("mode") or "full"
+    try:
+        clan, war = await app._load_live_clan_context()
+    except Exception as exc:
+        app.log.warning("Clan status refresh failed: %s", exc)
+        clan, war = {}, {}
+    if mode == "short":
+        route_name = "clan_status_short_report"
+        content = await asyncio.to_thread(app._build_clan_status_short_report, clan, war)
+    else:
+        route_name = "clan_status_report"
+        content = await asyncio.to_thread(app._build_clan_status_report, clan, war)
+    _log_route(
+        app,
+        route_name,
+        message,
+        ctx["mentioned"],
+        ctx["lane"],
+        workflow,
+        ctx["raw_question"],
+    )
+    await _save_reply_save(
+        app,
+        message,
+        ctx["conversation_scope"],
+        ctx["raw_question"],
+        content,
+        "clanops",
+        route_name,
+    )
+    return True
+
+
+async def _route_deck_display(app, message, ctx, intent) -> bool:
+    """`deck_display` route handler. Extracted verbatim from _dispatch_intent
+    (2026-07-26) — behavior unchanged.
+    """
+    workflow = ctx["workflow"]
+    if workflow not in {"clanops", "interactive"}:
+        return False
+    deck_target = await asyncio.to_thread(
+        app._extract_member_deck_target, ctx["raw_question"], message
+    )
+    if not deck_target:
+        # Router thought this was a deck display but we couldn't resolve a member.
+        # Fall through to llm_chat so the model can ask a clarifying question.
+        return False
+    mode = intent.get("mode") or "regular"
+    if mode == "war":
+        _log_route(
+            app,
+            "member_war_decks_report",
+            message,
+            ctx["mentioned"],
+            ctx["lane"],
+            workflow,
+            ctx["raw_question"],
+            deck_target=deck_target,
+            mode="war",
+        )
+        content = await asyncio.to_thread(app._build_member_war_decks_report, deck_target)
+        event_type = "member_war_decks_report"
+    else:
+        _log_route(
+            app,
+            "member_deck_report",
+            message,
+            ctx["mentioned"],
+            ctx["lane"],
+            workflow,
+            ctx["raw_question"],
+            deck_target=deck_target,
+        )
+        content = await asyncio.to_thread(app._build_member_deck_report, deck_target)
+        event_type = "member_deck_report"
+    await _save_reply_save(
+        app,
+        message,
+        ctx["conversation_scope"],
+        ctx["raw_question"],
+        content,
+        workflow,
+        event_type,
+    )
+    return True
+
+
 async def _dispatch_intent(app, message, ctx, intent) -> bool:
     """Dispatch a classified intent to its handler.
 
@@ -1154,84 +1336,32 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
         return True
 
     if route == "help":
-        role = "clanops" if workflow == "clanops" else "interactive"
-        event = "clanops_help" if role == "clanops" else "interactive_help"
+        return await _route_help(app, message, ctx)
+
+    # Table-driven report routes: these differed only in allowed workflows, the
+    # builder to call, and the event name — five copies of two shapes.
+    spec = _REPORT_ROUTES.get(route)
+    if spec:
+        if workflow not in spec.workflows:
+            return False
+        content = await asyncio.to_thread(getattr(app, spec.builder))
+        await _handle_report_route(app, message, ctx, spec.event, content)
+        return True
+
+    spec = _LOGGED_REPORT_ROUTES.get(route)
+    if spec:
+        if workflow not in spec.workflows:
+            return False
         _log_route(
             app,
-            event,
+            spec.event,
             message,
             ctx["mentioned"],
             ctx["lane"],
             workflow,
             ctx["raw_question"],
         )
-        channel_config = app._get_channel_behavior(message.channel.id) or {}
-        memory_context = await asyncio.to_thread(
-            db.build_memory_context,
-            discord_user_id=message.author.id,
-            channel_id=message.channel.id,
-            viewer_scope=channel_config.get("memory_scope") or "public",
-            query=ctx.get("raw_question"),
-        )
-        result = await asyncio.to_thread(
-            elixir_agent.respond_to_help_request,
-            ctx["raw_question"],
-            author_name=message.author.display_name,
-            channel_name=app._channel_reply_target_name(channel_config),
-            role=role,
-            memory_context=memory_context,
-        )
-        content = (result or {}).get("content")
-        if not content:
-            # LLM call failed or returned empty — fall back to the static report
-            # so the user always gets a useful answer.
-            app.log.warning("help_llm_empty: falling back to static help report")
-            content = await asyncio.to_thread(app._build_help_report, role)
-        await _save_reply_save(
-            app,
-            message,
-            ctx["conversation_scope"],
-            ctx["raw_question"],
-            content,
-            workflow,
-            event,
-        )
-        return True
-
-    if route == "roster_join_dates":
-        if workflow not in {"clanops", "interactive"}:
-            return False
-        content = await asyncio.to_thread(app._build_roster_join_dates_report)
-        await _handle_report_route(app, message, ctx, "roster_join_dates_report", content)
-        return True
-
-    if route == "kick_risk":
-        if workflow != "clanops":
-            return False
-        content = await asyncio.to_thread(app._build_kick_risk_report)
-        await _handle_report_route(app, message, ctx, "kick_risk_report", content)
-        return True
-
-    if route == "top_war_contributors":
-        if workflow != "clanops":
-            return False
-        content = await asyncio.to_thread(app._build_top_war_contributors_report)
-        await _handle_report_route(app, message, ctx, "top_war_contributors_report", content)
-        return True
-
-    if route == "status_report":
-        if workflow != "clanops":
-            return False
-        _log_route(
-            app,
-            "status_report",
-            message,
-            ctx["mentioned"],
-            ctx["lane"],
-            workflow,
-            ctx["raw_question"],
-        )
-        content = await asyncio.to_thread(app._build_status_report)
+        content = await asyncio.to_thread(getattr(app, spec.builder))
         await _save_reply_save(
             app,
             message,
@@ -1239,117 +1369,15 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
             ctx["raw_question"],
             content,
             "clanops",
-            "status_report",
-        )
-        return True
-
-    if route == "schedule_report":
-        if workflow != "clanops":
-            return False
-        _log_route(
-            app,
-            "schedule_report",
-            message,
-            ctx["mentioned"],
-            ctx["lane"],
-            workflow,
-            ctx["raw_question"],
-        )
-        content = await asyncio.to_thread(app._build_schedule_report)
-        await _save_reply_save(
-            app,
-            message,
-            ctx["conversation_scope"],
-            ctx["raw_question"],
-            content,
-            "clanops",
-            "schedule_report",
+            spec.event,
         )
         return True
 
     if route == "clan_status":
-        if workflow != "clanops":
-            return False
-        mode = intent.get("mode") or "full"
-        try:
-            clan, war = await app._load_live_clan_context()
-        except Exception as exc:
-            app.log.warning("Clan status refresh failed: %s", exc)
-            clan, war = {}, {}
-        if mode == "short":
-            route_name = "clan_status_short_report"
-            content = await asyncio.to_thread(app._build_clan_status_short_report, clan, war)
-        else:
-            route_name = "clan_status_report"
-            content = await asyncio.to_thread(app._build_clan_status_report, clan, war)
-        _log_route(
-            app,
-            route_name,
-            message,
-            ctx["mentioned"],
-            ctx["lane"],
-            workflow,
-            ctx["raw_question"],
-        )
-        await _save_reply_save(
-            app,
-            message,
-            ctx["conversation_scope"],
-            ctx["raw_question"],
-            content,
-            "clanops",
-            route_name,
-        )
-        return True
+        return await _route_clan_status(app, message, ctx, intent)
 
     if route == "deck_display":
-        if workflow not in {"clanops", "interactive"}:
-            return False
-        deck_target = await asyncio.to_thread(
-            app._extract_member_deck_target, ctx["raw_question"], message
-        )
-        if not deck_target:
-            # Router thought this was a deck display but we couldn't resolve a member.
-            # Fall through to llm_chat so the model can ask a clarifying question.
-            return False
-        mode = intent.get("mode") or "regular"
-        if mode == "war":
-            _log_route(
-                app,
-                "member_war_decks_report",
-                message,
-                ctx["mentioned"],
-                ctx["lane"],
-                workflow,
-                ctx["raw_question"],
-                deck_target=deck_target,
-                mode="war",
-            )
-            content = await asyncio.to_thread(app._build_member_war_decks_report, deck_target)
-            event_type = "member_war_decks_report"
-        else:
-            _log_route(
-                app,
-                "member_deck_report",
-                message,
-                ctx["mentioned"],
-                ctx["lane"],
-                workflow,
-                ctx["raw_question"],
-                deck_target=deck_target,
-            )
-            content = await asyncio.to_thread(app._build_member_deck_report, deck_target)
-            event_type = "member_deck_report"
-        await _save_reply_save(
-            app,
-            message,
-            ctx["conversation_scope"],
-            ctx["raw_question"],
-            content,
-            workflow,
-            event_type,
-        )
-        return True
+        return await _route_deck_display(app, message, ctx, intent)
 
     if route in {"deck_review", "deck_suggest"}:
         if workflow not in {"clanops", "interactive"}:
