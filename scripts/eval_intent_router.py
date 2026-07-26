@@ -220,16 +220,82 @@ def report(rows: list[dict], round_num: int) -> dict:
     }
 
 
+# Deterministic invariants the router must always satisfy (run cheaply with
+# --golden; each is one live classify_intent call). Unlike the generative rounds
+# above, these are fixed cases with an explicit expectation, so they double as a
+# regression guard.
+GOLDEN_CASES = [
+    {
+        "message": "1spaceO2 and pigsareus are away for a week. They let us know. Don't consider them inactive during that time.",
+        "workflow": "clanops",
+        "mentioned": True,
+        "forbidden": {"not_for_bot"},
+        "note": "LOA note WITH an @-mention must engage, not be dropped (2026-07-26 regression)",
+    },
+    {
+        "message": "who has the most donations this week?",
+        "workflow": "clanops",
+        "mentioned": True,
+        "forbidden": {"not_for_bot"},
+        "note": "any @-mentioned question must never route to not_for_bot",
+    },
+    {
+        "message": "lol yeah see you tomorrow",
+        "workflow": "interactive",
+        "mentioned": False,
+        "allowed": {"not_for_bot", "llm_chat"},
+        "note": "un-mentioned ambient chatter may still be not_for_bot",
+    },
+]
+
+
+def run_golden() -> int:
+    """Run the fixed invariant cases. Returns the number of failures."""
+    print("\n" + "=" * 70)
+    print("GOLDEN CASES (deterministic invariants)")
+    print("=" * 70)
+    failures = 0
+    for c in GOLDEN_CASES:
+        intent = classify_intent(
+            c["message"],
+            workflow=c["workflow"],
+            mentioned=c["mentioned"],
+            allows_open_channel_reply=False,
+        )
+        route = intent.get("route")
+        ok = True
+        if "forbidden" in c and route in c["forbidden"]:
+            ok = False
+        if "allowed" in c and route not in c["allowed"]:
+            ok = False
+        failures += 0 if ok else 1
+        print(
+            f"  [{'PASS' if ok else 'FAIL'}] mentioned={c['mentioned']} route={route} — {c['note']}"
+        )
+        if not ok:
+            print(f"         q={c['message']!r}  rationale={intent.get('rationale')!r}")
+    print(f"\nGolden: {len(GOLDEN_CASES) - failures}/{len(GOLDEN_CASES)} passed")
+    return failures
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rounds", type=int, default=2)
     parser.add_argument("--per-round", type=int, default=5, help="questions per category per round")
     parser.add_argument("--out", default="scripts/intent_router_eval_results.json")
+    parser.add_argument(
+        "--golden",
+        action="store_true",
+        help="run only the deterministic golden invariant cases (cheap) and exit",
+    )
     args = parser.parse_args()
 
     if not os.getenv("CLAUDE_API_KEY"):
         print("ERROR: CLAUDE_API_KEY not set in env (and not in loaded .env)")
         sys.exit(1)
+
+    if args.golden:
+        sys.exit(1 if run_golden() else 0)
 
     all_rows = []
     summaries = []
