@@ -570,7 +570,18 @@ def _elder_band(conn, scores: dict, now: str) -> dict:
     demote_reasons = {t: "abandoned" for t in abandoned}
     promotable: set[str] = set()
     demotable: set[str] = set(abandoned)
-    prom_by_rank = sorted(want_promote, key=lambda t: rank[t])
+    # Pair ACROSS the K line, starting at the boundary and working outward: the
+    # weakest challenger (just above the line) against the strongest outranked
+    # elder (just below it). That is the closest contest, so the deadband lands
+    # where a near-tie actually happens.
+    #
+    # Both lists used to be sorted the same way, which paired the STRONGEST
+    # challenger with the STRONGEST elder — the widest gap, the easiest swap — so
+    # SWAP_MARGIN was tested against a contest that was never close and the seat
+    # nearest the line got taken on a hair's lead. Live: Sandeep beat Tere by
+    # 0.020, well inside the 0.05 deadband, yet Tere was carded for demotion
+    # because the code matched her against pax (+0.100) instead.
+    prom_by_rank = sorted(want_promote, key=lambda t: -rank[t])
     out_by_rank = sorted(outranked, key=lambda t: rank[t])
     paired = min(len(prom_by_rank), len(out_by_rank))
     for i in range(paired):
