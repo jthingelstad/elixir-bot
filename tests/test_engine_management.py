@@ -1274,3 +1274,33 @@ def test_swap_deadband_is_tested_at_the_boundary_not_the_extremes(engine_conn):
                 f"{management.SWAP_MARGIN} deadband"
             )
             assert "#MBOUND" not in band["promotable"]
+
+
+def test_slack_tracks_roster_not_evidence_freshness(engine_conn):
+    """Open-slot slack is a property of the CLAN (how many seats are free), not
+    of how many members happened to have fresh evidence this tick.
+
+    The readiness filter reassigns `members` to just the ready ones. Measuring
+    slack after that made one member's kick grace swing on OTHER members'
+    ingestion lag: hold enough of the roster and the clan looks near-empty, so
+    everyone still being judged silently earns extra runway before a card.
+    """
+    # 45-member roster → 5 open slots → slack 0.1 → grace round(4*0.1) = 0.
+    # #A is grace-eligible (war deck) and idle 10 days: threshold 5+3+0 = 8.
+    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=10)
+    _add_war_deck(engine_conn, "#A")
+    for i in range(44):
+        _seed_member(engine_conn, tag=f"#F{i}", trophies=5000, last_battle_days_ago=0)
+
+    # ...but hold all 44 others, leaving #A the only 'ready' member. Pre-fix
+    # that read as a 1-member clan (slack 0.98 → +4 days → threshold 12 → the
+    # card would be suppressed at 10 days idle).
+    readiness = {
+        "members": {
+            f"#F{i}": {"status": "held", "reasons": ["freshness_unknown"]} for i in range(44)
+        }
+    }
+    readiness["members"]["#A"] = {"status": "ready", "reasons": []}
+
+    management.run_tick_evaluators(engine_conn, now=NOW, readiness=readiness)
+    assert _kick_state(engine_conn) == "recommended"
