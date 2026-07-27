@@ -31,7 +31,12 @@ JMAP_SESSION_URL = os.getenv("FASTMAIL_JMAP_SESSION_URL", "https://api.fastmail.
 EMAIL_ADDRESS = os.getenv("ELIXIR_EMAIL_ADDRESS", "elixir@poapkings.com")
 EMAIL_FROM_NAME = os.getenv("ELIXIR_EMAIL_FROM_NAME", "Elixir")
 SENT_PARENT = os.getenv("ELIXIR_EMAIL_SENT_PARENT", "Sent")
-SENT_FOLDER = os.getenv("ELIXIR_EMAIL_SENT_FOLDER", "Elixir")
+# The shared mailbox uses a per-agent "<Agent>-Sent" scheme (Elixir-Sent,
+# Oliver-Sent, Otto-Sent, Thingy-Sent). Elixir was missed when the folders were
+# renamed — Oliver's defaults were aligned but these were left as "Elixir", so
+# every send raised JMAPError("Could not find mailbox Sent/Elixir") and the
+# weekly clan recap + member report emails silently stopped going out.
+SENT_FOLDER = os.getenv("ELIXIR_EMAIL_SENT_FOLDER", "Elixir-Sent")
 HTML_ENABLED = os.getenv("ELIXIR_EMAIL_HTML_ENABLED", "1") != "0"
 
 
