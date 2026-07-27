@@ -97,7 +97,10 @@ def test_sustained_donor_is_roster_median_relative():
             "last_seen_at, is_home) VALUES ('#J2RGCRVG','POAP KINGS','2026-02-04',?,1)",
             (NOW,),
         )
-        # Roster donations for the closed Sunday: 0, 100, 200, 300, 400 → median 200.
+        # Roster donations for the closed donation-week: 0, 100, 200, 300, 400 →
+        # median 200. Seeded on SATURDAY, the week's peak — the CR counter resets
+        # on Sunday, so a Sunday row is the post-reset 0 of the NEXT week, not a
+        # frozen total (that misreading zeroed the live donor signal).
         for i, don in enumerate((0, 100, 200, 300, 400)):
             tag = f"#D{i}"
             conn.execute(
@@ -112,7 +115,7 @@ def test_sustained_donor_is_roster_median_relative():
             )
             conn.execute(
                 "INSERT INTO player_daily_metrics (player_tag, metric_date, "
-                "donations_week) VALUES (?, '2026-06-28', ?)",
+                "donations_week) VALUES (?, '2026-06-27', ?)",
                 (tag, don),
             )
         conn.commit()

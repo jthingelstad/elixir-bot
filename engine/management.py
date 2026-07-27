@@ -264,15 +264,27 @@ def advance_layer1(current: str, history: list) -> str:
 
 
 def _closed_week_donations(conn, tag, week_anchor: str):
-    """This member's donations for the closed week (frozen Sunday row)."""
+    """This member's donations for the most recent closed donation-week.
+
+    NOT the Sunday row: Clash Royale's donation counter RESETS on Sunday, so that
+    row is the post-reset ~0, not a frozen weekly total (live: Sunday averages 71
+    with 152 zeros, Saturday averages 186 with 40). Take the week's PEAK — the
+    counter climbs monotonically then resets, so its max IS the week's total.
+    Dates shift a day so %W groups Sun-Sat.
+    """
     row = conn.execute(
-        """SELECT donations_week FROM player_daily_metrics
-           WHERE player_tag = ? AND metric_date < ?
-             AND strftime('%w', metric_date) = '0' AND donations_week IS NOT NULL
-           ORDER BY metric_date DESC LIMIT 1""",
-        (tag, week_anchor),
+        """SELECT MAX(donations_week) AS peak FROM player_daily_metrics
+           WHERE player_tag = ? AND metric_date < ? AND donations_week IS NOT NULL
+             -- Skip the in-progress donation week. Its only elapsed day may be
+             -- the Sunday reset itself, whose peak is 0 — which would report a
+             -- 700-a-week donor as having given nothing.
+             AND strftime('%Y-%W', metric_date, '+1 day')
+                 <> strftime('%Y-%W', ?, '+1 day')
+           GROUP BY strftime('%Y-%W', metric_date, '+1 day')
+           ORDER BY strftime('%Y-%W', metric_date, '+1 day') DESC LIMIT 1""",
+        (tag, week_anchor, week_anchor),
     ).fetchone()
-    return None if row is None else (row["donations_week"] or 0)
+    return None if row is None else (row["peak"] or 0)
 
 
 def _roster_donor_median(conn, week_anchor: str) -> float | None:
@@ -281,17 +293,23 @@ def _roster_donor_median(conn, week_anchor: str) -> float | None:
     filter, let the math do the work") — self-calibrating as the clan's
     donation culture shifts (the old DONOR_WEEK_MIN=50 was calibrated on a
     long-gone distribution and had drifted to select ~78% of the roster)."""
+    # Peak of the clan's most recent closed donation-week, per member — not the
+    # Sunday row, which is the post-reset ~0 (see _closed_week_donations).
     vals = sorted(
         v
         for (v,) in conn.execute(
-            """SELECT donations_week FROM player_daily_metrics pm
-               WHERE metric_date = (
-                   SELECT MAX(metric_date) FROM player_daily_metrics
-                   WHERE metric_date < ? AND strftime('%w', metric_date) = '0')
-                 AND donations_week IS NOT NULL
+            """SELECT MAX(pm.donations_week) FROM player_daily_metrics pm
+               WHERE pm.metric_date < ? AND pm.donations_week IS NOT NULL
+                 AND strftime('%Y-%W', pm.metric_date, '+1 day') = (
+                     SELECT MAX(strftime('%Y-%W', metric_date, '+1 day'))
+                       FROM player_daily_metrics
+                      WHERE metric_date < ? AND donations_week IS NOT NULL
+                        AND strftime('%Y-%W', metric_date, '+1 day')
+                            <> strftime('%Y-%W', ?, '+1 day'))
                  AND EXISTS (SELECT 1 FROM clan_memberships cm
-                             WHERE cm.player_tag = pm.player_tag AND cm.left_at IS NULL)""",
-            (week_anchor,),
+                             WHERE cm.player_tag = pm.player_tag AND cm.left_at IS NULL)
+               GROUP BY pm.player_tag""",
+            (week_anchor, week_anchor, week_anchor),
         ).fetchall()
     )
     if not vals:
@@ -999,7 +1017,24 @@ def _has_leadership_hold(tag: str) -> bool:
                WHERE m.member_tag = ? AND m.retired_at IS NULL
                  AND (m.title LIKE 'Hold:%' OR m.title LIKE 'Away:%'
                       OR m.title LIKE 'LOA:%')
-                 AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+                 -- Compare as TIME, not text. `expires_at` is written from an
+                 -- LLM-supplied `away_until` and is stored in mixed shapes (live
+                 -- DB: 21 date-only, 63 ending in Z), so a lexicographic `>`
+                 -- gives wrong answers: a date-only "2026-08-03" tests FALSE from
+                 -- 00:00:00Z that day — a leader granting leave "until the 3rd"
+                 -- lost the member's shield at 7pm Chicago on the 2nd. A shape it
+                 -- cannot parse (e.g. "08/03/2026") compared FALSE immediately,
+                 -- silently leaving the member unprotected while the card said
+                 -- the hold was recorded. A date-only value covers that whole day.
+                 AND (m.expires_at IS NULL
+                      OR julianday(
+                           CASE WHEN length(m.expires_at) = 10
+                                THEN m.expires_at || 'T23:59:59'
+                                ELSE replace(m.expires_at, 'Z', '') END
+                         ) > julianday('now')
+                      -- Unparseable shape → julianday() is NULL. Fail SAFE: keep
+                      -- the member shielded rather than silently exposing them.
+                      OR julianday(replace(m.expires_at, 'Z', '')) IS NULL)
                LIMIT 1""",
             (tag,),
         ).fetchone()
