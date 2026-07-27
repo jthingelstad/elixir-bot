@@ -737,6 +737,12 @@ def run_tick_evaluators(
             )
         return []  # fresh-cut warm-up — no data, explicitly no judgment
 
+    # Roster size for slot-scarcity math must be captured BEFORE the readiness
+    # filter below reassigns `members`. Slack models how many seats are open —
+    # a property of the clan, not of how many members happened to have fresh
+    # evidence this tick. Measuring it post-filter let one member's kick grace
+    # swing on OTHER members' ingestion lag.
+    roster_size = len(members)
     if readiness is not None:
         ready_members = []
         member_readiness = readiness.get("members") or {}
@@ -768,8 +774,9 @@ def run_tick_evaluators(
     fired: list[dict] = []
     # Slot scarcity: an idle member only costs a slot when the clan is full, so
     # the contribution grace fades with open slots — full grace when empty, zero
-    # at 50/50. members are exactly the active roster (open-membership rows above).
-    slack = max(0, ROSTER_CAP - len(members)) / ROSTER_CAP
+    # at 50/50. Uses roster_size (the full active roster), NOT len(members),
+    # which the readiness filter may have shrunk.
+    slack = max(0, ROSTER_CAP - roster_size) / ROSTER_CAP
     for m in members:
         tag = m["player_tag"]
         last_row = conn.execute(
