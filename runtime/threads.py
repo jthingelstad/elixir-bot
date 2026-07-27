@@ -71,9 +71,42 @@ async def lock_thread(bot, thread_id: int, closing_text: str | None = None) -> b
 
 
 def war_week_thread_name(season_id: int, section_index: int, period_type: str | None) -> str:
-    if (period_type or "").lower() == "colosseum":
-        return f"Colosseum — Season {season_id}"
-    return f"War Week {int(section_index) + 1} — Season {season_id}"
+    """Thread title for a war week.
+
+    `period_type` alone cannot identify Colosseum during that week's practice days
+    (the API still reports "training"), so the season calendar decides: Colosseum
+    is always the season's final section. The total is included because it is now
+    knowable — "War Week 2 of 4" rather than a bare "War Week 2".
+    """
+    from datetime import datetime, timezone
+
+    from engine.war_seasons import final_section_index, total_sections, war_date
+
+    colosseum = (period_type or "").lower() == "colosseum"
+    total = None
+    try:
+        on = war_date(datetime.now(timezone.utc))
+        current_total = total_sections(on)
+        # The calendar describes the season running NOW. A thread for a week from
+        # another season (different length) must not borrow it — that produced
+        # "Colosseum (Week 5 of 4)". Only trust it when the section fits.
+        if 0 <= int(section_index) < current_total:
+            total = current_total
+            colosseum = colosseum or int(section_index) == final_section_index(on)
+    except TypeError, ValueError:
+        pass
+    week = int(section_index) + 1
+    if colosseum:
+        return (
+            f"Colosseum (Week {week} of {total}) — Season {season_id}"
+            if total
+            else f"Colosseum — Season {season_id}"
+        )
+    return (
+        f"War Week {week} of {total} — Season {season_id}"
+        if total
+        else f"War Week {week} — Season {season_id}"
+    )
 
 
 def build_week_opener(conn, season_id: int, section_index: int, name: str) -> str:

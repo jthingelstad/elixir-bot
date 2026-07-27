@@ -30,6 +30,17 @@ def _live_period_type(live_war: dict | None) -> str | None:
     return period.get("period_type") or state.get("period_type") or clock.get("period_type")
 
 
+def _live_phase(live_war: dict | None) -> str | None:
+    """Practice-vs-battle for the day, across the several `phase` vocabularies."""
+    live = live_war or {}
+    for key in ("clock", "period", "current_state"):
+        block = live.get(key) if isinstance(live.get(key), dict) else {}
+        phase = block.get("phase")
+        if phase:
+            return str(phase)
+    return None
+
+
 def get_game_truth(*, topic: str = "river_race", live_war: dict | None = None) -> GameTruthResult:
     """Return one versioned mechanics contract.
 
@@ -44,7 +55,7 @@ def get_game_truth(*, topic: str = "river_race", live_war: dict | None = None) -
             "available": False,
             "error": "unsupported_topic",
         }
-    mechanics = river_race_mechanics(_live_period_type(live_war))
+    mechanics = river_race_mechanics(_live_period_type(live_war), _live_phase(live_war))
     return {
         "capability": CAPABILITY_ID,
         "contract_version": CONTRACT_VERSION,
@@ -65,6 +76,16 @@ def live_war_claim_facts(live_war: dict | None) -> dict:
         "finish_line": mechanics.get("finish_line"),
         "battle_day_total": mechanics.get("battle_days"),
         "every_battle_counts_for_standings": mechanics.get("every_battle_counts_for_standings"),
+        # Boat axis — flattened so deterministic checks can reach it. Previously
+        # these lived only inside the nested canonical_game_truth blob, so nothing
+        # could assert on them.
+        "boat_in_play": mechanics.get("boat_in_play"),
+        "boat_defenses_exist": mechanics.get("boat_defenses_exist"),
+        "boat_battles_exist": mechanics.get("boat_battles_exist"),
+        "defenses_can_be_added": mechanics.get("defenses_can_be_added"),
+        "defenses_earn_fame_today": mechanics.get("defenses_earn_fame_today"),
+        "score_metric": mechanics.get("score_metric"),
+        "boat_guidance": mechanics.get("boat_guidance"),
         "canonical_game_truth": truth,
     }
 

@@ -11,6 +11,7 @@ Prioritize clear guidance, not wiki-style completeness.
 - `season_id` is the season number.
 - `section_index` is the current race week within that season, starting at 0.
 - When speaking to humans, refer to the week as `section_index + 1`.
+- The season's length is known (`total_weeks`), so state the position: "week 3 of 4", not a bare "week 3". `weeks_remaining` and `is_final_week` come with it.
 
 ### War cadence — say "week" or "season", never an ambiguous "war"
 
@@ -43,7 +44,9 @@ A River Race has **two different scores**, and they are two different races. Nev
 ### Practice Phase Priorities
 
 - Practice days are the setup window before battle days.
-- The main clan priority during practice is setting boat defenses.
+- **Everything in this section applies to a NORMAL river race week only.** In Colosseum week the boat is parked — see "Colosseum Week" below — and practice days are deck preparation only. Check `colosseum_week` before giving any practice-day boat advice.
+- The main clan priority during practice is setting boat defenses. Practice days are the **only** window in which defenses can be added — they cannot be added once battle days start — and a full set of defenses is how a clan can win the week in three days.
+- The API reports defenses only for **closed** days (`numOfDefensesRemaining` in `periodLogs`), so during the practice build window there is no live count. Urge members to set defenses; never claim how many are placed.
 - Boat defenses are a one-time setup during practice days, not something members redo every day.
 - A member may have some boat defenses set without having finished every available defense slot yet.
 - Strong practice-day messaging should remind members to build or update boat defenses early.
@@ -106,9 +109,9 @@ A River Race has **two different scores**, and they are two different races. Nev
 - There are NO boat defenses to set during Colosseum week. Do not mention boat defenses at all during this week.
 - There are no boat battles during Colosseum week.
 - Practice days during Colosseum week should focus on deck preparation only.
-- The API sends `periodType: "colosseum"` on battle days; practice days still show `"training"`.
-- The live war state includes a `colosseum_week` flag when battle days are active.
-- Season length is not exposed by the API until Colosseum is observed. Seasons run 4 or 5 weeks at Supercell's discretion to align with Pass Royale. The `colosseum_week` flag on the live war state — once battle days begin — is the only authoritative signal that the current week is the finale. Until that flag is true, frame remaining time as "until Colosseum week" without naming a specific week number, or simply talk about the current week without forecasting the season's end.
+- The API sends `periodType: "colosseum"` on battle days; practice days still show `"training"`. A Colosseum-week practice day is otherwise **indistinguishable** from a normal-week practice day in the payload.
+- The live war state therefore resolves Colosseum itself, and `colosseum_week` is true from **practice day 1** of the final week. `colosseum_source` says how it was established: `observed` (the API's `periodType`), `trophy_stakes` (±100 trophies), or `derived` (the calendar — see below). Trust `colosseum_week` regardless of source; never re-derive it from `period_type` yourself.
+- **Season length IS known.** A war season runs first-Monday-of-month → first-Monday-of-the-next-month, so it is 4 or 5 weeks and Colosseum is always the final week. The live war state carries `total_weeks`, `weeks_remaining` and `is_final_week`. Say "week 3 of 4" and name the finale when it arrives — the old rule forbidding a week number no longer applies.
 
 ## Rewards and Recognition
 

@@ -22,7 +22,12 @@ def render_war_now(data: dict) -> str:
     period-point race (the live action) and the weekly fame race (the boat / who
     wins the week). In Colosseum there is no weekly fame — only the period-point
     race matters."""
-    parts = [f"Season {data['season_id']} · Week {data['week']}"]
+    # "Week 3 of 4" — the season total is knowable now that a war season is known
+    # to run first-Monday to first-Monday (engine/war_seasons.py). Falls back to a
+    # bare week number if the shape could not be resolved.
+    total_weeks = data.get("total_weeks")
+    week_text = f"Week {data['week']} of {total_weeks}" if total_weeks else f"Week {data['week']}"
+    parts = [f"Season {data['season_id']} · {week_text}"]
     phase_with_total = data.get("phase_display")
     day_number = data.get("day_number")
     day_total = data.get("day_total")
@@ -48,6 +53,10 @@ def render_war_now(data: dict) -> str:
         lines.append(
             "Canonical Colosseum rule: no finish line; every battle across all "
             "four battle days continues to count toward clan and member standings."
+        )
+        lines.append(
+            "The boat is PARKED in Colosseum week: no boat battles, no boat defenses, "
+            "no repairs, and no fame — the score is war points only."
         )
     if data.get("time_left_text"):
         lines.append(f"Period ends in {data['time_left_text']}")
