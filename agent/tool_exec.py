@@ -1162,6 +1162,34 @@ def _execute_get_clan_intel_report(arguments):
     return entry
 
 
+def _normalize_away_until(value) -> str | None:
+    """Normalize an LLM-supplied leave date to a comparable UTC timestamp.
+
+    A bare date means the member is away THROUGH that day, so it resolves to that
+    day's end — "back on the 3rd" must not expire at 00:00 on the 3rd. Returns
+    None when the value cannot be read as a date, so the caller can refuse
+    instead of writing a hold that protects nobody.
+    """
+    from datetime import datetime, timezone
+
+    text = str(value or "").strip().replace("Z", "").replace(" ", "T")
+    if not text:
+        return None
+    if len(text) == 10:  # bare date → end of that day
+        try:
+            datetime.strptime(text, "%Y-%m-%d")
+        except ValueError:
+            return None
+        return f"{text}T23:59:59Z"
+    try:
+        stamp = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if stamp.tzinfo is not None:
+        stamp = stamp.astimezone(timezone.utc).replace(tzinfo=None)
+    return stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _execute_flag_member_watch(arguments):
     """Awareness-loop observation: flag a member for leadership attention.
 
@@ -1190,7 +1218,20 @@ def _execute_flag_member_watch(arguments):
     title = f"{'Hold' if is_hold else 'Watch'}: {resolved_tag}"
     body = f"{reason}"
     if is_hold:
-        expires_at = away_until
+        normalized = _normalize_away_until(away_until)
+        if normalized is None:
+            # Refuse rather than write a hold that silently protects nobody. The
+            # guard compares this value as a time; an unparseable shape used to
+            # be stored anyway, the card told the leader the leave was recorded,
+            # and the member was left fully exposed to the kick clock.
+            return {
+                "error": "invalid_away_until",
+                "detail": (
+                    f"Could not read {away_until!r} as a date. Use an ISO date or "
+                    "datetime, e.g. '2026-08-03' or '2026-08-03T12:00:00Z'."
+                ),
+            }
+        expires_at = normalized
     try:
         memory = create_memory(
             title=title,
