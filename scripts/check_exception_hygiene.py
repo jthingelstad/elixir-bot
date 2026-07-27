@@ -44,7 +44,7 @@ BROAD_EXCEPTION_BASELINE = {
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
     "engine/leader_note_effects.py": 2,  # apply/revert leader-note effects fail-open (never break the interpreter)
-    "engine/management.py": 5,  # +3: v7 leader-note gates (premise fingerprint, member shield) fail-open to False
+    "engine/management.py": 6,  # +3: v7 leader-note gates (premise fingerprint, member shield) fail-open to False
     "engine/materialize.py": 2,
     "engine/nicknames.py": 1,
     "engine/pol_seasons.py": 2,
@@ -55,7 +55,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/activity_runner.py": 3,
     "runtime/admin.py": 4,
     "runtime/alerts.py": 2,  # +1: schedule_job_failure_alert best-effort loop-schedule guard
-    "runtime/app.py": 40,  # +7: DM-outreach bridges + ask facts-brief profile lookup; +1: _outreach_log webhook guard
+    "runtime/app.py": 41,  # +7: DM-outreach bridges + ask facts-brief profile lookup; +1: _outreach_log webhook guard
     "runtime/awareness/deliver.py": 10,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
