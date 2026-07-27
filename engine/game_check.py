@@ -62,6 +62,14 @@ _BATTLES_DO_NOT_COUNT_RE = tuple(
         r"\b(?:purely|only|just)\s+(?:about|for)\s+(?:personal\s+)?(?:war\s+)?chest\s+rewards\b",
     )
 )
+# Boat talk that is impossible in a Colosseum week (the boat is parked). Matches
+# the affirmative forms — "set your boat defenses", "defenses are full", "boat
+# battle" — while allowing a negation ("no boat defenses this week") through.
+_BOAT_IN_COLOSSEUM_RE = re.compile(
+    r"(?<!no )(?<!not )(?<!never )\b(?:boat\s+defen[cs]e|boat\s+battle|defen[cs]es?\s+remaining"
+    r"|repair\s+point|top\s+up\s+(?:the\s+|our\s+|your\s+)?defen[cs]e)",
+    re.IGNORECASE,
+)
 
 
 def _finding(claim, issue, severity="warn"):
@@ -213,6 +221,18 @@ def _check_colosseum(copy, facts, out):
                 )
             )
             break
+    # The boat is parked in Colosseum week — there is no boat, no boat battle and
+    # nothing to defend or repair. This is the class that escaped on 2026-07-27:
+    # the copy told the clan to top up boat defenses during Colosseum week.
+    boat_match = _BOAT_IN_COLOSSEUM_RE.search(text)
+    if boat_match:
+        out.append(
+            _finding(
+                boat_match.group(0)[:120],
+                "Colosseum week has no boat: no boat battles, no boat defenses, no repairs",
+                "error",
+            )
+        )
 
 
 def check_post(copy: str, facts: dict, conn=None) -> list[dict]:

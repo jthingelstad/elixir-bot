@@ -417,17 +417,30 @@ def _time_block(conn, war: dict | None) -> dict | None:
             "is_final_battle_day": bool(war.get("final_battle_day_active")),
             "is_final_practice_day": bool(war.get("final_practice_day_active")),
             "is_colosseum_week": bool(war.get("colosseum_week")),
+            # How colosseum was established: "observed" (API periodType),
+            # "trophy_stakes" (±100), or "derived" (the calendar says this is the
+            # season's final section). The API cannot say "colosseum" during that
+            # week's practice days, so "derived" is the normal answer then.
+            "colosseum_source": war.get("colosseum_source"),
             "season_id": war.get("season_id"),
             "week": war.get("week"),
+            # Season position — now computable because a war season runs
+            # first-Monday to first-Monday. Say "week 3 of 4", not a bare "week 3".
+            "total_weeks": war.get("total_weeks"),
+            "weeks_remaining": war.get("weeks_remaining"),
+            "is_final_week": bool(war.get("is_final_week", False)),
             "period_ends_at": war.get("period_ends_at"),
         }
     clock = _war_clock_dict(conn)
     if not clock:
         return None
+    section_index = clock.get("section_index")
     return {
         "phase": clock.get("phase"),
         "season_id": clock.get("season_id"),
-        "week": clock.get("week"),
+        # WarClock carries section_index, never `week` — reading clock["week"] made
+        # time.week silently None whenever war_status was unavailable.
+        "week": (section_index + 1) if isinstance(section_index, int) else None,
         "is_colosseum_week": bool(clock.get("is_colosseum_week")),
     }
 
@@ -504,7 +517,8 @@ def _standing_block(war: dict | None) -> dict | None:
                 "leader_period_points": leader_pp,
                 "deficit_to_leader": (leader_pp - our_pp) if us.get("rank") != 1 else 0,
                 # Fame we'd bank at day close if this rank holds (placement only;
-                # defenses add more, unseen). Mirrors the in-game boat projection.
+                # intact boat defenses add more, reported separately as
+                # projected_defense_fame). Mirrors the in-game boat projection.
                 "projected_fame_if_held": war.get("projected_day_fame"),
                 "scoreboard": [
                     {
@@ -516,14 +530,24 @@ def _standing_block(war: dict | None) -> dict | None:
                 ],
             }
 
-    if weekly is None and today is None:
+    if weekly is None and today is None and not colosseum:
         return None
-    return {
+    block = {
         "primary_metric": war.get("primary_metric") or "fame",
         "field_size": len(race) or len(day),
         "weekly": weekly,
         "today": today,
     }
+    if colosseum:
+        # On a Colosseum practice day nothing has scored yet, so both sub-blocks
+        # are empty — but the block still ships so `primary_metric` carries the
+        # framing (points, not fame). Without this the brain loses the only signal
+        # that this week is not a fame race.
+        block["colosseum_note"] = (
+            "Colosseum week: the boat is parked. No weekly fame, no finish line, no boat "
+            "defenses or boat battles — the score is war points across four battle days."
+        )
+    return block
 
 
 def _channel_memory(conn) -> dict:

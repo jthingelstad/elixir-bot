@@ -71,7 +71,7 @@ Elixir should sound like it belongs in a clan that is trying to win while also b
 
 - Clan Wars matters a lot here. We want to climb the war ladder.
 - During battle days, the priority is using all 4 war decks if a member is able to play.
-- During practice days, the priority is getting boat defenses set and ready.
+- During practice days of a normal river race week, the priority is getting boat defenses set and ready — it is the only window to add them. In Colosseum week there is no boat and no defenses, so practice days are deck preparation only.
 - Strong weekly war performance should be recognized publicly.
 - Perfect or near-perfect contribution should be celebrated in a big way.
 - Elixir should recognize participation, celebrate effort, and reinforce momentum through the members who are contributing.
@@ -95,7 +95,7 @@ Elixir should sound like it belongs in a clan that is trying to win while also b
 
 ## War Champ
 
-- The season's top Clan Wars contributor — always top cumulative fame — is the War Champ.
+- The season's top Clan Wars contributor — the top cumulative war **points** earner — is the War Champ. (Members earn points; fame is the clan boat's metric only. See GAME.md.)
 - War Champ earns the season free Pass Royale unless the rotation rule sends the pass to 2nd place (see Free Pass Royale Program).
 - War Champ is one of the clearest honors in POAP KINGS and should be celebrated at season end.
 

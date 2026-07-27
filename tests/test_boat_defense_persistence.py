@@ -85,3 +85,56 @@ def test_upsert_week_persists_defense_fame():
         )
     finally:
         conn.close()
+
+
+def _log(period_index: int, dfame: int, remaining: int) -> dict:
+    return {
+        "periodIndex": period_index,
+        "items": [
+            {
+                "clan": {"tag": "#J2RGCRVG"},
+                "progressEarned": 3000,
+                "progressEarnedFromDefenses": dfame,
+                "numOfDefensesRemaining": remaining,
+            }
+        ],
+    }
+
+
+def _payload(section_index: int, period_index: int, period_type: str, logs: list) -> dict:
+    return {
+        "sectionIndex": section_index,
+        "periodIndex": period_index,
+        "periodType": period_type,
+        "clan": {"tag": "#J2RGCRVG", "fame": 0, "participants": []},
+        "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 0, "periodPoints": 0}],
+        "periodLogs": logs,
+    }
+
+
+def test_defense_projection_is_scoped_to_the_current_week():
+    """periodLogs spans the WHOLE SEASON, not just this week — a section-2 payload
+    still carries section-0 and section-1 battle days. Summing all of them inflated
+    war_weeks.defense_fame for every week after the first.
+    """
+    logs = [
+        _log(3, 435, 15),
+        _log(4, 435, 15),  # section 0
+        _log(10, 400, 12),
+        _log(11, 400, 12),  # section 1
+        _log(17, 300, 9),
+        _log(18, 300, 9),  # section 2 <- the current week
+    ]
+    proj = project_race_aspect(_payload(2, 19, "warDay", logs), 134)
+    assert proj["our_defense"]["defense_fame_days"] == [300, 300], "earlier weeks leaked in"
+    assert _week_defense_fame(proj) == 600, "must be THIS week's total, not the season's"
+    assert proj["our_defense"]["defenses_remaining"] == 9
+
+
+def test_practice_day_does_not_report_last_weeks_defenses_as_this_weeks():
+    """On a practice day the current section has no closed days yet, so there is
+    nothing to report — previously the previous week's final battle day was
+    surfaced as if it were the current week's state."""
+    logs = [_log(17, 300, 9), _log(18, 300, 9), _log(19, 300, 9), _log(20, 300, 9)]
+    proj = project_race_aspect(_payload(3, 21, "training", logs), 134)
+    assert proj["our_defense"] is None

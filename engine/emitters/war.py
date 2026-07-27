@@ -21,6 +21,7 @@ from __future__ import annotations
 from engine.change_sets import ChangeSetInvariantError, SeasonCloseChangeSet
 from engine.db import canon_tag, utcnow
 from engine.emitters import insert_stream_event
+from engine.normalize import PERIODS_PER_SECTION
 from engine.normalize import war_day as normalize_war_day
 
 
@@ -34,9 +35,21 @@ def _our_defense_projection(payload: dict, our_tag: str | None) -> dict | None:
     the API omits the field (then we simply don't project defenses)."""
     if not our_tag:
         return None
+    # periodLogs spans the WHOLE SEASON so far, not just this week: a section-4
+    # payload carries periodIndex 3..27 (four weeks of battle days). Summing all of
+    # them inflated war_weeks.defense_fame for every week after the first, and made
+    # a practice day report the PREVIOUS week's final battle day. Scope to the
+    # current section (periodIndex // 7 == sectionIndex).
+    section_index = payload.get("sectionIndex")
     days = []
     for pl in payload.get("periodLogs") or []:
         idx = pl.get("periodIndex")
+        if (
+            section_index is not None
+            and isinstance(idx, int)
+            and idx // PERIODS_PER_SECTION != section_index
+        ):
+            continue
         for it in pl.get("items") or []:
             if canon_tag((it.get("clan") or {}).get("tag")) == our_tag:
                 dfame = it.get("progressEarnedFromDefenses")

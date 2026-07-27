@@ -532,10 +532,18 @@ def _build_war_status_report(clan=None, war=None):
                     )
                 if defense_status.get("phase_display"):
                     defense_bits.append(f"latest logged {defense_status.get('phase_display')}")
-            lines.append(
-                "- Practice focus: boat defenses matter before battle days."
-                + (f" Latest defense log: {' | '.join(defense_bits)}" if defense_bits else "")
-            )
+            # Colosseum week has no boat, so its practice days are deck prep only.
+            # This line used to fire on ANY non-battle phase — including colosseum
+            # practice days, where the boat is parked (2026-07-27).
+            if war_status.get("colosseum_week"):
+                lines.append(
+                    "- Practice focus: Colosseum week — no boat, no defenses. Deck prep only."
+                )
+            else:
+                lines.append(
+                    "- Practice focus: boat defenses matter before battle days."
+                    + (f" Latest defense log: {' | '.join(defense_bits)}" if defense_bits else "")
+                )
 
     if week_summary:
         race = week_summary.get("race") or {}

@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 log = logging.getLogger("elixir_db")
@@ -28,6 +28,7 @@ from engine.game_rules import (
     river_race_completed_from_score,
     river_race_finish_line,
 )
+from engine.war_seasons import is_final_section, season_shape, war_date
 from storage._enrichment import _member_reference_fields
 from storage._war_shared import (
     get_latest_logged_race,
@@ -39,7 +40,6 @@ from storage.war_calendar import (
     FIRST_BATTLE_PERIOD_OFFSET,
     coerce_utc_datetime,
     format_utc_iso,
-    is_colosseum_week,
     period_offset,
     phase_day_number,
     resolve_phase,
@@ -118,19 +118,94 @@ def _rank_standings(projection: dict, *, by: str) -> list[dict]:
     return standings
 
 
+def _war_date_of(observed_at: Optional[str]) -> Optional[date]:
+    """War-calendar date for a stored observation stamp (None → caller uses now)."""
+    if not observed_at:
+        return None
+    try:
+        stamp = datetime.fromisoformat(str(observed_at).replace("Z", "+00:00"))
+    except TypeError, ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return war_date(stamp.astimezone(timezone.utc))
+
+
+def _season_shape_fields(observed_at: Optional[str], section_index: Optional[int]) -> dict:
+    """Season position: ``total_weeks`` / ``is_final_week`` / ``weeks_remaining``.
+
+    Until now nothing computed a season's LENGTH — `war_seasons.weeks` is only
+    written at season close — so Elixir could say "week 3" but never "week 3 of 4".
+    The calendar makes the total knowable on day one of the season.
+    """
+    if section_index is None:
+        return {}
+    try:
+        return {
+            k: v
+            for k, v in season_shape(
+                _war_date_of(observed_at) or war_date(datetime.now(timezone.utc)),
+                int(section_index),
+            ).items()
+            if k in {"total_weeks", "weeks_remaining", "is_final_week", "season_start"}
+        }
+    except TypeError, ValueError:
+        return {}
+
+
+def resolve_colosseum_week(
+    period_type: Optional[str],
+    *,
+    section_index: Optional[int] = None,
+    on: Optional[date] = None,
+    trophy_change: Optional[int] = None,
+    trophy_stakes_known: bool = False,
+) -> tuple[bool, Optional[str]]:
+    """Resolve "is this the colosseum week", returning ``(is_colosseum, source)``.
+
+    Three tiers, strongest first:
+
+    1. ``observed`` — the API says ``periodType == "colosseum"``. Always wins.
+    2. ``trophy_stakes`` — the logged week carries ±100 trophies (colosseum stakes).
+    3. ``derived`` — the calendar says this is the season's FINAL section, and
+       colosseum is always the final section (:mod:`engine.war_seasons`).
+
+    Tier 3 exists because the API cannot reveal colosseum during that week's
+    PRACTICE days: ``periodType`` only flips to ``colosseum`` once battle days
+    begin, and a colosseum-week practice day is indistinguishable from a normal
+    one. Without it, Elixir framed 2026-07-27 (colosseum practice day 1) as a
+    normal fame week and advised adding boat defenses to a parked boat.
+    """
+    if period_type == "colosseum":
+        return True, "observed"
+    if trophy_stakes_known and abs(trophy_change or 0) == 100:
+        return True, "trophy_stakes"
+    if section_index is not None:
+        try:
+            if is_final_section(on or war_date(datetime.now(timezone.utc)), int(section_index)):
+                return True, "derived"
+        except TypeError, ValueError:
+            pass
+    return False, None
+
+
 def is_colosseum_week_confirmed(
     period_type: Optional[str],
     trophy_change: Optional[int] = None,
     *,
     trophy_stakes_known: bool = False,
+    section_index: Optional[int] = None,
+    on: Optional[date] = None,
 ) -> bool:
-    """True when we have positive evidence the current week is the colosseum
-    (final) week of the season (§16.1: detected, never forecast)."""
-    if period_type == "colosseum":
-        return True
-    if trophy_stakes_known and abs(trophy_change or 0) == 100:
-        return True
-    return False
+    """Back-compat boolean wrapper over :func:`resolve_colosseum_week`."""
+    confirmed, _source = resolve_colosseum_week(
+        period_type,
+        section_index=section_index,
+        on=on,
+        trophy_change=trophy_change,
+        trophy_stakes_known=trophy_stakes_known,
+    )
+    return confirmed
 
 
 @managed_connection
@@ -148,9 +223,6 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
     period_type = projection.get("period_type")
     phase = resolve_phase(period_type, period_index)
     offset = period_offset(period_index)
-    colosseum = is_colosseum_week(period_type)
-    our_fame = _coerce_int(projection.get("our_fame"))
-    finish_line = river_race_finish_line(period_type)
 
     trophy_change = None
     if (
@@ -159,6 +231,23 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
         and section_index == latest_logged["section_index"]
     ):
         trophy_change = latest_logged["trophy_change"]
+
+    # ONE colosseum answer for every downstream surface. Previously the read used
+    # a bare `period_type == "colosseum"` while build_war_now_context used the
+    # confirmed variant, so they could disagree — and neither could see colosseum
+    # during that week's practice days (2026-07-27, loop 372).
+    colosseum, colosseum_source = resolve_colosseum_week(
+        period_type,
+        section_index=section_index,
+        on=_war_date_of(observed_at),
+        trophy_change=trophy_change,
+        trophy_stakes_known=trophy_change is not None,
+    )
+    # Mechanics key off the RESOLVED week type, so a derived colosseum drops the
+    # 10,000-fame finish line exactly like an observed one.
+    effective_period_type = "colosseum" if colosseum else period_type
+    our_fame = _coerce_int(projection.get("our_fame"))
+    finish_line = river_race_finish_line(effective_period_type)
 
     # Two separate races, never coalesced (see _rank_standings):
     #  - WEEKLY fame = the boat, awarded at each day's close by that day's rank;
@@ -232,7 +321,11 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
             "boat-defense fame is separate (projected_defense_fame, from the API's periodLogs, "
             "null when unavailable). projected_fame_at_close combines both."
         ),
-        "defenses_remaining": our_defense.get("defenses_remaining"),
+        # There is no boat in a colosseum week, so there is nothing to defend —
+        # this mirrors the `not colosseum` guard on projected_defense_fame above,
+        # which this field was missing (it leaked a stale count into the war
+        # capability and the get_river_race tool result).
+        "defenses_remaining": (None if colosseum else our_defense.get("defenses_remaining")),
         "clinches_finish_today": clinches_finish_today,
         "finish_line": finish_line,
         "season_id": season_id,
@@ -243,6 +336,10 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
         "period_type": period_type,
         "phase": phase,
         "colosseum_week": colosseum,
+        # How we know: "observed" (API periodType), "trophy_stakes" (±100), or
+        # "derived" (the calendar says this is the season's final section).
+        "colosseum_source": colosseum_source,
+        **_season_shape_fields(observed_at, section_index),
         "battle_phase_active": phase == "battle",
         "practice_phase_active": phase == "practice",
         "final_practice_day_active": phase == "practice" and offset == FINAL_PRACTICE_PERIOD_OFFSET,
@@ -558,15 +655,19 @@ def build_war_now_context(conn: Optional[sqlite3.Connection] = None) -> Optional
         day_total = status.get("practice_day_total")
 
     time_left_seconds = day_state.get("time_left_seconds")
-    colosseum_week = is_colosseum_week_confirmed(
-        period_type,
-        status.get("trophy_change"),
-        trophy_stakes_known=bool(status.get("trophy_stakes_known")),
-    )
+    # Consume the single resolved answer from get_current_war_status rather than
+    # re-deriving it here — this context used to run its own detection without the
+    # section index, so it could disagree with the awareness read about the very
+    # same week.
+    colosseum_week = status.get("colosseum_week")
 
     data = {
         "season_id": status.get("season_id"),
         "week": status.get("week"),
+        "total_weeks": status.get("total_weeks"),
+        "weeks_remaining": status.get("weeks_remaining"),
+        "is_final_week": bool(status.get("is_final_week", False)),
+        "colosseum_source": status.get("colosseum_source"),
         "phase": phase,
         "phase_display": status.get("phase_display"),
         "day_number": day_number,
