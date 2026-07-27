@@ -272,3 +272,27 @@ def test_demotion_copy_still_credits_the_member():
         rationale=_DEMOTE_RATIONALE,
     )
     assert "Thanks for the work you put in" in text
+
+
+def test_detector_catches_a_bare_roster_position_without_the_word_rank():
+    """R217 shipped "OllieTurtle sits 16 of 39 right now (band is top 6 to 8)"
+    and the first version of this detector called it clean — it keyed on the word
+    "rank" and on a hyphenated "band 6-8", neither of which appear there."""
+    assert clan_chat_copy.has_engine_internals("OllieTurtle sits 16 of 39 right now")
+    assert clan_chat_copy.has_engine_internals("band is top 6 to 8")
+
+
+def test_detector_allows_legitimate_small_totals():
+    """Day and week positions are real things members say — only roster-sized
+    counts are leadership internals. Guarding this stops the season-position work
+    ("week 4 of 4") from being rejected as a leak."""
+    for legitimate in (
+        "Battle Day 3 of 4",
+        "week 4 of 4",
+        "training day 2 of 3",
+        "four battle days",
+        "213 ranked battles",
+        "100% war decks",
+        "100 trophies on the line",
+    ):
+        assert not clan_chat_copy.has_engine_internals(legitimate), legitimate
