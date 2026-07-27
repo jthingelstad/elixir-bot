@@ -44,11 +44,14 @@ def test_role_action_clan_chat_copy_uses_public_reason_and_word_boundary():
         ),
     )
 
-    assert copy == (
-        "Removing 1spaceO2 for now: no battle in 8 days, last login 8 days ago; "
-        "0 donations this week. - E"
+    # Leads with the single primary fact and closes with credit for their time —
+    # not the semicolon-joined charge sheet the leadership rationale carries.
+    assert (
+        copy
+        == "1spaceO2 is heading out for now, no battle in 8 days. Thanks for the time with us. - E"
     )
     assert "...." not in copy
+    assert "0 donations this week" not in copy
 
 
 def test_clip_ends_on_complete_sentence_not_mid_word():
@@ -174,3 +177,98 @@ def test_signed_valid_messages_empty_is_none_and_caps_at_two():
     assert clan_chat_copy.signed_valid_messages(["", "   "]) is None
     out = clan_chat_copy.signed_valid_messages(["one", "two", "three"])
     assert out is not None and len(out) == 2
+
+
+# Promotion/demotion copy is pasted into in-game clan chat where every member
+# reads it. The leadership rationale behind these cards carries the score
+# breakdown, the member's rank in the standings, and the elder band — and it was
+# being reused as the message. R213-R217 (2026-07-27) went out citing board rank,
+# and R215 shipped the rationale almost verbatim: "Promoting dez42 to Elder:
+# Below band elder slot: score 0.83 [competitive 0.97, donations 0.55], rank 5 of
+# 39." R216 publicly told a demoted member they had "slipped to 12th of 39".
+_PROMO_RATIONALE = (
+    "Below-band elder slot: score 0.83 [competitive 0.98 (war 0.96 / ranked 0.88 "
+    "[90 btl], league 3), donations 0.55], rank 4 of 39, band 6-8, elders 8; held 3 wk."
+)
+_DEMOTE_RATIONALE = (
+    "outranked — the elder seat goes to a higher-ranked member: score 0.67 "
+    "[competitive 0.52 (war 0.21 / ranked 0.99 [218 btl], league 7), donations 0.96], "
+    "rank 16 of 39, band 6-8, elders 8; held 3 wk."
+)
+
+
+def test_engine_internals_detected_in_the_copy_that_actually_shipped():
+    shipped = [
+        "Promoting dez42 to Elder: Below band elder slot: score 0.83 "
+        "[competitive 0.97, donations 0.55], rank 5 of 39. Well earned.",
+        "pax up for elder, ranked 4 of 39 this run.",
+        "they've slipped to 12th of 39 with only 8 elder spots open.",
+        "donations held solid at 0.78.",
+    ]
+    for text in shipped:
+        assert clan_chat_copy.has_engine_internals(text), text
+    assert not clan_chat_copy.has_engine_internals(
+        "pax steps up to Elder, war and ranked play carrying it. Nice work."
+    )
+
+
+def test_validation_rejects_a_message_leaking_scoring_internals():
+    result = clan_chat_copy.validate_clan_chat_messages(
+        ["Promoting dez42 to Elder: score 0.83 [competitive 0.97], rank 5 of 39."],
+        max_messages=1,
+    )
+    assert any("engine_internals" in v for v in result.violations)
+
+
+def test_role_action_copy_never_leaks_rank_or_score():
+    for action_type, rationale in (
+        ("promotion_recommendation", _PROMO_RATIONALE),
+        ("demotion_recommendation", _DEMOTE_RATIONALE),
+        ("kick_recommendation", _DEMOTE_RATIONALE),
+    ):
+        text = clan_chat_copy.role_action_clan_chat_copy(
+            action_type=action_type,
+            target_player_name="dez42",
+            rationale=rationale,
+        )
+        assert text and "dez42" in text
+        assert not clan_chat_copy.has_engine_internals(text), text
+        # "ranked play" is fine; a position in the standings is not.
+        assert "of 39" not in text and "elder slot" not in text.lower()
+
+
+def test_step_down_copy_names_the_shortfall_not_the_strengths():
+    """A demotion must not praise what is strong — the first cut produced
+    "OllieTurtle moves back to Member for now, ranked play and donations carrying
+    it" for a member whose war participation had collapsed (war 0.21)."""
+    reason = clan_chat_copy.member_facing_role_reason(_DEMOTE_RATIONALE, "demotion_recommendation")
+    assert reason == "war has gone quiet"
+    assert "carrying it" not in reason
+
+    promo = clan_chat_copy.member_facing_role_reason(_PROMO_RATIONALE, "promotion_recommendation")
+    assert promo == "war and ranked play carrying it"
+
+
+def test_step_down_says_nothing_rather_than_inventing_a_failing():
+    """Simply being outranked is not a shortfall — stay quiet instead."""
+    all_solid = (
+        "outranked: score 0.90 [competitive 0.92 (war 0.91 / ranked 0.93 [40 btl], "
+        "league 5), donations 0.88], rank 9 of 39, band 6-8, elders 8; held 3 wk."
+    )
+    assert clan_chat_copy.member_facing_role_reason(all_solid, "demotion_recommendation") == ""
+    text = clan_chat_copy.role_action_clan_chat_copy(
+        action_type="demotion_recommendation",
+        target_player_name="Tere",
+        rationale=all_solid,
+    )
+    assert text and "Tere" in text
+    assert not clan_chat_copy.has_engine_internals(text)
+
+
+def test_demotion_copy_still_credits_the_member():
+    text = clan_chat_copy.role_action_clan_chat_copy(
+        action_type="demotion_recommendation",
+        target_player_name="Tere",
+        rationale=_DEMOTE_RATIONALE,
+    )
+    assert "Thanks for the work you put in" in text

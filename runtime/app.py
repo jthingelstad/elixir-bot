@@ -530,6 +530,7 @@ async def _ensure_role_action_clan_chat_copy(action: dict) -> dict:
     from runtime.clan_chat_copy import (
         ROLE_ACTION_TYPES,
         generate_clan_chat_copy,
+        member_facing_role_reason,
         role_action_clan_chat_copy,
     )
     from runtime.leader_action_ui import CLASH_COPY_MAX_LENGTH
@@ -572,11 +573,21 @@ async def _ensure_role_action_clan_chat_copy(action: dict) -> dict:
     )
     copy_text = fallback
     try:
+        # The rationale is written FOR LEADERS (score breakdown, standings rank,
+        # elder band). Asking the model to "summarize this reasoning" pulled all
+        # of that into member-facing copy — R213-R217 cited board rank, and R216
+        # publicly told a demoted member they had "slipped to 12th of 39". Give
+        # the model the contribution, not the scoring, and say what to recognize.
+        member_reason = member_facing_role_reason(rationale, atype)
         context = (
-            f"Tell the POAP KINGS clan, in in-game clan chat, WHY this is happening — "
-            f"so the reason is clear to everyone. Action: {atype.replace('_', ' ')} for "
-            f"{name}. Summarize this reasoning warmly and briefly; introduce nothing not "
-            f"present here: {rationale}"
+            f"Tell the POAP KINGS clan, in in-game clan chat, that this is happening and "
+            f"recognize what this member has contributed. Action: "
+            f"{atype.replace('_', ' ')} for {name}."
+            + (f" What stood out: {member_reason}." if member_reason else "")
+            + " Speak to the impact they have had on the clan — the war days they showed up "
+            "for, the battles, the donations. Never mention their position in any ranking or "
+            "standings, never a score or number out of the roster, and never the elder slot "
+            "count or band. Warm, brief, and specific to them."
         )
         result = await generate_clan_chat_copy(
             intent=f"role_action_{atype}",

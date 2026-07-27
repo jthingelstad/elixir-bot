@@ -25,6 +25,32 @@ _DISCORD_MENTION_RE = re.compile(r"<[@#!&][^>]+>|@(everyone|here)\b", re.IGNOREC
 _MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\([^)]+\)")
 _MESSAGE_LABEL_RE = re.compile(r"^\s*(?:copy|message)\s*\d*\s*:", re.IGNORECASE)
 _NUMBERED_LABEL_RE = re.compile(r"^\s*\d+[.)]\s+")
+
+# Leadership scoring internals that must never reach in-game clan chat. The
+# promotion/demotion rationale is written FOR LEADERS — it carries the score
+# breakdown, the member's rank in the standings, and the elder band — and it was
+# being reused verbatim as the basis for the member-facing message. Members were
+# reading things like "score 0.83 [competitive 0.97, donations 0.55], rank 5 of
+# 39" and, on demotions, "slipped to 12th of 39". A member should hear what they
+# did and what it meant to the clan, never their position on a leaderboard.
+_ENGINE_INTERNALS_RES = (
+    re.compile(r"\[[^\]]*\]"),  # [competitive 0.97, donations 0.55] / [90 btl]
+    re.compile(r"\bscores?\s+\d", re.IGNORECASE),  # "score 0.83"
+    re.compile(r"\brank(?:ed)?\s+\d+\s*(?:of|/)\s*\d+", re.IGNORECASE),  # "rank 5 of 39"
+    re.compile(r"\b\d+(?:st|nd|rd|th)\s+(?:of|/)\s*\d+", re.IGNORECASE),  # "12th of 39"
+    re.compile(r"\bband\s+\d+\s*[-–]\s*\d+", re.IGNORECASE),  # "band 6-8"
+    re.compile(r"\belders?\s+\d+\b", re.IGNORECASE),  # "elders 8"
+    re.compile(r"\bleague\s+\d+\b", re.IGNORECASE),  # "league 3"
+    re.compile(r"\b\d+\s*btl\b", re.IGNORECASE),  # "90 btl"
+    re.compile(r"\b0\.\d+\b"),  # bare 0.83 style scores
+)
+
+
+def has_engine_internals(text: str) -> bool:
+    """Whether member-facing copy leaks leadership scoring internals."""
+    return any(pattern.search(text or "") for pattern in _ENGINE_INTERNALS_RES)
+
+
 # A real sentence break: .!? followed by whitespace or end-of-string. The
 # look-ahead skips decimals/abbreviations mid-word (e.g. "7.0d", "13,750").
 _SENTENCE_END_RE = re.compile(r"[.!?](?=\s|$)")
@@ -202,6 +228,8 @@ def validate_clan_chat_messages(
             violations.append(f"message_{idx}_discord_markdown")
         if _MESSAGE_LABEL_RE.search(message) or _NUMBERED_LABEL_RE.search(message):
             violations.append(f"message_{idx}_label")
+        if has_engine_internals(message):
+            violations.append(f"message_{idx}_engine_internals")
 
     for term in required_terms:
         if term and term not in combined:
@@ -362,6 +390,70 @@ def signed_valid_messages(
     return None
 
 
+_STRENGTH_RE = re.compile(r"war\s+([01]\.\d+)\s*/\s*ranked\s+([01]\.\d+)", re.IGNORECASE)
+_DONATION_RE = re.compile(r"donations?\s+([01]\.\d+)", re.IGNORECASE)
+_STRONG = 0.80
+_WEAK = 0.50
+
+
+def member_facing_role_reason(rationale: str, action_type: str = "") -> str:
+    """Turn the leadership rationale into what a MEMBER should hear.
+
+    The rationale is written for leaders deciding the action — it carries the
+    score breakdown, standings rank, and elder band. Members should hear what the
+    person actually did for the clan, so this reads the same signals and returns
+    plain contribution language with no numbers, no rank, and no band.
+
+    The framing follows the ACTION. A promotion leads with what they are carrying;
+    a demotion or removal leads with what went quiet, because that is the actual
+    reason. Getting this backwards praises someone as you demote them — the first
+    cut of this produced "OllieTurtle moves back to Member, ranked play and
+    donations carrying it" for a member whose war participation had collapsed.
+
+    Returns "" when nothing can be said honestly — better a plain, respectful line
+    than an invented or contradictory reason.
+    """
+    text = rationale or ""
+    strengths = _STRENGTH_RE.search(text)
+    donations = _DONATION_RE.search(text)
+    if not strengths and not donations:
+        return ""
+
+    strong: list[str] = []
+    weak: list[str] = []
+    if strengths:
+        war, ranked = float(strengths.group(1)), float(strengths.group(2))
+        (strong if war >= _STRONG else weak if war < _WEAK else []).append("war")
+        (strong if ranked >= _STRONG else weak if ranked < _WEAK else []).append("ranked play")
+    if donations:
+        give = float(donations.group(1))
+        (strong if give >= _STRONG else weak if give < _WEAK else []).append("donations")
+
+    stepping_down = action_type in {"demotion_recommendation", "kick_recommendation"}
+    if stepping_down:
+        # Only ever name the shortfall on a step-down. If nothing is clearly weak
+        # (e.g. simply outranked by a stronger member), say nothing rather than
+        # implying a failing that the numbers do not show.
+        return f"{_join_words(weak)} has gone quiet" if weak else ""
+    if strong:
+        return f"{_join_words(strong)} carrying it"
+    return ""
+
+
+def _first_clause(reason: str) -> str:
+    """The leading fact of a reason, without the trailing list of others."""
+    head = re.split(r"[;,]", reason or "", maxsplit=1)[0]
+    return head.strip(" .,;:")
+
+
+def _join_words(items: list[str]) -> str:
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return f"{', '.join(items[:-1])} and {items[-1]}"
+
+
 def role_action_clan_chat_copy(
     *,
     action_type: str,
@@ -374,21 +466,45 @@ def role_action_clan_chat_copy(
     if action_type not in ROLE_ACTION_TYPES:
         return None
     name = " ".join((target_player_name or "this member").split()) or "this member"
-    reason = _clan_chat_action_reason(rationale)
+    # Two rationale shapes reach here. The promote/demote band rationale is pure
+    # leadership scoring ("score 0.83 [competitive 0.97...], rank 5 of 39") and
+    # must be translated, not quoted — pasting it verbatim is what shipped R215.
+    # The kick/inactivity rationale is already plain member-readable language
+    # ("no battle in 8 days, 0 donations this week") and is worth keeping, so it
+    # is used as-is when it carries no internals.
+    reason = member_facing_role_reason(rationale, action_type)
+    if not reason:
+        plain = _clan_chat_action_reason(rationale)
+        if action_type == "kick_recommendation":
+            # Lead with the single primary fact rather than reciting every
+            # shortfall — "no battle in 8 days" says it; "no battle in 8 days,
+            # last login 8 days ago; 0 donations this week" is a charge sheet.
+            plain = _first_clause(plain)
+        if plain and not has_engine_internals(plain):
+            reason = plain
     if action_type == "promotion_recommendation":
         text = (
-            f"Promoting {name} to Elder: {reason}. Well earned."
+            f"{name} steps up to Elder, {reason}. Nice work."
             if reason
-            else f"Promoting {name} to Elder. Well earned."
+            else f"{name} steps up to Elder. Nice work."
         )
     elif action_type == "demotion_recommendation":
+        # A demotion should still respect what they put in — never a public
+        # ranking. ("slipped to 12th of 39" went out on R216.)
         text = (
-            f"Moving {name} back to Member for now: {reason}."
+            f"{name} moves back to Member for now, {reason}. Thanks for the work you put in."
             if reason
-            else f"Moving {name} back to Member for now."
+            else f"{name} moves back to Member for now. Thanks for the work you put in."
         )
     else:
-        text = f"Removing {name} for now: {reason}." if reason else f"Removing {name} for now."
+        # A removal still names why — the clan should know — but as one plain
+        # fact, not the semicolon-joined stat list the rationale carries
+        # ("no battle in 8 days, last login 8 days ago; 0 donations this week").
+        text = (
+            f"{name} is heading out for now, {reason}. Thanks for the time with us."
+            if reason
+            else f"{name} is heading out for now. Thanks for the time with us."
+        )
     signed_text = sign_clan_chat_text(text, limit=max_chars, signature=signature)
     result = validate_clan_chat_messages(
         [signed_text],
