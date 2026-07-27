@@ -520,6 +520,24 @@ async def _clear_posting_sentinel(action: dict) -> None:
         log.debug("sentinel clear failed for %s", action.get("action_id"), exc_info=True)
 
 
+def _member_participation_facts(tag: str | None) -> str:
+    """Member-safe contribution facts for copy, or "" if unavailable."""
+    if not tag:
+        return ""
+    conn = None
+    try:
+        from engine.management import member_participation_facts
+
+        conn = db.get_connection()
+        return member_participation_facts(conn, tag)
+    except Exception:
+        log.warning("participation facts lookup failed for %s", tag, exc_info=True)
+        return ""
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 async def _ensure_role_action_clan_chat_copy(action: dict) -> dict:
     """Every promotion/demotion/kick card carries an in-game clan-chat message
     explaining the WHY (Jamie 2026-07-05: the clan must know why these actions
@@ -579,15 +597,23 @@ async def _ensure_role_action_clan_chat_copy(action: dict) -> dict:
         # publicly told a demoted member they had "slipped to 12th of 39". Give
         # the model the contribution, not the scoring, and say what to recognize.
         member_reason = member_facing_role_reason(rationale, atype)
+        # Real participation facts, not just the scoring summary. Without these
+        # the composer had nothing concrete about the member and fell back to
+        # restating the leadership maths. Same vocabulary as the public weekly
+        # Elder Standing, so the two surfaces can't describe someone differently.
+        facts = await asyncio.to_thread(
+            _member_participation_facts, action.get("target_player_tag")
+        )
         context = (
             f"Tell the POAP KINGS clan, in in-game clan chat, that this is happening and "
             f"recognize what this member has contributed. Action: "
             f"{atype.replace('_', ' ')} for {name}."
             + (f" What stood out: {member_reason}." if member_reason else "")
+            + (f" Their actual contribution: {facts}." if facts else "")
             + " Speak to the impact they have had on the clan — the war days they showed up "
-            "for, the battles, the donations. Never mention their position in any ranking or "
-            "standings, never a score or number out of the roster, and never the elder slot "
-            "count or band. Warm, brief, and specific to them."
+            "for, the battles, the donations. You may quote those concrete numbers. Never "
+            "mention their position in any ranking or standings, never a score or number out "
+            "of the roster, and never the elder slot count or band. Warm, brief, specific."
         )
         result = await generate_clan_chat_copy(
             intent=f"role_action_{atype}",

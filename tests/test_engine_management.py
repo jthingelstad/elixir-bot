@@ -1160,3 +1160,24 @@ def test_demotion_is_not_re_raised_once_the_member_is_already_a_member(engine_co
         engine_conn, anchor_dt.strftime("%Y-%m-%d"), now=anchor_dt.strftime("%Y-%m-%dT07:00:00Z")
     )
     assert not any(r["player_tag"] == "#EDEAD" for r in res["demote_eligible"])
+
+
+def test_member_participation_facts_are_member_safe(engine_conn):
+    """Copy about a member may quote what they DID, never the leadership maths.
+
+    Same vocabulary as the public weekly Elder Standing ("100% war decks, 213
+    ranked battles, ~11 donations/wk") so the card and the report can never
+    describe the same person differently.
+    """
+    _seed_ranked(engine_conn, "#EV", war_used=16, war_avail=16, war_days=4, donations=800)
+    for i in range(4):
+        _seed_ranked(engine_conn, f"#O{i}", war_used=4, war_avail=16, war_days=1, donations=50)
+
+    facts = management.member_participation_facts(engine_conn, "#EV", now=NOW)
+    assert "war decks" in facts
+    # The leadership internals from elder_evidence must not appear.
+    for leaked in ("score", "rank", "of 5", "percentile", "band"):
+        assert leaked not in facts.lower(), f"leaked {leaked!r}: {facts}"
+    assert "0." not in facts, f"raw score leaked: {facts}"
+
+    assert management.member_participation_facts(engine_conn, "#GHOST", now=NOW) == ""

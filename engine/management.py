@@ -617,6 +617,36 @@ def elder_evidence(conn, tag: str, now: str | None = None) -> dict | None:
     }
 
 
+def member_participation_facts(conn, tag: str, now: str | None = None) -> str:
+    """What a MEMBER may hear about their own contribution, as a plain phrase.
+
+    Deliberately the member-safe subset of :func:`elder_evidence`: the score,
+    percentile, rank and roster size are leadership internals and are dropped.
+    What remains is what the member actually did, in the same vocabulary the
+    public weekly Elder Standing uses ("100% war decks, 213 ranked battles,
+    ~11 donations/wk") so the two surfaces can never describe the same person
+    differently. Returns "" when there is nothing rankable to say.
+    """
+    try:
+        evidence = elder_evidence(conn, tag, now)
+    except Exception:
+        return ""
+    if not evidence:
+        return ""
+    bits: list[str] = []
+    war_rate = evidence.get("war_deck_rate")
+    if war_rate is not None:
+        bits.append(f"{round(float(war_rate) * 100)}% war decks")
+    battles = evidence.get("ranked_battles") or 0
+    if battles:
+        league = evidence.get("ranked_league_name")
+        bits.append(f"{battles} ranked battles" + (f" in {league}" if league else ""))
+    donations = evidence.get("donations_4wk_avg") or 0
+    if donations:
+        bits.append(f"~{donations} donations a week")
+    return ", ".join(bits)
+
+
 # ------------------------------------------------------ kick path (§3.3)
 
 
