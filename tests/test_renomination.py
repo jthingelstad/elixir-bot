@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from engine import management
 from storage import leader_actions as la
 
@@ -21,17 +23,40 @@ def _stamp(days_ago: int) -> str:
     return (NOW_DT - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def _seed_recommended(conn, tag="#AAA", name="Idle", kick_state="recommended"):
+def _seed_recommended(
+    conn,
+    tag="#AAA",
+    name="Idle",
+    kick_state="recommended",
+    judgment_status="ready",
+    role="member",
+    in_clan=True,
+):
     conn.execute(
         "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
         "VALUES (?, ?, ?, ?)",
         (tag, name, NOW, NOW),
     )
+    # judgment_status/role are seeded explicitly: the sweep re-applies the same
+    # readiness gate run_tick_evaluators uses (`!= 'ready'` → held), and the
+    # column DEFAULTs to 'unknown', so an under-seeded row is held, not ready.
     conn.execute(
-        "INSERT INTO member_management (player_tag, computed_at, week_anchor, kick_state) "
-        "VALUES (?, ?, '2026-06-29', ?)",
-        (tag, NOW, kick_state),
+        "INSERT INTO member_management "
+        "(player_tag, computed_at, week_anchor, kick_state, judgment_status, role) "
+        "VALUES (?, ?, '2026-06-29', ?, ?, ?)",
+        (tag, NOW, kick_state, judgment_status, role),
     )
+    if in_clan:
+        conn.execute(
+            "INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at) "
+            "VALUES ('#J2RGCRVG', 'POAP KINGS', ?, ?)",
+            (NOW, NOW),
+        )
+        conn.execute(
+            "INSERT INTO clan_memberships (player_tag, joined_at, left_at, join_source) "
+            "VALUES (?, ?, NULL, 'test')",
+            (tag, NOW),
+        )
     conn.commit()
 
 
@@ -269,3 +294,49 @@ def test_decline_dismisses_backing_case(engine_conn):
         "SELECT status FROM decision_cases WHERE case_id=?", (case_id,)
     ).fetchone()["status"]
     assert status == "dismissed"
+
+
+# --- Sweep re-applies the tick evaluator's guards -------------------------
+#
+# renominate_after_cooldown used to select on kick_state alone. That is safe
+# ONLY while run_tick_evaluators re-guards every member earlier in the same
+# tick — but the evaluator SKIPS members whose evidence is stale, freezing
+# their state. During a per-member ingestion gap the sweep could therefore
+# re-card someone on a leave hold, on stale evidence, with no guard in the way.
+
+
+@pytest.mark.parametrize("status", ["unknown", "held"])
+def test_renomination_blocked_when_evidence_not_ready(engine_conn, status):
+    """A member the evaluator is holding (stale/unmaterialized evidence) must
+    not be re-carded by the sweep — it would be a removal card raised on
+    evidence the engine itself declined to judge."""
+    _seed_recommended(engine_conn, judgment_status=status)
+    _insert_kick_card(engine_conn, status="rejected", decided_at=_stamp(10))
+    assert management.renominate_after_cooldown(engine_conn, now=NOW) == []
+
+
+@pytest.mark.parametrize("role", ["elder", "coLeader", "leader"])
+def test_renomination_blocked_when_already_promoted(engine_conn, role):
+    """kick_state is stale once a member is promoted past member. Re-carding a
+    sitting elder for removal off that stale state is the failure mode."""
+    _seed_recommended(engine_conn, role=role)
+    _insert_kick_card(engine_conn, status="rejected", decided_at=_stamp(10))
+    assert management.renominate_after_cooldown(engine_conn, now=NOW) == []
+
+
+def test_renomination_blocked_by_leave_hold(engine_conn, monkeypatch):
+    """The LOA promise outranks the cooldown: a leader-granted leave hold must
+    block a re-nomination exactly as it blocks the first card."""
+    _seed_recommended(engine_conn)
+    _insert_kick_card(engine_conn, status="rejected", decided_at=_stamp(10))
+    monkeypatch.setattr(management, "_has_leadership_hold", lambda tag: True)
+    assert management.renominate_after_cooldown(engine_conn, now=NOW) == []
+
+
+def test_renomination_skips_departed_member(engine_conn):
+    """kick_state freezes at whatever it held just before a member left, and
+    nothing resets it on departure. A declined kick followed by a voluntary
+    leave must not resurface as a removal card for someone already gone."""
+    _seed_recommended(engine_conn, in_clan=False)
+    _insert_kick_card(engine_conn, status="rejected", decided_at=_stamp(10))
+    assert management.renominate_after_cooldown(engine_conn, now=NOW) == []

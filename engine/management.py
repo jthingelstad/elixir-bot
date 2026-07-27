@@ -413,10 +413,21 @@ def _ranked_battles(conn, tag, now: str, window: int) -> int:
     (which was skill/account-power, not effort)."""
     return (
         conn.execute(
+            # Window on battle_time (when it was PLAYED), not observed_at (when
+            # Elixir saw it). The v5.1 migration stamped 1,227 rows with a single
+            # observed_at, so pre-migration history all counted as "recent":
+            # L-Drxgo 112 vs a true 101, OllieTurtle 220 vs 213. This feeds
+            # ranked_pct in the score AND _passes_ranked_floor, which decides the
+            # fast abandonment demotion — so any future backfill would silently
+            # hand the whole roster a passing floor.
             """SELECT COUNT(*) FROM battle_events
            WHERE player_tag = ? AND mode_group = 'ranked'
-             AND julianday(observed_at) >= julianday(?) - ?""",
-            (tag, now, window),
+            -- battle_time is uniformly CR-compact (YYYYMMDDTHHMMSS.mmmZ) and
+            -- fixed-width, so a compact-string compare is exact and needs no
+            -- parsing. The stored '.000Z' tail sorts after the bare cutoff, so
+            -- a battle exactly on the boundary is included.
+             AND battle_time >= strftime('%Y%m%dT%H%M%S', ?, ?)""",
+            (tag, now, f"-{window} days"),
         ).fetchone()[0]
         or 0
     )
@@ -972,6 +983,22 @@ def renominate_after_cooldown(conn, now: str | None = None) -> list[dict]:
              FROM member_management mm
              LEFT JOIN players p ON p.player_tag = mm.player_tag
             WHERE mm.kick_state = 'recommended'
+              -- Re-apply the guards run_tick_evaluators applies. This sweep used
+              -- to select on kick_state alone, which is safe ONLY because the
+              -- evaluator re-guards everyone earlier in the same tick — except it
+              -- SKIPS members whose evidence is stale, freezing their state. So
+              -- during a per-member ingestion gap this could re-card someone on an
+              -- active leave hold, on stale evidence, with no guard in the way.
+              --
+              -- Membership is the load-bearing one: kick_state freezes at whatever
+              -- it was ~10min before a member left, and nothing resets it on
+              -- departure (2026-07-27: all 6 'recommended' rows were ex-members).
+              -- Without this, a declined kick + a voluntary leave = a removal card
+              -- raised days later for someone already gone.
+              AND EXISTS (SELECT 1 FROM clan_memberships cm
+                           WHERE cm.player_tag = mm.player_tag AND cm.left_at IS NULL)
+              AND COALESCE(mm.judgment_status, 'ready') = 'ready'
+              AND COALESCE(mm.role, 'member') NOT IN ('elder', 'coLeader', 'leader')
               AND NOT EXISTS (
                   SELECT 1 FROM leader_action_recommendations l3
                    WHERE l3.target_player_tag = mm.player_tag
@@ -982,6 +1009,11 @@ def renominate_after_cooldown(conn, now: str | None = None) -> list[dict]:
     ).fetchall()
     fired: list[dict] = []
     for row in rows:
+        # A leave hold or member shield must block a re-nomination exactly as it
+        # blocks the first one — otherwise a member whose leader granted them
+        # leave gets a removal card raised behind that promise.
+        if _has_leadership_hold(row["player_tag"]) or _has_member_shield(row["player_tag"]):
+            continue
         if _premise_still_rejected(conn, row["player_tag"], "kick_recommendation"):
             continue  # leader rejected the premise; evidence unchanged → stay blocked
         blocked_until = _renomination_blocked_until(

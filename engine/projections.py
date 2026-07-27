@@ -491,8 +491,14 @@ def refresh_management_inputs(conn, player_tag, now=None):
         (tag, now),
     ).fetchone()[0]
     battle_days = conn.execute(
+        # Window on when the battle was PLAYED, not when it was ingested. With
+        # observed_at this produced impossible values — a 28-day window can hold
+        # at most 29 distinct days, yet Shafith Nihal stored 34 and raquaza's
+        # oldest "in-window" battle was 81 days old — because the v5.1 migration
+        # stamped 1,227 rows with one observed_at. battle_time is uniformly
+        # CR-compact and fixed-width, so the compact-string compare is exact.
         "SELECT battle_time FROM battle_events WHERE player_tag = ? "
-        "AND observed_at >= strftime('%Y-%m-%dT%H:%M:%S', ?, '-28 days')",
+        "AND battle_time >= strftime('%Y%m%dT%H%M%S', ?, '-28 days')",
         (tag, now),
     ).fetchall()
     days = {
