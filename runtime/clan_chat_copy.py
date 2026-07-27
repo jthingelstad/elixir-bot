@@ -39,6 +39,12 @@ _ENGINE_INTERNALS_RES = (
     re.compile(r"\brank(?:ed)?\s+\d+\s*(?:of|/)\s*\d+", re.IGNORECASE),  # "rank 5 of 39"
     re.compile(r"\b\d+(?:st|nd|rd|th)\s+(?:of|/)\s*\d+", re.IGNORECASE),  # "12th of 39"
     re.compile(r"\bband\s+\d+\s*[-–]\s*\d+", re.IGNORECASE),  # "band 6-8"
+    re.compile(r"\bband\s+is\s+top\s+\d+", re.IGNORECASE),  # "band is top 6 to 8"
+    # A bare position out of the roster — "sits 16 of 39" — with no "rank" word
+    # to key on. Guarded by the size of the second number so the legitimate
+    # small-N totals survive: "Battle Day 3 of 4", "training day 2 of 3",
+    # "week 4 of 4". Nothing real counts out of 9 or more except the roster.
+    re.compile(r"\b\d+\s*(?:of|/)\s*(?:[1-9]\d+|\d{2,})\b"),
     re.compile(r"\belders?\s+\d+\b", re.IGNORECASE),  # "elders 8"
     re.compile(r"\bleague\s+\d+\b", re.IGNORECASE),  # "league 3"
     re.compile(r"\b\d+\s*btl\b", re.IGNORECASE),  # "90 btl"
