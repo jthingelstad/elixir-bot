@@ -866,9 +866,15 @@ def command_page() -> dict:
                    mm.kick_state, mm.promote_state, mm.demote_state
             FROM member_management mm
             LEFT JOIN players p ON p.player_tag = mm.player_tag
-            WHERE mm.kick_state != 'none'
-               OR mm.promote_state IN ('eligible', 'recommended')
-               OR mm.demote_state IN ('eligible', 'recommended')
+            -- Current members only: kick/promote/demote state freezes at whatever
+            -- it held just before someone leaves and nothing resets it on
+            -- departure, so ex-members otherwise sit at the TOP of this panel
+            -- (the kick_state ordering below promotes them).
+            WHERE EXISTS (SELECT 1 FROM clan_memberships cm
+                           WHERE cm.player_tag = mm.player_tag AND cm.left_at IS NULL)
+              AND (mm.kick_state != 'none'
+                   OR mm.promote_state IN ('eligible', 'recommended')
+                   OR mm.demote_state IN ('eligible', 'recommended'))
             ORDER BY (mm.kick_state != 'none') DESC,
                      (mm.promote_state = 'recommended') DESC,
                      p.current_name COLLATE NOCASE
@@ -955,6 +961,10 @@ def management_page() -> dict:
             """
             SELECT mm.*, p.current_name FROM member_management mm
             LEFT JOIN players p ON p.player_tag = mm.player_tag
+            -- Current members only — see the attention-panel note above: stale
+            -- kick_state on departed members would lead this page.
+            WHERE EXISTS (SELECT 1 FROM clan_memberships cm
+                           WHERE cm.player_tag = mm.player_tag AND cm.left_at IS NULL)
             ORDER BY (mm.kick_state != 'none') DESC, (mm.promote_state != 'none') DESC,
                      (mm.demote_state != 'none') DESC, p.current_name LIMIT 200""",
         )
