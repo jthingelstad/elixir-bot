@@ -1231,3 +1231,46 @@ def test_donation_average_survives_the_sunday_reset(engine_conn):
     # would have produced 0.
     assert avg == pytest.approx(220, abs=1), f"expected ~220 (weekly peaks), got {avg}"
     assert avg > 100, "the Sunday reset must not zero the donation signal"
+
+
+def test_swap_deadband_is_tested_at_the_boundary_not_the_extremes(engine_conn):
+    """The anti-flap deadband must guard the CLOSEST contest across the K line.
+
+    Both lists were sorted the same way, pairing the strongest challenger with the
+    strongest outranked elder — the widest gap — so SWAP_MARGIN was tested against
+    a contest that was never close, and the elder nearest the line lost the seat
+    on a hair's lead. Live 2026-07-27: Sandeep out-scored Tere by 0.020, inside
+    the 0.05 deadband, yet Tere was carded because the code matched her against
+    pax (+0.100).
+    """
+    # Four clear elders, plus a boundary pair separated by less than SWAP_MARGIN.
+    for i in range(4):
+        _seed_ranked(
+            engine_conn,
+            f"#E{i}",
+            role="elder",
+            war_used=15,
+            war_avail=16,
+            war_days=4,
+            donations=900 - i,
+        )
+    for i in range(8):
+        _seed_ranked(engine_conn, f"#M{i}", war_used=2, war_avail=16, war_days=1, donations=10 + i)
+    # The contest at the line: a challenger barely ahead of the weakest elder.
+    _seed_ranked(
+        engine_conn, "#EBOUND", role="elder", war_used=8, war_avail=16, war_days=2, donations=400
+    )
+    _seed_ranked(engine_conn, "#MBOUND", war_used=8, war_avail=16, war_days=2, donations=405)
+    engine_conn.commit()
+
+    scores = management._elder_scores(engine_conn, NOW, NOW[:10])
+    band = management._elder_band(engine_conn, scores, NOW)
+
+    if "#MBOUND" in band["should_be"] and "#EBOUND" not in band["should_be"]:
+        gap = scores["#MBOUND"]["score"] - scores["#EBOUND"]["score"]
+        if gap < management.SWAP_MARGIN:
+            assert "#EBOUND" not in band["demotable"], (
+                f"boundary elder demoted on a {gap:.3f} lead, inside the "
+                f"{management.SWAP_MARGIN} deadband"
+            )
+            assert "#MBOUND" not in band["promotable"]
