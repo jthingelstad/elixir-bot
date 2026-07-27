@@ -431,13 +431,30 @@ def refresh_management_inputs(conn, player_tag, now=None):
     role_row = conn.execute(
         "SELECT role FROM player_current_state WHERE player_tag = ?", (tag,)
     ).fetchone()
+    # Clash Royale's weekly donation counter resets on SUNDAY (verified across
+    # the roster: 24-26 members drop to 0 every Sunday). Sampling `%w='0'` — the
+    # previous approach — therefore read the value just AFTER the reset, i.e. ~0,
+    # so this average was near-zero for the whole clan: pax reported 4.5/week
+    # while actually donating ~200. That fed the public Elder Standing AND the
+    # donation component of the elder score, so promotion and demotion ranked on
+    # noise.
+    #
+    # Take each donation-week's PEAK instead, which is reset-agnostic: the
+    # counter climbs monotonically through the week, so its max IS that week's
+    # total. Shifting the date by a day groups Sun-Sat together (%W weeks start
+    # Monday), and the in-progress week is excluded so a partial total can't drag
+    # the average down.
     donations = conn.execute(
-        """SELECT AVG(donations_week) FROM (
-               SELECT donations_week FROM player_daily_metrics
-               WHERE player_tag = ? AND strftime('%w', metric_date) = '0'
-                 AND donations_week IS NOT NULL
-               ORDER BY metric_date DESC LIMIT 4)""",
-        (tag,),
+        """SELECT AVG(peak) FROM (
+               SELECT MAX(donations_week) AS peak,
+                      strftime('%Y-%W', metric_date, '+1 day') AS donation_week
+               FROM player_daily_metrics
+               WHERE player_tag = ? AND donations_week IS NOT NULL
+                 AND strftime('%Y-%W', metric_date, '+1 day')
+                     <> strftime('%Y-%W', ?, '+1 day')
+               GROUP BY donation_week
+               ORDER BY donation_week DESC LIMIT 4)""",
+        (tag, now[:10]),
     ).fetchone()[0]
     fame = conn.execute(
         """SELECT AVG(season_fame) FROM (

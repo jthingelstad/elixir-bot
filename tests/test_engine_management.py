@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from engine import management
 from engine.management import advance_layer1
 
@@ -1181,3 +1183,48 @@ def test_member_participation_facts_are_member_safe(engine_conn):
     assert "0." not in facts, f"raw score leaked: {facts}"
 
     assert management.member_participation_facts(engine_conn, "#GHOST", now=NOW) == ""
+
+
+def test_donation_average_survives_the_sunday_reset(engine_conn):
+    """Clash Royale's weekly donation counter resets on SUNDAY.
+
+    The old query sampled `strftime('%w', metric_date) = '0'` — Sunday — so it
+    read the value just AFTER the reset, i.e. ~0. Live effect on 2026-07-27: the
+    whole roster's `donations_4wk_avg` collapsed (pax reported 4.5/week while
+    actually donating ~200), and because the elder score uses a donation
+    PERCENTILE, whoever happened to catch a stray nonzero Sunday outranked the
+    clan's genuinely best donors. Shafith Nihal — top-ranked once corrected —
+    was accruing toward DEMOTION on it.
+    """
+    from engine.projections import refresh_management_inputs
+
+    tag = "#DONOR"
+    _seed_ranked(engine_conn, tag, war_used=8, war_avail=16, war_days=2, donations=0)
+    engine_conn.execute("DELETE FROM player_daily_metrics WHERE player_tag = ?", (tag,))
+
+    # Three full donation weeks. The counter climbs Mon-Sat and resets to 0 on
+    # Sunday — exactly the live shape.
+    for week_start, peak in (("2026-07-06", 210), ("2026-07-13", 270), ("2026-07-20", 180)):
+        start = datetime.strptime(week_start, "%Y-%m-%d")
+        for day in range(6):  # Mon-Sat: climbing
+            engine_conn.execute(
+                "INSERT OR REPLACE INTO player_daily_metrics (player_tag, metric_date, "
+                "donations_week) VALUES (?, ?, ?)",
+                (tag, (start + timedelta(days=day)).strftime("%Y-%m-%d"), peak * (day + 1) // 6),
+            )
+        engine_conn.execute(  # Sunday: the reset
+            "INSERT OR REPLACE INTO player_daily_metrics (player_tag, metric_date, "
+            "donations_week) VALUES (?, ?, 0)",
+            (tag, (start + timedelta(days=6)).strftime("%Y-%m-%d")),
+        )
+    engine_conn.commit()
+
+    refresh_management_inputs(engine_conn, tag, now="2026-07-27T12:00:00Z")
+    avg = engine_conn.execute(
+        "SELECT donations_4wk_avg FROM member_management WHERE player_tag = ?", (tag,)
+    ).fetchone()[0]
+
+    # Mean of the three weekly peaks (210, 270, 180) = 220. The old Sunday sample
+    # would have produced 0.
+    assert avg == pytest.approx(220, abs=1), f"expected ~220 (weekly peaks), got {avg}"
+    assert avg > 100, "the Sunday reset must not zero the donation signal"
