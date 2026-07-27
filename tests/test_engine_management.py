@@ -1077,3 +1077,86 @@ def test_management_read_summary_reflects_engine_states():
         assert summary["members_evaluated"] == 5  # #GONE not counted
     finally:
         conn.close()
+
+
+def test_promotion_is_not_re_raised_once_the_member_is_already_an_elder(engine_conn):
+    """`promote_state='eligible'` is sticky, so without a current-role guard the
+    weekly review kept asking to promote someone who already held the role.
+
+    Live case (2026-07-27): Fullboat and dez42 were promoted to Elder on
+    2026-07-20, and the following Monday's review still produced promote-to-Elder
+    cards R214/R215 for both — while the weekly Elder Standing report was already
+    listing them under "These Elders keep earning it". A recommendation must
+    describe something still true.
+    """
+    _seed_ranked(engine_conn, "#TOP", war_used=16, war_avail=16, war_days=4, donations=800)
+    for i in range(5):
+        _seed_ranked(engine_conn, f"#M{i}", war_used=4, war_avail=16, war_days=2, donations=100)
+
+    def _review(wk):
+        anchor_dt = datetime(2026, 6, 29, tzinfo=timezone.utc) + timedelta(weeks=wk)
+        _topup_week(engine_conn, "#TOP", anchor_dt, 16, 16, 800)
+        for i in range(5):
+            _topup_week(engine_conn, f"#M{i}", anchor_dt, 4, 16, 100)
+        return management.run_weekly_review(
+            engine_conn,
+            anchor_dt.strftime("%Y-%m-%d"),
+            now=anchor_dt.strftime("%Y-%m-%dT07:00:00Z"),
+        )
+
+    for wk in range(3):
+        res = _review(wk)
+    assert any(r["player_tag"] == "#TOP" for r in res["promote_eligible"]), (
+        "precondition: #TOP should reach promote-eligible"
+    )
+    assert (
+        engine_conn.execute(
+            "SELECT promote_state FROM member_management WHERE player_tag = '#TOP'"
+        ).fetchone()[0]
+        == "eligible"
+    )
+
+    # The leader acts: #TOP is now an Elder in the roster.
+    engine_conn.execute("UPDATE member_management SET role = 'elder' WHERE player_tag = '#TOP'")
+    engine_conn.execute("UPDATE player_current_state SET role = 'elder' WHERE player_tag = '#TOP'")
+    engine_conn.commit()
+
+    res = _review(3)
+    assert not any(r["player_tag"] == "#TOP" for r in res["promote_eligible"]), (
+        "re-raised a promotion for a member who is already an Elder"
+    )
+    assert (
+        engine_conn.execute(
+            "SELECT promote_state FROM member_management WHERE player_tag = '#TOP'"
+        ).fetchone()[0]
+        == "none"
+    ), "the promote machine should clear once the outcome has happened"
+
+
+def test_demotion_is_not_re_raised_once_the_member_is_already_a_member(engine_conn):
+    """Mirror guard on the way down — never ask to demote a sitting member."""
+    for i in range(11):
+        _seed_ranked(engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200)
+    _seed_ranked(
+        engine_conn, "#EDEAD", role="elder", war_used=0, war_avail=0, war_days=0, donations=900
+    )
+    for wk in range(3):
+        anchor_dt = datetime(2026, 6, 29, tzinfo=timezone.utc) + timedelta(weeks=wk)
+        for i in range(11):
+            _topup_week(engine_conn, f"#P{i}", anchor_dt, 8, 16, 200)
+        res = management.run_weekly_review(
+            engine_conn,
+            anchor_dt.strftime("%Y-%m-%d"),
+            now=anchor_dt.strftime("%Y-%m-%dT07:00:00Z"),
+        )
+    assert any(r["player_tag"] == "#EDEAD" for r in res["demote_eligible"])
+
+    engine_conn.execute("UPDATE member_management SET role = 'member' WHERE player_tag = '#EDEAD'")
+    engine_conn.commit()
+    anchor_dt = datetime(2026, 6, 29, tzinfo=timezone.utc) + timedelta(weeks=3)
+    for i in range(11):
+        _topup_week(engine_conn, f"#P{i}", anchor_dt, 8, 16, 200)
+    res = management.run_weekly_review(
+        engine_conn, anchor_dt.strftime("%Y-%m-%d"), now=anchor_dt.strftime("%Y-%m-%dT07:00:00Z")
+    )
+    assert not any(r["player_tag"] == "#EDEAD" for r in res["demote_eligible"])

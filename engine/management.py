@@ -1185,6 +1185,15 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
                 if p_miss >= 2:
                     withdrawn.append({"player_tag": tag, "kind": "promote"})
                     p_state, p_weeks, p_miss = "building", max(0, p_weeks // 2), 0
+        # A recommendation must describe something still TRUE. `eligible` is a
+        # sticky state, so without this guard the review re-raised a promote card
+        # every week for a member who already held the role: Fullboat and dez42
+        # were promoted 2026-07-20 and were handed fresh "promote to Elder" cards
+        # on 2026-07-27 (R214/R215), while the Elder Standing report was already
+        # listing them as Elders. The outcome happening IS the completion — clear
+        # the machine rather than asking for it again.
+        if p_state == "eligible" and role != "member":
+            p_state, p_weeks, p_miss = "none", 0, 0
         st["promote_misses"] = p_miss
         if p_state == "eligible":
             promote_eligible.append(
@@ -1210,6 +1219,11 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
         else:
             if d_state in ("eligible", "recommended"):
                 withdrawn.append({"player_tag": tag, "kind": "demote"})
+            d_state, d_weeks = "none", 0
+        # Same rule on the way down: never ask to demote someone who is already
+        # a member. d_gate normally clears this, but the guard is explicit so the
+        # two directions cannot drift apart.
+        if d_state == "eligible" and role != "elder":
             d_state, d_weeks = "none", 0
         st["demote_weeks"] = d_weeks
         if d_state == "eligible":
