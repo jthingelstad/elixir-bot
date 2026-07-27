@@ -278,10 +278,10 @@ def _closed_week_donations(conn, tag, week_anchor: str):
              -- Skip the in-progress donation week. Its only elapsed day may be
              -- the Sunday reset itself, whose peak is 0 — which would report a
              -- 700-a-week donor as having given nothing.
-             AND strftime('%Y-%W', metric_date, '+1 day')
-                 <> strftime('%Y-%W', ?, '+1 day')
-           GROUP BY strftime('%Y-%W', metric_date, '+1 day')
-           ORDER BY strftime('%Y-%W', metric_date, '+1 day') DESC LIMIT 1""",
+             AND strftime('%Y-%W', metric_date)
+                 <> strftime('%Y-%W', ?)
+           GROUP BY strftime('%Y-%W', metric_date)
+           ORDER BY strftime('%Y-%W', metric_date) DESC LIMIT 1""",
         (tag, week_anchor, week_anchor),
     ).fetchone()
     return None if row is None else (row["peak"] or 0)
@@ -300,12 +300,12 @@ def _roster_donor_median(conn, week_anchor: str) -> float | None:
         for (v,) in conn.execute(
             """SELECT MAX(pm.donations_week) FROM player_daily_metrics pm
                WHERE pm.metric_date < ? AND pm.donations_week IS NOT NULL
-                 AND strftime('%Y-%W', pm.metric_date, '+1 day') = (
-                     SELECT MAX(strftime('%Y-%W', metric_date, '+1 day'))
+                 AND strftime('%Y-%W', pm.metric_date) = (
+                     SELECT MAX(strftime('%Y-%W', metric_date))
                        FROM player_daily_metrics
                       WHERE metric_date < ? AND donations_week IS NOT NULL
-                        AND strftime('%Y-%W', metric_date, '+1 day')
-                            <> strftime('%Y-%W', ?, '+1 day'))
+                        AND strftime('%Y-%W', metric_date)
+                            <> strftime('%Y-%W', ?))
                  AND EXISTS (SELECT 1 FROM clan_memberships cm
                              WHERE cm.player_tag = pm.player_tag AND cm.left_at IS NULL)
                GROUP BY pm.player_tag""",
@@ -440,10 +440,17 @@ def _war_rate(conn, tag, now: str) -> float:
     """Decks used ÷ available over the trailing war window (§3.2). 0.0 when the
     member has no finalized war days — non-participation ranks at the bottom."""
     row = conn.execute(
+        # Window on the DATE, not the instant. war_attendance_days rows are
+        # bulk-stamped one timestamp per war week (17 distinct values live, each a
+        # Monday ~10:00Z covering that week's 4 days), so an hour-precise cutoff
+        # moves an ENTIRE war week in or out depending on what time the review
+        # runs. Measured: the same calendar day at 08:00Z vs 20:49Z changed
+        # war_rate for 15 of 39 members — Aaqib Javed by 0.131, which at weight
+        # 0.65 is 2.6x SWAP_MARGIN. Seats must not depend on the clock.
         """SELECT SUM(decks_used) AS used, SUM(decks_available) AS avail
            FROM war_attendance_days
-           WHERE player_tag = ? AND julianday(observed_at) >= julianday(?) - ?""",
-        (tag, now, WAR_RATE_WINDOW),
+           WHERE player_tag = ? AND date(observed_at) >= date(?, ?)""",
+        (tag, now, f"-{WAR_RATE_WINDOW} days"),
     ).fetchone()
     if not row or not row["avail"]:
         return 0.0

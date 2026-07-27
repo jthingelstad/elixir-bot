@@ -346,8 +346,23 @@ def refresh_daily_metrics(conn, tag, date_chicago):
            ON CONFLICT(player_tag, metric_date) DO UPDATE SET
                exp_level = excluded.exp_level, trophies = excluded.trophies,
                best_trophies = excluded.best_trophies, clan_rank = excluded.clan_rank,
-               donations_week = excluded.donations_week,
-               donations_received_week = excluded.donations_received_week,
+               -- Donations are a MONOTONIC within-week counter, so keep the day's
+               -- high-water mark, not the last poll. The weekly reset lands
+               -- Monday ~00:10 UTC = Sunday ~19:00 America/Chicago, which is
+               -- INSIDE the Chicago day: a later poll would overwrite that week's
+               -- true peak with the post-reset 0 and destroy it permanently.
+               -- Measured cost of the old behaviour: ~13% roster-wide
+               -- understatement, unevenly spread 0-50% per member — and because
+               -- the elder score is a PERCENTILE, uneven loss reorders the
+               -- ranking. MAX is also correct on a normal day (the counter only
+               -- climbs) and resets cleanly the day after, when every reading is
+               -- already post-reset.
+               donations_week = MAX(
+                   COALESCE(excluded.donations_week, 0),
+                   COALESCE(player_daily_metrics.donations_week, 0)),
+               donations_received_week = MAX(
+                   COALESCE(excluded.donations_received_week, 0),
+                   COALESCE(player_daily_metrics.donations_received_week, 0)),
                last_seen_api = COALESCE(excluded.last_seen_api, player_daily_metrics.last_seen_api)""",
         (
             tag,
@@ -447,11 +462,11 @@ def refresh_management_inputs(conn, player_tag, now=None):
     donations = conn.execute(
         """SELECT AVG(peak) FROM (
                SELECT MAX(donations_week) AS peak,
-                      strftime('%Y-%W', metric_date, '+1 day') AS donation_week
+                      strftime('%Y-%W', metric_date) AS donation_week
                FROM player_daily_metrics
                WHERE player_tag = ? AND donations_week IS NOT NULL
-                 AND strftime('%Y-%W', metric_date, '+1 day')
-                     <> strftime('%Y-%W', ?, '+1 day')
+                 AND strftime('%Y-%W', metric_date)
+                     <> strftime('%Y-%W', ?)
                GROUP BY donation_week
                ORDER BY donation_week DESC LIMIT 4)""",
         (tag, now[:10]),
@@ -467,9 +482,12 @@ def refresh_management_inputs(conn, player_tag, now=None):
         (tag,),
     ).fetchone()[0]
     attendance = conn.execute(
+        # Date-granular, matching engine.management._war_rate: these rows carry one
+        # bulk timestamp per war week, so an hour-precise cutoff swings a whole
+        # week in or out depending on when the job happens to run.
         """SELECT CAST(SUM(decks_used) AS REAL) / NULLIF(SUM(decks_available), 0)
            FROM war_attendance_days
-           WHERE player_tag = ? AND observed_at >= strftime('%Y-%m-%dT%H:%M:%S', ?, '-28 days')""",
+           WHERE player_tag = ? AND date(observed_at) >= date(?, '-28 days')""",
         (tag, now),
     ).fetchone()[0]
     battle_days = conn.execute(
