@@ -198,7 +198,7 @@ async def _post_startup_message() -> bool:
             recent_posts=recent_posts,
         )
     except Exception as exc:
-        log.error("Startup message generation failed: %s", exc)
+        log.exception("Startup message generation failed: %s", exc)
         fun_line = None
     if not fun_line:
         fun_line = ":elixir_hype: Elixir is in the arena and the decks are shuffled. Leadership view is live."

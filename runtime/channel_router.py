@@ -1561,7 +1561,7 @@ async def _handle_reception_message(app, message, ctx, channel_config, scope) ->
                 name="reception_memory",
             )
         except Exception as e:
-            app.log.error("reception error: %s", e)
+            app.log.exception("reception error: %s", e)
             app._log_prompt_failure(
                 question=raw_question,
                 workflow="reception",
@@ -1752,7 +1752,7 @@ async def _handle_channel_llm_message(app, message, ctx, channel_config) -> None
                 name=f"{workflow}_memory",
             )
         except Exception as e:
-            app.log.error("%s channel error: %s", workflow, e)
+            app.log.exception("%s channel error: %s", workflow, e)
             app._log_prompt_failure(
                 question=raw_question,
                 workflow=workflow,

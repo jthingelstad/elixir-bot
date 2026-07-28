@@ -190,7 +190,7 @@ def _log_prompt_failure(
             _preview_text(llm.get("last_error"), limit=240),
         )
     except Exception as exc:
-        log.error("prompt failure logging error: %s", exc)
+        log.exception("prompt failure logging error: %s", exc)
 
 
 # ── The `elixir` runtime surface ─────────────────────────────────────────────
@@ -437,7 +437,10 @@ async def _post_pending_leader_action_cards(limit: int = 4) -> int:
     try:
         channel_config = _channel_config_by_key("arena-relay")
     except Exception:
-        log.warning("engine leader-action cards skipped: arena-relay unavailable")
+        # ERROR, not warning: this returns 0 having posted nothing, so a card a
+        # leader is owed never reaches #actions. That is the 2026-07-18 outage
+        # class — the bot looked healthy while leadership silently got nothing.
+        log.error("engine leader-action cards skipped: arena-relay unavailable", exc_info=True)
         return 0
     relay_channel = bot.get_channel(int(channel_config["id"]))
     if relay_channel is None:
@@ -999,7 +1002,9 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
     try:
         channel_config = _channel_config_by_key("arena-relay")
     except Exception:
-        log.warning("awareness relay skipped: arena-relay unavailable")
+        # ERROR: returns False having delivered nothing. A relay the brain
+        # decided to send is dropped, and only the log can say so.
+        log.error("awareness relay skipped: arena-relay unavailable", exc_info=True)
         return False
     relay_channel = bot.get_channel(int(channel_config["id"]))
     if relay_channel is None:
@@ -1450,7 +1455,7 @@ async def on_ready():
                 log.info("Synced global /elixir commands")
             SLASH_COMMANDS_SYNCED = True
         except Exception as exc:
-            log.error("Slash command sync failed: %s", exc)
+            log.exception("Slash command sync failed: %s", exc)
     # Sync custom emoji
     guild = bot.get_guild(GUILD_ID)
     if guild:
@@ -1531,7 +1536,9 @@ async def on_ready():
 
             await restore_leader_action_views(bot)
         except Exception as exc:
-            log.warning("Leader action view restore failed: %s", exc)
+            # ERROR: the cards stay on Discord but their buttons stop working,
+            # so a leader clicks Done and nothing happens. Silent from outside.
+            log.exception("Leader action view restore failed: %s", exc)
         try:
             cards = await _post_pending_leader_action_cards()
             if cards:

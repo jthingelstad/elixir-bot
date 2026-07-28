@@ -1277,7 +1277,7 @@ def _generate_simple_message(
             return None
         return text
     except (APIError, APIConnectionError) as e:
-        log.error("%s API error: %s", error_label, e)
+        log.exception("%s API error: %s", error_label, e)
         return None
 
 
@@ -1311,7 +1311,7 @@ def generate_promote_content(clan_data, war_data=None, roster_data=None):
         )
         return _parse_response(response_text(resp) or "null")
     except (APIError, APIConnectionError) as e:
-        log.error("Promote API error: %s", e)
+        log.exception("Promote API error: %s", e)
         return None
 
 

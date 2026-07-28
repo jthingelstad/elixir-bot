@@ -159,7 +159,7 @@ async def _ensure_member_role(
         )
         return True, f"Granted the Member role to {cr_name}."
     except discord.Forbidden:
-        app.log.error(
+        app.log.exception(
             "Cannot assign member role to %s — check bot permissions and role hierarchy",
             discord_member.id,
         )
@@ -204,7 +204,9 @@ async def remove_member_role_for_tag(member_tag: str, *, reason: str) -> tuple[b
         await guild_member.remove_roles(member_role, reason=reason)
         return True, f"Removed Member role from {guild_member.display_name}."
     except discord.Forbidden:
-        app.log.error("Cannot remove member role from %s — check bot permissions", guild_member.id)
+        app.log.exception(
+            "Cannot remove member role from %s — check bot permissions", guild_member.id
+        )
         return False, "Couldn't remove the Member role due to Discord permissions."
 
 
