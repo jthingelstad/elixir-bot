@@ -38,7 +38,7 @@ BROAD_EXCEPTION_BASELINE = {
     "capabilities/war.py": 1,
     "cr_api.py": 4,
     "db/__init__.py": 2,
-    "db/schema.py": 10,  # +1: V10 migration rollback/re-raise (same pattern as v2-v9)
+    "db/schema.py": 11,  # +1: V11 migration rollback/re-raise (same pattern as v2-v10)
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
@@ -71,7 +71,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/jobs/_maintenance.py": 4,
     "runtime/jobs/_memory.py": 22,
     "runtime/jobs/_promotion.py": 3,
-    "runtime/jobs/_tournament.py": 6,
+    "runtime/jobs/_tournament.py": 8,  # +2: #210 stream emitters, best-effort so a tournament never dies on an emit
     "runtime/leader_action_feedback.py": 1,
     "runtime/leader_action_ui.py": 9,
     "runtime/leader_note_interpreter.py": 5,  # interpret/apply/undo/fix all fail-open off the delivery path

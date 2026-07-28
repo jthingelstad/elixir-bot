@@ -1,6 +1,7 @@
 """Tests for tournament signal generation during polling."""
 
 import asyncio
+import json
 
 import db
 from runtime.jobs import _tournament as tournament_jobs
@@ -631,3 +632,84 @@ def test_tournament_recap_records_failure_and_reports_not_posted(monkeypatch):
             {"context": {"tournament_tag": "#2QG9Y9UR"}},
         )
     ]
+
+
+# --- #210: tournaments are clan events; their internals are their own stream ---
+
+
+def test_tournament_finished_is_a_clan_event_with_podium(engine_conn):
+    """The clan stream sees the tournament as ONE bounded moment, carrying the
+    facts the retired deterministic close-post used to format itself."""
+    from runtime.jobs import _tournament as tj
+
+    api = {
+        "membersList": [
+            {"rank": 1, "name": "Ada", "tag": "#A", "score": 9},
+            {"rank": 2, "name": "Bo", "tag": "#B", "score": 7},
+            {"rank": 3, "name": "Cy", "tag": "#C", "score": 5},
+            {"rank": 4, "name": "Di", "tag": "#D", "score": 1},
+        ],
+        "deckSelection": "collection",
+    }
+    tj._emit_tournament_finished("#T1", {"name": "Friday Cup"}, api)
+
+    row = engine_conn.execute(
+        "SELECT event_type, payload_json FROM clan_events WHERE event_type='tournament_finished'"
+    ).fetchone()
+    assert row is not None
+    payload = json.loads(row["payload_json"])
+    assert payload["name"] == "Friday Cup"
+    assert payload["participants"] == 4
+    assert [p["name"] for p in payload["podium"]] == ["Ada", "Bo", "Cy"]  # top 3 only
+
+
+def test_battle_beats_go_to_the_tournament_stream_not_the_clan_stream(engine_conn):
+    """The grain separation this issue exists for: a tournament produces dozens
+    of battles, and putting them on the clan stream would drown the awareness
+    read in battle results. They belong to a tournament-scoped stream."""
+    from runtime.jobs import _tournament as tj
+
+    before_clan = engine_conn.execute("SELECT COUNT(*) FROM clan_events").fetchone()[0]
+    for i in range(5):
+        tj._emit_tournament_event(
+            "#T1",
+            "tournament_battle_played",
+            f"tournament_battle_played|#T1|t{i}|#A|#B",
+            {"tournament_tag": "#T1", "battle_time": f"t{i}", "winner": "#A"},
+            subject_tag="#A",
+        )
+
+    scoped = engine_conn.execute(
+        "SELECT COUNT(*) FROM tournament_events WHERE tournament_tag='#T1'"
+    ).fetchone()[0]
+    after_clan = engine_conn.execute("SELECT COUNT(*) FROM clan_events").fetchone()[0]
+    assert scoped == 5
+    assert after_clan == before_clan, "battle beats must never reach the clan stream"
+
+
+def test_tournament_beats_are_idempotent_on_the_canonical_signal_key(engine_conn):
+    """A battle appears in BOTH players' logs, so the same beat is seen twice.
+    Dedup rides the signal_key the poller already canonicalizes."""
+    from runtime.jobs import _tournament as tj
+
+    key = "tournament_battle_played|#T1|20260728T120000|#A|#B"
+    for _ in range(3):
+        tj._emit_tournament_event(
+            "#T1",
+            "tournament_battle_played",
+            key,
+            {"tournament_tag": "#T1", "battle_time": "20260728T120000"},
+        )
+    assert (
+        engine_conn.execute(
+            "SELECT COUNT(*) FROM tournament_events WHERE dedup_key = ?", (key,)
+        ).fetchone()[0]
+        == 1
+    )
+
+
+def test_tournament_finished_forces_a_post():
+    """It is a real, dated clan moment — the awareness loop must not skip it."""
+    from runtime.awareness.read import HARD_POST_EVENT_TYPES
+
+    assert "tournament_finished" in HARD_POST_EVENT_TYPES

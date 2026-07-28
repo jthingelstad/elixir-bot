@@ -66,6 +66,20 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
     "clan_score_milestone": _event("clan", "clan_event", "milestone", "clan_score"),
     "clan_league_changed": _event("clan", "clan_event", "league", "prev_league", "war_trophies"),
     "clan_birthday": _event("clan", "clan_event", "years", hard_post=True),
+    # A tournament is a time-bounded event stream, not its own subsystem (#210).
+    # It ends on the clan stream like any other bounded thing, and the awareness
+    # loop narrates it — the same path season_closed and member_joined take.
+    # hard_post because a finished tournament is a real, dated clan moment that
+    # must not be silently skipped.
+    "tournament_finished": _event(
+        "clan",
+        "clan_event",
+        "name",
+        "participants",
+        "podium",
+        time_semantics="exact",
+        hard_post=True,
+    ),
     "member_birthday": _event("clan", "clan_event", "name"),
     "join_anniversary": _event("clan", "clan_event", "name", "months"),
     "cr_account_anniversary": _event("clan", "clan_event", "name", "years"),
@@ -90,6 +104,18 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
     "card_added": _event("game", "system", "name", time_semantics="exact"),
     "event_started": _event("game", "system", "title", time_semantics="exact"),
     "event_badge_earned": _event("game", "system", "badge_name", time_semantics="exact"),
+    # tournament stream — the fine grain INSIDE a bounded tournament (#210).
+    # These never touch the clan stream: one tournament produces dozens of
+    # battles and they would drown the awareness read in match results. The clan
+    # stream gets exactly one row per tournament (`tournament_finished`, above);
+    # this stream is scoped by tournament_tag and read by the tournament's own
+    # short-lived agent, which polls every 5 minutes while the event is live.
+    "tournament_battle_played": _event(
+        "tournament", "clan_event", "tournament_tag", "battle_time", time_semantics="exact"
+    ),
+    "tournament_member_joined": _event(
+        "tournament", "clan_event", "tournament_tag", "player_tag", time_semantics="exact"
+    ),
 }
 
 _STREAM_BY_TABLE = {
@@ -97,6 +123,7 @@ _STREAM_BY_TABLE = {
     "clan_events": "clan",
     "war_events": "war",
     "game_events": "game",
+    "tournament_events": "tournament",
 }
 
 

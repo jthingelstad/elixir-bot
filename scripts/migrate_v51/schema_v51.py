@@ -669,7 +669,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 69  # +member_outreach (V6); -editor_verdicts (V8); -recognition_ledger (V9); -elixir_improvement_suggestions (V10)
+EXPECTED_TABLE_COUNT = 70  # +member_outreach (V6); -editor_verdicts (V8); -recognition_ledger (V9); -elixir_improvement_suggestions (V10); +tournament_events (V11)
 
 
 _DEAD_MEMBERS_FK = re.compile(
