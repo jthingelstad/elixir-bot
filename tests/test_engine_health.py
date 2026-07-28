@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -147,3 +148,57 @@ def test_data_integrity_flags_relational_and_projection_drift():
         assert any("war timestamp" in problem for problem in problems)
     finally:
         c.close()
+
+
+def test_api_drift_alerts_on_structural_change_only(conn):
+    """Structural drift is a signal; new event tags are noise.
+
+    The sentinel always recorded drift, but nothing evaluated it — the delivery
+    path was removed from Discord with a comment saying the Observatory owned
+    it, and the Observatory never did (#212). `[].tournamentTag` appeared in
+    player_battlelog on 2026-07-24 and nobody was told.
+    """
+    conn.executescript(
+        """CREATE TABLE IF NOT EXISTS api_sentinel_observations (
+               observation_id INTEGER PRIMARY KEY, sentinel_type TEXT, scope TEXT,
+               name TEXT, endpoint TEXT, first_seen_at TEXT, announced_signal_key TEXT
+           );"""
+    )
+    fresh = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stale = (datetime.now(timezone.utc) - timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn.executemany(
+        "INSERT INTO api_sentinel_observations "
+        "(sentinel_type, scope, name, endpoint, first_seen_at, announced_signal_key) "
+        "VALUES (?,?,?,?,?,?)",
+        [
+            (
+                "schema_path",
+                "player_battlelog",
+                "[].tournamentTag",
+                "player_battlelog",
+                fresh,
+                None,
+            ),
+            ("event", "events", "#2RL8CY8G", "events", fresh, None),  # noise — never alerts
+            ("schema_path", "player", "[].oldField", "player", stale, None),  # outside the window
+            ("schema_path", "clan", "[].seen", "clan", fresh, "sig:already-told"),  # announced
+        ],
+    )
+    conn.commit()
+
+    problems = health.check_api_drift(conn)
+    assert len(problems) == 1
+    assert "tournamentTag" in problems[0]
+    assert "2RL8CY8G" not in problems[0], "new event tags are routine noise, not drift"
+    assert "oldField" not in problems[0], "the historical backlog must not alert forever"
+    assert "seen" not in problems[0], "already-announced drift must not re-alert"
+
+
+def test_api_drift_silent_when_shape_is_stable(conn):
+    conn.executescript(
+        """CREATE TABLE IF NOT EXISTS api_sentinel_observations (
+               observation_id INTEGER PRIMARY KEY, sentinel_type TEXT, scope TEXT,
+               name TEXT, endpoint TEXT, first_seen_at TEXT, announced_signal_key TEXT
+           );"""
+    )
+    assert health.check_api_drift(conn) == []

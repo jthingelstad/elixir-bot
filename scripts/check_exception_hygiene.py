@@ -38,7 +38,7 @@ BROAD_EXCEPTION_BASELINE = {
     "capabilities/war.py": 1,
     "cr_api.py": 4,
     "db/__init__.py": 2,
-    "db/schema.py": 12,  # +1: V12 migration rollback/re-raise (same pattern as v2-v11)
+    "db/schema.py": 13,  # +1: V13 migration rollback/re-raise (same pattern as v2-v12)
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
@@ -49,7 +49,7 @@ BROAD_EXCEPTION_BASELINE = {
     "engine/pol_seasons.py": 2,
     "memory_store/__init__.py": 1,
     "runtime/activity_runner.py": 3,
-    "runtime/admin.py": 4,
+    "runtime/admin.py": 2,  # -2: #212 retired the dead signal.publish-pending impl
     "runtime/alerts.py": 2,  # +1: schedule_job_failure_alert best-effort loop-schedule guard
     "runtime/app.py": 41,  # +7: DM-outreach bridges + ask facts-brief profile lookup; +1: _outreach_log webhook guard
     "runtime/awareness/deliver.py": 10,
@@ -62,7 +62,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/discord_posting.py": 2,
     "runtime/elder_standing.py": 1,
     "runtime/email_verification.py": 1,
-    "runtime/health.py": 2,
+    "runtime/health.py": 3,  # +1: #212 api-drift check, fail-as-finding like its siblings
     "runtime/helpers/_common.py": 1,
     "runtime/helpers/_members.py": 2,
     "runtime/helpers/_reports.py": 10,
@@ -81,7 +81,6 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/startup.py": 3,
     "runtime/status.py": 3,
     "runtime/system_signals.py": 1,
-    "runtime/system_status_post.py": 1,
     "runtime/threads.py": 3,
     "runtime/webapp/chat.py": 2,
     "runtime/webapp/queries.py": 5,  # +1: command war-snapshot best-effort (like war_page)

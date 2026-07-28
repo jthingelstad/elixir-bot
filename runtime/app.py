@@ -31,7 +31,7 @@ from runtime.channel_router import route_message
 from runtime.discord_commands import register_elixir_app_commands
 from runtime.emoji import sync_emoji
 from runtime.leader_action_policy import can_post_leader_action
-from runtime.system_signals import queue_startup_system_signals
+from runtime.system_signals import seed_startup_state
 
 load_dotenv()
 
@@ -362,12 +362,6 @@ from runtime.startup import (  # noqa: E402,F401
     _post_startup_message,
     _resolve_runtime_channel,
     _startup_channel_audit_summary,
-)
-from runtime.system_status_post import (  # noqa: E402,F401
-    _post_system_signal_updates,
-    _preauthored_system_signal_result,
-    _publish_pending_system_signal_updates,
-    _system_signal_updates,
 )
 
 register_elixir_app_commands(bot)
@@ -1476,7 +1470,7 @@ async def on_ready():
     global SLASH_COMMANDS_SYNCED
     log.info("Elixir online as %s", bot.user)
     prompts.ensure_valid_discord_channel_config()
-    await asyncio.to_thread(queue_startup_system_signals)
+    await asyncio.to_thread(seed_startup_state)
     role_status = _member_role_grant_status()
     if role_status["configured"] and not role_status["ok"]:
         log.warning(

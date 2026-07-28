@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 12
+CURRENT_SCHEMA_VERSION = 13
 
 
 _V1_STATEMENTS = (
@@ -813,6 +813,30 @@ def _apply_v12(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS memory_log")
 
 
+def _apply_v13(conn: sqlite3.Connection) -> None:
+    """Drop ``system_signals`` — an announcement queue with no drain (#212).
+
+    It carried two unrelated things. ``capability_unlock`` rows were nine
+    hardcoded release announcements re-queued on every boot; release news now
+    goes out through the real flow (RELEASES.md + #announcements + email via
+    scripts/cut_release.py), and the last one shipped 2026-04-17.
+    ``api_*_sentinel`` rows were operator alerts about Clash Royale API drift.
+
+    Neither could be delivered. The publisher was removed from Discord with a
+    comment saying the Observatory owned it; the Observatory never did, so the
+    only caller of ``_publish_pending_system_signal_updates`` sat inside an
+    admin command with no dispatch branch. `[].tournamentTag` appeared in
+    player_battlelog on 2026-07-24 and nobody was told.
+
+    Drift now rides ``runtime.health.check_api_drift`` to #elixir-log, which is
+    a live operator channel the health job already posts to, and the AGENT-TEAM
+    Data Analyst owns characterizing it. The sentinel observations themselves
+    (``api_sentinel_observations``) are untouched — only the undeliverable queue
+    in front of them goes.
+    """
+    conn.execute("DROP TABLE IF EXISTS system_signals")
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -934,6 +958,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 12
+    if version < 13:
+        try:
+            _apply_v13(conn)
+            conn.execute("PRAGMA user_version = 13")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -990,7 +1023,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "ba724d7575add93854efcf919b303f77e5d76c880d61dc11040e1209862822db"
+CURRENT_SCHEMA_FINGERPRINT = "633c6c44e260ba1082772277e8194bcc976c461f9660e3cca6fc16bb93bb8f05"
 
 
 __all__ = [
