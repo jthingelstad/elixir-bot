@@ -1059,7 +1059,7 @@ TOOLS = [
                         "demotion_review",
                         "war_recovery",
                     ],
-                    "description": "Optional. Set only for a member kick/promotion/demotion review that should also become a #leader-actions card. Omit for a general followup (still tracked as a decision case).",
+                    "description": "Set this (WITH member_tag) for a member kick/promotion/demotion review, and it becomes a #actions card a leader can decide — the only way this tool reaches a human. Omit it and the followup is recorded as a memory only; nothing is posted and no leader is asked anything.",
                 },
             },
             "required": ["topic", "recommendation"],

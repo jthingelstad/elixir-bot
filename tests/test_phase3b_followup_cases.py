@@ -118,3 +118,30 @@ def test_flag_member_watch_with_case_type_opens_case():
     assert result.get("case_id")
     case = db.get_decision_case(result["case_key"])
     assert case["case_type"] == "inactivity_review"
+
+
+def test_unknown_case_type_is_refused_at_the_storage_boundary():
+    """Only a type some reconciler OWNS may become a case.
+
+    `leadership_followup` was the counter-example: never in CASE_TYPES, so no
+    reconciler iterated it and every row stayed open forever while being
+    invisible to leadership. The tool schemas constrain case_type to an enum, but
+    that is enforced by the model API — this keeps the invariant true for any
+    caller, so an unclosable case cannot be created by construction.
+    """
+    import pytest
+
+    for bad in ("leadership_followup", "kick_review", "war_readiness_review", ""):
+        with pytest.raises(ValueError):
+            db.upsert_member_review_case(case_type=bad, member={"tag": "#GUARD1", "name": "Guard"})
+
+
+def test_known_case_types_are_still_accepted():
+    from storage.cases import CASE_TYPES
+
+    for good in sorted(CASE_TYPES):
+        case = db.upsert_member_review_case(
+            case_type=good, member={"tag": f"#OK{abs(hash(good)) % 9999}", "name": "Ok"}
+        )
+        assert case is not None
+        assert case["case_type"] == good

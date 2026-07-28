@@ -467,8 +467,13 @@ lazily by runtime code.
   `is_test`; verified live DDL). Changes: none structural — it is already
   `target_player_tag`-keyed. Kick-suppression (C1) keeps reading it.
 - `decision_cases` — **carried, slimmed to one implementation** (the live table is
-  already generic + tag-keyed; verified DDL). It serves the clanops write tools
-  (`flag_member_watch`, `record_leadership_followup`) and the member-review queue.
+  already generic + tag-keyed; verified DDL). It serves the member-review queue only.
+  A case is opened ONLY for a type in `CASE_TYPES` — one some reconciler owns — and
+  `upsert_member_review_case` rejects anything else. The awareness write tools
+  (`flag_member_watch`, `record_leadership_followup`) reach it only by supplying such a
+  `case_type` together with a member; without both they record a memory and nothing more.
+  The retired `leadership_followup` type was the counter-example: outside `CASE_TYPES`,
+  so nothing could ever close it (#208).
   Columns `source_signal_key` / `source_signal_type` are renamed
   `source_event_key` / `source_event_type` (Gen B naming retired).
 - `revisits` — carried as-is (`signal_key` renamed `revisit_key`; it is an opaque
@@ -671,7 +676,7 @@ omitted.
 | | season_window / war_season | war_races | war_seasons, war_weeks |
 | write: `update_member` | 4 fields | member_metadata | player_metadata |
 | write: `save_clan_memory` | — | clan_memories (+ satellites) | unchanged (deferred pass) |
-| write: `flag_member_watch` / `record_leadership_followup` | — | decision_cases, clan_memories | decision_cases (renamed source cols), clan_memories |
+| write: `flag_member_watch` / `record_leadership_followup` | — | decision_cases, clan_memories | clan_memories always; decision_cases only with a `CASE_TYPES` case_type + member (#208) |
 | write: `schedule_revisit` | — | revisits | revisits |
 
 **Notable upgrades over today:** `at_risk` and `promotion_candidates` stop

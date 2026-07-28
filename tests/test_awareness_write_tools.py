@@ -177,7 +177,13 @@ def test_flag_member_watch_can_upsert_decision_case(memdb):
 
 def test_awareness_write_does_not_reopen_a_leader_closed_case(memdb):
     """QA H20/H21: an awareness write must not silently reopen a decision case
-    a leader deliberately resolved/dismissed."""
+    a leader deliberately resolved/dismissed.
+
+    Uses `inactivity_review` — the real type behind a removal review. This test
+    previously used an invented `kick_review`, which appears nowhere in
+    production code or data and is not in CASE_TYPES, so it exercised a case type
+    no reconciler owns — the exact defect class #208 closed.
+    """
     db.snapshot_members([{"tag": "#ZZZ9", "name": "Rook", "role": "member"}])
     first = json.loads(
         tool_exec._execute_tool(
@@ -185,7 +191,7 @@ def test_awareness_write_does_not_reopen_a_leader_closed_case(memdb):
             {
                 "member_tag": "Rook",
                 "reason": "Silent; review removal.",
-                "case_type": "kick_review",
+                "case_type": "inactivity_review",
             },
             workflow="awareness",
         )
@@ -202,7 +208,7 @@ def test_awareness_write_does_not_reopen_a_leader_closed_case(memdb):
             {
                 "member_tag": "Rook",
                 "reason": "Still silent.",
-                "case_type": "kick_review",
+                "case_type": "inactivity_review",
             },
             workflow="awareness",
         )
@@ -211,7 +217,7 @@ def test_awareness_write_does_not_reopen_a_leader_closed_case(memdb):
 
     # The controlled re-nomination path (allow_reopen=True) still may.
     db.upsert_member_review_case(
-        case_type="kick_review",
+        case_type="inactivity_review",
         member={"tag": "#ZZZ9", "name": "Rook"},
         allow_reopen=True,
     )
