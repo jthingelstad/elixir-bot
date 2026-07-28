@@ -789,7 +789,21 @@ def command_page() -> dict:
     conn = db.get_connection()
     try:
         open_actions = leader_actions.list_leader_actions(status="proposed", limit=25, conn=conn)
-        open_cases = cases.list_decision_cases(limit=25, conn=conn)
+        # A case that BACKS an open card is not a second thing to decide -- it is
+        # the card's internal record. Counting both double-counted one item
+        # ("Needs your decision: 2" for a single kick review); 26 of 39 cases
+        # ever created carry a linked card. Only surface cases with nothing on
+        # the board behind them, and label them as tracking rather than asks.
+        carded = {
+            r["case_id"]
+            for r in conn.execute(
+                "SELECT DISTINCT case_id FROM leader_action_recommendations "
+                "WHERE case_id IS NOT NULL AND status = 'proposed'"
+            ).fetchall()
+        }
+        open_cases = [
+            c for c in cases.list_decision_cases(limit=25, conn=conn) if c["case_id"] not in carded
+        ]
         pending_revisits = revisits.list_pending_revisits(limit=15, conn=conn)
 
         attention = _rows(

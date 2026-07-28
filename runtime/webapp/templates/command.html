@@ -9,8 +9,12 @@
 
   <div class="card primary" style="grid-column: 1 / -1;">
     <h2 style="margin-top:0;">Needs your decision
-      <span class="badge {{ 'bad' if (open_actions|length + open_cases|length) else 'ok' }}">{{ open_actions|length + open_cases|length }}</span>
+      <span class="badge {{ 'bad' if open_actions|length else 'ok' }}">{{ open_actions|length }}</span>
     </h2>
+    <p class="muted" style="margin:.2rem 0 .6rem;">
+      Cards Elixir has raised and is waiting on. <strong>You decide these in Discord —
+      #actions</strong>, with ✅ or ❌; this page is the read-only view.
+    </p>
     {% if open_actions %}
       <table>
         <thead><tr><th>Card</th><th>Member</th><th>What</th><th>Raised</th></tr></thead>
@@ -27,22 +31,27 @@
       </table>
     {% endif %}
     {% if open_cases %}
-      <h3 style="margin:.7rem 0 .2rem;">Decision cases due</h3>
+      <h3 style="margin:.7rem 0 .2rem;">Tracked, not yet asked</h3>
+      <p class="muted" style="margin:.2rem 0 .4rem;">
+        Concerns Elixir is holding open <em>without</em> a card on the board — nothing is
+        waiting on you here. They either become a card when the evidence is strong enough,
+        or close themselves when it isn't.
+      </p>
       <table>
-        <thead><tr><th>Case</th><th>Member</th><th>Due</th></tr></thead>
+        <thead><tr><th>Concern</th><th>Member</th><th>Since</th></tr></thead>
         <tbody>
         {% for c in open_cases %}
           <tr>
             <td>{{ c.get('title') or c.get('case_type','') }}</td>
             <td>{{ c.get('target_player_name') or '—' }}</td>
-            <td class="muted">{{ c.get('due_at','') | reltime }}</td>
+            <td class="muted">{{ (c.get('opened_at') or c.get('due_at') or '') | reltime }}</td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
     {% endif %}
     {% if not open_actions and not open_cases %}
-      <p class="muted">Nothing waiting on you — no open cards or due cases. ✅</p>
+      <p class="muted">Nothing waiting on you — no open cards. ✅</p>
     {% endif %}
     <p style="margin:.5rem 0 0;"><a href="/management" class="muted">All management detail →</a></p>
   </div>
