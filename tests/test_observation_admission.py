@@ -239,43 +239,6 @@ def test_rejected_profile_does_not_mutate_baseline_or_poll_freshness(engine_conn
     assert engine_conn.execute("SELECT COUNT(*) FROM player_events").fetchone()[0] == 0
 
 
-def test_offline_replay_rejects_foreign_race_without_state_mutation(tmp_path, v51_schema_template):
-    import shutil
-
-    from engine.offline import OfflineEngine
-
-    db_path = str(tmp_path / "offline-admission.db")
-    shutil.copy(v51_schema_template, db_path)
-    engine = OfflineEngine(db_path)
-    foreign = _race_payload()
-    foreign["clan"]["tag"] = "#OTHER"
-    foreign["clans"].append(
-        {
-            "tag": "#OTHER",
-            "name": "OTHER",
-            "fame": 10,
-            "periodPoints": 0,
-            "clanScore": 500,
-        }
-    )
-
-    engine.apply(
-        "currentriverrace",
-        "OTHER",
-        json.dumps(foreign),
-        "2026-07-01T10:00:00Z",
-    )
-
-    assert engine.counters["observation_rejections"] == 1
-    assert (
-        engine.conn.execute(
-            "SELECT COUNT(*) FROM state_baselines WHERE entity_kind='riverrace'"
-        ).fetchone()[0]
-        == 0
-    )
-    engine.close()
-
-
 def test_storage_facade_rejects_cross_entity_profile_and_bad_battlelog(engine_conn):
     import db
 

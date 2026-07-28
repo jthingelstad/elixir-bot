@@ -268,12 +268,3 @@ def engine_conn(_isolate_default_sqlite_db):
     conn.execute("PRAGMA foreign_keys=ON")
     yield conn
     conn.close()
-
-
-@pytest.fixture()
-def legacy_engine_conn(engine_conn):
-    """Engine connection with the retired offline-only delivery queue."""
-    from engine.legacy_proactive import prepare_queue
-
-    prepare_queue(engine_conn)
-    return engine_conn

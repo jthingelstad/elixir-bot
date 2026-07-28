@@ -78,14 +78,9 @@ def test_retired_topic_channels_are_gone():
     """#player-highlights / #river-race / #battle-feed / #clan-events were
     deleted 2026-07-11; their lanes are removed and public commentary is
     consolidated into #elixir (the awareness brain's channel)."""
-    from engine.recognition.compose import PREFIX_LANE
-
     for lane in ("member-highlights", "river-race", "battle-feed", "clan-events"):
         assert lane not in prompts.CHANNEL_LANE_CONFIG
-    # recognition prefixes that used to fan out to those channels now go to #elixir
-    assert PREFIX_LANE["celebrate"] == "elixir"
-    assert PREFIX_LANE["clan"] == "elixir"
-    assert PREFIX_LANE["war"] == "elixir"
+    # public commentary is consolidated into #elixir, the awareness brain's channel
     assert prompts.discord_singleton_lane("elixir")["id"]
 
 

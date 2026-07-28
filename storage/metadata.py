@@ -209,7 +209,12 @@ _MIXED_TIMESTAMP_TABLES = {
 
 # Ordered list of (table, column, retention_days) for all purge targets.
 # v5.1 retention (docs/reference/v5.1/schema.md §1). Durable, never purged: rollups,
-# identity/tenure, awards, war_seasons, recognition_ledger, curated memories.
+# identity/tenure, awards, war_seasons, curated memories.
+#
+# This list states what is NOT purged; it is not evidence that a table has a live
+# consumer. `recognition_ledger` sat here until #207 and was assumed load-bearing
+# on that basis -- in fact award idempotency is the awards UNIQUE constraint, and
+# nothing read the ledger back. Verify a reader before trusting an entry here.
 _PURGE_TARGETS = [
     ("api_observation_receipts", "fetched_at", RAW_PAYLOAD_RETENTION_DAYS),
     (

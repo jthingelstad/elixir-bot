@@ -669,7 +669,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 71  # +member_outreach (V6); -editor_verdicts (V8, critic removed)
+EXPECTED_TABLE_COUNT = 70  # +member_outreach (V6); -editor_verdicts (V8); -recognition_ledger (V9)
 
 
 _DEAD_MEMBERS_FK = re.compile(

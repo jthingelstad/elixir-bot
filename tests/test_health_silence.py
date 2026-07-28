@@ -9,7 +9,6 @@ from runtime import health
 def _clear(conn):
     conn.execute("DELETE FROM awareness_posts")
     conn.execute("DELETE FROM leader_action_recommendations")
-    conn.execute("DELETE FROM recognition_ledger")
     conn.commit()
 
 

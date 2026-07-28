@@ -397,8 +397,6 @@ def main() -> int:
         ).fetchone()[0]
         g["week_finished emitted at section rollover"] = wf == 1
 
-    n_ledger = conn.execute("SELECT COUNT(*) FROM recognition_ledger").fetchone()[0]
-    g["zero legacy recognition claims"] = n_ledger == 0
     g["retired delivery queue absent"] = (
         conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='communication_intents'"
@@ -425,10 +423,7 @@ def main() -> int:
         print(exc)
         g["global DB invariants"] = False
 
-    print(
-        f"\nsim ran {args.start} -> {end.strftime('%Y-%m-%dT%H:%M:%SZ')}; "
-        f"{n_ledger} legacy claims, {battles} battles"
-    )
+    print(f"\nsim ran {args.start} -> {end.strftime('%Y-%m-%dT%H:%M:%SZ')}; {battles} battles")
     print("\n=== GATES ===")
     ok = True
     for k, v in g.items():

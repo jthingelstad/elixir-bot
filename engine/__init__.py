@@ -12,10 +12,9 @@ steps and deliberately stops before communication:
 ``engine.tick`` orchestrates those steps. ``engine.baselines`` and
 ``engine.clock`` provide their shared diff and war-time substrates.
 
-Proactive communication is owned by the awareness loop. The retained
-``engine.recognition`` and ``engine.delivery`` modules support offline replay
-and compatibility tests only; they are not live tick stages. ``engine.offline``
-is the API-free, Discord-free rehearsal harness.
+Proactive communication is owned by the awareness loop — solely, since the
+deterministic recognition/delivery stack was retired (#207). ``engine.offline``
+remains as the API-free, Discord-free replay harness for the live tick path.
 
 Public surfaces remain ``elixir_agent.py`` and ``runtime.app``; activity
 wiring lives in ``runtime/activities.py``.

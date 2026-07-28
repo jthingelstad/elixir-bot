@@ -32,12 +32,9 @@ import builtins
 import dis
 import importlib
 import inspect
-import json
 import pkgutil
 import textwrap
 import types
-
-import pytest
 
 _BUILTINS = set(dir(builtins))
 
@@ -169,88 +166,6 @@ def test_every_advertised_tool_has_an_executor():
         and isinstance(node.comparators[0].value, str)
     }
     assert advertised == tool_exec.TOOL_EXECUTOR_NAMES == dispatched
-
-
-# ------------------------------------------------- dynamic invocation (lazy imports)
-
-
-def _make_intent(conn, intent_type, payload, scope="public"):
-    """Insert a minimal intent row and return it as a dict (compose reads
-    intent_type / scope / payload_json)."""
-    conn.execute(
-        "INSERT INTO recognition_ledger (recognition_key, stream, event_refs_json, "
-        "score, claimed_at) VALUES (?, 'x', '{}', 0, '2026-07-05T00:00:00Z')",
-        (f"k:{intent_type}",),
-    )
-    conn.execute(
-        "INSERT INTO communication_intents (recognition_key, intent_type, lane, scope, "
-        "payload_json, status, attempts, created_at, expires_at) VALUES "
-        "(?, ?, 'battle-feed', ?, ?, 'pending', 0, '2026-07-05T00:00:00Z', "
-        "'2026-07-05T06:00:00Z')",
-        (f"k:{intent_type}", intent_type, scope, json.dumps(payload)),
-    )
-    conn.commit()
-    return {
-        "intent_type": intent_type,
-        "scope": scope,
-        "payload_json": json.dumps(payload),
-    }
-
-
-# Representative intent per compose branch — every prefix + the specific typed
-# payloads whose enrichment paths have bitten us (role_changed, season_closed).
-_INTENT_CASES = [
-    (
-        "war:war_day_opened",
-        {"subject_tag": "#A", "war_clock": {}, "war_day_human": "battle day 1 of 4"},
-    ),
-    ("war:week_finished", {"our_rank": 1, "our_fame": 10000}),
-    ("war:season_closed", {"war_champ_tag": "#A", "free_pass_tag": "#A"}),
-    (
-        "pulse:player_stream",
-        {"battles_total": 10, "quiet_window": False, "standouts": []},
-    ),
-    (
-        "celebrate:collection_level_milestone",
-        {"subject_tag": "#A", "milestone": 1700, "collection_level": 1712},
-    ),
-    (
-        "celebrate:card_level_milestone",
-        {"subject_tag": "#A", "card_name": "Balloon", "milestone": 16},
-    ),
-    ("cohort:arena_wave", {"members": [{"name": "A"}]}),
-    ("clan:member_joined", {"subject_tag": "#A", "name": "A", "trophies": 5000}),
-    ("clan:member_left", {"subject_tag": "#A", "name": "A", "tenure_days": 30}),
-    (
-        "clan:role_changed",
-        {"subject_tag": "#A", "new_role": "elder", "direction": "promoted"},
-    ),
-    ("clan:season_awards", {"season_id": 133}),
-    ("clan:clan_score_milestone", {"clan_tag": "#J", "milestone": 90000}),
-]
-
-
-@pytest.mark.parametrize("intent_type,payload", _INTENT_CASES, ids=[c[0] for c in _INTENT_CASES])
-def test_compose_ask_builds_for_every_intent_type(legacy_engine_conn, intent_type, payload):
-    """intent_context builds a non-empty ask for every intent branch — exercises
-    each branch's lazy imports / enrichment (the CLASH_COPY_MAX_LENGTH class
-    lived in exactly this kind of path)."""
-    from engine.recognition import compose
-
-    row = _make_intent(legacy_engine_conn, intent_type, payload)
-    ask = compose.intent_context(legacy_engine_conn, row)
-    assert isinstance(ask, str) and ask.strip(), f"empty ask for {intent_type}"
-
-
-@pytest.mark.parametrize("intent_type,payload", _INTENT_CASES, ids=[c[0] for c in _INTENT_CASES])
-def test_render_intent_fallback_for_every_intent_type(legacy_engine_conn, intent_type, payload):
-    """The deterministic fallback copy renders for every branch (delivery falls
-    back to this when compose/gate fail — it must never itself raise)."""
-    from engine.recognition import compose
-
-    row = _make_intent(legacy_engine_conn, intent_type, payload)
-    copy = compose.render_intent(row)
-    assert isinstance(copy, str) and copy.strip(), f"empty fallback for {intent_type}"
 
 
 def test_leader_action_card_builds_for_every_type(engine_conn):

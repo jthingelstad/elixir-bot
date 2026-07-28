@@ -655,60 +655,6 @@ def awards_page() -> dict:
         conn.close()
 
 
-def recognition_page(
-    stream: str | None, suppressed_only: bool, q: str | None, limit: int = 150
-) -> dict:
-    conn = db.get_connection()
-    try:
-        where, params = ["1=1"], []
-        if stream:
-            where.append("l.stream = ?")
-            params.append(stream)
-        if q:
-            where.append("l.recognition_key LIKE ?")
-            params.append(f"%{q}%")
-        rows = _rows(
-            conn,
-            f"""
-            SELECT l.recognition_key, l.stream, l.score, l.claimed_at, l.intent_id,
-                   l.event_refs_json
-            FROM recognition_ledger l
-            WHERE {" AND ".join(where)}
-            ORDER BY l.claimed_at DESC LIMIT ?""",
-            (*params, limit),
-        )
-        for r in rows:
-            blob = _parse_json(r.pop("event_refs_json"), {})
-            suppressed = blob.get("suppressed") if isinstance(blob, dict) else None
-            r["suppressed_reason"] = (suppressed or {}).get("reason")
-        if suppressed_only:
-            rows = [r for r in rows if r["suppressed_reason"]]
-        return {
-            "claims": rows,
-            "stream": stream or "",
-            "q": q or "",
-            "suppressed_only": suppressed_only,
-        }
-    finally:
-        conn.close()
-
-
-def recognition_detail(recognition_key: str) -> dict | None:
-    conn = db.get_connection()
-    try:
-        claim = _one(
-            conn,
-            "SELECT * FROM recognition_ledger WHERE recognition_key = ?",
-            (recognition_key,),
-        )
-        if claim is None:
-            return None
-        claim["refs"] = _parse_json(claim.get("event_refs_json"), {})
-        return {"claim": claim}
-    finally:
-        conn.close()
-
-
 def member_page(tag: str) -> dict | None:
     conn = db.get_connection()
     try:
@@ -727,18 +673,6 @@ def member_page(tag: str) -> dict | None:
             WHERE player_tag = ? ORDER BY joined_at DESC LIMIT 1""",
             (tag,),
         )
-        claims = _rows(
-            conn,
-            """
-            SELECT l.recognition_key, l.stream, l.score, l.claimed_at, l.intent_id,
-                   l.event_refs_json
-            FROM recognition_ledger l
-            WHERE l.recognition_key LIKE ? ORDER BY l.claimed_at DESC LIMIT 50""",
-            (f"%{tag}%",),
-        )
-        for c in claims:
-            blob = _parse_json(c.pop("event_refs_json"), {})
-            c["suppressed_reason"] = ((blob or {}).get("suppressed") or {}).get("reason")
         events = events_read.list_recent_events(days=30, subject_key=tag, limit=60, conn=conn)
         battles = _rows(
             conn,
@@ -803,7 +737,6 @@ def member_page(tag: str) -> dict | None:
             "poll": poll,
             "management": management,
             "membership": membership,
-            "claims": claims,
             "events": events,
             "battles": battles,
             "attendance": attendance,
