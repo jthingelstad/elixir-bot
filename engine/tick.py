@@ -151,9 +151,9 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
     """Poll → ingest → emit → project → manage.
 
     This production entrypoint cannot compose or deliver proactive posts. The
-    awareness loop consumes its event streams independently; the retired
-    recognizer/intent pipeline is reachable only through engine.legacy_proactive
-    in explicit offline rehearsals.
+    awareness loop consumes its event streams independently and is now the sole
+    proactive owner — the deterministic recognizer/intent pipeline it replaced
+    was retired entirely in #207.
     """
     now = now or datetime.now(timezone.utc)
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")

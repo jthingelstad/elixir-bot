@@ -9,7 +9,7 @@ older deployed code missed. Those rows are reported for cold review, but are
 not an idempotence failure merely because the implementation improved.
 
 Pass 2 is the GATE: after clearing baselines again, the exact same code and
-payloads must produce ZERO additional events, battles, legacy ledger claims,
+payloads must produce ZERO additional events or battles,
 or awareness post receipts. Because every dedup key is derived from payload
 content + observation time, any second-pass delta is a current-code defect:
 
@@ -68,7 +68,6 @@ def engine_go_live(conn) -> str | None:
 def counts(conn) -> dict:
     c = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in EVENT_TABLES}
     c["battle_events"] = conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0]
-    c["ledger"] = conn.execute("SELECT COUNT(*) FROM recognition_ledger").fetchone()[0]
     c["awareness_posts"] = conn.execute("SELECT COUNT(*) FROM awareness_posts").fetchone()[0]
     return c
 
@@ -199,12 +198,7 @@ def main() -> int:
     gates: dict[str, bool] = {}
     gates["second-pass new events == 0"] = new_events == 0
     gates["new battle rows == 0"] = after["battle_events"] == before["battle_events"]
-    gates["new legacy ledger claims == 0"] = after["ledger"] == before["ledger"]
     gates["new awareness posts == 0"] = after["awareness_posts"] == before["awareness_posts"]
-    dupes = conn.execute(
-        "SELECT COUNT(*) - COUNT(DISTINCT recognition_key) FROM recognition_ledger"
-    ).fetchone()[0]
-    gates["zero duplicate ledger claims"] = dupes == 0
 
     try:
         from tests.conftest import assert_db_invariants

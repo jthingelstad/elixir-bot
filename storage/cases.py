@@ -347,7 +347,8 @@ def resolve_decision_case(
     return get_decision_case_by_id(case_id, conn=conn)
 
 
-# Mirror of engine.recognition.recognizers.KICK_SUPPRESS_DAYS. A departure is
+# Was mirrored from the retired recognizers (#207); now the single definition.
+# A departure is
 # attributed to a kick when a kick_recommendation was marked done within this
 # window before the member left. Kept local to avoid a storage->engine import
 # (engine depends on storage, not the reverse).

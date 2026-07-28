@@ -1,13 +1,16 @@
 """Lane-registration consistency — a lane must exist at ALL THREE registration
 points or the bot breaks. The #battle-feed outage (2026-07-05) was a lane wired
-in DISCORD.md + compose but missing from CHANNEL_LANE_CONFIG's validator, which
-hard-failed on_ready. These tests keep the three points in sync.
+in DISCORD.md but missing from CHANNEL_LANE_CONFIG's validator, which hard-failed
+on_ready. These tests keep the three points in sync.
 
 The three points:
-  1. engine.recognition.compose.PREFIX_LANE values — what recognition routes to.
+  1. runtime.lanes.channels() — what the live delivery path can actually resolve
+     from DISCORD.md. (Was engine.recognition.compose.PREFIX_LANE until the
+     deterministic proactive stack was retired in #207; the awareness loop now
+     posts through this resolver.)
   2. prompts.CHANNEL_LANE_CONFIG keys — the on_ready validator's allowlist.
-  3. prompts/lanes/<lane>.md — the lane voice file compose loads (a missing one
-     silently drops composition to the fallback).
+  3. prompts/lanes/<lane>.md — the lane voice file (a missing one silently drops
+     composition to the fallback).
 """
 
 from __future__ import annotations
@@ -15,19 +18,19 @@ from __future__ import annotations
 import os
 
 import prompts
-from engine.recognition.compose import FAIL_CLOSED_LANE, PREFIX_LANE
+from runtime.lanes import channels
 
 _LANES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts", "lanes")
 
 
 def _routed_lanes() -> set[str]:
-    """Every lane recognition can actually route an intent to."""
-    return set(PREFIX_LANE.values()) | {FAIL_CLOSED_LANE}
+    """Every lane the live delivery path can resolve to a Discord channel."""
+    return set(channels())
 
 
 def test_every_routed_lane_is_in_channel_lane_config():
-    """A lane recognition routes to but the validator doesn't know → on_ready
-    crash (the #battle-feed class)."""
+    """A lane the delivery path can resolve but the validator doesn't know →
+    on_ready crash (the #battle-feed class)."""
     missing = _routed_lanes() - set(prompts.CHANNEL_LANE_CONFIG)
     assert not missing, (
         f"lanes routed by PREFIX_LANE but absent from CHANNEL_LANE_CONFIG "

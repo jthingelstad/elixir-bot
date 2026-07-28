@@ -51,19 +51,6 @@ def check_tick_errors(conn) -> list[str]:
     return problems
 
 
-def check_ledger_duplicates(conn) -> list[str]:
-    total, distinct = conn.execute(
-        "SELECT COUNT(*), COUNT(DISTINCT recognition_key) FROM recognition_ledger"
-    ).fetchone()
-    return (
-        [
-            f"recognition ledger has {total - distinct} duplicate key(s) — the one-moment-one-post invariant broke"
-        ]
-        if total != distinct
-        else []
-    )
-
-
 def check_poll_starvation(conn) -> list[str]:
     """Fairness floors (runtime.md §4): battlelog ≤6h, profile ≤24h for every
     open-membership member."""
@@ -246,7 +233,6 @@ def run_all(conn, previous_size: int | None = None) -> tuple[list[str], int]:
     problems: list[str] = []
     for check in (
         check_tick_errors,
-        check_ledger_duplicates,
         check_poll_starvation,
         check_memory_writes,
         check_new_incidents,

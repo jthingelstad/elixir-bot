@@ -3,7 +3,6 @@ promote path, kick path with guards."""
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -976,51 +975,6 @@ def test_elder_evidence_shape_and_none(engine_conn):
     assert ev["war_deck_rate"] >= 0.9 and ev["donations_4wk_avg"] == 226
     assert ev["rank"] and ev["elder_score"] > 0
     assert management.elder_evidence(engine_conn, "#GHOST", now=NOW) is None
-
-
-def test_promotion_fallback_carries_the_why():
-    # The deterministic #clan-events promotion copy must explain WHY, drawn
-    # from elder_evidence — not a bare "🎉 promoted!" (Jamie 2026-07-05).
-    from engine.recognition import compose
-
-    row = {
-        "intent_type": "clan:role_changed",
-        "payload_json": json.dumps(
-            {
-                "event_type": "role_changed",
-                "direction": "promoted",
-                "new_role": "elder",
-                "player_name": "Atternam",
-                "elder_evidence": {
-                    "ranked_league_name": "Ultimate Champion",
-                    "war_deck_rate": 0.96,
-                    "donations_week": 226,
-                },
-            }
-        ),
-    }
-    out = compose.render_intent(row)
-    assert "Atternam" in out and "Elder" in out
-    assert "Ultimate Champion" in out  # the why is present
-    assert out != "🎉 Atternam was promoted to elder!"  # not the old bare line
-
-
-def test_promotion_fallback_sane_without_evidence():
-    from engine.recognition import compose
-
-    row = {
-        "intent_type": "clan:role_changed",
-        "payload_json": json.dumps(
-            {
-                "event_type": "role_changed",
-                "direction": "promoted",
-                "new_role": "elder",
-                "player_name": "Newbie",
-            }
-        ),
-    }
-    out = compose.render_intent(row)
-    assert "Newbie" in out and "Elder" in out  # graceful with no evidence
 
 
 def test_management_read_summary_reflects_engine_states():

@@ -23,10 +23,6 @@ def conn():
             status_json TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
-        CREATE TABLE recognition_ledger (
-            ledger_id INTEGER PRIMARY KEY,
-            recognition_key TEXT NOT NULL
-        );
         CREATE TABLE players (player_tag TEXT PRIMARY KEY);
         CREATE TABLE clan_memberships (
             membership_id INTEGER PRIMARY KEY,
@@ -78,15 +74,6 @@ def test_tick_errors_flags_recent_job_failure(conn):
     )
     problems = health.check_tick_errors(conn)
     assert len(problems) == 1 and "recorded a failure" in problems[0]
-
-
-def test_ledger_duplicates(conn):
-    conn.executemany(
-        "INSERT INTO recognition_ledger (recognition_key) VALUES (?)",
-        [("a",), ("b",), ("a",)],
-    )
-    problems = health.check_ledger_duplicates(conn)
-    assert len(problems) == 1 and "1 duplicate key(s)" in problems[0]
 
 
 def test_poll_starvation_null_counts_as_starved(conn):

@@ -90,7 +90,6 @@ _V51_SCHEMA_CORE = {
         "last_seen_at",
     },
     "battle_events": {"dedup_key", "player_tag", "battle_time"},
-    "recognition_ledger": {"recognition_key", "stream", "claimed_at"},
 }
 
 

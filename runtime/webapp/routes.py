@@ -150,15 +150,6 @@ async def raw_payload_page(request: web.Request) -> web.Response:
     return render("raw.html", request, nav="streams", row=row, body=body, annotated=annotated)
 
 
-async def recognition_page(request: web.Request) -> web.Response:
-    stream = request.query.get("stream") or None
-    suppressed = request.query.get("suppressed") == "1"
-    q = request.query.get("q") or None
-    data = await asyncio.to_thread(queries.recognition_page, stream, suppressed, q)
-    flash = request.query.get("ok", "")
-    return render("recognition.html", request, nav="recognition", flash=flash, **data)
-
-
 async def awareness_page(request: web.Request) -> web.Response:
     data = await asyncio.to_thread(queries.awareness_page)
     return render("awareness.html", request, nav="awareness", **data)
@@ -190,14 +181,6 @@ async def memories_page(request: web.Request) -> web.Response:
     q = request.query.get("q") or None
     data = await asyncio.to_thread(queries.memories_page, kind, member, q)
     return render("memories.html", request, nav="memories", **data)
-
-
-async def recognition_detail(request: web.Request) -> web.Response:
-    key = request.match_info["key"]
-    data = await asyncio.to_thread(queries.recognition_detail, key)
-    if data is None:
-        raise web.HTTPNotFound(text="no such recognition key")
-    return render("recognition_detail.html", request, nav="recognition", key=key, **data)
 
 
 async def member_page(request: web.Request) -> web.Response:
@@ -334,13 +317,11 @@ def add_routes(app: web.Application) -> None:
             web.get("/streams", streams_page),
             web.get("/api-sentinel", api_sentinel_page),
             web.get("/raw/{payload_id}", raw_payload_page),
-            web.get("/recognition", recognition_page),
             web.get("/awareness", awareness_page),
             web.get("/activities", activities_page),
             web.get("/editorial", editorial_page),
             web.get("/incidents", incidents_page),
             web.get("/memories", memories_page),
-            web.get("/recognition/{key:.+}", recognition_detail),
             web.get("/member/{tag}", member_page),
             web.get("/polling", polling_page),
             web.get("/management", management_page),

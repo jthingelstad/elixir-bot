@@ -72,7 +72,6 @@ def test_pages_render_on_empty_db():
             "/ticks",
             "/streams",
             "/api-sentinel",
-            "/recognition",
             "/awareness",
             "/activities",
             "/polling",
@@ -328,53 +327,6 @@ def test_member_page_shows_leader_action_trail():
         assert "kick_recommendation" in text
         assert "Idle 9 days" in text
         assert "agreed, kicked" in text
-
-    _client_run(body)
-
-
-def _seed_claims():
-    conn = db.get_connection()
-    try:
-        conn.execute(
-            """INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at)
-               VALUES ('#SEED1', 'Seedling', '2026-07-01T00:00:00Z', '2026-07-04T00:00:00Z')"""
-        )
-        conn.execute(
-            """INSERT INTO recognition_ledger
-               (recognition_key, stream, event_refs_json, score, claimed_at, intent_id)
-               VALUES ('collection_level_milestone:#SEED1:1700', 'player',
-                       '{"refs": [], "suppressed": null}', 85, '2026-07-04T00:00:00Z', 7)"""
-        )
-        conn.execute(
-            """INSERT INTO recognition_ledger
-               (recognition_key, stream, event_refs_json, score, claimed_at)
-               VALUES ('best_trophies_peak:#SEED1:5100', 'player',
-                       '{"suppressed": {"reason": "player_highlight_accruing", "score": 40}}',
-                       40, '2026-07-04T00:01:00Z')"""
-        )
-        conn.execute(
-            """INSERT INTO poll_state (player_tag, temperature, heat, updated_at)
-               VALUES ('#SEED1', 'warm', 2, '2026-07-04T00:00:00Z')"""
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def test_recognition_shows_suppression_and_archived_legacy_reference():
-    _seed_claims()
-
-    async def body(client):
-        r = await client.get("/recognition", headers=LOGIN)
-        text = await r.text()
-        assert "player_highlight_accruing" in text
-        assert "legacy post #7 (archived)" in text
-        r = await client.get("/recognition/best_trophies_peak:%23SEED1:5100", headers=LOGIN)
-        assert r.status == 200
-        assert "player_highlight_accruing" in await r.text()
-        r = await client.get("/member/SEED1", headers=LOGIN)
-        assert r.status == 200
-        assert "Seedling" in await r.text()
 
     _client_run(body)
 

@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
 
 
 _V1_STATEMENTS = (
@@ -716,6 +716,24 @@ def _apply_v8(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS editor_verdicts")
 
 
+def _apply_v9(conn: sqlite3.Connection) -> None:
+    """Drop ``recognition_ledger`` with the deterministic recognition pipeline.
+
+    The recognizers/scorer stopped running 2026-07-10 when the awareness loop
+    became the sole proactive owner; the package was removed 2026-07-28 (#207).
+    The ledger was a claim store answering "has this moment already been
+    narrated?" for that pipeline alone.
+
+    It was briefly assumed load-bearing because it held ``award:`` keys and sat
+    on the never-purged list. It was not: award idempotency is
+    ``UNIQUE(award_type, season_id, section_index, player_tag)`` on ``awards``
+    with INSERT OR IGNORE, and the ledger claim fired *after* and *conditional
+    on* that insert. All 17 award claims carried ``intent_id = NULL`` — they
+    never posted. Nothing outside the retired package read the table back.
+    """
+    conn.execute("DROP TABLE IF EXISTS recognition_ledger")
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -801,6 +819,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 8
+    if version < 9:
+        try:
+            _apply_v9(conn)
+            conn.execute("PRAGMA user_version = 9")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -857,7 +884,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "e55d8dc65f7f91bca834341504d8bca7570f46a47c369144d4b8b1f0d74d75cb"
+CURRENT_SCHEMA_FINGERPRINT = "a85c7988189a39b2dff4f7663edc75fc84bed484719a9e94c0ace570d2df9c14"
 
 
 __all__ = [

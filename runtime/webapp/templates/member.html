@@ -96,26 +96,7 @@
 {% endif %}
 </div>
 
-<h2>Decision trail — claims & posts</h2>
-<div class="card" style="overflow-x:auto;">
-  <table>
-    <tr><th>claimed</th><th>key</th><th class="num">score</th><th>outcome</th></tr>
-    {% for c in claims %}
-      <tr>
-        <td>{{ c.claimed_at | reltime }}</td>
-        <td><a href="/recognition/{{ c.recognition_key | urlencode }}"><code>{{ c.recognition_key | truncate(60) }}</code></a></td>
-        <td class="num">{{ c.score }}</td>
-        <td>
-          {% if c.suppressed_reason %}<span class="badge bad">{{ c.suppressed_reason | truncate(36) }}</span>
-          {% elif c.intent_id is not none %}<span class="muted">legacy post #{{ c.intent_id }} (archived)</span>
-          {% else %}<span class="muted">claimed</span>{% endif %}
-        </td>
-      </tr>
-    {% else %}
-      <tr><td colspan="4" class="muted">No recognized moments yet.</td></tr>
-    {% endfor %}
-  </table>
-</div>
+
 
 <h2>Recent events</h2>
 <div class="card" style="overflow-x:auto;">

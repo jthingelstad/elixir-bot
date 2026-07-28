@@ -1,11 +1,13 @@
 """The game-level stream: detect Clash Royale changes (new cards, events, event
-badges) and announce them clan-wide to #announcements — with the card/badge art,
-grouped so one real change posts once, badges attributed to the first member.
+badges) into `game_events`.
 
-Covers the seam end to end: card-catalog diff → game_events; sentinel emitter
-(Mastery skipped, novel badge attributed, go-live cursor seed); game_recognizer
-(group by change_key, idempotent, backfilled never posts); the #announcements
-route + deterministic fallbacks; and the image-embed delivery gate.
+Covers the card-catalog diff and the sentinel emitter, which are live. The
+recognizer/delivery half of this file was removed with the deterministic
+proactive stack (#207) — announcing these changes is the awareness loop's job
+now.
+
+Covers: card-catalog diff → game_events, and the sentinel emitter (Mastery
+skipped, novel badge attributed, go-live cursor seed).
 """
 
 from __future__ import annotations
@@ -13,20 +15,14 @@ from __future__ import annotations
 import json
 
 import db
-from engine import delivery
 from engine.db import cursor_set
 from engine.emitters.game import emit_game_from_sentinel
-from engine.recognition import compose
-from engine.recognition import recognizers as R
 from storage import game_events as ge
 from storage.card_catalog import sync_card_catalog
 
 
 def _mem():
     conn = db.get_connection(":memory:")
-    from engine.legacy_proactive import prepare_queue
-
-    prepare_queue(conn)
     ge.ensure_schema(conn)
     return conn
 
@@ -232,210 +228,3 @@ def test_emitter_unattributed_when_member_unresolvable():
 
 
 # --------------------------------------------------------------- recognizer
-
-
-def test_recognizer_groups_by_change_key_and_is_idempotent():
-    conn = _mem()
-    # two detections sharing ONE change_key must post once
-    ge.insert_game_event(
-        conn,
-        dedup_key="event_started:#E1",
-        event_type="event_started",
-        change_key="event:#E1",
-        observed_at="2026-07-07T00:00:00Z",
-        payload={"event_type": "event_started", "title": "Chaos"},
-    )
-    ge.insert_game_event(
-        conn,
-        dedup_key="event_started:#E1:mode",
-        event_type="event_started",
-        change_key="event:#E1",
-        observed_at="2026-07-07T00:00:01Z",
-        payload={"event_type": "event_started", "title": "Chaos (mode)"},
-    )
-    conn.commit()
-    c = R.game_recognizer(conn, "2026-07-07T00:05:00Z")
-    assert c["game_posted"] == 1  # grouped
-    intents = conn.execute(
-        "SELECT * FROM communication_intents WHERE lane='announcements'"
-    ).fetchall()
-    assert len(intents) == 1
-    # re-run across a later tick → the ledger claim blocks a repeat
-    assert R.game_recognizer(conn, "2026-07-07T00:10:00Z")["game_posted"] == 0
-    conn.close()
-
-
-def test_recognizer_never_posts_backfilled_rows():
-    conn = _mem()
-    ge.insert_game_event(
-        conn,
-        dedup_key="card_added:1",
-        event_type="card_added",
-        change_key="card:1",
-        observed_at="2026-01-01T00:00:00Z",
-        payload={"event_type": "card_added", "name": "OldCard"},
-        backfilled=True,
-    )
-    conn.commit()
-    assert R.game_recognizer(conn, "2026-07-07T00:05:00Z")["game_posted"] == 0
-    assert conn.execute("SELECT COUNT(*) FROM communication_intents").fetchone()[0] == 0
-    conn.close()
-
-
-# ----------------------------------------------------------- route + fallback
-
-
-def test_game_intents_route_to_announcements():
-    assert compose.route("game:card_added", "public") == "announcements"
-    assert compose.route("game:event_badge_earned", "public") == "announcements"
-
-
-def _render(intent_type, payload):
-    return compose.render_intent(
-        {
-            "intent_type": intent_type,
-            "scope": "public",
-            "payload_json": json.dumps(payload),
-        }
-    )
-
-
-def test_fallbacks_read_cleanly_for_each_game_type():
-    card = _render(
-        "game:card_added",
-        {
-            "event_type": "card_added",
-            "name": "Ronin",
-            "rarity": "legendary",
-            "elixir_cost": 3,
-        },
-    )
-    assert "Ronin" in card and "Legendary" in card and "3 elixir" in card
-    ev = _render(
-        "game:event_started",
-        {
-            "event_type": "event_started",
-            "title": "Mega Chaos",
-            "description": "2v2 chaos",
-        },
-    )
-    assert "Mega Chaos" in ev
-    badge = _render(
-        "game:event_badge_earned",
-        {
-            "event_type": "event_badge_earned",
-            "badge_label": "Chaos S2",
-            "member_name": "Aaqib Javed",
-        },
-    )
-    assert "Chaos S2" in badge and "Aaqib Javed" in badge
-    anon = _render(
-        "game:event_badge_earned",
-        {
-            "event_type": "event_badge_earned",
-            "badge_label": "Chaos S2",
-            "member_name": None,
-        },
-    )
-    assert "Chaos S2" in anon and "Aaqib" not in anon
-
-
-# ------------------------------------------------------------- image delivery
-
-
-def test_card_intent_delivers_with_image_but_text_lanes_do_not():
-    conn = _mem()
-    sync_card_catalog({"items": [_card(1, "Knight")]}, conn=conn)  # bootstrap
-    sync_card_catalog(
-        {
-            "items": [
-                _card(1, "Knight"),
-                _card(2, "Ronin", "legendary", icon="http://x/ronin.png"),
-            ]
-        },
-        conn=conn,
-    )
-    conn.commit()
-    R.game_recognizer(conn, "2026-07-07T00:05:00Z")
-
-    seen = {}
-
-    def send_img(lane, copy, thread_id=None, image_url=None):
-        seen["image_url"] = image_url
-        return 1
-
-    delivery.consume(conn, send_img, lambda i: None, "2026-07-07T00:06:00Z")
-    assert seen["image_url"] == "http://x/ronin.png"
-    conn.close()
-
-
-def test_text_only_send_fn_never_sees_image_kwarg():
-    conn = _mem()
-    ge.insert_game_event(
-        conn,
-        dedup_key="card_added:9",
-        event_type="card_added",
-        change_key="card:9",
-        observed_at="2026-07-07T00:00:00Z",
-        payload={
-            "event_type": "card_added",
-            "name": "X",
-            "image_url": "http://x/x.png",
-        },
-    )
-    conn.commit()
-    R.game_recognizer(conn, "2026-07-07T00:05:00Z")
-    calls = {}
-
-    def send_text(lane, copy):  # 2-arg stub (offline/tests) — must still work
-        calls["lane"] = lane
-        return 1
-
-    out = delivery.consume(conn, send_text, lambda i: None, "2026-07-07T00:06:00Z")
-    assert out["delivered"] == 1 and calls["lane"] == "announcements"
-    conn.close()
-
-
-# ------------------------------------------------------ Chaos_S2 end-to-end
-
-
-def test_chaos_s2_replay_end_to_end():
-    # The real motivating case: Aaqib Javed earns the new Chaos_S2 badge.
-    conn = _mem()
-    conn.execute(
-        "INSERT OR IGNORE INTO players (player_tag, current_name, first_seen_at, "
-        "last_seen_at) VALUES ('#2G2RPVPP','Aaqib Javed','2026-03-01','2026-07-07')"
-    )
-    cursor_set(conn, "emit:game", 0)
-    _obs(
-        conn,
-        "badge_name",
-        "BaselineBadge",
-        first_seen="2026-06-13T11:46:39",
-        sample={"badge": {"name": "BaselineBadge"}},
-    )
-    conn.commit()
-    emit_game_from_sentinel(conn, "2026-07-06T00:00:00Z")  # go-live seed → nothing
-    _obs(
-        conn,
-        "badge_name",
-        "Chaos_S2",
-        first_seen="2026-07-06T21:30:43",
-        sample={"badge": {"name": "Chaos_S2", "iconUrls": {"large": "http://x/chaos.png"}}},
-    )
-    conn.commit()
-    emit_game_from_sentinel(conn, "2026-07-06T21:35:00Z")
-    R.game_recognizer(conn, "2026-07-06T21:36:00Z")
-
-    captured = {}
-
-    def send_img(lane, copy, thread_id=None, image_url=None):
-        captured.update(lane=lane, copy=copy, image_url=image_url)
-        return 1
-
-    delivery.consume(conn, send_img, lambda i: None, "2026-07-06T21:37:00Z")
-    assert captured["lane"] == "announcements"
-    assert captured["image_url"] == "http://x/chaos.png"
-    assert "Chaos S2" in captured["copy"] and "Aaqib Javed" in captured["copy"]
-    assert "Chaos_S2" not in captured["copy"]  # never the raw key
-    conn.close()

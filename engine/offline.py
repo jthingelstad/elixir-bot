@@ -1,22 +1,26 @@
 """OfflineEngine — the rehearsal seam (migration.md Phase 0 item 4 / Phase 6).
 
-Replays archived raw payloads through ingest → emit → project. An explicit
-legacy flag can invoke the isolated retired proactive adapter once at finish()
-with a stub sender (no API, Discord, or LLM).
-scripts/migrate_v51/rehearsal.py drives this.
+Replays archived raw payloads through ingest → emit → project, with no API,
+Discord, or LLM. This is general replay infrastructure for the LIVE tick path —
+scripts/replay_gate.py drives it as a hard verification gate, and
+scripts/migrate_v51/rehearsal.py uses it too.
+
+The optional ``legacy_proactive`` seam that invoked the deterministic
+recognizer/renderer here was removed with that stack (#207): the awareness loop
+is the sole proactive owner, and keeping a retired pipeline executable purely
+for comparison is what the trim-and-fit sprint exists to stop.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 
 from engine import materialize, observations
 from engine.clock import infer_season_id
 from engine.db import connect
 from engine.normalize import parse_cr_time
-from engine.recognition.compose import render_intent
 
 HOME_CLAN = "#J2RGCRVG"
 
@@ -116,50 +120,15 @@ class OfflineEngine:
         # riverracelog / cards / events / clan_by_tag: no offline consumer
         self.conn.commit()
 
-    def finish(
-        self,
-        now: datetime | None = None,
-        *,
-        legacy_proactive: bool = False,
-    ) -> dict:
-        """Finish projections and optionally exercise the retired poster.
+    def finish(self, now: datetime | None = None) -> dict:
+        """Commit projections and return the replay counters.
 
-        Production :func:`engine.tick.run_tick` has no delivery surface: the
-        awareness brain is the sole proactive poster. Offline replay must
-        mirror that architecture by default or it drains years of deliberately
-        dormant recognizer cursors and manufactures legacy ledger claims and
-        communication intents that production would never create.
-
-        ``legacy_proactive=True`` is an explicit comparison/rehearsal seam for the
-        deterministic recognizer and renderer. It never becomes the default
-        again. ``now`` freezes the wall clock for deterministic callers.
+        Production :func:`engine.tick.run_tick` has no delivery surface — the
+        awareness brain is the sole proactive poster — so offline replay has
+        none either. ``now`` is accepted for signature compatibility with
+        deterministic callers that freeze the wall clock.
         """
-        now_iso = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        sent: list[tuple[str, str]] = []
-
-        def send_fn(lane: str, copy: str) -> str:
-            sent.append((lane, copy))
-            return f"offline-{len(sent)}"
-
-        def compose_fn(intent) -> str | None:
-            return render_intent(intent)  # deterministic; no LLM offline
-
-        rec: dict = {}
-        d: dict = {}
-        if legacy_proactive:
-            from engine import legacy_proactive as legacy
-
-            rec, d = legacy.run(
-                self.conn,
-                self.clock,
-                now_iso,
-                send_fn=send_fn,
-                compose_fn=compose_fn,
-            )
         self.conn.commit()
         out = dict(self.counters)
-        out.update({f"recognize_{k}": v for k, v in rec.items()})
-        out.update({f"deliver_{k}": v for k, v in d.items()})
-        out["posts_composed"] = len(sent)
-        out["proactive_mode"] = "legacy_comparison" if legacy_proactive else "awareness_only"
+        out["proactive_mode"] = "awareness_only"
         return out
