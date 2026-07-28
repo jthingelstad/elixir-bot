@@ -1,10 +1,8 @@
-"""Persistence for the awareness loop: thoughts, posts, and standing watches.
+"""Persistence for the awareness loop: thoughts and posts.
 
 - ``awareness_thoughts`` — one row per loop turn: the read it reviewed, the
   plan it produced, and whether it chose silence.
 - ``awareness_posts`` — the durable member-facing delivery history.
-- ``watches`` — standing concerns Elixir is keeping an eye on (a durable home
-  for the ``flag_member_watch`` surface).
 
 Schema is versioned centrally in ``db.schema``. This module never issues DDL.
 Writers follow the ``managed_connection`` borrow/own pattern and never commit a
@@ -78,7 +76,6 @@ def ensure_awareness_schema(conn: sqlite3.Connection) -> None:
         "awareness_delivery_intents",
         {"intent_key", "lane", "content", "covers_json", "status", "attempts"},
     )
-    require_columns(conn, "watches", {"watch_id", "status"})
 
 
 def ensure_event_cursors(conn: sqlite3.Connection) -> tuple[dict[str, int], bool]:
@@ -511,20 +508,6 @@ def list_recent_thoughts(
     return [dict(r) for r in rows]
 
 
-@managed_connection
-def open_watches(
-    *,
-    conn: Optional[sqlite3.Connection] = None,
-) -> list[dict]:
-    ensure_awareness_schema(conn)
-    rows = conn.execute(
-        "SELECT watch_id, opened_at, subject_tag, subject_label, reason, status, "
-        "expires_at, last_seen_at, resolved_at FROM watches "
-        "WHERE status = 'open' ORDER BY opened_at DESC",
-    ).fetchall()
-    return [dict(r) for r in rows]
-
-
 __all__ = [
     "ensure_awareness_schema",
     "persist_thought",
@@ -536,7 +519,6 @@ __all__ = [
     "mark_delivery_fulfilled",
     "attach_awareness_posts_to_loop",
     "list_recent_thoughts",
-    "open_watches",
     "last_tick_at",
     "event_cursor_positions",
     "ensure_event_cursors",
