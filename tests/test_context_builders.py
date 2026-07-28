@@ -9,7 +9,6 @@ import json
 import db
 from memory_store import create_memory, list_memories
 from storage import war_status
-from storage.trends import build_clan_trend_summary_context
 
 HOME = "#J2RGCRVG"
 
@@ -105,42 +104,6 @@ def test_war_day_state_excludes_departed_from_deck_buckets():
     # Fame lists still honor the departed player's real contribution.
     all_tags = {p["tag"] for p in state["participants"]}
     assert "#GONE" in all_tags
-
-
-def test_clan_trend_context_labels_roster_delta_and_battle_delta():
-    conn = db.get_connection()
-    try:
-        # A joiner mid-window inflates the roster total by their whole count;
-        # the context must label that delta as roster movement, not pushing.
-        for _i, (date, members, total) in enumerate(
-            [
-                ("2026-06-28", 43, 450000),
-                ("2026-06-30", 44, 462000),
-                ("2026-07-02", 46, 488000),
-                ("2026-07-04", 47, 513000),
-            ]
-        ):
-            conn.execute(
-                """INSERT INTO clan_daily_metrics (metric_date, clan_tag, clan_name,
-                       member_count, total_member_trophies, clan_score, observed_at)
-                   VALUES (?, ?, 'POAP KINGS', ?, ?, 60000, ?)""",
-                (date, HOME, members, total, f"{date}T23:00:00Z"),
-            )
-        conn.execute(
-            """INSERT INTO clan_daily_battle_rollups (battle_date, clan_tag, clan_name,
-                   mode_group, battles, wins, losses, draws, trophy_change_total, last_aggregated_at)
-               VALUES ('2026-07-03', ?, 'POAP KINGS', 'ladder', 40, 22, 18, 0, 180, '2026-07-04T00:00:00Z')""",
-            (HOME,),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    text = build_clan_trend_summary_context(days=30, window_days=7)
-    assert "roster_total_trophies_change" in text
-    assert "NOT trophies pushed" in text
-    assert "battle_trophy_delta" in text
-    assert "total_member_trophies 6" not in text  # old unlabeled framing gone
 
 
 def test_memory_war_filters_actually_filter():

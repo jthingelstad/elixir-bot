@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 13
+CURRENT_SCHEMA_VERSION = 14
 
 
 _V1_STATEMENTS = (
@@ -29,18 +29,6 @@ _V1_STATEMENTS = (
         model TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS idx_awareness_thoughts_at ON awareness_thoughts(at DESC)",
-    """CREATE TABLE IF NOT EXISTS watches (
-        watch_id TEXT PRIMARY KEY,
-        opened_at TEXT NOT NULL,
-        subject_tag TEXT,
-        subject_label TEXT,
-        reason TEXT,
-        status TEXT NOT NULL DEFAULT 'open',
-        expires_at TEXT,
-        last_seen_at TEXT,
-        resolved_at TEXT
-    )""",
-    "CREATE INDEX IF NOT EXISTS idx_watches_status ON watches(status, opened_at DESC)",
     """CREATE TABLE IF NOT EXISTS awareness_posts (
         post_id INTEGER PRIMARY KEY,
         lane TEXT NOT NULL,
@@ -197,7 +185,6 @@ _V1_COLUMNS = {
 REQUIRED_SCHEMA = {
     "awareness_thoughts": {"thought_id", "loop_number", "tool_trace_json"},
     "awareness_posts": {"post_id", "lane", "content_preview", "posted_at"},
-    "watches": {"watch_id", "status"},
     "players": {"player_tag", "display_name"},
     "player_metadata": {
         "player_tag",
@@ -837,6 +824,36 @@ def _apply_v13(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS system_signals")
 
 
+def _apply_v14(conn: sqlite3.Connection) -> None:
+    """Drop four verified-dead tables (#211).
+
+    ``event_threads`` and ``post_quality_runs`` were never in this schema at
+    all — the v5.1 migration script created them and they were never carried
+    into ``db/schema.py``. Migration orphans; nothing in the running bot knew
+    they existed.
+
+    ``watches`` was declared, indexed and guarded, with a reader
+    (``open_watches``) that had no callers — and **zero** ``INSERT INTO
+    watches`` anywhere in the repo, tests included. The live watch concept
+    moved into ``memories`` (`Watch:` / `Hold:` titles); this was the abandoned
+    original.
+
+    ``clan_daily_battle_rollups`` froze at battle_date 2026-07-03 when
+    ``_recompute_clan_daily_battle_rollups`` lost its last caller in the v5.1
+    cut, while its player-level sibling stayed current. An earlier QA fix had
+    already re-pointed the live trend path at ``battle_events`` (see the note at
+    storage/trends.py), so nothing read the stale numbers — the remaining reader
+    contributed only a row count.
+    """
+    for table in (
+        "event_threads",
+        "post_quality_runs",
+        "watches",
+        "clan_daily_battle_rollups",
+    ):
+        conn.execute(f"DROP TABLE IF EXISTS {table}")
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -967,6 +984,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 13
+    if version < 14:
+        try:
+            _apply_v14(conn)
+            conn.execute("PRAGMA user_version = 14")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1023,7 +1049,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "633c6c44e260ba1082772277e8194bcc976c461f9660e3cca6fc16bb93bb8f05"
+CURRENT_SCHEMA_FINGERPRINT = "c2ffb6d9766dd900c0c78bfa1cc1a9d328b53befc1a836aac96b4821c7f53035"
 
 
 __all__ = [

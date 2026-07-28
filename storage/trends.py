@@ -132,31 +132,6 @@ def get_clan_total_member_trophies_history(
     return _rowdicts(rows)
 
 
-@managed_connection
-def get_clan_daily_battle_summary(
-    days: int = 30,
-    clan_tag: Optional[str] = None,
-    mode_group: Optional[str] = None,
-    conn: Optional[sqlite3.Connection] = None,
-) -> list[dict]:
-    cutoff = _cutoff_date(days)
-    where = ["battle_date >= ?"]
-    params = [cutoff]
-    if clan_tag:
-        where.append("clan_tag = ?")
-        params.append(_canon_tag(clan_tag))
-    if mode_group:
-        where.append("mode_group = ?")
-        params.append(mode_group)
-    rows = conn.execute(
-        "SELECT battle_date, clan_tag, clan_name, mode_group, game_mode_id, game_mode_name, members_active, battles, wins, losses, draws, trophy_change_total, captured_battles, expected_battle_delta, completeness_ratio, is_complete "
-        f"FROM clan_daily_battle_rollups WHERE {' AND '.join(where)} "
-        "ORDER BY battle_date ASC, mode_group ASC, COALESCE(game_mode_id, 0) ASC",
-        tuple(params),
-    ).fetchall()
-    return _rowdicts(rows)
-
-
 def _compare_series_window(rows, value_key):
     if not rows:
         return {"days": 0, "start": None, "end": None, "delta": 0}
@@ -391,7 +366,6 @@ def build_clan_trend_summary_context(
     counts = get_clan_member_count_history(days=days, clan_tag=clan_tag, conn=conn)
     scores = get_clan_score_history(days=days, clan_tag=clan_tag, conn=conn)
     trophies = get_clan_total_member_trophies_history(days=days, clan_tag=clan_tag, conn=conn)
-    battle_rows = get_clan_daily_battle_summary(days=days, clan_tag=clan_tag, conn=conn)
     comparison = compare_clan_trend_windows(window_days=window_days, clan_tag=clan_tag, conn=conn)
     latest_counts = counts[-1] if counts else {}
     latest_scores = scores[-1] if scores else {}
@@ -427,7 +401,6 @@ def build_clan_trend_summary_context(
             f"record {current_battles.get('wins')}-{current_battles.get('losses')}-{current_battles.get('draws')} "
             f"vs {previous_battles.get('wins')}-{previous_battles.get('losses')}-{previous_battles.get('draws')}"
         ),
-        f"daily_battle_rows: {len(battle_rows)}",
     ]
     return "\n".join(lines)
 

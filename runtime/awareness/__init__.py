@@ -14,7 +14,6 @@ from runtime.awareness.read import build_read
 from runtime.awareness.store import (
     ensure_awareness_schema,
     list_recent_thoughts,
-    open_watches,
     persist_thought,
 )
 
@@ -25,5 +24,4 @@ __all__ = [
     "ensure_awareness_schema",
     "persist_thought",
     "list_recent_thoughts",
-    "open_watches",
 ]
