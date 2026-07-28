@@ -1,7 +1,7 @@
 """v5.1 memory migration — memory.md §3 (M1–M3). Content, not structure.
 
 Reads the OLD memory DB read-only; writes the new `memories`/`memory_tags`/
-`memory_log` tables in the engine DB. Idempotent: clears and reloads the new
+tables in the engine DB. Idempotent: clears and reloads the new
 tables (safe — they are only written by this script until the seam-swap
 deploy). memory_episodes already live in the engine DB (T12) and stay in
 place — M2 is a verify, not a copy.
@@ -38,9 +38,8 @@ def run(db_path: str, memory_db_path: str) -> int:
     new.execute("PRAGMA busy_timeout = 30000")
     apply_schema_migrations(new)
 
-    # Idempotency: clear-and-reload (memory_log of the migration reload too).
+    # Idempotency: clear-and-reload.
     new.execute("DELETE FROM memory_tags")
-    new.execute("DELETE FROM memory_log")
     new.execute("DELETE FROM memories")
 
     # M1 — clan_memories → memories (ids preserved; scope system_internal→leadership)
@@ -144,12 +143,9 @@ def run(db_path: str, memory_db_path: str) -> int:
             (body,),
         )
         legacy_added = 1
-    new.execute(
-        "INSERT INTO memory_log (memory_id, action, actor, at, diff_json) "
-        "VALUES (0, 'created', 'migration:memory_migrate', datetime('now'), "
-        "json_object('migrated', ?, 'tags', ?, 'legacy_facts_rollup', ?))",
-        (migrated, len(tag_rows), legacy_added),
-    )
+    # The migration used to stamp its own run into memory_log; that table was
+    # dropped in schema v12 (#215) as an audit trail with no reader. The run is
+    # reported by the parity check below and the caller's return value.
     new.commit()
 
     # ---- Parity (memory.md §3) ----

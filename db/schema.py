@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 12
 
 
 _V1_STATEMENTS = (
@@ -221,7 +221,6 @@ REQUIRED_SCHEMA = {
     "pol_season_results": {"pol_season_id", "player_tag"},
     "memories": {"memory_id", "kind", "scope"},
     "memory_tags": {"memory_id", "tag"},
-    "memory_log": {"log_id", "memory_id"},
     "raw_api_payloads": {
         "payload_id",
         "endpoint",
@@ -792,6 +791,28 @@ def _apply_v11(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v12(conn: sqlite3.Connection) -> None:
+    """Drop ``memory_log`` — an audit trail with no reader (#215).
+
+    It recorded every create/tag/update against ``memories`` (529 rows and
+    growing ~154/week, the fastest of any memory table). A whole-repo trace
+    found **zero** production SELECTs: the only references outside the migration
+    scripts are a column guard and a name in a table-grouping set for the DB
+    status report.
+
+    The decision test the issue asked for was "surface a real bounded audit use,
+    apply explicit retention, or remove it safely." No use surfaced, and the
+    evidence is worse than neutral: ``attach_evidence_ref`` writes ONLY here, so
+    its output was already unrecoverable by design. An audit nobody can read is
+    not an audit.
+
+    If memory provenance is wanted later, the honest version is a memory-detail
+    view in the Observatory backed by a table with a reader -- not a write-only
+    log accumulating forever.
+    """
+    conn.execute("DROP TABLE IF EXISTS memory_log")
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -904,6 +925,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 11
+    if version < 12:
+        try:
+            _apply_v12(conn)
+            conn.execute("PRAGMA user_version = 12")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -960,7 +990,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "e8007ffefaf152996154375fd736c93ae7d94ff111c776eaf8b6165279b51294"
+CURRENT_SCHEMA_FINGERPRINT = "ba724d7575add93854efcf919b303f77e5d76c880d61dc11040e1209862822db"
 
 
 __all__ = [

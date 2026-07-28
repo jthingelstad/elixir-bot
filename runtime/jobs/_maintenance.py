@@ -150,6 +150,18 @@ async def _db_maintenance_cycle():
         # 2. Purge expired rows.
         purge_stats = await asyncio.to_thread(db.purge_old_data)
 
+        # 2b. Memory expiry. purge_expired_memories has documented itself as
+        # "called from db-maintenance" since it was written, and never was --
+        # only a test called it (#215). Soft expiry hid rows from recall; this
+        # is what actually reclaims them, closing the expand/backfill/cutover/
+        # contract cycle for the inference TTL.
+        import memory_store
+
+        purged_memories = await asyncio.to_thread(memory_store.purge_expired_memories)
+        if purged_memories:
+            log.info("purged %s expired/retired memories", purged_memories)
+        purge_stats["memories"] = purged_memories
+
         # 3. VACUUM reclaims disk space; must run outside any transaction.
         def _vacuum():
             conn = db.get_connection()
