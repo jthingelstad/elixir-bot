@@ -64,6 +64,10 @@ def _get_build_hash():
             .strip()
         )
     except subprocess.SubprocessError, OSError:
+        log.warning(
+            "build hash unavailable — git failed at boot; releases will record 'unknown'",
+            exc_info=True,
+        )
         return "unknown"
 
 

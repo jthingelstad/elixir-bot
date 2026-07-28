@@ -722,6 +722,9 @@ def get_database_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         ).fetchall():
             size_by_name[row["name"]] = row["total_bytes"] or 0
     except sqlite3.OperationalError:
+        # dbstat is an optional SQLite module; without it the status page just
+        # omits per-table sizes. Benign, but say which build we are on.
+        log.debug("dbstat unavailable — per-table sizes omitted", exc_info=True)
         size_by_name = {}
 
     counts_by_name: dict[str, int] = {}

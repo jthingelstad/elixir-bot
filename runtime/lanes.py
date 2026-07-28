@@ -16,8 +16,11 @@ it can be deleted without touching anything live.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
+
+log = logging.getLogger("runtime.lanes")
 
 _DISCORD_MD = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts", "DISCORD.md"
@@ -31,6 +34,14 @@ def channels(path: str = _DISCORD_MD) -> dict[str, dict]:
     try:
         text = open(path, encoding="utf-8").read()
     except OSError:
+        # Returning {} makes every lane unresolvable, which stops Elixir posting
+        # anywhere at all. That must never be a quiet outcome.
+        log.error(
+            "channel config unreadable at %s — every lane will fail to resolve "
+            "and no post can be delivered",
+            path,
+            exc_info=True,
+        )
         return lanes
     for m in re.finditer(r"^## #(?P<name>[\w-]+)\n(?P<body>.*?)(?=^## |\Z)", text, re.M | re.S):
         body = m.group("body")
