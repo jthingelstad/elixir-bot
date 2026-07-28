@@ -236,46 +236,6 @@ def find_unwatched_clan_tournament(conn, *, now: datetime | None = None) -> dict
     return None
 
 
-def _emit_tournament_event(
-    tournament_tag: str, event_type: str, dedup_key: str, payload: dict, *, subject_tag=None
-) -> None:
-    """Land one fine-grained tournament beat on the TOURNAMENT-scoped stream.
-
-    Battles and joins are far too granular for `clan_events` — a single
-    tournament produces dozens, and they would drown the awareness read in
-    battle results. They get their own stream, scoped by tournament_tag, in the
-    canonical stream shape so cursors and readers work unchanged (#210). The
-    clan stream sees exactly one row per tournament: `tournament_finished`.
-
-    Best-effort: a tournament must keep running even if the emit fails.
-    """
-    from engine.db import connect
-    from engine.emitters import insert_stream_event
-
-    conn = None
-    try:
-        conn = connect()
-        insert_stream_event(
-            conn,
-            "tournament_events",
-            dedup_key=dedup_key,
-            event_type=event_type,
-            subject_cols={"tournament_tag": tournament_tag, "subject_tag": subject_tag},
-            observed_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            window_start=None,
-            payload=payload,
-            timing="exact",
-        )
-        conn.commit()
-    except Exception:
-        log.warning(
-            "tournament_events emit failed (%s / %s)", tournament_tag, event_type, exc_info=True
-        )
-    finally:
-        if conn is not None:
-            conn.close()
-
-
 def _emit_tournament_finished(tournament_tag: str, tournament: dict, api_data: dict) -> None:
     """Land a finished tournament on the clan stream for the awareness loop.
 
@@ -467,21 +427,6 @@ async def _tournament_watch_tick():
                                         tournament_timing=tournament_timing,
                                     )
                                     live_signals.append(signal)
-                                    # Same beat, durable: the signal drives the
-                                    # 5-minute post, the stream row is the record
-                                    # (#210). store_tournament_battle already
-                                    # dedups on the canonicalized
-                                    # (p1, p2, battle_time) triple, so this fires
-                                    # once per match even though the battle shows
-                                    # up in both players' logs.
-                                    await asyncio.to_thread(
-                                        _emit_tournament_event,
-                                        tag,
-                                        "tournament_battle_played",
-                                        signal["signal_key"],
-                                        signal,
-                                        subject_tag=battle_info.get("winner_tag"),
-                                    )
                         # Also feed through existing battle log pipeline
                         await asyncio.to_thread(db.snapshot_player_battlelog, p_tag, battle_log)
                 except Exception as e:

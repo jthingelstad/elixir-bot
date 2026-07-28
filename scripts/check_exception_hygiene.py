@@ -38,7 +38,7 @@ BROAD_EXCEPTION_BASELINE = {
     "capabilities/war.py": 1,
     "cr_api.py": 4,
     "db/__init__.py": 2,
-    "db/schema.py": 14,  # +1: V14 migration rollback/re-raise (same pattern as v2-v13)
+    "db/schema.py": 15,  # +1: V15 migration rollback/re-raise (same pattern as v2-v14)
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
@@ -71,7 +71,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/jobs/_maintenance.py": 4,
     "runtime/jobs/_memory.py": 22,
     "runtime/jobs/_promotion.py": 3,
-    "runtime/jobs/_tournament.py": 10,  # +2: autowatch scan + clan-chat relay, best-effort so a tournament never dies on them
+    "runtime/jobs/_tournament.py": 9,  # autowatch scan + clan-chat relay; -1 with the retired tournament_events emitter
     "runtime/leader_action_feedback.py": 1,
     "runtime/leader_action_ui.py": 9,
     "runtime/leader_note_interpreter.py": 5,  # interpret/apply/undo/fix all fail-open off the delivery path

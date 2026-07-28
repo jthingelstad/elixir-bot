@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 14
+CURRENT_SCHEMA_VERSION = 15
 
 
 _V1_STATEMENTS = (
@@ -735,47 +735,14 @@ def _apply_v10(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS elixir_improvement_suggestions")
 
 
-_TOURNAMENT_EVENTS_DDL = """CREATE TABLE IF NOT EXISTS tournament_events (
-    event_id    INTEGER PRIMARY KEY,
-    dedup_key   TEXT NOT NULL UNIQUE,
-    event_type  TEXT NOT NULL,
-    tournament_tag TEXT NOT NULL,
-    subject_tag TEXT,
-    observed_at TEXT NOT NULL,
-    timing      TEXT NOT NULL DEFAULT 'estimated' CHECK (timing IN ('exact','estimated')),
-    window_start TEXT,
-    evidence_json TEXT,
-    payload_json  TEXT NOT NULL,
-    scope TEXT NOT NULL DEFAULT 'public' CHECK (scope IN ('public','leadership')),
-    created_at TEXT NOT NULL
-)"""
-
-
 def _apply_v11(conn: sqlite3.Connection) -> None:
-    """Add the tournament-scoped event stream (#210).
+    """Superseded by v15.
 
-    A tournament is a bounded clan event, so the CLAN stream gets exactly one
-    row for it (``tournament_finished``). Everything inside the tournament —
-    each battle, each player joining — is far too fine-grained for a clan-level
-    stream and would drown the awareness read in battle results. Those get their
-    own stream, scoped by ``tournament_tag``.
-
-    Shape is deliberately identical to clan_events/war_events so the generic
-    ``insert_stream_event`` machinery, cursors and readers all work unchanged;
-    only the scope column differs (``tournament_tag`` instead of ``clan_tag``).
-    The existing tournament_battles / tournament_participants tables become
-    projections OF this stream, matching how battle_events feeds the daily
-    rollups everywhere else in the engine.
+    Added a tournament-scoped ``tournament_events`` stream; ``tournament_battles``
+    already served that purpose with real readers, so nothing ever read it and
+    v15 drops it. Kept as a no-op so the version ladder stays contiguous for any
+    database that ran v11 before v15 existed.
     """
-    conn.execute(_TOURNAMENT_EVENTS_DDL)
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_tournament_events_scope "
-        "ON tournament_events(tournament_tag, observed_at DESC)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_tournament_events_type "
-        "ON tournament_events(event_type, observed_at DESC)"
-    )
 
 
 def _apply_v12(conn: sqlite3.Connection) -> None:
@@ -852,6 +819,23 @@ def _apply_v14(conn: sqlite3.Connection) -> None:
         "clan_daily_battle_rollups",
     ):
         conn.execute(f"DROP TABLE IF EXISTS {table}")
+
+
+def _apply_v15(conn: sqlite3.Connection) -> None:
+    """Drop ``tournament_events`` — a stream I added and nothing read (#210).
+
+    The grain call was right: battles inside a tournament must not pollute the
+    clan stream. The implementation was not. A tournament-scoped battle record
+    ALREADY existed as ``tournament_battles``, with real readers (the recap and
+    card stats), so this was a third table recording the same battles in a
+    different shape, written in parallel rather than as their source. It shipped
+    with 0 rows and no reader — the exact "durable store nobody drains" pattern
+    the rest of this sprint spent the day removing.
+
+    The clan-level ``tournament_finished`` event on ``clan_events`` stays: it is
+    genuinely read, as a hard-post the awareness loop narrates.
+    """
+    conn.execute("DROP TABLE IF EXISTS tournament_events")
 
 
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
@@ -993,6 +977,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 14
+    if version < 15:
+        try:
+            _apply_v15(conn)
+            conn.execute("PRAGMA user_version = 15")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1049,7 +1042,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "c2ffb6d9766dd900c0c78bfa1cc1a9d328b53befc1a836aac96b4821c7f53035"
+CURRENT_SCHEMA_FINGERPRINT = "4c36141760886f1c126fa32193d73f11eaa11e9115a36dfd30ee7d0dd2cb670f"
 
 
 __all__ = [

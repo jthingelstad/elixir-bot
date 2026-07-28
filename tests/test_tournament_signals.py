@@ -663,51 +663,6 @@ def test_tournament_finished_is_a_clan_event_with_podium(engine_conn):
     assert [p["name"] for p in payload["podium"]] == ["Ada", "Bo", "Cy"]  # top 3 only
 
 
-def test_battle_beats_go_to_the_tournament_stream_not_the_clan_stream(engine_conn):
-    """The grain separation this issue exists for: a tournament produces dozens
-    of battles, and putting them on the clan stream would drown the awareness
-    read in battle results. They belong to a tournament-scoped stream."""
-    from runtime.jobs import _tournament as tj
-
-    before_clan = engine_conn.execute("SELECT COUNT(*) FROM clan_events").fetchone()[0]
-    for i in range(5):
-        tj._emit_tournament_event(
-            "#T1",
-            "tournament_battle_played",
-            f"tournament_battle_played|#T1|t{i}|#A|#B",
-            {"tournament_tag": "#T1", "battle_time": f"t{i}", "winner": "#A"},
-            subject_tag="#A",
-        )
-
-    scoped = engine_conn.execute(
-        "SELECT COUNT(*) FROM tournament_events WHERE tournament_tag='#T1'"
-    ).fetchone()[0]
-    after_clan = engine_conn.execute("SELECT COUNT(*) FROM clan_events").fetchone()[0]
-    assert scoped == 5
-    assert after_clan == before_clan, "battle beats must never reach the clan stream"
-
-
-def test_tournament_beats_are_idempotent_on_the_canonical_signal_key(engine_conn):
-    """A battle appears in BOTH players' logs, so the same beat is seen twice.
-    Dedup rides the signal_key the poller already canonicalizes."""
-    from runtime.jobs import _tournament as tj
-
-    key = "tournament_battle_played|#T1|20260728T120000|#A|#B"
-    for _ in range(3):
-        tj._emit_tournament_event(
-            "#T1",
-            "tournament_battle_played",
-            key,
-            {"tournament_tag": "#T1", "battle_time": "20260728T120000"},
-        )
-    assert (
-        engine_conn.execute(
-            "SELECT COUNT(*) FROM tournament_events WHERE dedup_key = ?", (key,)
-        ).fetchone()[0]
-        == 1
-    )
-
-
 def test_tournament_finished_forces_a_post():
     """It is a real, dated clan moment — the awareness loop must not skip it."""
     from runtime.awareness.read import HARD_POST_EVENT_TYPES
