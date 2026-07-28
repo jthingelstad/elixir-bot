@@ -1080,7 +1080,7 @@ def reconstruct_member_war_decks(
         }
     placeholders = ",".join("?" for _ in _WAR_DECK_BATTLE_TYPES)
     rows = conn.execute(
-        f"SELECT battle_time, battle_type, deck_json, NULL AS team_rounds_json, deck_selection "
+        f"SELECT battle_time, battle_type, deck_json, rounds_json AS team_rounds_json, deck_selection "
         f"FROM battle_events "
         f"WHERE player_tag = ? AND is_war = 1 AND battle_type IN ({placeholders}) "
         f"ORDER BY battle_time DESC LIMIT ?",

@@ -105,3 +105,154 @@ def test_losses_faced_counts_battles_not_card_copies():
     seen = player._deck_card_modes(duel_deck)
     assert seen.count(("Knight", None)) == 2, "fixture must contain the duplicate"
     assert len(set(seen)) == 3, "deduped, a duel counts Knight once per battle"
+
+
+# ── v17: the whole battle record ─────────────────────────────────────────────
+
+_FULL_BATTLE = {
+    "battleTime": "20260728T120000.000Z",
+    "type": "PvP",
+    "deckSelection": "collection",
+    "modifiers": [{"tag": "#CLAN", "modifiers": ["Knight3"]}],
+    "team": [
+        {
+            "tag": "#ME",
+            "name": "Me",
+            "crowns": 1,
+            "cards": _TEAM_CARDS,
+            "supportCards": [{"id": 159000000, "name": "Tower Princess", "level": 14}],
+            "elixirLeaked": 4.25,
+            "kingTowerHitPoints": 2400,
+            "princessTowersHitPoints": [1200, 0],
+            "globalRank": 204,
+            "clan": {"tag": "#J2RGCRVG", "name": "POAP KINGS", "badgeId": 16000107},
+        }
+    ],
+    "opponent": [
+        {
+            "tag": "#OPP",
+            "name": "Rival",
+            "crowns": 3,
+            "cards": _OPPONENT_CARDS,
+            "supportCards": [{"id": 159000003, "name": "Dagger Duchess", "level": 12}],
+            "elixirLeaked": 1.5,
+            "kingTowerHitPoints": 0,
+            "princessTowersHitPoints": [3052],
+            "startingTrophies": 9100,
+            "trophyChange": 30,
+            "clan": {"tag": "#RIVAL", "name": "Rivals", "badgeId": 16000001},
+        }
+    ],
+}
+
+
+def test_every_captured_battle_field_round_trips():
+    """One assertion per fact the audit found being dropped. Each was parsed
+    into scope and discarded; a regression here is silent, because the reader
+    returns a confident empty answer rather than failing."""
+    row = extract_battles("#ME", [_FULL_BATTLE])[0]
+
+    assert json.loads(row["support_cards_json"])[0]["name"] == "Tower Princess"
+    assert json.loads(row["opponent_support_cards_json"])[0]["name"] == "Dagger Duchess"
+    assert row["elixir_leaked"] == 4.25
+    assert row["opponent_elixir_leaked"] == 1.5
+    assert row["king_tower_hp"] == 2400
+    assert row["opponent_king_tower_hp"] == 0
+    assert json.loads(row["princess_towers_hp_json"]) == [1200, 0]
+    assert row["global_rank"] == 204
+    assert row["clan_tag"] == "#J2RGCRVG"
+    assert row["opponent_name"] == "Rival"
+    assert row["opponent_clan_tag"] == "#RIVAL"
+    assert row["opponent_clan_name"] == "Rivals"
+    assert row["opponent_clan_badge_id"] == 16000001
+    assert row["opponent_starting_trophies"] == 9100
+    assert row["opponent_trophy_change"] == 30
+    assert json.loads(row["modifiers_json"])[0]["modifiers"] == ["Knight3"]
+
+
+def test_boat_battle_result_fields_are_captured():
+    row = extract_battles(
+        "#ME",
+        [
+            {
+                **_FULL_BATTLE,
+                "type": "boatBattle",
+                "boatBattleSide": "attacker",
+                "boatBattleWon": True,
+                "newTowersDestroyed": 2,
+                "prevTowersDestroyed": 1,
+                "remainingTowers": 0,
+            }
+        ],
+    )[0]
+
+    assert row["boat_battle_side"] == "attacker"
+    assert row["boat_battle_won"] == 1
+    assert (row["new_towers_destroyed"], row["prev_towers_destroyed"]) == (2, 1)
+    assert row["remaining_towers"] == 0
+
+
+def test_duel_rounds_keep_each_round_deck_separately():
+    """A duel's top-level `cards` is every round concatenated, so the individual
+    decks exist ONLY here. Shape matches what war_analytics already expects."""
+    row = extract_battles(
+        "#ME",
+        [
+            {
+                **_FULL_BATTLE,
+                "type": "riverRaceDuel",
+                "team": [
+                    {
+                        **_FULL_BATTLE["team"][0],
+                        "rounds": [
+                            {"crowns": 1, "elixirLeaked": 2.0, "cards": _TEAM_CARDS},
+                            {"crowns": 0, "elixirLeaked": 3.0, "cards": _OPPONENT_CARDS},
+                        ],
+                    }
+                ],
+            }
+        ],
+    )[0]
+
+    rounds = json.loads(row["rounds_json"])
+    assert len(rounds) == 2
+    assert [c["name"] for c in rounds[0]["cards"]] == ["Fireball"]
+    assert [c["name"] for c in rounds[1]["cards"]] == ["Knight", "Archers"]
+    assert rounds[1]["elixir_leaked"] == 3.0
+
+
+def test_every_insert_column_is_also_enriched_on_dedup():
+    """A column in the INSERT but not the enrich UPDATE never backfills on a
+    re-poll -- the bug that left deck_json NULL on already-seen battles."""
+    from engine.ingest import _ENRICH_COLUMNS, _INSERT_COLUMNS
+
+    identity = {
+        "dedup_key",
+        "player_tag",
+        "battle_time",
+        "observed_at",
+        "battle_type",
+        "opponent_tag",
+        "crowns_for",
+        "crowns_against",
+        "game_mode_id",
+        "game_mode_name",
+        "mode_group",
+        "outcome",
+        "is_war",
+        "is_ladder",
+        "is_ranked",
+        "is_competitive",
+        "is_special_event",
+        "trophy_change",
+        "starting_trophies",
+        "deck_selection",
+        "is_hosted_match",
+        "tournament_tag",
+        "event_tag",
+        "season_id",
+        "section_index",
+        "war_day_index",
+    }
+    missing = set(_INSERT_COLUMNS) - set(_ENRICH_COLUMNS) - identity
+    assert not missing, f"columns that would never backfill on re-poll: {sorted(missing)}"

@@ -514,7 +514,13 @@ def test_reconstruct_war_decks_no_overlap_with_distinct_decks():
         conn.close()
 
 
-def test_reconstruct_war_decks_does_not_infer_unstored_duel_rounds():
+def test_reconstruct_war_decks_reads_duel_rounds():
+    """Inverted at v17 (#216). This asserted reconstruction must FAIL on a duel,
+    because `rounds` was selected as `NULL AS team_rounds_json` -- war-deck
+    analysis counted duel battles it could not read the decks of. A duel's
+    top-level `cards` is all rounds concatenated, so the individual decks exist
+    ONLY in `rounds`. With them stored, this same fixture (1 war PvP + a 3-round
+    duel) yields the full 4-deck war set."""
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
@@ -564,9 +570,12 @@ def test_reconstruct_war_decks_does_not_infer_unstored_duel_rounds():
         ]
         db.snapshot_player_battlelog("#PLAYER", battles, conn=conn)
         out = db.reconstruct_member_war_decks("#PLAYER", conn=conn)
-        assert out["status"] != "reconstructed"
-        assert out.get("confidence") != "high"
         assert out["evidence"]["duel_battles_seen"] == 1
+        # 3 duel rounds + 1 war PvP = the 4 decks a war deck set is made of.
+        assert out["evidence"]["distinct_decks_observed"] == 4
+        assert out["status"] == "reconstructed"
+        found = {frozenset(d["name"] for d in deck["cards"]) for deck in out["decks"]}
+        assert frozenset(round2) in found, "a middle duel round must be recovered"
     finally:
         conn.close()
 

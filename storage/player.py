@@ -444,7 +444,7 @@ def get_member_recent_losses(
     member_id = member_row["member_id"]
     rows = conn.execute(
         f"SELECT outcome, crowns_for, crowns_against, opponent_deck_json, battle_time, battle_type, game_mode_name, "
-        f"opponent_tag, NULL AS opponent_name, NULL AS opponent_clan_tag "
+        f"opponent_tag, opponent_name, opponent_clan_tag "
         f"FROM battle_events WHERE player_tag = ? AND {predicate} "
         f"ORDER BY battle_time DESC LIMIT ?",
         (member_id, limit),
@@ -549,7 +549,7 @@ def get_member_recent_battles(
     capped_limit = min(requested_limit, cap)
     rows = conn.execute(
         f"SELECT battle_time, battle_type, game_mode_name, outcome, crowns_for, crowns_against, "
-        f"trophy_change, deck_json, opponent_deck_json, NULL AS opponent_name, opponent_tag, NULL AS opponent_clan_tag "
+        f"trophy_change, deck_json, opponent_deck_json, opponent_name, opponent_tag, opponent_clan_tag "
         f"FROM battle_events WHERE player_tag = ? AND {predicate} "
         f"ORDER BY battle_time DESC LIMIT ?",
         (member_row["member_id"], capped_limit),

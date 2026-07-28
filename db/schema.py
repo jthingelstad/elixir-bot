@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 16
+CURRENT_SCHEMA_VERSION = 18
 
 
 _V1_STATEMENTS = (
@@ -859,6 +859,93 @@ def _apply_v16(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE battle_events ADD COLUMN opponent_deck_json TEXT")
 
 
+_V17_BATTLE_COLUMNS = (
+    # --- the polled player -------------------------------------------------
+    ("support_cards_json", "TEXT"),  # tower troop; 100% coverage, never stored
+    ("elixir_leaked", "REAL"),
+    ("king_tower_hp", "INTEGER"),
+    ("princess_towers_hp_json", "TEXT"),
+    ("global_rank", "INTEGER"),
+    ("clan_tag", "TEXT"),  # their clan AT BATTLE TIME, not their clan today
+    ("rounds_json", "TEXT"),  # duel sub-decks
+    # --- the opponent ------------------------------------------------------
+    ("opponent_name", "TEXT"),
+    ("opponent_clan_tag", "TEXT"),
+    ("opponent_clan_name", "TEXT"),
+    ("opponent_clan_badge_id", "INTEGER"),
+    ("opponent_support_cards_json", "TEXT"),
+    ("opponent_elixir_leaked", "REAL"),
+    ("opponent_king_tower_hp", "INTEGER"),
+    ("opponent_princess_towers_hp_json", "TEXT"),
+    ("opponent_global_rank", "INTEGER"),
+    ("opponent_starting_trophies", "INTEGER"),
+    ("opponent_trophy_change", "INTEGER"),
+    ("opponent_rounds_json", "TEXT"),
+    # --- the battle --------------------------------------------------------
+    ("modifiers_json", "TEXT"),
+    ("boat_battle_side", "TEXT"),
+    ("boat_battle_won", "INTEGER"),
+    ("new_towers_destroyed", "INTEGER"),
+    ("prev_towers_destroyed", "INTEGER"),
+    ("remaining_towers", "INTEGER"),
+)
+
+
+def _apply_v17(conn: sqlite3.Connection) -> None:
+    """Store the WHOLE battle, not a summary of it (#216).
+
+    An audit of 58,105 battles against the live API found `battle_events` kept
+    17 of the ~30 facts each battle carries. The rest were parsed and dropped.
+    Four of them had readers already asking for them and getting a hardcoded
+    NULL back -- the same starvation that hid the missing opponent deck:
+
+      * `supportCards` (the tower troop) -- 100% coverage, and
+        `get_member_current_deck` returns `support_cards: []` unconditionally
+        even though a whole aggregation pipeline sits behind it. 6.9% of use is
+        non-default (Dagger Duchess, Royal Chef, Cannoneer), so this is real
+        deck identity, not a constant.
+      * opponent `name` / `clan` -- selected as `NULL AS opponent_name` /
+        `NULL AS opponent_clan_tag` in two readers.
+      * duel `rounds` -- `NULL AS team_rounds_json`, so war-deck analysis counts
+        duel battles it cannot read the decks of.
+
+    And three with no reader yet but no way to reconstruct later:
+    `elixirLeaked` (the only per-battle SKILL signal the API gives that is not
+    the outcome), king/princess tower HP (margin of defeat -- today a 0-1
+    nail-biter and a 3-crown blowout are both just outcome='L'), and the boat
+    battle result fields.
+
+    Deliberately NOT stored: `isLadderTournament`, which was False on all
+    58,105 battles observed. If Supercell ever populates it, the API sentinel
+    catches the drift; a column that is constant is noise.
+
+    Known limit: 2v2 keeps only opponent[0]. The second opponent's deck is
+    dropped, as it always has been.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(battle_events)")}
+    for name, decl in _V17_BATTLE_COLUMNS:
+        if name not in columns:
+            conn.execute(f"ALTER TABLE battle_events ADD COLUMN {name} {decl}")
+
+
+def _apply_v18(conn: sqlite3.Connection) -> None:
+    """Store the equipped tower troop on player_current_state (#216).
+
+    Separate from v17 only because v17 had already run on the live database by
+    the time this gap surfaced; a shipped migration is not edited in place.
+
+    Same starvation as the rest: `get_member_current_deck` normalizes and
+    returns a `support_cards` list, fed by `NULL AS
+    current_deck_support_cards_json`, so it was unconditionally empty. The
+    player endpoint provides `currentDeckSupportCards`.
+    """
+    state = {row[1] for row in conn.execute("PRAGMA table_info(player_current_state)")}
+    if "current_deck_support_cards_json" not in state:
+        conn.execute(
+            "ALTER TABLE player_current_state ADD COLUMN current_deck_support_cards_json TEXT"
+        )
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1016,6 +1103,24 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 16
+    if version < 17:
+        try:
+            _apply_v17(conn)
+            conn.execute("PRAGMA user_version = 17")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        version = 17
+    if version < 18:
+        try:
+            _apply_v18(conn)
+            conn.execute("PRAGMA user_version = 18")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1072,7 +1177,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "55c931597c7fd494ad426406b885df0ba48389737ad26b7fb900e4ce31d7d8b9"
+CURRENT_SCHEMA_FINGERPRINT = "838e7a5fc606ec472d7c75a6eb11a07d263323317fcefff5ad6d2d1f19d5d839"
 
 
 __all__ = [
