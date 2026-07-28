@@ -404,3 +404,60 @@ def _run_non_fts_expiry_case(memory_conn):
         member_tag="#EXP1", viewer_scope="public", limit=10, conn=memory_conn
     )
     assert got == []
+
+
+def test_inference_memories_self_expire_but_curated_ones_do_not():
+    """Machine observations decay; curated knowledge does not.
+
+    `inference` rows are Elixir noticing something — true when written, trivia
+    months later. They are ~97% of the corpus, and because the FTS branch scopes
+    by neither channel nor age they dominate text recall. leader_note/synthesis
+    carry decisions (an LOA, an agreed exception) and must never evaporate.
+    """
+    conn = db.get_connection()
+    try:
+        memory_store.ensure_memory_schema(conn)
+        inf = memory_store.create_memory(
+            body="TDuck maxed Princess card.",
+            source_type="elixir_inference",
+            is_inference=True,
+            confidence=0.95,
+            created_by="test",
+            scope="public",
+            title="milestone",
+            conn=conn,
+        )
+        note = memory_store.create_memory(
+            body="JaxikoLane is away until the 20th.",
+            source_type="leader_note",
+            is_inference=False,
+            confidence=1.0,
+            created_by="discord:1",
+            scope="leadership",
+            title="LOA: JaxikoLane",
+            conn=conn,
+        )
+        assert inf["expires_at"], "an inference memory must age out on its own"
+        assert not note["expires_at"], "a leader note must never expire by default"
+    finally:
+        conn.close()
+
+
+def test_explicit_expiry_still_wins_over_the_default():
+    conn = db.get_connection()
+    try:
+        memory_store.ensure_memory_schema(conn)
+        m = memory_store.create_memory(
+            body="short-lived",
+            source_type="elixir_inference",
+            is_inference=True,
+            confidence=0.9,
+            created_by="test",
+            scope="public",
+            title="explicit",
+            expires_at="2027-01-01T00:00:00Z",
+            conn=conn,
+        )
+        assert m["expires_at"].startswith("2027-01-01")
+    finally:
+        conn.close()
