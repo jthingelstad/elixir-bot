@@ -84,3 +84,24 @@ def test_polled_player_listed_second_still_attributes_decks_correctly():
 
     assert [c["name"] for c in json.loads(row["deck_json"])] == ["Fireball"]
     assert [c["name"] for c in json.loads(row["opponent_deck_json"])] == ["Knight", "Archers"]
+
+
+def test_losses_faced_counts_battles_not_card_copies():
+    """War duels store 2-3 sub-decks under a single battle, so the same card can
+    appear twice for ONE loss. `losses_faced` is documented as a battle count,
+    so it must dedupe within a battle."""
+    import storage.player as player
+
+    duel_deck = json.dumps(
+        [
+            {"id": 1, "name": "Knight", "level": 14},
+            {"id": 2, "name": "Archers", "level": 14},
+            # second sub-deck of the same duel, re-using Knight
+            {"id": 1, "name": "Knight", "level": 14},
+            {"id": 3, "name": "Zap", "level": 14},
+        ]
+    )
+
+    seen = player._deck_card_modes(duel_deck)
+    assert seen.count(("Knight", None)) == 2, "fixture must contain the duplicate"
+    assert len(set(seen)) == 3, "deduped, a duel counts Knight once per battle"
