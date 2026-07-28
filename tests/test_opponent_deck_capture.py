@@ -256,3 +256,76 @@ def test_every_insert_column_is_also_enriched_on_dedup():
     }
     missing = set(_INSERT_COLUMNS) - set(_ENRICH_COLUMNS) - identity
     assert not missing, f"columns that would never backfill on re-poll: {sorted(missing)}"
+
+
+# ── why the loss happened, not just that it did ──────────────────────────────
+
+
+def test_surviving_towers_reads_the_api_omission_convention():
+    """The API OMITS destroyed princess towers rather than zeroing them, so the
+    list length is the survivor count and NULL means both fell. Verified against
+    12k battles: 0 crowns conceded -> 2 entries, 1 -> 1."""
+    import storage.player as player
+
+    assert player._surviving_towers("[2088,155]") == [2088, 155]
+    assert player._surviving_towers("[3052]") == [3052]
+    assert player._surviving_towers(None) == []
+    assert player._surviving_towers("not json") == []
+
+
+def _loss(crowns_for, crowns_against, opp_towers, leaked=None, opp_leaked=None):
+    return {
+        "crowns_for": crowns_for,
+        "crowns_against": crowns_against,
+        "opponent_princess_towers_hp_json": opp_towers,
+        "elixir_leaked": leaked,
+        "opponent_elixir_leaked": opp_leaked,
+    }
+
+
+def test_margin_separates_a_winnable_loss_from_a_sweep():
+    """Both of these are outcome='L' and nothing before v17 could tell them
+    apart: one finished with the opponent's tower at 90 HP, the other was 0-3."""
+    import storage.player as player
+
+    margin = player._loss_margin(
+        [
+            _loss(0, 1, "[3000,90]"),  # near miss — one hit short
+            _loss(0, 3, None),  # swept, no towers left standing
+            _loss(1, 2, "[2500]"),  # lost by one crown, not close on HP
+        ]
+    )
+
+    assert margin["one_crown_losses"] == 2  # 0-1 and 1-2, not the 0-3
+    assert margin["near_miss_losses"] == 1
+    assert margin["closest_tower_hp"] == 90
+    assert margin["losses_with_tower_data"] == 2  # the swept loss has no data
+
+
+def test_margin_reports_no_tower_data_rather_than_zero():
+    import storage.player as player
+
+    margin = player._loss_margin([_loss(0, 3, None)])
+
+    assert margin["closest_tower_hp"] is None
+    assert margin["losses_with_tower_data"] == 0
+    assert margin["near_miss_losses"] == 0
+
+
+def test_elixir_compares_against_the_same_battle():
+    """Comparing to the opponent controls for game length — a long game leaks
+    more for both sides, so the absolute number alone would mislead."""
+    import storage.player as player
+
+    elixir = player._elixir_discipline(
+        [
+            _loss(0, 1, None, leaked=10.0, opp_leaked=2.0),
+            _loss(0, 1, None, leaked=1.0, opp_leaked=8.0),
+            _loss(0, 1, None, leaked=4.0, opp_leaked=None),  # opponent missing
+        ]
+    )
+
+    assert elixir["leaked_more_than_opponent"] == 1
+    assert elixir["losses_compared"] == 2  # the unpaired battle is excluded
+    assert elixir["avg_leaked"] == 5.0  # all three count for own average
+    assert elixir["avg_opponent_leaked"] == 5.0

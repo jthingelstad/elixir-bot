@@ -397,6 +397,82 @@ _LOSSES_SCOPE_PREDICATES = {
 }
 
 
+# A princess tower runs ~3,000 HP at the levels this clan plays (observed
+# median 3,052, max 6,104). Under 500 is roughly one connected push from
+# falling -- close enough that the loss was winnable, and rare enough to mean
+# something: 10.8% of losses across the corpus.
+NEAR_MISS_TOWER_HP = 500
+
+
+def _surviving_towers(towers_json) -> list[int]:
+    """Princess tower HP still standing at the end of the battle.
+
+    The API omits destroyed towers rather than zeroing them, so the list LENGTH
+    is the survivor count (0 crowns conceded -> 2 entries, 1 -> 1) and NULL
+    means both fell. Verified against 12k battles.
+    """
+    try:
+        towers = json.loads(towers_json or "[]")
+    except json.JSONDecodeError, TypeError, ValueError:
+        return []
+    return [t for t in towers if isinstance(t, int) and not isinstance(t, bool)]
+
+
+def _loss_margin(losses: list) -> dict:
+    """How CLOSE the losses were, which crowns alone cannot say.
+
+    A 0-1 loss where the opponent's last tower finished at 90 HP and a 0-3
+    sweep are both `outcome='L'`; before v17 nothing downstream could tell them
+    apart. The weakest surviving opponent tower is the honest measure of how
+    close the next crown was.
+    """
+    one_crown = 0
+    near_misses = 0
+    weakest: list[int] = []
+    for row in losses:
+        if (row["crowns_against"] or 0) - (row["crowns_for"] or 0) == 1:
+            one_crown += 1
+        towers = _surviving_towers(row["opponent_princess_towers_hp_json"])
+        if towers:
+            low = min(towers)
+            weakest.append(low)
+            if low < NEAR_MISS_TOWER_HP:
+                near_misses += 1
+    return {
+        "one_crown_losses": one_crown,
+        "near_miss_losses": near_misses,
+        "closest_tower_hp": min(weakest) if weakest else None,
+        "losses_with_tower_data": len(weakest),
+        "near_miss_threshold_hp": NEAR_MISS_TOWER_HP,
+    }
+
+
+def _elixir_discipline(losses: list) -> dict:
+    """Elixir leaked, theirs vs the opponent's.
+
+    The only per-battle SKILL signal the CR API exposes that is not the result:
+    it measures overflow while capped, so it is a habit, not luck. Comparing to
+    the opponent in the SAME battle controls for game length.
+    """
+    mine: list[float] = []
+    theirs: list[float] = []
+    out_leaked = 0
+    for row in losses:
+        a, b = row["elixir_leaked"], row["opponent_elixir_leaked"]
+        if isinstance(a, (int, float)):
+            mine.append(float(a))
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            theirs.append(float(b))
+            if a > b:
+                out_leaked += 1
+    return {
+        "avg_leaked": round(sum(mine) / len(mine), 2) if mine else None,
+        "avg_opponent_leaked": round(sum(theirs) / len(theirs), 2) if theirs else None,
+        "leaked_more_than_opponent": out_leaked,
+        "losses_compared": len(theirs),
+    }
+
+
 def _deck_card_modes(deck_json) -> list[tuple[str, Optional[str]]]:
     """(name, played_as) for each card in a stored slim deck.
 
@@ -444,6 +520,7 @@ def get_member_recent_losses(
     member_id = member_row["member_id"]
     rows = conn.execute(
         f"SELECT outcome, crowns_for, crowns_against, opponent_deck_json, battle_time, battle_type, game_mode_name, "
+        f"elixir_leaked, opponent_elixir_leaked, opponent_princess_towers_hp_json, "
         f"opponent_tag, opponent_name, opponent_clan_tag "
         f"FROM battle_events WHERE player_tag = ? AND {predicate} "
         f"ORDER BY battle_time DESC LIMIT ?",
@@ -477,6 +554,8 @@ def get_member_recent_losses(
         if r["crowns_for"] is not None and r["crowns_against"] is not None
     ]
     avg_crown_deficit = round(sum(crown_diffs) / len(crown_diffs), 2) if crown_diffs else None
+    margin = _loss_margin(losses)
+    elixir = _elixir_discipline(losses)
     current_loss_streak = 0
     for row in rows:
         if row["outcome"] == "L":
@@ -507,11 +586,21 @@ def get_member_recent_losses(
         "top_opponent_cards": top_opponent_cards,
         "losses_with_deck_data": decks_seen,
         "opponent_decks_captured": bool(decks_seen),
+        # WHY the losses happened, not just that they did. `margin` separates a
+        # winnable game from a sweep; `elixir` is the one habit-level skill
+        # signal the API exposes. Both are v17 facts (#216).
+        "margin": margin,
+        "elixir": elixir,
         "note": (
             f"Opponent cards come from {decks_seen} of {losses_examined} examined "
             "losses; the rest predate deck capture. `losses_faced` counts battles "
             "lost with that card on the other side, not card copies. Cite only "
-            "cards listed here."
+            "cards listed here. `margin.near_miss_losses` are games where the "
+            f"opponent's last tower finished under {NEAR_MISS_TOWER_HP} HP — "
+            "winnable, not outclassed; say so rather than calling them beaten. "
+            "`elixir.avg_leaked` above the opponent's is a habit worth naming "
+            "gently; below it means elixir was NOT the problem, so do not "
+            "suggest it was."
             if decks_seen
             else (
                 "No opponent decks captured in this window (all examined losses "
