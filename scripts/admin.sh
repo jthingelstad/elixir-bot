@@ -90,11 +90,6 @@ backup_db() {
     "$PROJECT_DIR/.venv/bin/python" "$PROJECT_DIR/scripts/backup_db.py"
 }
 
-update_awards() {
-    echo "==> Updating awards across every season in war_races..."
-    "$PROJECT_DIR/.venv/bin/python" "$PROJECT_DIR/scripts/backfill_awards.py" --all
-}
-
 run_activity() {
     if [ "${2:-}" != "run" ] || [ -z "${3:-}" ]; then
         echo "Usage: $0 activity run <activity-key>"
@@ -111,10 +106,9 @@ case "${1:-}" in
     install)  install_bot ;;
     status)   status ;;
     backup)   backup_db ;;
-    awards)   update_awards ;;
     activity) run_activity "$@" ;;
     *)
-        echo "Usage: $0 {start|stop|restart|upgrade|install|status|backup|awards|activity run <activity-key>}"
+        echo "Usage: $0 {start|stop|restart|upgrade|install|status|backup|activity run <activity-key>}"
         exit 1
         ;;
 esac
