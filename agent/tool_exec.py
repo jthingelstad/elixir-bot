@@ -1826,7 +1826,7 @@ def _execute_tool(name, arguments, workflow=None):
 
         return json.dumps(result, default=str)
     except Exception as e:
-        log.error("Tool execution error (%s): %s", name, e)
+        log.exception("Tool execution error (%s): %s", name, e)
         return json.dumps({"error": str(e)})
 
 

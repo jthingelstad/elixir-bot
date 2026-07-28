@@ -37,6 +37,6 @@ async def sync_emoji(guild: discord.Guild) -> None:
             uploaded += 1
             log.info("Uploaded emoji :%s:", name)
         except (discord.HTTPException, OSError) as exc:
-            log.error("Failed to upload emoji :%s:: %s", name, exc)
+            log.exception("Failed to upload emoji :%s:: %s", name, exc)
 
     log.info("Emoji sync complete: %d uploaded, %d already existed", uploaded, skipped)

@@ -545,7 +545,7 @@ def _chat_with_tools(
         try:
             resp = _create_completion(messages)
         except (APIError, APIConnectionError) as e:
-            log.error("LLM API error: %s", e)
+            log.exception("LLM API error: %s", e)
             if return_errors:
                 return _failure_payload("llm_api_error", e, phase="initial_completion")
             return None
@@ -587,7 +587,7 @@ def _chat_with_tools(
                     # we just want a clean JSON answer from the data it has.
                     repair_resp = _create_completion(messages, allow_tools=False)
                 except (APIError, APIConnectionError) as e:
-                    log.error("LLM API repair error: %s", e)
+                    log.exception("LLM API repair error: %s", e)
                     if return_errors:
                         return _failure_payload("llm_api_error", e, phase="repair_completion")
                     return None
@@ -755,7 +755,7 @@ def _chat_with_tools(
         _log_agent_loop(max_tool_rounds)
         return parsed
     except (APIError, APIConnectionError) as e:
-        log.error("Final answer error: %s", e)
+        log.exception("Final answer error: %s", e)
         if return_errors:
             return _failure_payload("llm_api_error", e, phase="final_completion")
         return None

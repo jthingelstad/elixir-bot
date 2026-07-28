@@ -107,7 +107,9 @@ async def _build_rest_channel_lookup(
             except Exception:
                 import logging
 
-                logging.getLogger("elixir").warning(
+                # ERROR: the activity runs but its output goes nowhere. A
+                # skipped channel is indistinguishable from a quiet one.
+                logging.getLogger("elixir").exception(
                     "activity_runner: channel %s unreachable; skipping", channel_id
                 )
         return client, _ChannelLookup(channels)
