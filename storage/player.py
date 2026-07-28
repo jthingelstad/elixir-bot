@@ -453,14 +453,15 @@ def get_member_recent_losses(
     losses = [r for r in rows if r["outcome"] == "L"]
     losses_examined = len(losses)
     # The headline: which cards keep showing up on the other side of a loss.
-    # Counted once per battle, not once per appearance, so the number reads as
-    # "beaten by this card N times" rather than a card-slot tally.
+    # Counted once per BATTLE, not once per appearance, so the number reads as
+    # "beaten by this card N times" rather than a card-slot tally. The dedupe
+    # matters for war duels, which store 2-3 sub-decks under one battle and
+    # could otherwise count a shared card twice for a single loss.
     card_counts: Counter[tuple[str, Optional[str]]] = Counter()
     decks_seen = 0
     opponent_agg: dict[str, dict] = {}
     for row in losses:
-        for entry in _deck_card_modes(row["opponent_deck_json"]):
-            card_counts[entry] += 1
+        card_counts.update(set(_deck_card_modes(row["opponent_deck_json"])))
         if row["opponent_deck_json"]:
             decks_seen += 1
         opp_tag = row["opponent_tag"]

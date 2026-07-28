@@ -177,7 +177,9 @@ Three database files exist, with distinct roles:
 
 - **`elixir-v51.db`** — the operational engine DB. The clean-break baseline source is `scripts/migrate_v51/schema_v51.py`; ordered post-cut evolution lives in `db/schema.py`. `db.get_connection()` refuses databases without the v5.1 spine, migrates compatible v5.1 databases forward, and is the sole initializer.
 - Durable memory lives IN the engine DB since 2026-07-04 (the v5.1 memory pass, `docs/reference/v5.1/memory.md`): `memories` + `memory_tags` + `memories_fts`, accessed through the `memory_store` seam. `inference` rows carry a 90-day default TTL and are reclaimed by db-maintenance; curated kinds (`leader_note`, `synthesis`, `system`) never expire by default (#215). The old `elixir-v5-memory.db` is archived (`elixir-v5-memory-archive-2026H2.db`, read-only); `ELIXIR_V5_MEMORY_DB` is retired. **One database for all runtime activity.**
-- **`elixir-v5-archive-2026H2.db`** — the pre-cut cold archive. Read-only (chmod 444), never written; open with `file:…?immutable=1`. Everything historical lives here.
+- **`elixir-v5-archive-2026H2.db`** — the pre-cut cold archive. Read-only (chmod 444), never written; open with `file:…?immutable=1`. **Not present on this workstation** — `tests/conftest.py` and `schema_v51.build()` both treat it as optional and fall back to the frozen `carried_ddl.sql`, which is why nothing has failed. Do not assume it is reachable; verify before planning any recovery around it.
+
+**Historical recovery actually comes from the rolling backups** in `$ELIXIR_BACKUP_DIR` (see `scripts/backup_db.py`). Each nightly `.db.gz` froze the short-retention `raw_api_payloads` window as it stood on its own date, so their UNION reaches much further back than any single snapshot — the live DB holds ~2 weeks of payloads, the backups months. `scripts/backfill_opponent_decks_from_backups.py` is the worked example: it recovered 4,164 battles that no longer existed anywhere in `elixir-v51.db`.
 
 The engine DB follows the layered retention model (`docs/reference/v5.1/schema.md`):
 

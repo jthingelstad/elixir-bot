@@ -58,7 +58,10 @@ forward migrations from `db/schema.py`. A non-empty database without the v5.1
 spine is refused; it is never rebuilt or upgraded in place.
 
 The immutable pre-cut archive is `elixir-v5-archive-2026H2.db`. Never point the
-running bot at it and never change its read-only permissions.
+running bot at it and never change its read-only permissions. It is **not
+present on this workstation**; every consumer treats it as optional, so verify
+it exists before planning any recovery around it. For historical data the
+rolling backups (below) are the practical source — see AGENTS.md.
 
 Create an operational backup before every runtime deployment:
 
@@ -218,7 +221,11 @@ rg 'prompt_failure' elixir-v5.log
 - `elixir-v51.db` — live operational state, streams, projections, management,
   conversation, and durable memory.
 - `elixir-v51.db-wal` / `elixir-v51.db-shm` — SQLite WAL sidecars while live.
-- `elixir-v5-archive-2026H2.db` — immutable cold archive.
+- `elixir-v5-archive-2026H2.db` — immutable cold archive (absent here; optional).
+- `$ELIXIR_BACKUP_DIR/*.db.gz` — rolling nightly backups. Each froze the
+  short-retention `raw_api_payloads` window on its own date, so together they
+  are the real historical record; treat them as recoverable evidence, not just
+  disaster-recovery copies.
 - `elixir-v5.log` — active launchd log.
 - `.env` — local secrets; never commit it.
 
