@@ -13,6 +13,7 @@ __all__ = [
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Optional
 
 from apscheduler.jobstores.base import JobLookupError
@@ -175,6 +176,101 @@ def _build_battle_played_signal(
     }
 
 
+def _emit_tournament_event(
+    tournament_tag: str, event_type: str, dedup_key: str, payload: dict, *, subject_tag=None
+) -> None:
+    """Land one fine-grained tournament beat on the TOURNAMENT-scoped stream.
+
+    Battles and joins are far too granular for `clan_events` — a single
+    tournament produces dozens, and they would drown the awareness read in
+    battle results. They get their own stream, scoped by tournament_tag, in the
+    canonical stream shape so cursors and readers work unchanged (#210). The
+    clan stream sees exactly one row per tournament: `tournament_finished`.
+
+    Best-effort: a tournament must keep running even if the emit fails.
+    """
+    from engine.db import connect
+    from engine.emitters import insert_stream_event
+
+    conn = None
+    try:
+        conn = connect()
+        insert_stream_event(
+            conn,
+            "tournament_events",
+            dedup_key=dedup_key,
+            event_type=event_type,
+            subject_cols={"tournament_tag": tournament_tag, "subject_tag": subject_tag},
+            observed_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            window_start=None,
+            payload=payload,
+            timing="exact",
+        )
+        conn.commit()
+    except Exception:
+        log.warning(
+            "tournament_events emit failed (%s / %s)", tournament_tag, event_type, exc_info=True
+        )
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _emit_tournament_finished(tournament_tag: str, tournament: dict, api_data: dict) -> None:
+    """Land a finished tournament on the clan stream for the awareness loop.
+
+    Carries the facts the deterministic close-post used to format itself —
+    final podium, participant count, deck format — so the brain narrates from
+    the same evidence rather than re-deriving it from the tournament tables.
+    Best-effort: a tournament that ends must still close cleanly even if the
+    emit fails, so this never raises into the watch tick.
+    """
+    from engine.db import connect
+    from engine.emitters import insert_stream_event
+    from engine.tick import HOME_CLAN
+
+    members = api_data.get("membersList") or []
+    podium = [
+        {
+            "rank": m.get("rank"),
+            "name": m.get("name"),
+            "tag": m.get("tag"),
+            "score": m.get("score"),
+        }
+        for m in sorted(members, key=lambda m: m.get("rank") or 999)[:3]
+    ]
+    name = tournament.get("name") or api_data.get("name") or tournament_tag
+    observed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn = None
+    try:
+        conn = connect()
+        insert_stream_event(
+            conn,
+            "clan_events",
+            dedup_key=f"tournament_finished:{tournament_tag}",
+            event_type="tournament_finished",
+            subject_cols={"clan_tag": HOME_CLAN, "subject_tag": None},
+            observed_at=observed_at,
+            window_start=None,
+            payload={
+                "name": name,
+                "tournament_tag": tournament_tag,
+                "participants": len(members),
+                "podium": podium,
+                "deck_selection": api_data.get("deckSelection"),
+                "game_mode": tournament.get("game_mode_name"),
+            },
+            timing="exact",
+        )
+        conn.commit()
+        log.info("tournament_finished emitted for %s (%s players)", tournament_tag, len(members))
+    except Exception:
+        log.warning("tournament_finished emit failed for %s", tournament_tag, exc_info=True)
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 async def _tournament_watch_tick():
     """Poll the active tournament for standings and capture participant battle logs."""
     tournament = await asyncio.to_thread(db.get_active_tournament)
@@ -248,13 +344,27 @@ async def _tournament_watch_tick():
                                 )
                                 if battle_info:
                                     battles_captured += 1
-                                    live_signals.append(
-                                        _build_battle_played_signal(
-                                            tag,
-                                            tournament_name,
-                                            battle_info,
-                                            tournament_timing=tournament_timing,
-                                        )
+                                    signal = _build_battle_played_signal(
+                                        tag,
+                                        tournament_name,
+                                        battle_info,
+                                        tournament_timing=tournament_timing,
+                                    )
+                                    live_signals.append(signal)
+                                    # Same beat, durable: the signal drives the
+                                    # 5-minute post, the stream row is the record
+                                    # (#210). store_tournament_battle already
+                                    # dedups on the canonicalized
+                                    # (p1, p2, battle_time) triple, so this fires
+                                    # once per match even though the battle shows
+                                    # up in both players' logs.
+                                    await asyncio.to_thread(
+                                        _emit_tournament_event,
+                                        tag,
+                                        "tournament_battle_played",
+                                        signal["signal_key"],
+                                        signal,
+                                        subject_tag=battle_info.get("winner_tag"),
                                     )
                         # Also feed through existing battle log pipeline
                         await asyncio.to_thread(db.snapshot_player_battlelog, p_tag, battle_log)
@@ -265,18 +375,15 @@ async def _tournament_watch_tick():
         # Handle tournament end
         if api_status == "ended" and tournament["status"] != "ended":
             await asyncio.to_thread(db.finalize_tournament, tag, api_data)
-            log.info(
-                "Tournament %s ended — posting close, deferring recap %ds",
-                tag,
-                TOURNAMENT_RECAP_DELAY_SECONDS,
-            )
-            # The "tournament_ended" signal in live_signals would otherwise
-            # generate a chatty narrative post via tournament_update.
-            # Replace it with a deterministic facts + leaderboard post and
-            # defer the LLM recap so the two don't land on top of each other.
+            log.info("Tournament %s ended — emitting tournament_finished", tag)
+            # A finished tournament is a bounded clan moment, so it lands on the
+            # clan stream and the awareness loop narrates it — the same path
+            # season_closed and member_joined take (#210). The bespoke
+            # close-post + deferred `tournament_recap` LLM workflow that used to
+            # run here made tournaments a second proactive owner, composing and
+            # posting in parallel with the brain.
             live_signals = [s for s in live_signals if s.get("type") != "tournament_ended"]
-            await _post_tournament_close(tag, api_data)
-            _schedule_tournament_recap(tag, delay_seconds=TOURNAMENT_RECAP_DELAY_SECONDS)
+            await asyncio.to_thread(_emit_tournament_finished, tag, tournament, api_data)
             stop_tournament_watch()
 
         # Post live tournament signals directly to #elixir (v5-style),

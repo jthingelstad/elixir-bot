@@ -46,6 +46,12 @@ def test_hard_post_set_is_the_expected_member_facing_floor():
             # → #elixir
             "week_finished",
             "season_closed",
+            # A finished tournament is a real, dated clan moment (#210). Added
+            # deliberately: the fine grain INSIDE a tournament (each battle,
+            # each join) is NOT here — it lives on the tournament-scoped stream
+            # and is narrated by the tournament's own short-lived agent, because
+            # a 3-hour awareness cadence cannot cover a 3-hour event.
+            "tournament_finished",
         }
     )
 

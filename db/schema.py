@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 
 
 _V1_STATEMENTS = (
@@ -749,6 +749,49 @@ def _apply_v10(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS elixir_improvement_suggestions")
 
 
+_TOURNAMENT_EVENTS_DDL = """CREATE TABLE IF NOT EXISTS tournament_events (
+    event_id    INTEGER PRIMARY KEY,
+    dedup_key   TEXT NOT NULL UNIQUE,
+    event_type  TEXT NOT NULL,
+    tournament_tag TEXT NOT NULL,
+    subject_tag TEXT,
+    observed_at TEXT NOT NULL,
+    timing      TEXT NOT NULL DEFAULT 'estimated' CHECK (timing IN ('exact','estimated')),
+    window_start TEXT,
+    evidence_json TEXT,
+    payload_json  TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'public' CHECK (scope IN ('public','leadership')),
+    created_at TEXT NOT NULL
+)"""
+
+
+def _apply_v11(conn: sqlite3.Connection) -> None:
+    """Add the tournament-scoped event stream (#210).
+
+    A tournament is a bounded clan event, so the CLAN stream gets exactly one
+    row for it (``tournament_finished``). Everything inside the tournament —
+    each battle, each player joining — is far too fine-grained for a clan-level
+    stream and would drown the awareness read in battle results. Those get their
+    own stream, scoped by ``tournament_tag``.
+
+    Shape is deliberately identical to clan_events/war_events so the generic
+    ``insert_stream_event`` machinery, cursors and readers all work unchanged;
+    only the scope column differs (``tournament_tag`` instead of ``clan_tag``).
+    The existing tournament_battles / tournament_participants tables become
+    projections OF this stream, matching how battle_events feeds the daily
+    rollups everywhere else in the engine.
+    """
+    conn.execute(_TOURNAMENT_EVENTS_DDL)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tournament_events_scope "
+        "ON tournament_events(tournament_tag, observed_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tournament_events_type "
+        "ON tournament_events(event_type, observed_at DESC)"
+    )
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -852,6 +895,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 10
+    if version < 11:
+        try:
+            _apply_v11(conn)
+            conn.execute("PRAGMA user_version = 11")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -908,7 +960,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "665eb5f12fdc02714fa089603e0bf68dc84e196c13bcddf31c9a0a8f93ae7573"
+CURRENT_SCHEMA_FINGERPRINT = "e8007ffefaf152996154375fd736c93ae7d94ff111c776eaf8b6165279b51294"
 
 
 __all__ = [
