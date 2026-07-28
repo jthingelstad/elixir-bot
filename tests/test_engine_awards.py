@@ -120,15 +120,22 @@ def test_grant_season_awards_full_slate():
         assert [e["tag"] for e in grants["rookie_mvps"]] == ["#R"]  # first-war-season only
         assert grants["war_participants"] == 4  # A, B, C, R (fame > 0)
 
-        # ledger keys claimed per recognition.md §5
-        claims = conn.execute(
-            "SELECT COUNT(*) FROM recognition_ledger WHERE recognition_key LIKE 'award:%'"
+        # Every grant is a real row. Idempotency lives on the awards table's
+        # UNIQUE(award_type, season_id, section_index, player_tag) constraint --
+        # NOT the recognition ledger, whose per-award claims were intentless and
+        # read by nothing, and were retired with the recognizer (#207).
+        rows = conn.execute(
+            "SELECT COUNT(*) FROM awards WHERE season_id = ?", (SEASON,)
         ).fetchone()[0]
-        assert claims == grants["granted"]
+        assert rows == grants["granted"]
 
-        # idempotent: re-run grants nothing
+        # idempotent: re-run grants nothing, and adds no duplicate rows
         again = engine_awards.grant_season_awards(conn, SEASON, AT)
         assert again["granted"] == 0
+        assert (
+            conn.execute("SELECT COUNT(*) FROM awards WHERE season_id = ?", (SEASON,)).fetchone()[0]
+            == rows
+        )
     finally:
         conn.close()
 

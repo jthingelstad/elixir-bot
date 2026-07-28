@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 
 from capabilities.game_truth import awareness_post_facts
-from engine.recognition import compose as engine_compose
+from runtime import lanes as engine_compose
 from runtime.awareness.policy import validate_plan, validate_repair
 
 log = logging.getLogger("elixir")

@@ -76,18 +76,13 @@ def _grant(
             awarded_at,
         ),
     )
-    if cur.rowcount:
-        # recognition.md §5: award grants claim ledger keys for durable dedup.
-        # These claims are intentionally intentless; awareness owns narration.
-        from engine.recognition import ledger
-
-        ledger.claim(
-            conn,
-            f"award:{award_type}:{season_id}:{player_tag}",
-            "war",
-            [f"season_closed:{season_id}"],
-            0,
-        )
+    # Idempotency is the UNIQUE(award_type, season_id, section_index, player_tag)
+    # constraint above, paired with INSERT OR IGNORE — not the recognition
+    # ledger. The ledger claim that used to fire here was intentless by design
+    # ("awareness owns narration"): it existed only so the deterministic
+    # recognizer would not also announce an award awareness already owns. That
+    # recognizer is retired (#207), so the claim guarded nothing and nothing read
+    # it back.
     return bool(cur.rowcount)
 
 
