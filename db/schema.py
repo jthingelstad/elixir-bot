@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 18
+CURRENT_SCHEMA_VERSION = 19
 
 
 _V1_STATEMENTS = (
@@ -946,6 +946,28 @@ def _apply_v18(conn: sqlite3.Connection) -> None:
         )
 
 
+def _apply_v19(conn: sqlite3.Connection) -> None:
+    """Drop ``tournament_battles`` -- battle_events is the battle store (#216).
+
+    This table existed for exactly one reason: it kept BOTH decks, and
+    ``battle_events`` kept only the polled player's. That gap is what Jamie
+    noticed when I described the table as "only justified by the opponent's
+    deck", and closing it (v16) removed the table's reason to exist.
+
+    Its 7 rows predated ``battle_events`` (which starts 2026-05-07) so they were
+    replayed into the main stream first, from the full ``raw_json`` payload each
+    row carried -- see scripts/migrate_tournament_battles.py. They came out
+    RICHER than the table held: support cards, elixir leaked and tower HP, none
+    of which it had columns for.
+
+    ``get_tournament_battles`` now reads ``battle_events`` and collapses the
+    per-polled-player rows back to one row per match, because the two stores
+    have different grain: a match between two clan members appears twice here,
+    once from each side.
+    """
+    conn.execute("DROP TABLE IF EXISTS tournament_battles")
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1121,6 +1143,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 18
+    if version < 19:
+        try:
+            _apply_v19(conn)
+            conn.execute("PRAGMA user_version = 19")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1177,7 +1208,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "838e7a5fc606ec472d7c75a6eb11a07d263323317fcefff5ad6d2d1f19d5d839"
+CURRENT_SCHEMA_FINGERPRINT = "cec6231f4d76a8b3534b116883dbd56d95bc74d11c002827f0276893a5cdf3bc"
 
 
 __all__ = [
