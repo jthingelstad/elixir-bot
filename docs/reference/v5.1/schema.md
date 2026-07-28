@@ -13,7 +13,7 @@
 > **Implementation amendment (2026-07-14):** migration 0 below remains the
 > clean-break baseline. Ordered post-cut changes now live in `db/schema.py` and
 > are applied only by `db.get_connection()`. Production awareness uses
-> `awareness_thoughts`, `awareness_posts`, `watches`, and per-stream rows in
+> `awareness_thoughts`, `awareness_posts`, and per-stream rows in
 > `stream_cursors`; `communication_intents` is retained for offline legacy
 > rehearsals and history, not as the production post ledger.
 >
@@ -69,17 +69,16 @@ tables unchanged and is not redesigned here.
 | L1 API provenance (14d) | `api_observation_receipts`, `raw_api_payloads` | 2 |
 | L2 Current-state baselines | `state_baselines` | 1 |
 | L3 Event streams | `battle_events`, `player_events`, `clan_events`, `war_events` | 4 |
-| L4 Rollups (durable) | `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics`, `clan_daily_battle_rollups` | 4 |
+| L4 Rollups (durable) | `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics` | 3 |
 | L5 Identity & tenure (durable) | `players`, `player_metadata`, `player_aliases`, `clans`, `discord_users`, `discord_links`, `clan_memberships` | 7 |
 | L6 Projections / read models | `player_current_state`, `player_card_collection`, `player_recent_form`, `member_management` | 4 |
-| Awareness runtime | `awareness_thoughts`, `awareness_delivery_intents`, `awareness_posts`, `watches` | 4 |
-| Legacy recognition (offline delivery queue is TEMP) | `recognition_ledger` | 1 |
+| Awareness runtime | `awareness_thoughts`, `awareness_delivery_intents`, `awareness_posts` | 3 |
 | Clan management | `leader_action_recommendations`, `decision_cases`, `revisits` | 3 |
 | Bounded stream: war | `war_seasons`, `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days` | 5 |
 | Bounded stream: tournaments | `tournaments`, `tournament_battles`, `tournament_participants` | 3 |
 | Awards (durable) | `awards` | 1 |
 | Engine control | `stream_cursors` (durable), `runtime_job_status`, `poll_state` (runtime.md §4), `materialization_runs`, `materialization_inputs` | 5 |
-| Ops singletons (carried) | `llm_calls`, `prompt_failures`, `prompt_feedback`, `system_signals`, `api_sentinel_observations`, `arena_relay_screenshot_observations`, `discord_channels`, `channel_state`, `game_mode_contexts`, `card_catalog` | 10 |
+| Ops singletons (carried) | `llm_calls`, `prompt_failures`, `prompt_feedback`, `api_sentinel_observations`, `arena_relay_screenshot_observations`, `discord_channels`, `channel_state`, `game_mode_contexts`, `card_catalog` | 9 |
 | **Engine total** | | **51** |
 | Deferred pass (carried unchanged) | `clan_memories` + 9 satellites + FTS/vec, `conversation_threads`, `messages`, `memory_facts`, `memory_episodes` | ~19 designed |
 
@@ -403,49 +402,19 @@ recommendations until a ready materialization evaluates them again.
 
 ## 7. Recognition, delivery, clan management, war, awards
 
-### 7.1 Recognition ledger — durable engine state (§10, feedback New-4)
+### 7.1–7.2 Recognition ledger and `communication_intents` — RETIRED (#207)
 
-```sql
-CREATE TABLE recognition_ledger (
-    recognition_key TEXT PRIMARY KEY,       -- 'arena_up:{tag}:{arena}', 'champion_unlock:{tag}:{card}'
-    stream TEXT NOT NULL,                   -- which stream claimed it first
-    event_refs_json TEXT NOT NULL,          -- contributing event dedup_keys (cross-stream)
-    score INTEGER NOT NULL,                 -- notability score at claim time
-    claimed_at TEXT NOT NULL,
-    intent_id INTEGER                       -- NULL until an intent is raised (claim ≠ post)
-);
-```
+Both are gone. The deterministic recognizer, its delivery queue, and the
+`legacy_proactive` adapter that was the only executable path into them were
+removed on 2026-07-28; the awareness loop is the sole proactive owner.
 
-First claim wins via the PK; the second stream's `INSERT` conflicts and backs off.
-Never purged (reset ⇒ double-posts, §14.2).
-
-### 7.2 `communication_intents` — retained offline legacy queue
-
-Replaces both `storage/communication_intents.py` (Gen B, ~29 KB) and
-`event_core/domain/communication_intent.py` (Gen C) — Part I §1's duplicated concept
-collapses to one table with the §17.3 delivery semantics built in.
-
-```sql
-CREATE TABLE communication_intents (
-    intent_id INTEGER PRIMARY KEY,
-    recognition_key TEXT REFERENCES recognition_ledger(recognition_key),
-    intent_type TEXT NOT NULL,              -- routing prefix (recognition.md owns map)
-    lane TEXT NOT NULL,                     -- resolved destination lane
-    scope TEXT NOT NULL CHECK (scope IN ('public','leadership')),
-    payload_json TEXT NOT NULL,             -- presentation-free facts for composition
-    status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending','fulfilled','failed','expired')),
-    attempts INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL, expires_at TEXT NOT NULL,   -- created + 6h (§17.3)
-    fulfilled_at TEXT, discord_message_id TEXT, last_error TEXT
-);
-CREATE INDEX idx_intents_pending ON communication_intents(status, expires_at) WHERE status IN ('pending','failed');
-```
-
-At-least-once contract (§17.3): mark `fulfilled` only on confirmed send; `failed`
-retries on the next explicit legacy pass; past `expires_at` → `expired` (drop
-stale). Production does not raise or consume these rows. `engine.legacy_proactive`
-owns the only executable adapter into this historical contract.
+`recognition_ledger` was briefly assumed load-bearing because it held `award:`
+keys. It was not: award idempotency is
+`UNIQUE(award_type, season_id, section_index, player_tag)` on `awards` with
+`INSERT OR IGNORE`, and the ledger claim fired *after* and *conditional on* that
+insert succeeding. All 17 award claims carried `intent_id = NULL` — they never
+posted; they existed only so the recognizer would not narrate an award awareness
+already owned. Nothing outside the retired package read the table back.
 
 ### 7.2a Awareness runtime state — the production consumer
 
@@ -456,9 +425,10 @@ or successful live delivery. `awareness_posts` stores delivered copy, lane,
 covered signals, loop number, timestamp, and Discord message id for channel
 memory and heartbeat reads. `awareness_delivery_intents` stores the pre-send
 post plan and per-post attempt/fulfillment state; `awareness_posts.intent_key`
-links confirmed Discord receipts back to it. `watches` holds the workflow's
-standing concerns. These tables are created by ordered schema migrations, not
-lazily by runtime code.
+links confirmed Discord receipts back to it. Standing concerns live in
+`memories` as `Watch:` / `Hold:` titles — the `watches` table declared here was
+never written by anything and was dropped in #211. These tables are created by
+ordered schema migrations, not lazily by runtime code.
 
 ### 7.3 Clan management & leader actions
 

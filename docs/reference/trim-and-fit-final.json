@@ -1,0 +1,35 @@
+{
+  "captured_at": "2026-07-28",
+  "baseline": {
+    "captured_at": "2026-07-28",
+    "git_head": "ee14157",
+    "production_py_files": 167,
+    "production_loc": 67017,
+    "test_py_files": 132,
+    "test_loc": 33664,
+    "script_py_files": 45,
+    "script_loc": 10164,
+    "root_py_files": 6,
+    "db_tables": 76,
+    "db_indexes": 84,
+    "db_total_rows": 114889,
+    "agent_tools": 23,
+    "admin_commands": 19,
+    "observatory_pages": 18,
+    "tests_collected": 1311
+  },
+  "final": {
+    "production_py_files": 158,
+    "production_loc": 63651,
+    "test_py_files": 124,
+    "test_loc": 31690,
+    "script_py_files": 45,
+    "script_loc": 9787,
+    "db_tables": 69,
+    "db_indexes": 78,
+    "agent_tools": 23,
+    "admin_commands": 19,
+    "observatory_pages": 17,
+    "tests_collected": 1222
+  }
+}
