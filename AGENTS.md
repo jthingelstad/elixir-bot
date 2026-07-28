@@ -136,21 +136,26 @@ Unit tests target one delta with minimal dicts; these three run the engine again
 The bugs that keep biting are seam/first-use failures that fail *silently*. Three
 tools make them visible:
 
-1. **Incident ledger** — abandoned runtime work and cross-table consistency
-   failures record to `runtime_incidents`
-   (`storage/incidents.py:record_incident`). Expected parsing, user/tool errors,
-   and optional enrichment use bounded fallbacks or logs instead of flooding the
-   ledger; see `docs/reference/error-handling.md`.
-   An external agent finds all open failures in one query:
-   `sqlite3 elixir-v51.db "SELECT at, component, summary, detail FROM runtime_incidents WHERE resolved_at IS NULL ORDER BY at DESC LIMIT 50"`.
-   Also on Observatory `/incidents`, and the daily `engine-health` job names them
-   to #elixir-log. Resolve one with `UPDATE runtime_incidents SET resolved_at = ...`.
+1. **The error log** — `logs/elixir-error.log` (ERROR+ with tracebacks, written
+   by `runtime/logging_setup.py`, rotated at 2 MB × 5). Abandoned runtime work
+   and cross-table consistency failures log there on their module's own logger
+   with a stable `<component> failed: k=v` prefix. Expected parsing, user/tool
+   errors, and optional enrichment use bounded fallbacks or lower levels instead
+   of flooding it; see `docs/reference/error-handling.md`. It is small enough
+   (~6 lines/day) to read whole, which is the point.
+   **Elixir does not monitor itself.** A `runtime_incidents` ledger and a daily
+   `engine-health` job tried, and the ledger recorded 0 rows in 25 days while
+   the log held 159 real errors — so the check reported "all clear" through
+   every failure. Both were retired 2026-07-28 (schema v20). Detection is an
+   operator job: **AGENT-TEAM/error-watch.md**, owned by the Operations Manager.
 2. **Entrypoint smoke** (`tests/test_entrypoints_smoke.py`) — static + dynamic
    check that every function's names resolve and every compose/card/tool
    entrypoint is invocable. Catches the NameError/lazy-import class at test time.
 3. **`scripts/confidence_report.py`** — one command (`--json`, non-zero exit on
-   findings) that unifies open incidents + smoke/integration test status + the
-   latest post-quality scorecard. "Is Elixir healthy?" in one answer. Run it
+   findings) that unifies grouped errors from the error log + smoke/integration
+   test status + the latest post-quality scorecard, plus the `liveness` silence
+   alarm (an error log cannot report a failure that produced no error, and the
+   worst outages were quiet). "Is Elixir healthy?" in one answer. Run it
    before/after any change; it's what the unattended `confidence-monitor` routine
    executes. The scorecard samples the active awareness and assistant-message
    paths; deterministic accuracy/repetition findings become idempotent editorial
@@ -158,7 +163,7 @@ tools make them visible:
 
 ### Review discipline
 
-A green suite is necessary, not sufficient. Before deploying a substantive change, do a **cold adversarial review** of the diff — read it as a skeptic hunting for what breaks, not as the author confirming what works. After deploying, do a **live behavioral audit**: watch what the running system actually does (Observatory, tick counters, posted messages) rather than what the code says it should do. The 2026-07-04 end-to-end review is the reference case: the suite was green, yet the live audit found a season-breaking gap (the awards consumer was never built — two work streams each assumed the other owned it) and the cold review found ten more real defects (delivery commit ordering, per-lane fail-stop, timestamp-format mismatches, CSRF host matching). The `engine-health` daily activity (`runtime/health.py`) institutionalizes the live audit's checks, but it covers only known failure classes — new changes need fresh adversarial eyes. Never mark a cross-stream feature done without verifying the consumer end-to-end.
+A green suite is necessary, not sufficient. Before deploying a substantive change, do a **cold adversarial review** of the diff — read it as a skeptic hunting for what breaks, not as the author confirming what works. After deploying, do a **live behavioral audit**: watch what the running system actually does (Observatory, tick counters, posted messages) rather than what the code says it should do. The 2026-07-04 end-to-end review is the reference case: the suite was green, yet the live audit found a season-breaking gap (the awards consumer was never built — two work streams each assumed the other owned it) and the cold review found ten more real defects (delivery commit ordering, per-lane fail-stop, timestamp-format mismatches, CSRF host matching). An `engine-health` daily activity once tried to institutionalize the live audit's checks in-product; it was retired 2026-07-28 because a check that only covers known failure classes, run by the system it is checking, manufactures false calm (it read a ledger that never recorded a row). The watching lives outside the runtime now — `AGENT-TEAM/error-watch.md` — and new changes still need fresh adversarial eyes. Never mark a cross-stream feature done without verifying the consumer end-to-end.
 
 ## Cleanup
 
@@ -264,7 +269,7 @@ Read the exact, current list (keys, schedules, executors, enabled state) from `r
 - **Clan management:** `weekly-leadership-review` (Mon 7:00 CT — rolls the weekly hysteresis grain, surfaces promote/demote candidacies as leader actions, posts one review) and `action-outcome-refresh` (daily 9:30 CT — leader-action outcome evaluation + feedback-synthesis re-queue). The old `leadership-action-scan` is **gone**; its scan/creation role lives in the engine's reactive kick path.
 - **War:** `war-attendance-snapshot` (daily 4:15 CT — finalizes `war_attendance_days` just before the ~09:15 UTC war-day boundary; evaluators read finalized days only).
 - **Scheduled posts / reports:** `daily-clan-insight` (`#ask-elixir` hidden fact), `weekly-recap` (public recap), `weekly-discord-invite-relay`, `promotion-content` (`#recruiting`), `clan-wars-intel`.
-- **Maintenance / ops:** `api-sentinel` (CR-API drift notes to `#leaders`), `memory-synthesis` (weekly memory hygiene), `card-catalog-sync`, `db-maintenance`, `db-backup` (daily 3:37 CT iCloud snapshot), `engine-health` (daily 8:23 CT read-only audit — `runtime/health.py`; posts to `#elixir-log` only when a check fails).
+- **Maintenance / ops:** `api-sentinel` (CR-API drift notes to `#leaders`), `memory-synthesis` (weekly memory hygiene), `card-catalog-sync`, `db-maintenance`, `db-backup` (daily 3:37 CT iCloud snapshot). `engine-health` was retired 2026-07-28 — production-problem detection is an operator/AGENT-TEAM job (`AGENT-TEAM/error-watch.md`), not an internal function of the clan bot.
 - **Tournaments:** the watch is leader-started/stopped (`runtime/jobs/_tournament.py`), a dynamic job that resumes on restart — not a registry entry.
 
 ## Architecture: Prompts vs Code
@@ -351,7 +356,7 @@ uv run --locked python scripts/review_agent_feedback.py --workflow clanops --jso
 The `system_signals` queue was retired in #212 — it had no drain, so nothing it held was ever delivered. The two things it used to carry now have real owners:
 
 - **Feature / release news** → `scripts/cut_release.py`: RELEASES.md, a #announcements post, and email to members with a verified address. One flow, already used for every release.
-- **CR API drift** → the `api-sentinel` activity records first-seen schema paths into `api_sentinel_observations`, and the engine-health check `check_api_drift` posts *structural* drift (new schema path, progress key, or game mode — never routine new event tags) to #elixir-log within 48h. The alert is deliberately thin; the AGENT-TEAM **Data Analyst** owns characterizing it and filing the issue.
+- **CR API drift** → the `api-sentinel` activity records first-seen schema paths into `api_sentinel_observations`. Nothing in the runtime evaluates them: the Operations Manager runs the 48h *structural*-drift query (new schema path, progress key, or game mode — never routine new event tags, which are pure noise) from `AGENT-TEAM/error-watch.md` step 5. The hand-off is deliberately thin; the AGENT-TEAM **Data Analyst** owns characterizing it and filing the issue.
 
 Elixir also posts a startup check-in to the #elixir-log webhook with the running build hash and a short Clash Royale-flavored line.
 

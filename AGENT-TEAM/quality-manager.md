@@ -21,7 +21,7 @@ Every run:
 2. Pull the recent quality signal:
    * `scripts/review_agent_feedback.py` — 👎 reactions and prompt failures.
    * `uv run --locked python scripts/leader_feedback_report.py --days 7` — how leadership actually answered Elixir's HITL cards: acceptance rate per action type, decision notes verbatim, and copy edits (where the leader rewrote Elixir's wording). Engine auto-withdrawals are excluded — those are Elixir retracting its own card, not leadership declining, and counting them understates accuracy. Low acceptance for one action type, or repeated copy edits, is the sharpest quality signal available: the notes usually say *which* half is wrong, the judgment or the wording.
-   * `uv run --locked python scripts/confidence_report.py --quick --json` — incidents, output silence, confidence tests, and deterministic post-quality checks.
+   * `uv run --locked python scripts/confidence_report.py --quick --json` — grouped errors from `logs/elixir-error.log`, output silence, confidence tests, and deterministic post-quality checks.
    * `runtime_job_status`, stream cursors, event streams, awareness thoughts/posts, and management/case evidence in `elixir-v51.db`.
    * Exact delivered copy and traces from `awareness_posts`, `awareness_thoughts`, `messages`, and `leader_action_recommendations`.
    * `prompt_failures` in the operational DB. Legacy tables such as `awareness_ticks`, `signal_outcomes`, and `game_event_stream` exist only in the immutable cold archive and are relevant only to an explicitly historical audit.

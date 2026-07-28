@@ -60,7 +60,7 @@ erDiagram
 | War and awards | `war_seasons`, `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days`, `awards` | Bounded war truth plus durable honors. |
 | Awareness and leadership | `awareness_thoughts`, `awareness_posts`, `decision_cases`, `leader_action_recommendations`, `revisits` | Deliberation, confirmed delivery, and policy outcomes. Standing concerns live in `memories` as `Watch:` / `Hold:` titles; the `watches` table was never written and was dropped in #211. |
 | Conversation and memory | `conversation_threads`, `messages`, `memories`, `memory_tags`, `memories_fts` | Channel-scoped conversation and public/leadership durable memory. (`memory_log` dropped in #215 — an audit trail with no reader.) |
-| Runtime control | `stream_cursors`, `poll_state`, `materialization_runs`, `runtime_job_status`, `runtime_incidents` | Progress, adaptive polling, data-product readiness/provenance, job health, and best-effort failure visibility. |
+| Runtime control | `stream_cursors`, `poll_state`, `materialization_runs`, `runtime_job_status` | Progress, adaptive polling, data-product readiness/provenance, and job health. (`runtime_incidents` dropped in V20 — it recorded 0 rows in 25 days while the error log held 159; failure visibility is `logs/elixir-error.log`.) |
 
 ## Invariants
 

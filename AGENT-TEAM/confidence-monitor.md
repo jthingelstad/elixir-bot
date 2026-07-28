@@ -9,8 +9,9 @@ what Elixir posts to Discord — then FIX what's clearly broken. Jamie authorize
 autonomous fix + deploy (2026-07-05) for the unattended window.
 
 **Boundary — what you MAY do autonomously (all gated on the rules below):**
-- **Fix + deploy** a clearly-broken thing: an open error incident with a
-  traceback, or a failing confidence/entrypoint/lane/cold-start/pipeline test.
+- **Fix + deploy** a clearly-broken thing: a live error in
+  `logs/elixir-error.log` with a traceback, or a failing
+  confidence/entrypoint/lane/cold-start/pipeline test.
 - **Moderate posts:** edit or delete a live Discord post that is wrong, thin, or
   game-inaccurate (the reactive review the 30-min loop did).
 
@@ -31,26 +32,28 @@ autonomous fix + deploy (2026-07-05) for the unattended window.
    uv run --locked python scripts/confidence_report.py --quick --json
    ```
    Exit 0 = healthy, stop after a one-line note. Non-zero = findings; the JSON
-   has `incidents`, `liveness`, `tests`, `quality`.
+   has `errors`, `liveness`, `tests`, `quality`.
    - **`liveness` is the silence alarm (treat as high-signal).** Quiet is not
      calm — the `can_post_leader_action` bug killed ALL card posting with no
      symptom but silence. "no Discord output in Nh" or "leader-action(s)
      proposed but never posted" means something is silently stuck: investigate
      the posting path NOW (tail the log, check the tick, check
      `_post_pending_leader_action_cards`), fix per step 3, don't wait it out.
-3. **Incidents** (`runtime_incidents`, the fail-soft ledger) and **failing
-   confidence tests** (`tests.ok=false`) — a NameError, a bad key, a missing
-   lane registration, an FK regression. For each, read the traceback / the
-   named failure, then:
+3. **Errors** (grouped from `logs/elixir-error.log` — see
+   `AGENT-TEAM/error-watch.md` for the full runbook) and **failing confidence
+   tests** (`tests.ok=false`) — a NameError, a bad key, a missing lane
+   registration, an FK regression. Check `last` on each error group first: a
+   kind that stopped days ago is not live work. For each live one, read the
+   traceback / the named failure, then:
    - **If it's a small, obvious, test-backed fix — DO IT and DEPLOY it:**
      (a) branch or edit; (b) `uv run --locked pytest -q` AND
      `uv run --locked python scripts/confidence_report.py` — BOTH must pass;
      (c) if green, commit + push to `main` and deploy atomically:
      `launchctl kickstart -k gui/$(id -u)/com.poapkings.elixir`, then confirm
-     one clean tick + `healthz` ok; (d) mark the incident resolved:
-     `sqlite3 elixir-v51.db "UPDATE runtime_incidents SET resolved_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE incident_id=<id>"`.
+     one clean tick + `healthz` ok; (d) confirm the kind stops appearing in the
+     error log — that, not a ledger row, is what "resolved" means now.
    - **If the fix doesn't go green, or isn't small/obvious:** REVERT any edit,
-     file a `bug` issue with the traceback + context, leave the incident open.
+     file a `bug` issue with the traceback + context.
      Never leave `main` or the live bot in a red state.
 4. **Post review + moderation** — fetch recent posts from the stream channels
    (river-race, player-highlights, clan-events, battle-feed, ask-elixir) with the
@@ -65,8 +68,8 @@ autonomous fix + deploy (2026-07-05) for the unattended window.
    fallback* post is expected (the composer hit revise/fallback) — note it but
    don't churn; a depth flag on a real LLM compose is an editorial signal → file
    an `enhancement` referencing the Editor rubric.
-6. Post a one-line health summary to `#elixir-log` (bot token from .env): open
-   incidents, test status, posts edited/deleted, and what you fixed/deployed/
+6. Post a one-line health summary to `#elixir-log` (bot token from .env): live
+   error kinds, test status, posts edited/deleted, and what you fixed/deployed/
    filed.
 
 ## Success

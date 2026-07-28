@@ -297,22 +297,12 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     # player-pulse retired 2026-07-10: its #battle-feed posts rode the engine
     # delivery pipeline (now off) and battle-mode momentum is brain-owned in
     # #elixir. Removing the ActivityDefinition unschedules the job.
-    ActivityDefinition(
-        activity_key="engine-health",
-        owner_lane="elixir-log",
-        purpose="Daily read-only engine audit (tick errors, stuck intents, "
-        "ledger duplicates, poll starvation, memory-write recency, db growth); "
-        "posts to #elixir-log only when something is off.",
-        job_id="engine-health",
-        job_function="_engine_health",
-        schedule_kind="cron",
-        schedule_config={
-            "hour": 8,
-            "minute": 23,
-        },
-        delivery_targets=("Discord: #elixir-log on failed checks only",),
-        activity_role="observer",
-    ),
+    # engine-health retired 2026-07-28: detecting production problems is an
+    # operator/AGENT-TEAM job, not an internal function of the clan bot. It read
+    # the incident ledger, which had recorded 0 rows in 25 days while
+    # logs/elixir-error.log held 159 real errors, so it reported "all clear"
+    # through every actual failure. The error log is the interface now
+    # (AGENT-TEAM/operations-manager.md owns reading it).
     # editorial-sweep + editorial-review retired 2026-07-10 with the Editor: the
     # brain composes with depth natively, so there's no template gate to tune and
     # no rubric to feed. Removing the ActivityDefinitions unschedules both jobs.

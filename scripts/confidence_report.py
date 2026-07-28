@@ -2,9 +2,14 @@
 """The one-command confidence surface (confidence plan capstone).
 
 Answers "is Elixir healthy?" in one shot by unifying the three pillars:
-  1. open incidents          (runtime_incidents — the fail-soft ledger)
+  1. recent errors            (logs/elixir-error.log — the ERROR-only log)
   2. confidence test status   (entrypoint smoke + lane + cold-start + pipeline)
   3. latest post-quality      (scripts/eval_post_quality — game-accuracy + depth)
+
+Pillar 1 used to read `runtime_incidents`, a ledger that recorded 0 rows in 25
+days while the log held 159 real errors — so this report said "healthy" through
+every actual failure. The ledger was retired 2026-07-28 (schema v20); the log
+was always the record, and this now reads it directly.
 
 Exit code is NON-ZERO when there are findings, so a cron/launchd wrapper or the
 unattended `confidence-monitor` routine knows to act. `--json` emits a machine
@@ -20,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -33,44 +39,140 @@ _CONFIDENCE_TESTS = [
     "tests/test_entrypoints_smoke.py",
     "tests/test_lane_registration.py",
     "tests/test_cold_start_tick.py",
-    "tests/test_pipeline_integration.py",
+    # tests/test_pipeline_integration.py was deleted with the recognition stack
+    # in #207 but left in this list, so pytest exited 4 ("file not found") and
+    # this pillar reported FAIL on every run since. Same class of bug as the
+    # incident ledger this report used to read: a signal nobody validated.
 ]
 
 
-def _incidents() -> list[dict]:
-    from dotenv import load_dotenv
+_LOG_LINE = re.compile(
+    r"^(?P<at>\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)[,.]\d+ "
+    r"\[(?P<level>[A-Z]+)\] (?P<logger>[^:]+): (?P<message>.*)$"
+)
 
-    load_dotenv(os.path.join(REPO, ".env"))
-    import db
-    from storage.incidents import open_incidents
+# Call sites log `<component> failed: k=v k=v`, so the varying part is exactly
+# the context that makes each occurrence unique. Grouping on the raw message
+# would report one broken path firing 40 times as 40 findings — the opposite of
+# the point. Collapse the values, keep the shape.
+_SHAPE_SUBS = (
+    (re.compile(r"(?<==)\S+"), "*"),  # k=v values (thread_id=123, lane=elixir)
+    (re.compile(r"#[0-9A-Z]{3,}"), "#TAG"),  # CR player/clan tags
+    (re.compile(r"\b\d[\d.,:+-]*\b"), "N"),  # bare ids, counts, timestamps
+)
 
-    conn = db.get_connection()
-    try:
+
+def _shape(message: str) -> str:
+    """A stable grouping key: the message with its varying values collapsed."""
+    for pattern, replacement in _SHAPE_SUBS:
+        message = pattern.sub(replacement, message)
+    return message[:160]
+
+
+def _errors(hours: int = 24) -> list[dict]:
+    """Distinct error kinds in the last `hours` of logs/elixir-error.log.
+
+    Grouped by (logger, message *shape*) so 40 repeats of one broken path read
+    as one finding with a count, not 40 findings. `message` is the collapsed
+    shape, `sample` a real line from it, `last` what says still-firing.
+    """
+    import datetime as _dt
+
+    from runtime.logging_setup import error_log_path
+
+    path = error_log_path()
+    now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if not os.path.exists(path):
+        # A missing operator interface is itself a finding. Same shape as a real
+        # group so every consumer can read `last` without special-casing.
         return [
             {
-                "at": r["at"],
-                "component": r["component"],
-                "severity": r["severity"],
-                "summary": r["summary"],
+                "logger": "confidence_report",
+                "message": f"no error log at {path} — logging may not be configured",
+                "sample": f"no error log at {path}",
+                "count": 1,
+                "first": now,
+                "last": now,
             }
-            for r in open_incidents(conn, limit=100)
         ]
-    finally:
-        conn.close()
+
+    cutoff = (_dt.datetime.now() - _dt.timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    grouped: dict[tuple[str, str], dict] = {}
+    with open(path, errors="replace") as handle:
+        for line in handle:
+            match = _LOG_LINE.match(line.rstrip("\n"))
+            if not match or match["at"] < cutoff:
+                continue  # continuation/traceback lines ride with their header
+            shape = _shape(match["message"])
+            entry = grouped.setdefault(
+                (match["logger"], shape),
+                {
+                    "logger": match["logger"],
+                    "message": shape,
+                    "sample": match["message"][:200],
+                    "count": 0,
+                    "first": match["at"],
+                    "last": match["at"],
+                },
+            )
+            entry["count"] += 1
+            # min/max rather than "last line wins": a real log is chronological,
+            # but `last` is the field triage turns on, so don't make it depend on
+            # that.
+            entry["first"] = min(entry["first"], match["at"])
+            if match["at"] >= entry["last"]:
+                entry["last"] = match["at"]
+                entry["sample"] = match["message"][:200]  # most recent occurrence
+    return sorted(grouped.values(), key=lambda e: e["last"], reverse=True)
+
+
+SILENCE_HOURS = 14  # no Discord output at all in this window → investigate
+LEADER_ACTION_STALE_HOURS = 2  # a proposed card unposted this long → posting broken
 
 
 def _liveness() -> list[str]:
     """Silence signals — no output, or leader-actions recommended-but-never-posted.
-    Silence is an alarm, not the absence of one (Jamie, 2026-07-05)."""
+    Silence is an alarm, not the absence of one (Jamie, 2026-07-05).
+
+    These two queries lived in `runtime/health.py` until the daily health check
+    was retired. They stay here because they are the one thing that check saw
+    that a log never will: an error log cannot report a failure that produced no
+    error, and both of these signatures are *quiet*. This is an operator script,
+    which is where the watching belongs.
+    """
     from dotenv import load_dotenv
 
     load_dotenv(os.path.join(REPO, ".env"))
     import db
-    from runtime.health import check_output_silence
 
     conn = db.get_connection()
     try:
-        return check_output_silence(conn)
+        problems = []
+        # (a) total output silence — the Pulse alone posts every ~8h, so 14h dark is wrong.
+        row = conn.execute("SELECT MAX(posted_at) FROM awareness_posts").fetchone()
+        last = row[0] if row else None
+        if last:
+            hrs = conn.execute(
+                "SELECT ROUND((julianday('now') - julianday(?)) * 24, 1)", (last,)
+            ).fetchone()[0]
+            if hrs is not None and hrs > SILENCE_HOURS:
+                problems.append(
+                    f"no Discord output in {hrs}h (last post {last}) — Elixir may be silently stuck"
+                )
+        # (b) the can_post_leader_action signature: proposed but never posted.
+        stuck = conn.execute(
+            "SELECT COUNT(*) FROM leader_action_recommendations "
+            "WHERE status = 'proposed' AND copy_message_id IS NULL "
+            "AND COALESCE(is_test, 0) = 0 AND proposed_at < "
+            "strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)",
+            (f"-{LEADER_ACTION_STALE_HOURS} hours",),
+        ).fetchone()[0]
+        if stuck:
+            problems.append(
+                f"{stuck} leader-action(s) proposed >{LEADER_ACTION_STALE_HOURS}h ago but never "
+                f"posted — card posting may be broken"
+            )
+        return problems
     except Exception as exc:  # noqa: BLE001
         return [f"liveness check failed: {exc!r}"]
     finally:
@@ -108,22 +210,23 @@ def main() -> int:
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--quick", action="store_true", help="skip the LLM depth eval")
     ap.add_argument("--days", type=int, default=3, help="post-quality sample window")
+    ap.add_argument("--error-hours", type=int, default=24, help="error-log lookback window")
     args = ap.parse_args()
 
-    incidents = _incidents()
+    errors = _errors(args.error_hours)
     liveness = _liveness()
     tests = _run_tests()
     quality = _quality(args.days, args.quick)
 
     findings = (
-        len(incidents)
+        len(errors)
         + len(liveness)
         + (0 if tests["ok"] else 1)
         + len(quality.get("flagged", []) if quality.get("available") else [])
     )
     report = {
         "healthy": findings == 0,
-        "incidents": incidents,
+        "errors": errors,
         "liveness": liveness,
         "tests": tests,
         "quality": quality,
@@ -138,9 +241,9 @@ def main() -> int:
             for s in liveness:
                 print(f"  ⚠️  {s}")
             print()
-        print(f"Open incidents: {len(incidents)}")
-        for i in incidents[:15]:
-            print(f"  [{i['at'][5:16]}] {i['severity']:5} {i['component']}: {i['summary'][:80]}")
+        print(f"Error kinds in the last {args.error_hours}h: {len(errors)}")
+        for e in errors[:15]:
+            print(f"  [last {e['last'][5:16]}] x{e['count']:<4} {e['logger']}: {e['sample'][:80]}")
         print(f"\nConfidence tests: {'PASS' if tests['ok'] else 'FAIL'} — {tests['summary']}")
         for f in tests["failures"]:
             print(f"  {f}")

@@ -12,7 +12,6 @@ import discord
 import db
 from runtime.leader_action_feedback import queue_leader_action_feedback_refresh
 from runtime.leader_note_interpreter import queue_leader_note_interpretation
-from storage.incidents import record_incident
 
 log = logging.getLogger("elixir.leader_action_ui")
 
@@ -275,16 +274,11 @@ async def _refresh_card_message(interaction: discord.Interaction, action: dict) 
         if source_id and interaction.channel:
             try:
                 message = await interaction.channel.fetch_message(int(source_id))
-            except Exception as exc:
-                await asyncio.to_thread(
-                    record_incident,
-                    "leader_action_ui.fetch_card",
-                    exc,
-                    context={
-                        "action_id": action.get("action_id"),
-                        "source_message_id": source_id,
-                    },
-                    severity="warn",
+            except Exception:
+                log.exception(
+                    "leader_action_ui.fetch_card failed: action_id=%s source_message_id=%s",
+                    action.get("action_id"),
+                    source_id,
                 )
                 message = None
     if message is None:

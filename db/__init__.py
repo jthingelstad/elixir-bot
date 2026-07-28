@@ -484,17 +484,12 @@ def set_member_nickname(
             from engine.db import refresh_display_name
 
             refresh_display_name(conn, player_tag)
-        except Exception as exc:
+        except Exception:
             # The nickname is authoritative even if its disposable projection
-            # cannot refresh; record the abandoned materialization for repair.
-            from storage.incidents import record_incident
-
-            record_incident(
-                "db.set_member_nickname.refresh_display_name",
-                exc,
-                context={"player_tag": _canon_tag(player_tag)},
-                severity="warn",
-                conn=conn,
+            # cannot refresh; log the abandoned materialization for repair.
+            log.exception(
+                "db.set_member_nickname.refresh_display_name failed: player_tag=%s",
+                _canon_tag(player_tag),
             )
         if owns:
             conn.commit()

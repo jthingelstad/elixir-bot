@@ -13,8 +13,6 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from storage.incidents import record_incident
-
 _TICKS: collections.deque = collections.deque(maxlen=288)  # ~48h at 10-min ticks
 
 _RETENTION_DAYS = 30
@@ -44,13 +42,9 @@ def record_tick(counters: dict) -> None:
             conn.commit()
         finally:
             conn.close()
-    except Exception as exc:  # persistence must never fail the tick
-        log.warning("tick-history persistence failed", exc_info=True)
-        record_incident(
-            "webapp.tick_history.persist",
-            exc,
-            context={"recorded_at": entry.get("recorded_at")},
-            severity="warn",
+    except Exception:  # persistence must never fail the tick
+        log.exception(
+            "webapp.tick_history.persist failed: recorded_at=%s", entry.get("recorded_at")
         )
 
 

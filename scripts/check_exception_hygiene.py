@@ -38,7 +38,7 @@ BROAD_EXCEPTION_BASELINE = {
     "capabilities/war.py": 1,
     "cr_api.py": 4,
     "db/__init__.py": 2,
-    "db/schema.py": 19,  # +1: V19 migration rollback/re-raise (same pattern as v2-v18)
+    "db/schema.py": 20,  # +1: V20 migration rollback/re-raise (same pattern as v2-v19)
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
@@ -51,7 +51,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/activity_runner.py": 3,
     "runtime/admin.py": 2,  # -2: #212 retired the dead signal.publish-pending impl
     "runtime/alerts.py": 2,  # +1: schedule_job_failure_alert best-effort loop-schedule guard
-    "runtime/app.py": 41,  # +7: DM-outreach bridges + ask facts-brief profile lookup; +1: _outreach_log webhook guard
+    "runtime/app.py": 39,  # +7: DM-outreach bridges + ask facts-brief profile lookup; +1: _outreach_log webhook guard; -2: retired _record_incident boundary + the _engine_health job
     "runtime/awareness/deliver.py": 10,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
@@ -62,7 +62,8 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/discord_posting.py": 2,
     "runtime/elder_standing.py": 1,
     "runtime/email_verification.py": 1,
-    "runtime/health.py": 3,  # +1: #212 api-drift check, fail-as-finding like its siblings
+    # runtime/health.py removed: the daily health check was retired 2026-07-28
+    # (it read an incident ledger that never recorded a row).
     "runtime/helpers/_common.py": 1,
     "runtime/helpers/_members.py": 2,
     "runtime/helpers/_reports.py": 10,
@@ -88,12 +89,11 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/webapp/ticks.py": 2,
     "storage/_formatting.py": 2,
     "storage/identity.py": 2,
-    "storage/incidents.py": 1,
+    # storage/incidents.py removed with the ledger it wrote (2026-07-28).
     "storage/leader_actions.py": 3,
 }
 
 _LOG_CALLS = {"critical", "debug", "error", "exception", "info", "warn", "warning"}
-_INCIDENT_CALLS = {"_record_incident", "record_incident"}
 _REPORT_CALLS = {
     "add",
     "append",
@@ -189,7 +189,7 @@ def _is_silent(handler: ast.ExceptHandler) -> bool:
     if any(isinstance(node, ast.Raise) for node in nodes):
         return False
     calls = {_call_name(node) for node in nodes if isinstance(node, ast.Call)}
-    return not (calls & (_LOG_CALLS | _INCIDENT_CALLS | _REPORT_CALLS))
+    return not (calls & (_LOG_CALLS | _REPORT_CALLS))
 
 
 def _call_name(call: ast.Call) -> str:
@@ -206,8 +206,6 @@ def _classification(handler: ast.ExceptHandler) -> str:
     calls = {_call_name(node) for node in nodes if isinstance(node, ast.Call)}
     if any(isinstance(node, ast.Raise) for node in nodes):
         return "reraised"
-    if calls & _INCIDENT_CALLS:
-        return "incident"
     if calls & _LOG_CALLS:
         return "logged"
     if calls & _REPORT_CALLS:
@@ -275,7 +273,7 @@ def check() -> tuple[list[str], Counter]:
             if classification == "unhandled":
                 findings.append(
                     f"{relative}:{handler.lineno}: broad exception needs an explicit "
-                    "fallback, report, incident, log, status update, or re-raise"
+                    "fallback, report, log, status update, or re-raise"
                 )
 
     actual = {path: count for path, count in sorted(counts.items())}

@@ -170,11 +170,6 @@ async def editorial_page(request: web.Request) -> web.Response:
     return render("editorial.html", request, nav="editorial", **data)
 
 
-async def incidents_page(request: web.Request) -> web.Response:
-    data = await asyncio.to_thread(queries.incidents_page)
-    return render("incidents.html", request, nav="incidents", **data)
-
-
 async def memories_page(request: web.Request) -> web.Response:
     kind = request.query.get("kind") or None
     member = request.query.get("member") or None
@@ -320,7 +315,6 @@ def add_routes(app: web.Application) -> None:
             web.get("/awareness", awareness_page),
             web.get("/activities", activities_page),
             web.get("/editorial", editorial_page),
-            web.get("/incidents", incidents_page),
             web.get("/memories", memories_page),
             web.get("/member/{tag}", member_page),
             web.get("/polling", polling_page),

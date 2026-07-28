@@ -8,6 +8,8 @@ You may inspect logs, telemetry, runtime status, scheduled jobs, delivery system
 
 Read AGENTS.md, AGENT-TEAM/WORKFLOW.md, and AGENT-TEAM/README.md before acting. The `log-triage`, `awareness-report`, and `llm-cost-report` skills under `.claude/skills/` are your primary lenses.
 
+**You own error detection.** Elixir does not watch itself — the `runtime_incidents` ledger and the daily `engine-health` job were retired 2026-07-28 (the ledger recorded 0 rows in 25 days while the log held 159 real errors, so the health check reported "all clear" through every failure). `logs/elixir-error.log` is the interface now. **AGENT-TEAM/error-watch.md is your runbook for it** — reading it whole, grouping by kind, telling still-firing from historical, tracing root cause from tracebacks, and the CR API drift query. Run it every cadence.
+
 Cadence: hourly, or every few hours — production health needs a tight loop.
 
 Healthy-run rule: if production is healthy, do not opportunistically change code. Either work one existing `operations`/`reliability` issue that authorizes the improvement, file a small issue with the evidence and stop, or take no action.
@@ -17,10 +19,10 @@ Every run:
 1. Run the shared git preflight (AGENT-TEAM/scripts/preflight.sh).
 2. **`needs-deploy` first — before anything else.** Any open issue labeled `needs-deploy` is a change committed but not yet live (usually a DB migration). Deploy it **now**, atomically: pull the commit and restart so the new code and its migration go live together — never let a migration sit applied-but-un-deployed or committed-but-un-migrated (that interim breaks the running process). Then remove `needs-deploy` and close/return the issue. Only after the deploy queue is clear do you move on.
 3. Check production status (scripts/admin.sh status).
-4. Review recent logs, failures, and telemetry. For v5.1, include:
-   - `uv run --locked python scripts/confidence_report.py --quick --json`
-   - open `runtime_incidents` plus recent `runtime_job_status` rows
-   - recent repo-root `elixir-v5.log` entries
+4. **Work AGENT-TEAM/error-watch.md** — read `logs/elixir-error.log` whole, group by kind, separate still-firing from historical, and run the CR API drift query. Alongside it:
+   - `uv run --locked python scripts/confidence_report.py --quick --json` (grouped `errors` + the `liveness` silence alarm)
+   - recent `runtime_job_status` rows
+   - repo-root `elixir-v5.log` when the process died without logging
 5. Review operational metrics: errors, latency
    - token usage
    - API costs

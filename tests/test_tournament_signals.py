@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 
 import db
 from runtime.jobs import _tournament as tournament_jobs
@@ -610,28 +611,21 @@ def test_tournament_recap_reports_not_posted_without_context(monkeypatch):
     assert asyncio.run(tournament_jobs._tournament_recap("#2QG9Y9UR")) is False
 
 
-def test_tournament_recap_records_failure_and_reports_not_posted(monkeypatch):
+def test_tournament_recap_logs_failure_and_reports_not_posted(monkeypatch, caplog):
     error = RuntimeError("recap context failed")
-    incidents = []
 
     def fail(_tag):
         raise error
 
     monkeypatch.setattr(tournament_jobs.db, "build_tournament_recap_context", fail)
-    monkeypatch.setattr(
-        tournament_jobs,
-        "record_incident",
-        lambda component, exc, **kwargs: incidents.append((component, exc, kwargs)),
-    )
 
-    assert asyncio.run(tournament_jobs._tournament_recap("#2QG9Y9UR")) is False
-    assert incidents == [
-        (
-            "tournament.recap",
-            error,
-            {"context": {"tournament_tag": "#2QG9Y9UR"}},
-        )
-    ]
+    with caplog.at_level(logging.ERROR, logger="elixir"):
+        assert asyncio.run(tournament_jobs._tournament_recap("#2QG9Y9UR")) is False
+
+    failures = [r for r in caplog.records if "tournament.recap failed" in r.getMessage()]
+    assert len(failures) == 1
+    assert "#2QG9Y9UR" in failures[0].getMessage()
+    assert failures[0].exc_info is not None and failures[0].exc_info[1] is error
 
 
 # --- #210: tournaments are clan events; their internals are their own stream ---

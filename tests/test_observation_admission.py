@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 from engine import observations
@@ -176,7 +177,7 @@ class _Api:
         return []
 
 
-def test_rejected_profile_does_not_mutate_baseline_or_poll_freshness(engine_conn):
+def test_rejected_profile_does_not_mutate_baseline_or_poll_freshness(engine_conn, caplog):
     api = _Api()
     first_at = datetime(2026, 7, 6, 15, 0, tzinfo=timezone.utc)
     first = run_tick(engine_conn, first_at, api=api)
@@ -195,7 +196,8 @@ def test_rejected_profile_does_not_mutate_baseline_or_poll_freshness(engine_conn
     # player contract is a schema/transport artifact, not an empty profile.
     api.player_payload = {}
     rejected_at = first_at + timedelta(hours=5)
-    rejected = run_tick(engine_conn, rejected_at, api=api)
+    with caplog.at_level(logging.ERROR, logger="engine.tick"):
+        rejected = run_tick(engine_conn, rejected_at, api=api)
     assert rejected["profile_observation_rejections"] == 1
     assert rejected["profile_observation_contract_rejections"] == 1
     assert rejected["battlelog_observations_accepted"] == 1
@@ -211,25 +213,26 @@ def test_rejected_profile_does_not_mutate_baseline_or_poll_freshness(engine_conn
     assert poll_after["last_profile_poll"] == poll_before
     assert poll_after["last_battlelog_poll"] == rejected_at.strftime("%Y-%m-%dT%H:%M:%SZ")
     assert engine_conn.execute("SELECT COUNT(*) FROM player_events").fetchone()[0] == 0
-    assert (
-        engine_conn.execute(
-            "SELECT COUNT(*) FROM runtime_incidents "
-            "WHERE component='engine.observation.player' AND severity='error'"
-        ).fetchone()[0]
-        == 1
-    )
+    # The rejection is an ERROR on the engine's own logger, so it lands in
+    # logs/elixir-error.log where an operator reads it. (Until 2026-07-28 this
+    # went to the runtime_incidents ledger, which nothing ever read.)
+    rejections = [
+        r
+        for r in caplog.records
+        if r.levelno >= logging.ERROR and "engine.observation.player:" in r.getMessage()
+    ]
+    assert len(rejections) == 1
+    assert "CR observation rejected by admission boundary" in rejections[0].getMessage()
 
-    # Repeated contract failures stay visible in per-tick counters without
-    # flooding the durable incident ledger every ten minutes.
+    # Repeated contract failures stay visible in per-tick counters AND keep
+    # logging: an operator needs to see this is still firing, not one row from
+    # 25 days ago.
     engine_conn.execute("UPDATE poll_state SET heat=2, temperature='warm' WHERE player_tag='#A'")
-    repeated = run_tick(engine_conn, rejected_at + timedelta(minutes=10), api=api)
+    caplog.clear()
+    with caplog.at_level(logging.ERROR, logger="engine.tick"):
+        repeated = run_tick(engine_conn, rejected_at + timedelta(minutes=10), api=api)
     assert repeated["profile_observation_contract_rejections"] == 1
-    assert (
-        engine_conn.execute(
-            "SELECT COUNT(*) FROM runtime_incidents WHERE component='engine.observation.player'"
-        ).fetchone()[0]
-        == 1
-    )
+    assert any("engine.observation.player:" in r.getMessage() for r in caplog.records)
 
     # A later healthy response sees the original baseline, so no synthetic
     # loss/restoration cascade is emitted.
@@ -239,33 +242,34 @@ def test_rejected_profile_does_not_mutate_baseline_or_poll_freshness(engine_conn
     assert engine_conn.execute("SELECT COUNT(*) FROM player_events").fetchone()[0] == 0
 
 
-def test_storage_facade_rejects_cross_entity_profile_and_bad_battlelog(engine_conn):
+def test_storage_facade_rejects_cross_entity_profile_and_bad_battlelog(engine_conn, caplog):
     import db
 
     wrong = _player_payload()
     wrong["tag"] = "#OTHER"
-    db.snapshot_player_profile(wrong, expected_tag="#A", conn=engine_conn)
-    db.snapshot_player_battlelog(
-        "#A",
-        [
-            {
-                "battleTime": "20260701T110000.000Z",
-                "gameMode": {"id": 72000006, "name": "Ladder"},
-                "team": [{"tag": "#OTHER", "crowns": 1}],
-                "opponent": [{"tag": "#OPP", "crowns": 0}],
-            }
-        ],
-        conn=engine_conn,
-    )
+    with caplog.at_level(logging.ERROR, logger="elixir.storage.player"):
+        db.snapshot_player_profile(wrong, expected_tag="#A", conn=engine_conn)
+        db.snapshot_player_battlelog(
+            "#A",
+            [
+                {
+                    "battleTime": "20260701T110000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#OTHER", "crowns": 1}],
+                    "opponent": [{"tag": "#OPP", "crowns": 0}],
+                }
+            ],
+            conn=engine_conn,
+        )
 
     assert engine_conn.execute("SELECT COUNT(*) FROM state_baselines").fetchone()[0] == 0
     assert engine_conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0] == 0
-    assert (
-        engine_conn.execute(
-            "SELECT COUNT(*) FROM runtime_incidents WHERE component LIKE 'storage.snapshot_player_%'"
-        ).fetchone()[0]
-        == 2
-    )
+    logged = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno >= logging.ERROR and "storage.snapshot_player_" in r.getMessage()
+    ]
+    assert len(logged) == 2
 
 
 def test_api_receipts_are_append_only_and_generation_links_exact_input(engine_conn):

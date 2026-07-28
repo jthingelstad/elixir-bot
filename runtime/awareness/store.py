@@ -292,18 +292,14 @@ def record_awareness_post(
             # the call's duration (#172 2026-07-16) and false-flagged grounding
             # from thin post-facts. If a post-compose critic is ever rebuilt it
             # must run OUTSIDE the delivery transaction with the full brain facts.
-    except Exception as exc:
-        log.exception("record_awareness_post: failed to record %s post", lane)
+    except Exception:
         # The post is already visible in Discord, so this remains fail-soft to
-        # avoid a retry duplicate. The incident ledger makes the lost local
-        # receipt visible to health monitoring and operators.
-        from storage.incidents import record_incident
-
-        record_incident(
-            "awareness.record_post",
-            exc,
-            context={"lane": lane, "discord_message_id": message_id},
-            conn=conn,
+        # avoid a retry duplicate. The error log is what makes the lost local
+        # receipt visible to an operator.
+        log.exception(
+            "awareness.record_post failed: lane=%s discord_message_id=%s",
+            lane,
+            message_id,
         )
 
 

@@ -221,14 +221,6 @@ def write_season_chronicle(conn, kind: str, season_id, observed_at: str) -> int 
             mem["memory_id"],
         )
         return mem["memory_id"]
-    except Exception as exc:
-        log.exception("chronicle failed for %s season %s", kind, season_id)
-        from storage.incidents import record_incident
-
-        record_incident(
-            "chronicles.write",
-            exc,
-            context={"kind": kind, "season_id": season_id},
-            conn=conn,
-        )
+    except Exception:
+        log.exception("chronicles.write failed: kind=%s season_id=%s", kind, season_id)
         return None

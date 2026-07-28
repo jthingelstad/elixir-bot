@@ -57,18 +57,6 @@ for _discord_logger in ("discord", "discord.client", "discord.gateway", "discord
 log = logging.getLogger("elixir")
 
 
-def _record_incident(component, error, context=None, severity="error"):
-    """Fail-soft-but-visible: record a swallowed failure to the incident ledger
-    (confidence plan §1). Never raises — an observability call must not crash
-    the path it observes."""
-    try:
-        from storage.incidents import record_incident
-
-        record_incident(component, error, context=context, severity=severity)
-    except Exception:
-        log.exception("incident recording boundary failed component=%s", component)
-
-
 CHICAGO = pytz.timezone("America/Chicago")
 TOKEN = os.getenv("DISCORD_TOKEN")
 _dc = prompts.discord_config()
@@ -804,53 +792,6 @@ async def _weekly_leadership_review():
         f"demote={len(result.get('demote_eligible') or [])}",
     )
     return result
-
-
-async def _engine_health():
-    """Daily engine health audit (runtime/health.py) — the institutionalized
-    version of the 2026-07-04 live behavioral audit. Read-only checks; posts
-    to #elixir-log ONLY when something is off, silent when healthy."""
-    from runtime import elixir_log, health
-
-    runtime_status.mark_job_start("engine_health")
-
-    def _run():
-        conn = db.get_connection()
-        try:
-            row = conn.execute(
-                "SELECT status_json FROM runtime_job_status WHERE job_name = 'engine_health'"
-            ).fetchone()
-            previous_size = None
-            if row:
-                try:
-                    last = json.loads(json.loads(row["status_json"]).get("last_summary") or "{}")
-                    previous_size = last.get("db_size_bytes")
-                except TypeError, ValueError:
-                    pass
-            return health.run_all(conn, previous_size)
-        finally:
-            conn.close()
-
-    try:
-        problems, size = await asyncio.to_thread(_run)
-    except Exception as exc:
-        runtime_status.mark_job_failure("engine_health", str(exc))
-        log.exception("engine health audit failed")
-        return
-    if problems:
-        body = "\n".join(f"- {p}" for p in problems)
-        await asyncio.to_thread(
-            elixir_log.post_event,
-            f"**Engine health: {len(problems)} issue(s)**\n{body}",
-        )
-        log.warning("engine health: %d issue(s): %s", len(problems), "; ".join(problems))
-    else:
-        log.info("engine health: all checks clean (db %.1fMB)", size / 1e6)
-    runtime_status.mark_job_success(
-        "engine_health",
-        json.dumps({"problems": len(problems), "db_size_bytes": size}),
-    )
-    return {"problems": problems, "db_size_bytes": size}
 
 
 # The leader-only #thinking channel — Elixir's train of thought lands here as a

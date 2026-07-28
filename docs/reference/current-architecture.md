@@ -37,7 +37,7 @@ rationale and may describe components later retired from production.
 | Proactive judgment and voice | awareness workflow | `awareness_thoughts`, `awareness_posts`, stream cursors |
 | Interactive answers | agent workflows and tool policy | `messages`, scoped memories, LLM telemetry |
 | Human clan decisions | management state machines and leadership UI | decision cases, leader actions, revisits |
-| Operational truth | activity registry, incidents, runtime status | `runtime_job_status`, `runtime_incidents`, tick history |
+| Operational truth | activity registry, runtime status, process logging | `runtime_job_status`, tick history, `logs/elixir-error.log` |
 
 ## Retired proactive stack
 
@@ -54,6 +54,22 @@ Nothing outside the retired package read the table.
 
 `engine/offline.py` survives as the API-free replay harness that
 `scripts/replay_gate.py` drives; its optional `legacy_proactive` seam is gone.
+
+## Retired self-monitoring
+
+The `runtime_incidents` ledger (`storage/incidents.py`) and the daily
+`engine-health` job (`runtime/health.py`) were removed 2026-07-28; schema v20
+drops the table. The ledger recorded **0 rows in 25 days** while
+`logs/elixir-error.log` held **159 real errors**, and the health check read the
+ledger — so it reported "all clear" through every actual failure.
+
+Detecting production problems is an operator/AGENT-TEAM job, not an internal
+function of the clan bot: a component that reports on its own health reports
+from inside the failure. Every former `record_incident` call site now logs on
+its module's own logger, landing in the ERROR-only rotating log that
+`runtime/logging_setup.py` writes. `AGENT-TEAM/error-watch.md` (Operations
+Manager) owns reading it, and carries the CR API drift query that
+`check_api_drift` used to run.
 
 ## Change rule
 

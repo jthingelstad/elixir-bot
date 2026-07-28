@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 from collections import Counter
@@ -23,6 +24,8 @@ from storage.game_modes import (
     special_event_badge_names,
     special_event_context_for_badge,
 )
+
+log = logging.getLogger("elixir.storage.player")
 
 CARD_UPGRADE_SIGNAL_MIN_LEVEL = 16
 MASTERY_BADGE_SIGNAL_MIN_LEVEL = 5
@@ -254,7 +257,6 @@ def snapshot_player_profile(
     """Apply an interactive profile refresh through the engine's canonical
     observation path. Returns [] (the retired signal list stays retired)."""
     from engine import materialize, observations
-    from storage.incidents import record_incident
 
     requested_tag = expected_tag or (
         player_data.get("tag") if isinstance(player_data, dict) else ""
@@ -268,12 +270,11 @@ def snapshot_player_profile(
         source="interactive_refresh",
     )
     if not admission.accepted:
-        record_incident(
-            "storage.snapshot_player_profile",
-            "CR observation rejected by admission boundary",
-            context={"entity_key": admission.entity_key, "errors": admission.errors},
-            severity="error",
-            conn=conn,
+        log.error(
+            "storage.snapshot_player_profile: CR observation rejected by admission "
+            "boundary: entity_key=%s errors=%s",
+            admission.entity_key,
+            admission.errors,
         )
         return []
     assert observation is not None
@@ -350,7 +351,6 @@ def snapshot_player_battlelog(
     from datetime import timezone as _tz
 
     from engine import materialize, observations
-    from storage.incidents import record_incident
 
     tag = _canon_tag(player_tag)
     if not tag:
@@ -365,12 +365,11 @@ def snapshot_player_battlelog(
         source="interactive_refresh",
     )
     if not admission.accepted:
-        record_incident(
-            "storage.snapshot_player_battlelog",
-            "CR observation rejected by admission boundary",
-            context={"entity_key": admission.entity_key, "errors": admission.errors},
-            severity="error",
-            conn=conn,
+        log.error(
+            "storage.snapshot_player_battlelog: CR observation rejected by admission "
+            "boundary: entity_key=%s errors=%s",
+            admission.entity_key,
+            admission.errors,
         )
         return []
     assert observation is not None

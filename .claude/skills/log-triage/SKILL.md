@@ -39,7 +39,7 @@ If the log is very large (>10k lines), start by tailing the last ~2000 lines. On
 After triaging failures, spot-check these even if nothing errored:
 
 - Is `engine-tick` firing roughly every 10 minutes and `awareness-loop` on its registered cadence? Long gaps mean the scheduler stalled.
-- Are `runtime_job_status` failures or open `runtime_incidents` corroborated in the log?
+- Are `runtime_job_status` failures corroborated in `logs/elixir-error.log`?
 - Any signal that silently went to zero — e.g. no `agent_loop` entries for a workflow that usually runs hourly?
 
 ## Grouping and dedup
