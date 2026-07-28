@@ -17,6 +17,7 @@ from db import (
     _utcnow,
     managed_connection,
 )
+from engine.ingest import mirror_battles
 from storage.player import _normalize_cards_for_storage
 
 # ---------------------------------------------------------------------------
@@ -554,40 +555,34 @@ def store_tournament_battle(
 
     cards_a = _normalize_cards_for_storage(team.get("cards") or [])
     cards_b = _normalize_cards_for_storage(opp.get("cards") or [])
-    deck_a = _json_or_none(cards_a)
-    deck_b = _json_or_none(cards_b)
     card_names_a = _card_names_from_deck(cards_a)
     card_names_b = _card_names_from_deck(cards_b)
 
     # Canonicalize order: player1_tag is always the lexicographically smaller tag.
     if tag_a <= tag_b:
-        p1_tag, p1_name, p1_crowns, p1_deck, p1_card_names = (
+        p1_tag, p1_name, p1_crowns, p1_card_names = (
             tag_a,
             team.get("name"),
             crowns_a,
-            deck_a,
             card_names_a,
         )
-        p2_tag, p2_name, p2_crowns, p2_deck, p2_card_names = (
+        p2_tag, p2_name, p2_crowns, p2_card_names = (
             tag_b,
             opp.get("name"),
             crowns_b,
-            deck_b,
             card_names_b,
         )
     else:
-        p1_tag, p1_name, p1_crowns, p1_deck, p1_card_names = (
+        p1_tag, p1_name, p1_crowns, p1_card_names = (
             tag_b,
             opp.get("name"),
             crowns_b,
-            deck_b,
             card_names_b,
         )
-        p2_tag, p2_name, p2_crowns, p2_deck, p2_card_names = (
+        p2_tag, p2_name, p2_crowns, p2_card_names = (
             tag_a,
             team.get("name"),
             crowns_a,
-            deck_a,
             card_names_a,
         )
 
@@ -597,34 +592,32 @@ def store_tournament_battle(
     arena = battle.get("arena") or {}
     game_mode = battle.get("gameMode") or {}
 
-    cursor = conn.execute(
-        """INSERT OR IGNORE INTO tournament_battles (
-            tournament_id, battle_time,
-            player1_tag, player1_name, player1_crowns, player1_deck_json,
-            player2_tag, player2_name, player2_crowns, player2_deck_json,
-            winner_tag, deck_selection, game_mode_id, arena_name, raw_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            tournament_id,
-            battle.get("battleTime"),
-            p1_tag,
-            p1_name,
-            p1_crowns,
-            p1_deck,
-            p2_tag,
-            p2_name,
-            p2_crowns,
-            p2_deck,
-            winner_tag,
-            battle.get("deckSelection"),
-            game_mode.get("id"),
-            arena.get("name") if isinstance(arena, dict) else None,
-            _json_or_none(battle),
-        ),
-    )
-
-    if cursor.rowcount == 0:
+    # Dedup against battle_events rather than a table of our own (#216). The
+    # watcher polls every participant, so the SAME match arrives once per
+    # player and must yield exactly ONE piece of live commentary.
+    #
+    # The check is MATCH-level, not row-level, and that distinction matters:
+    # battle_events keys on the polled player, so A-vs-B and B-vs-A are two
+    # different rows with two different dedup keys. Asking "did mirror_battles
+    # insert anything?" would answer yes for both and post twice.
+    seen = conn.execute(
+        """SELECT 1 FROM battle_events
+            WHERE battle_time = ?
+              AND ((player_tag = ? AND opponent_tag = ?)
+                OR (player_tag = ? AND opponent_tag = ?))
+            LIMIT 1""",
+        (battle.get("battleTime"), p1_tag, p2_tag, p2_tag, p1_tag),
+    ).fetchone()
+    if seen:
         return None
+
+    # Record it here rather than relying on the watcher's later
+    # snapshot_player_battlelog call. Depending on that ordering would make
+    # duplicate-suppression an invisible side effect of statement order in a
+    # different module -- and the failure mode is members getting the same
+    # battle narrated twice. mirror_battles is idempotent on its dedup key, so
+    # the watcher's own call remains harmless.
+    mirror_battles(conn, tag_a, [battle], _utcnow(), None)
 
     conn.execute(
         "UPDATE tournaments SET battles_captured = battles_captured + 1 WHERE tournament_id = ?",
@@ -769,14 +762,83 @@ def get_tournament_participants(
 def get_tournament_battles(
     tournament_id: int, conn: Optional[sqlite3.Connection] = None
 ) -> list[dict]:
-    """Return all battles for a tournament, ordered by time."""
-    rows = conn.execute(
-        """SELECT * FROM tournament_battles
-           WHERE tournament_id = ?
-           ORDER BY battle_time ASC""",
+    """Return all battles for a tournament, ordered by time.
+
+    Sourced from `battle_events` since #216 -- the dedicated table existed only
+    because `battle_events` stored one deck per battle, and v16 stores both.
+
+    The two stores have different GRAIN and that is the whole subtlety here:
+    `battle_events` keeps one row per POLLED PLAYER, so a match between two clan
+    members appears twice, once from each side. Callers count battles and
+    aggregate card picks, both of which would double for those matches. So the
+    per-player rows are collapsed back to one row per match, keyed on the
+    canonical tag pair, and re-presented in the player1/player2 shape the
+    dedicated table used.
+    """
+    tag_row = conn.execute(
+        "SELECT tournament_tag FROM tournaments WHERE tournament_id = ?",
         (tournament_id,),
+    ).fetchone()
+    if not tag_row or not tag_row["tournament_tag"]:
+        return []
+    rows = conn.execute(
+        """SELECT b.battle_time, b.player_tag, b.deck_json, b.crowns_for,
+                  b.opponent_tag, b.opponent_deck_json, b.opponent_name,
+                  b.crowns_against, b.deck_selection, b.game_mode_id, b.arena_name,
+                  COALESCE(p.display_name, p.current_name) AS player_name
+             FROM battle_events b
+             LEFT JOIN players p ON p.player_tag = b.player_tag
+            WHERE b.tournament_tag = ?
+            ORDER BY b.battle_time ASC""",
+        (tag_row["tournament_tag"],),
     ).fetchall()
-    return [dict(r) for r in rows]
+
+    matches: dict[tuple, dict] = {}
+    for r in rows:
+        a, b = r["player_tag"], r["opponent_tag"]
+        key = (r["battle_time"], *sorted((a or "", b or "")))
+        if key in matches:
+            continue
+        # Canonical order, matching what the old table stored.
+        if (a or "") <= (b or ""):
+            first, second = (
+                (a, r["player_name"], r["crowns_for"], r["deck_json"]),
+                (
+                    b,
+                    r["opponent_name"],
+                    r["crowns_against"],
+                    r["opponent_deck_json"],
+                ),
+            )
+        else:
+            first, second = (
+                (
+                    b,
+                    r["opponent_name"],
+                    r["crowns_against"],
+                    r["opponent_deck_json"],
+                ),
+                (a, r["player_name"], r["crowns_for"], r["deck_json"]),
+            )
+        winner = None
+        if first[2] is not None and second[2] is not None and first[2] != second[2]:
+            winner = first[0] if first[2] > second[2] else second[0]
+        matches[key] = {
+            "battle_time": r["battle_time"],
+            "player1_tag": first[0],
+            "player1_name": first[1],
+            "player1_crowns": first[2],
+            "player1_deck_json": first[3],
+            "player2_tag": second[0],
+            "player2_name": second[1],
+            "player2_crowns": second[2],
+            "player2_deck_json": second[3],
+            "winner_tag": winner,
+            "deck_selection": r["deck_selection"],
+            "game_mode_id": r["game_mode_id"],
+            "arena_name": r["arena_name"],
+        }
+    return sorted(matches.values(), key=lambda m: m["battle_time"] or "")
 
 
 @managed_connection
