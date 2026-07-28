@@ -1,9 +1,19 @@
-"""Phase 3b — leadership followups always open a durable decision case.
+"""A followup opens a decision case ONLY when it becomes a #actions card.
 
-A `record_leadership_followup` is action-oriented by definition, so it now opens
-a decision case (the single home for the concern) by default, with the memory as
-its annotation. `flag_member_watch` stays memory-only unless a case_type makes it
-explicitly action-oriented.
+Phase 3b originally made `record_leadership_followup` always open a decision
+case. For the member-review path (`case_type` + `member_tag`) that is right — the
+case backs a card a leader decides. For the generic paths it was not: those cases
+were invisible (no card, no post; the only surface was an unlabelled Observatory
+count) and immortal (`leadership_followup` is absent from CASE_TYPES, the set
+every reconciler iterates, so nothing could ever close one).
+
+The brain also READS open cases each tick, so it saw its own stale pile and could
+only respond by filing another — 3 of the 9 ever created were Elixir reporting on
+the staleness of the other 6. It cost a real report: case #376 correctly diagnosed
+the stale-role bug four days before it caused damage, and nobody saw it.
+
+The observation is still recorded durably as a memory. What is gone is the false
+promise of an open work item nobody owns.
 """
 
 from __future__ import annotations
@@ -15,7 +25,7 @@ from agent.tool_exec import (
 )
 
 
-def test_followup_opens_generic_case_by_default():
+def test_generic_followup_records_memory_but_opens_no_case():
     result = _execute_record_leadership_followup(
         {
             "topic": "Week 3 war deck check",
@@ -24,17 +34,28 @@ def test_followup_opens_generic_case_by_default():
         }
     )
     assert result["success"] is True
-    assert result.get("memory_id")  # narrative annotation still written
-    assert result.get("case_id")
-
-    case = db.get_decision_case(result["case_key"])
-    assert case is not None
-    assert case["case_type"] == "leadership_followup"
-    assert case["target_player_tag"] == "#ABC123"
-    assert case["status"] == db.CASE_OPEN
+    assert result.get("memory_id")  # the observation is still durable
+    assert result.get("case_id") is None
+    assert result["escalated"] is False  # and it says so plainly
+    assert "note" in result  # telling the model how to actually reach a human
 
 
-def test_followup_with_case_type_routes_to_member_review():
+def test_operation_followup_without_member_opens_no_case():
+    """The shape that produced all 9 orphans: no member, no case_type."""
+    before = len(db.list_decision_cases(limit=100))
+    result = _execute_record_leadership_followup(
+        {
+            "topic": "recruiting funnel slow",
+            "recommendation": "Post fresh recruiting copy this week.",
+        }
+    )
+    assert result["escalated"] is False
+    assert result.get("case_id") is None
+    assert len(db.list_decision_cases(limit=100)) == before
+
+
+def test_followup_with_case_type_still_routes_to_member_review():
+    """The one path that reaches a leader must keep working."""
     result = _execute_record_leadership_followup(
         {
             "topic": "promotion review for Gareth",
@@ -43,44 +64,35 @@ def test_followup_with_case_type_routes_to_member_review():
             "case_type": "promotion_review",
         }
     )
+    assert result["escalated"] is True
     case = db.get_decision_case(result["case_key"])
     assert case["case_type"] == "promotion_review"
     assert case["case_key"].startswith("promotion_review:member:")
 
 
-def test_distinct_topics_open_distinct_cases_for_same_member():
-    r1 = _execute_record_leadership_followup(
-        {
-            "topic": "war deck check",
-            "recommendation": "Fix war deck.",
-            "member_tag": "#DUP1",
-        }
-    )
-    r2 = _execute_record_leadership_followup(
-        {
-            "topic": "donation slump",
-            "recommendation": "Nudge on donations.",
-            "member_tag": "#DUP1",
-        }
-    )
-    assert r1["case_key"] != r2["case_key"]
-    keys = {
-        c["case_key"] for c in db.list_decision_cases(case_type="leadership_followup", limit=20)
-    }
-    assert r1["case_key"] in keys and r2["case_key"] in keys
-
-
-def test_operation_followup_without_member():
+def test_case_type_without_member_does_not_escalate():
+    """A member review with no member cannot become a card, so it must not
+    pretend to have escalated."""
     result = _execute_record_leadership_followup(
         {
-            "topic": "recruiting funnel slow",
-            "recommendation": "Post fresh recruiting copy this week.",
+            "topic": "someone should be promoted",
+            "recommendation": "Review the elder band.",
+            "case_type": "promotion_review",
         }
     )
-    case = db.get_decision_case(result["case_key"])
-    assert case["case_type"] == "leadership_followup"
-    assert case["case_key"] == "leadership_followup:recruiting-funnel-slow"
-    assert case["subject_type"] == "operation"
+    assert result["escalated"] is False
+    assert result.get("case_id") is None
+
+
+def test_no_leadership_followup_case_can_be_created():
+    """Regression guard on the type itself: `leadership_followup` is not in
+    CASE_TYPES, so any row of that type is unclosable by construction."""
+    for args in (
+        {"topic": "a", "recommendation": "x", "member_tag": "#NOPE1"},
+        {"topic": "b", "recommendation": "y"},
+    ):
+        _execute_record_leadership_followup(args)
+    assert db.list_decision_cases(case_type="leadership_followup", limit=20) == []
 
 
 def test_flag_member_watch_default_is_memory_only():

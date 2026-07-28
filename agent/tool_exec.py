@@ -1387,17 +1387,17 @@ def _execute_schedule_revisit(arguments):
     }
 
 
-def _followup_topic_slug(topic: str, *, max_len: int = 48) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", (topic or "").strip().lower()).strip("-")
-    return slug[:max_len].rstrip("-") or "general"
-
-
 def _execute_record_leadership_followup(arguments):
-    """Awareness-loop observation: queue an operational suggestion.
+    """Awareness-loop observation: record an operational note.
 
     Persists as a leadership-scoped, inference-typed memory with the
     ``followup`` tag. If ``member_tag`` is provided, the memory is scoped to
     that member so the member-context view surfaces it.
+
+    A NOTE IS NOT AN ESCALATION. This raises a #actions card only when
+    ``case_type`` AND ``member_tag`` are both supplied; otherwise nothing reaches
+    a human and the result says so (``escalated``). See the comment below the
+    memory write for why the generic case path was removed.
     """
     from memory_store import attach_tags, create_memory
 
@@ -1429,17 +1429,29 @@ def _execute_record_leadership_followup(arguments):
         return {"error": "record_leadership_followup_failed", "detail": str(exc)}
 
     attach_tags(memory["memory_id"], ["followup"], actor="elixir:awareness-tool")
-    # A leadership followup is action-oriented by definition, so it always becomes
-    # a durable decision case — the single home for the concern — with the memory
-    # above as its narrative annotation. A specific case_type (e.g.
-    # promotion_review) routes to the member-review card path; otherwise it is a
-    # generic followup case keyed by topic so distinct concerns about the same
-    # member do not collapse into one.
+    # A decision case is opened ONLY for a member review that also becomes a
+    # #actions card. The generic paths used to open a `leadership_followup` case
+    # instead — and that record was invisible and immortal:
+    #
+    #   * nothing surfaced it. No card, no post; the sole surface was an
+    #     unlabelled "open cases" count on the Observatory, which the clan leader
+    #     could not interpret ("I don't even know what a case is").
+    #   * nothing could close it. `leadership_followup` is not in CASE_TYPES, the
+    #     set every reconciler iterates, so all 9 ever created were still open.
+    #   * the brain READS open cases each tick, saw its own stale pile, and its
+    #     only recourse was to file another one — 3 of the 9 were Elixir
+    #     reporting on the staleness of the other 6.
+    #
+    # It cost a real report: case #376 (2026-07-23) correctly diagnosed the
+    # stale-role bug and named Fullboat, dez42 and L-Drxgo four days before the
+    # weekly review raised those exact cards and a human had to catch it.
+    #
+    # The memory above still records the observation durably. What is gone is the
+    # false promise of an open work item nobody owns. To actually reach a leader,
+    # post to the leader-lounge lane (#leaders) or raise a member-scoped card.
     case = None
-    effective_type = case_type or "leadership_followup"
-    topic_slug = _followup_topic_slug(topic)
-    try:
-        if case_type and resolved_tag:
+    if case_type and resolved_tag:
+        try:
             case = db.upsert_member_review_case(
                 case_type=case_type,
                 member={"tag": resolved_tag},
@@ -1447,38 +1459,27 @@ def _execute_record_leadership_followup(arguments):
                 recommendation=recommendation,
                 rationale=recommendation,
             )
-        elif resolved_tag:
-            case = db.upsert_decision_case(
-                case_type=effective_type,
-                title=f"Followup: {topic}",
-                recommendation=recommendation,
-                rationale=recommendation,
-                target_player_tag=resolved_tag,
-                case_key=f"leadership_followup:member:{resolved_tag}:{topic_slug}",
-                state={"topic": topic},
-            )
-        else:
-            case = db.upsert_decision_case(
-                case_type=effective_type,
-                title=f"Followup: {topic}",
-                recommendation=recommendation,
-                rationale=recommendation,
-                subject_type="operation",
-                subject_key=f"operation:{topic_slug}",
-                case_key=f"leadership_followup:{topic_slug}",
-                state={"topic": topic},
-            )
-    except Exception as exc:
-        log.warning("record_leadership_followup case upsert failed: %s", exc)
+        except Exception as exc:
+            log.warning("record_leadership_followup case upsert failed: %s", exc)
     result = {
         "success": True,
         "memory_id": memory["memory_id"],
         "member_tag": resolved_tag,
         "type": "followup",
+        # Say plainly whether this reached leadership. Without it the tool reads
+        # as an escalation in every case, which is how observations went
+        # unanswered for weeks while the brain believed it had reported them.
+        "escalated": bool(case),
     }
     if case:
         result["case_id"] = case.get("case_id")
         result["case_key"] = case.get("case_key")
+    else:
+        result["note"] = (
+            "Recorded as a leadership memory only — no leader has been asked anything. "
+            "If this needs a human to act, post it to the leader-lounge lane (#leaders), "
+            "or call again with case_type + member_tag to raise a #actions card."
+        )
     return result
 
 
