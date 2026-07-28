@@ -1,6 +1,7 @@
 """Tournament watch."""
 
 __all__ = [
+    "maybe_autowatch_tournament",
     "TOURNAMENT_POLL_MINUTES",
     "TOURNAMENT_BATTLE_LOG_SPACING_SECONDS",
     "_TOURNAMENT_JOB_ID",
@@ -13,7 +14,7 @@ __all__ = [
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from apscheduler.jobstores.base import JobLookupError
@@ -33,6 +34,16 @@ from runtime.helpers._common import _post_to_elixir
 from storage.incidents import record_incident
 
 TOURNAMENT_POLL_MINUTES = int(os.getenv("TOURNAMENT_POLL_MINUTES", "5"))
+# Auto-detect: how many DISTINCT current members must appear in the same
+# tournament before Elixir starts watching it unasked. 1 would fire on a member
+# joining any random public tournament; 2+ is the clan doing something together.
+TOURNAMENT_AUTOWATCH_MIN_MEMBERS = int(os.getenv("TOURNAMENT_AUTOWATCH_MIN_MEMBERS", "2"))
+# How far back to look for tournament battles. The battle-log poll lags real
+# play by roughly 20 minutes, so this must comfortably exceed that or a
+# tournament is detected only after it ends.
+TOURNAMENT_AUTOWATCH_LOOKBACK_MINUTES = int(
+    os.getenv("TOURNAMENT_AUTOWATCH_LOOKBACK_MINUTES", "90")
+)
 TOURNAMENT_BATTLE_LOG_SPACING_SECONDS = 0.5
 TOURNAMENT_RECAP_DELAY_SECONDS = int(os.getenv("TOURNAMENT_RECAP_DELAY_SECONDS", "120"))
 _TOURNAMENT_JOB_ID = "tournament-watch"
@@ -176,6 +187,55 @@ def _build_battle_played_signal(
     }
 
 
+def find_unwatched_clan_tournament(conn, *, now: datetime | None = None) -> dict | None:
+    """A tournament several clan members are playing that nobody told us about.
+
+    Elixir already ingests these: a tournament battle arrives in the battle log
+    with `type: "tournament"` and a `tournamentTag`, and `battle_events` has
+    carried a `tournament_tag` column all along. On 2026-07-24 five current
+    members -- Shafith Nihal, Vijay, canavar, AHMO, MONICA -- played
+    #2JVLYQR9 across 100 minutes, Elixir observed the first battle within ~20
+    minutes, and nothing happened, because watching required a human to type
+    `/tournament watch <tag>`.
+
+    Returns the tag + participants, or None. Membership is checked live so a
+    tournament full of ex-members does not trigger a watch.
+    """
+    now = now or datetime.now(timezone.utc)
+    cutoff = (now - timedelta(minutes=TOURNAMENT_AUTOWATCH_LOOKBACK_MINUTES)).strftime(
+        "%Y%m%dT%H%M%S"
+    )
+    rows = conn.execute(
+        """SELECT be.tournament_tag AS tag,
+                  COUNT(DISTINCT be.player_tag) AS members,
+                  MAX(be.battle_time) AS latest
+             FROM battle_events be
+            WHERE be.tournament_tag IS NOT NULL
+              AND be.battle_time >= ?
+              AND EXISTS (SELECT 1 FROM clan_memberships cm
+                           WHERE cm.player_tag = be.player_tag AND cm.left_at IS NULL)
+              AND NOT EXISTS (SELECT 1 FROM tournaments t
+                               WHERE t.tournament_tag = be.tournament_tag)
+            GROUP BY be.tournament_tag
+           HAVING members >= ?
+            ORDER BY members DESC, latest DESC
+            LIMIT 1""",
+        (cutoff, TOURNAMENT_AUTOWATCH_MIN_MEMBERS),
+    ).fetchone()
+    if row := rows:
+        names = [
+            r[0]
+            for r in conn.execute(
+                """SELECT DISTINCT COALESCE(p.display_name, p.current_name)
+                     FROM battle_events be LEFT JOIN players p ON p.player_tag = be.player_tag
+                    WHERE be.tournament_tag = ? AND be.battle_time >= ?""",
+                (row["tag"], cutoff),
+            ).fetchall()
+        ]
+        return {"tournament_tag": row["tag"], "members": row["members"], "names": names}
+    return None
+
+
 def _emit_tournament_event(
     tournament_tag: str, event_type: str, dedup_key: str, payload: dict, *, subject_tag=None
 ) -> None:
@@ -269,6 +329,62 @@ def _emit_tournament_finished(tournament_tag: str, tournament: dict, api_data: d
     finally:
         if conn is not None:
             conn.close()
+
+
+def _raise_tournament_clan_chat_relay(
+    tournament_tag: str, tournament: dict, api_data: dict
+) -> None:
+    """Post-tournament commentary for the whole clan, in game.
+
+    In-game clan chat is the only surface that reaches every member -- Discord
+    is an opted-in subset -- so a tournament the clan played together belongs
+    there, not only in #announcements. Elixir cannot type into the game, so this
+    rides the existing HITL path: an `in_game_relay` card a leader pastes.
+
+    Copy runs through the same guardrails as every other clan-chat message
+    (200-char cap, sentence-aware clip, the Supercell censor-filter guard, and
+    the `- E` signature). Best-effort: a tournament must close cleanly even if
+    the card cannot be raised.
+    """
+    from runtime.clan_chat_copy import signed_valid_messages
+    from runtime.leader_action_ui import CLASH_COPY_MAX_LENGTH
+    from storage.leader_actions import create_leader_action_recommendation
+
+    members = api_data.get("membersList") or []
+    podium = sorted(members, key=lambda m: m.get("rank") or 999)[:3]
+    name = tournament.get("name") or api_data.get("name") or "the tournament"
+
+    if podium:
+        lead = podium[0]
+        bits = [f"{name} wrapped. {lead.get('name')} took it with {lead.get('score')} wins"]
+        if len(podium) > 1:
+            bits.append(", then " + " and ".join(str(m.get("name")) for m in podium[1:]))
+        bits.append(f". {len(members)} played. good games all")
+        draft = "".join(bits)
+    else:
+        draft = f"{name} wrapped with {len(members)} players. good games all"
+
+    copies = signed_valid_messages(draft, max_chars=CLASH_COPY_MAX_LENGTH)
+    if not copies:
+        log.warning("tournament clan-chat copy rejected by guardrails: %r", draft)
+        return
+    copy_text = copies[0]
+    try:
+        create_leader_action_recommendation(
+            action_type="in_game_relay",
+            objective=f"Tournament recap: {name}",
+            prompt_text=f"Paste this clan-chat note: {copy_text}",
+            rationale=f"{len(members)} played {name} ({tournament_tag}); in-game chat reaches everyone.",
+            target_channel_key="arena-relay",
+            source_signal_key=f"tournament_finished:{tournament_tag}",
+            source_signal_type="tournament_recap",
+            copy_original_text=copy_text,
+            copy_current_text=copy_text,
+            action_key=f"tournament_relay:{tournament_tag}",
+        )
+        log.info("tournament clan-chat relay card raised for %s", tournament_tag)
+    except Exception:
+        log.warning("tournament clan-chat relay failed for %s", tournament_tag, exc_info=True)
 
 
 async def _tournament_watch_tick():
@@ -384,6 +500,7 @@ async def _tournament_watch_tick():
             # posting in parallel with the brain.
             live_signals = [s for s in live_signals if s.get("type") != "tournament_ended"]
             await asyncio.to_thread(_emit_tournament_finished, tag, tournament, api_data)
+            await asyncio.to_thread(_raise_tournament_clan_chat_relay, tag, tournament, api_data)
             stop_tournament_watch()
 
         # Post live tournament signals directly to #elixir (v5-style),
@@ -589,6 +706,64 @@ async def _tournament_recap(tournament_tag: str) -> bool:
             context={"tournament_tag": tournament_tag},
         )
         return False
+
+
+async def maybe_autowatch_tournament() -> dict | None:
+    """Start watching a tournament the clan is already playing, unasked.
+
+    Watching used to require a human to type `/tournament watch <tag>`, so a
+    tournament nobody thought to register was invisible -- even though Elixir had
+    already ingested every battle of it. Reuses the exact bootstrap the slash
+    command uses: validate against the API, refuse an ended one, register, start
+    the poller.
+
+    Best-effort and quiet: returns None when there is nothing to do.
+    """
+    from engine.db import connect
+
+    if await asyncio.to_thread(db.get_active_tournament):
+        return None  # already watching one; never run two
+
+    conn = None
+    try:
+        conn = connect()
+        found = find_unwatched_clan_tournament(conn)
+    except Exception:
+        log.warning("tournament autowatch scan failed", exc_info=True)
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+    if not found:
+        return None
+
+    tag = str(found["tournament_tag"]).lstrip("#")
+    api_data = await asyncio.to_thread(cr_api.get_tournament, tag)
+    if not api_data:
+        log.info("tournament autowatch: %s not resolvable via API", tag)
+        return None
+    if (api_data.get("status") or "") == "ended":
+        # Detection lagged past the finish. Register it anyway so the same
+        # tournament is not re-detected every tick forever.
+        await asyncio.to_thread(db.register_tournament, tag, api_data)
+        log.info("tournament autowatch: %s already ended; recorded, not watched", tag)
+        return {"tournament_tag": tag, "watched": False}
+
+    await asyncio.to_thread(db.register_tournament, tag, api_data)
+    start_tournament_watch()
+    log.info(
+        "tournament autowatch: watching %s (%s) — detected from %s member(s): %s",
+        api_data.get("name") or tag,
+        tag,
+        found["members"],
+        ", ".join(str(n) for n in found["names"][:6]),
+    )
+    return {
+        "tournament_tag": tag,
+        "watched": True,
+        "members": found["members"],
+        "names": found["names"],
+    }
 
 
 def start_tournament_watch():
