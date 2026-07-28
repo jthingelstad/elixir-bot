@@ -873,6 +873,7 @@ _FACADE_EXPORT_GROUPS = {
         "get_member_ranked_status",
         "get_member_recent_battles",
         "get_member_recent_losses",
+        "get_member_recent_wins",
         "get_member_special_event_activity",
         "get_player_intel_refresh_targets",
         "list_player_daily_battle_rollups",

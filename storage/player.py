@@ -418,6 +418,26 @@ def _surviving_towers(towers_json) -> list[int]:
     return [t for t in towers if isinstance(t, int) and not isinstance(t, bool)]
 
 
+def _tower_pressure(battles: list, tower_column: str) -> tuple[int, Optional[int], int]:
+    """(battles where a tower nearly fell, lowest HP seen, battles with data).
+
+    Reads whichever side was under pressure. In a LOSS that is the opponent's
+    towers -- how close the member came to the next crown. In a WIN it is the
+    member's own -- how close they came to losing. Same measurement, opposite
+    column, so the two reads stay comparable.
+    """
+    close = 0
+    weakest: list[int] = []
+    for row in battles:
+        towers = _surviving_towers(row[tower_column])
+        if towers:
+            low = min(towers)
+            weakest.append(low)
+            if low < NEAR_MISS_TOWER_HP:
+                close += 1
+    return close, (min(weakest) if weakest else None), len(weakest)
+
+
 def _loss_margin(losses: list) -> dict:
     """How CLOSE the losses were, which crowns alone cannot say.
 
@@ -426,28 +446,45 @@ def _loss_margin(losses: list) -> dict:
     apart. The weakest surviving opponent tower is the honest measure of how
     close the next crown was.
     """
-    one_crown = 0
-    near_misses = 0
-    weakest: list[int] = []
-    for row in losses:
-        if (row["crowns_against"] or 0) - (row["crowns_for"] or 0) == 1:
-            one_crown += 1
-        towers = _surviving_towers(row["opponent_princess_towers_hp_json"])
-        if towers:
-            low = min(towers)
-            weakest.append(low)
-            if low < NEAR_MISS_TOWER_HP:
-                near_misses += 1
+    one_crown = sum(1 for r in losses if (r["crowns_against"] or 0) - (r["crowns_for"] or 0) == 1)
+    near, closest, with_data = _tower_pressure(losses, "opponent_princess_towers_hp_json")
     return {
         "one_crown_losses": one_crown,
-        "near_miss_losses": near_misses,
-        "closest_tower_hp": min(weakest) if weakest else None,
-        "losses_with_tower_data": len(weakest),
+        "near_miss_losses": near,
+        "closest_tower_hp": closest,
+        "losses_with_tower_data": with_data,
         "near_miss_threshold_hp": NEAR_MISS_TOWER_HP,
     }
 
 
-def _elixir_discipline(losses: list) -> dict:
+def _win_margin(wins: list) -> dict:
+    """How DECISIVE the wins were -- and how many were nearly losses.
+
+    The mirror of `_loss_margin`. A member on a win streak built from coin
+    flips is in a different position from one three-crowning the ladder, and
+    "wins: 12" says neither. `narrow_wins` counts games where the member's OWN
+    last tower finished under the same threshold a near-miss loss uses.
+    """
+    three_crown = sum(1 for r in wins if (r["crowns_for"] or 0) >= 3)
+    # Named for what it MEASURES, not how it feels: a tower surviving at 31 HP
+    # was still never lost, so this legitimately overlaps `narrow_wins`. Calling
+    # it "flawless" would have quietly promoted a survived game to a dominant
+    # one -- the same trap as describing a high elixir leak as "out-leaking".
+    no_tower_lost = sum(
+        1 for r in wins if len(_surviving_towers(r["princess_towers_hp_json"])) == 2
+    )
+    narrow, closest, with_data = _tower_pressure(wins, "princess_towers_hp_json")
+    return {
+        "three_crown_wins": three_crown,
+        "no_tower_lost_wins": no_tower_lost,
+        "narrow_wins": narrow,
+        "closest_own_tower_hp": closest,
+        "wins_with_tower_data": with_data,
+        "narrow_threshold_hp": NEAR_MISS_TOWER_HP,
+    }
+
+
+def _elixir_discipline(battles: list) -> dict:
     """Elixir leaked, theirs vs the opponent's.
 
     LOWER IS BETTER. Leaked elixir is elixir WASTED -- it overflowed while the
@@ -462,7 +499,7 @@ def _elixir_discipline(losses: list) -> dict:
     mine: list[float] = []
     theirs: list[float] = []
     leaked_more = 0
-    for row in losses:
+    for row in battles:
         a, b = row["elixir_leaked"], row["opponent_elixir_leaked"]
         if isinstance(a, (int, float)):
             mine.append(float(a))
@@ -474,7 +511,7 @@ def _elixir_discipline(losses: list) -> dict:
         "avg_leaked": round(sum(mine) / len(mine), 2) if mine else None,
         "avg_opponent_leaked": round(sum(theirs) / len(theirs), 2) if theirs else None,
         "leaked_more_than_opponent": leaked_more,
-        "losses_compared": len(theirs),
+        "battles_compared": len(theirs),
         "lower_is_better": True,
     }
 
@@ -614,6 +651,107 @@ def get_member_recent_losses(
                 "predate deck capture). Do not cite or invent opponent cards — "
                 "ground comments in loss streak / crown deficit, and use "
                 "opponent_tags to scout via cr_api (aspect='player'/'clan')."
+            )
+        ),
+    }
+
+
+@managed_connection
+def get_member_recent_wins(
+    tag: str,
+    scope: str = "competitive_10",
+    limit: int = 30,
+    top_cards: int = 10,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    """What is WORKING for a player, mirroring get_member_recent_losses.
+
+    Elixir could only ever diagnose. Every battle read was built around the
+    losing side -- what beat you, how close you came -- so praise had nothing
+    behind it but a win count, and "you're on a 5-game streak" is the same
+    sentence whether those were three-crown sweeps or five coin flips.
+
+    The mirror is deliberate: the same scopes, the same coverage honesty, and
+    tower pressure measured on the side that was actually under it. In a loss
+    that is the opponent's towers; here it is the member's own, which is what
+    makes `narrow_wins` meaningful -- games won without ever being threatened
+    are a different story from games survived.
+    """
+    member_tag = _canon_tag(tag)
+    predicate = _LOSSES_SCOPE_PREDICATES.get(scope, _LOSSES_SCOPE_PREDICATES["competitive_10"])
+    member_row = conn.execute(
+        "SELECT player_tag AS member_id, COALESCE(display_name, current_name) AS current_name "
+        "FROM players WHERE player_tag = ?",
+        (member_tag,),
+    ).fetchone()
+    if not member_row:
+        return None
+    rows = conn.execute(
+        f"SELECT outcome, crowns_for, crowns_against, opponent_deck_json, battle_time, "
+        f"battle_type, game_mode_name, elixir_leaked, opponent_elixir_leaked, "
+        f"princess_towers_hp_json, opponent_tag "
+        f"FROM battle_events WHERE player_tag = ? AND {predicate} "
+        f"ORDER BY battle_time DESC LIMIT ?",
+        (member_row["member_id"], limit),
+    ).fetchall()
+    wins = [r for r in rows if r["outcome"] == "W"]
+    wins_examined = len(wins)
+
+    # Cards on the LOSING side of a win: what this member reliably handles.
+    # Same battle-not-copies dedupe as the losses read.
+    card_counts: Counter[tuple[str, Optional[str]]] = Counter()
+    decks_seen = 0
+    for row in wins:
+        card_counts.update(set(_deck_card_modes(row["opponent_deck_json"])))
+        if row["opponent_deck_json"]:
+            decks_seen += 1
+
+    crown_surpluses = [
+        (r["crowns_for"] or 0) - (r["crowns_against"] or 0)
+        for r in wins
+        if r["crowns_for"] is not None and r["crowns_against"] is not None
+    ]
+    current_win_streak = 0
+    for row in rows:
+        if row["outcome"] == "W":
+            current_win_streak += 1
+        else:
+            break
+
+    margin = _win_margin(wins)
+    elixir = _elixir_discipline(wins)
+    return {
+        "member_tag": member_tag,
+        "member_name": member_row["current_name"],
+        "scope": scope,
+        "lookback_battles": len(rows),
+        "wins_examined": wins_examined,
+        "current_win_streak": current_win_streak,
+        "avg_crown_surplus": (
+            round(sum(crown_surpluses) / len(crown_surpluses), 2) if crown_surpluses else None
+        ),
+        "beaten_cards": [
+            {"name": name, "played_as": played_as, "wins_over": count}
+            for (name, played_as), count in card_counts.most_common(top_cards)
+        ],
+        "wins_with_deck_data": decks_seen,
+        "opponent_decks_captured": bool(decks_seen),
+        "margin": margin,
+        "elixir": elixir,
+        "note": (
+            f"Opponent cards come from {decks_seen} of {wins_examined} examined wins. "
+            "`beaten_cards` are cards this member BEAT — a matchup they handle, not "
+            "a weakness; never read this list as what troubles them. "
+            f"`margin.narrow_wins` finished with their OWN last tower under "
+            f"{NEAR_MISS_TOWER_HP} HP: won, but close, so do not call those dominant. "
+            "`no_tower_lost_wins` kept both princess towers — note a narrow win can "
+            "also be one, so do not add these together. In `elixir`, LOWER IS BETTER; "
+            "a leak average below the opponent's here is worth genuine credit."
+            if decks_seen
+            else (
+                "No opponent decks captured in this window. Do not cite or invent "
+                "opponent cards — ground praise in the crown surplus, streak and "
+                "margin fields, which are present regardless."
             )
         ),
     }

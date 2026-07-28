@@ -58,7 +58,14 @@ TOOLS = [
             "- war: current-day war deck status + season participation summary\n"
             "- trend: trophy/activity trend with window comparison\n"
             "- deck: current deck + signature cards (most-used from battle logs)\n"
-            "- losses: top opponent cards seen in recent losses + crown deficit + loss-streak context (uses scope param to pick mode: war_10/ladder_ranked_10/competitive_10/overall_10)\n"
+            "- losses: what is BEATING them — top opponent cards seen in recent losses, crown deficit, loss streak, "
+            "plus `margin` (how close each loss was: one-crown games, near-misses where the opponent's last "
+            "tower finished under 500 HP) and `elixir` (elixir wasted vs the opponent's in the same battle; "
+            "LOWER IS BETTER). Uses scope to pick mode: war_10/ladder_ranked_10/competitive_10/overall_10\n"
+            "- wins: what is WORKING — cards they BEAT, crown surplus, win streak, plus `margin` "
+            "(three-crown wins, wins where no tower was lost, narrow wins that were nearly losses) "
+            "and the same `elixir` comparison. Use this for praise, coaching on strengths, or "
+            "'what should I keep doing' — pair with losses for a full read\n"
             "- history: trophy and donation history from snapshots\n"
             "- ranked: Ranked / Path of Legend status and recent Ranked activity, separate from Trophy Road\n"
             "- mode_activity: 7/30-day activity by mode family (Trophy Road, Ranked, Events, War, etc.)\n"
@@ -94,6 +101,7 @@ TOOLS = [
                             "trend",
                             "deck",
                             "losses",
+                            "wins",
                             "history",
                             "ranked",
                             "mode_activity",
