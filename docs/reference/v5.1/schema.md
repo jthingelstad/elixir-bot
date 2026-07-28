@@ -79,7 +79,7 @@ tables unchanged and is not redesigned here.
 | Bounded stream: tournaments | `tournaments`, `tournament_battles`, `tournament_participants` | 3 |
 | Awards (durable) | `awards` | 1 |
 | Engine control | `stream_cursors` (durable), `runtime_job_status`, `poll_state` (runtime.md §4), `materialization_runs`, `materialization_inputs` | 5 |
-| Ops singletons (carried) | `llm_calls`, `prompt_failures`, `prompt_feedback`, `system_signals`, `api_sentinel_observations`, `arena_relay_screenshot_observations`, `discord_channels`, `channel_state`, `game_mode_contexts`, `card_catalog`, `elixir_improvement_suggestions` | 11 |
+| Ops singletons (carried) | `llm_calls`, `prompt_failures`, `prompt_feedback`, `system_signals`, `api_sentinel_observations`, `arena_relay_screenshot_observations`, `discord_channels`, `channel_state`, `game_mode_contexts`, `card_catalog` | 10 |
 | **Engine total** | | **51** |
 | Deferred pass (carried unchanged) | `clan_memories` + 9 satellites + FTS/vec, `conversation_threads`, `messages`, `memory_facts`, `memory_episodes` | ~19 designed |
 

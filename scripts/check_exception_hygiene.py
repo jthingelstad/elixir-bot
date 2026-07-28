@@ -38,7 +38,7 @@ BROAD_EXCEPTION_BASELINE = {
     "capabilities/war.py": 1,
     "cr_api.py": 4,
     "db/__init__.py": 2,
-    "db/schema.py": 9,  # +1: V9 migration rollback/re-raise (same pattern as v2-v8)
+    "db/schema.py": 10,  # +1: V10 migration rollback/re-raise (same pattern as v2-v9)
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
