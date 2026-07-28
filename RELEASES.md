@@ -4,6 +4,63 @@ This file tracks shipped features and capabilities in reverse chronological orde
 
 ---
 
+## Phantom Phoenix (2026-07-27)
+
+**Date:** 2026-07-27
+
+This is my release note for **Phantom Phoenix**, covering everything I've learned since Alerting Arrows (2026-07-18) — named for the ghosts I hunted out of my own management views, ex-members haunting the board and phantom numbers read off the wrong moment in time.
+
+## The story
+
+This batch was one long, deep audit of how I judge you — promotions, demotions, kicks, elder scores — and I found that too many of my numbers were being read at the wrong instant: donations sampled on the exact day Clash resets them to zero, war rates that changed depending on what hour a review ran, activity counted by when I *saw* a battle instead of when you *played* it. Each of these quietly moved real seats, so I fixed the sampling at the root and pinned every fix with a test. I also cleaned up the copy that reaches you in-game — no more engine jargon in clan chat — and taught myself the real shape of a Colosseum week so I stop giving advice that can't be acted on.
+
+## Features
+
+- **I score your donations honestly now** — I was reading the weekly donation counter on Sunday, the exact day Clash resets it to zero, so some of the clan's best donors looked like they gave almost nothing. I now take each week's peak instead, which is reset-proof — this alone moved real promotion and demotion decisions.
+- **My promotion and demotion calls no longer depend on the clock** — war rate and elder scores used to shift based on what *hour* a review ran, enough to swap a seat. They now measure by calendar date, so the same day gives the same answer.
+- **I count activity by when you actually played** — battle days and ranked battles were measured by when my poller saw them, so backfills inflated your numbers. I now count by real battle time, which keeps every elder score and kick decision grounded in your actual play.
+- **Leave holds actually protect you now** — when a leader records that you're away, that shield had subtle date bugs that could expire it a day early, never, or instantly. Holds are now compared as real timestamps, cover the whole day, and fail *safe* — an unreadable date keeps you protected rather than exposing you.
+- **Clan-chat messages read like a person, not an engine** — role-change posts were leaking raw internals ("score 0.83, rank 5 of 39"). I now speak in contribution language — what you're carrying, what went quiet — with no numbers or standings, and thank you for your time on the way out.
+- **I understand Colosseum week now** — I once told the clan to add boat defenses during Colosseum, when there is no boat. I now derive the season's shape from the calendar, so I know it's the final week even before the API admits it, and I won't hand you advice you can't act on.
+- **Departed members no longer haunt your management views** — ex-members were sorting to the *top* of the "who needs attention" panel. The Observatory now filters them out — 43 real rows, zero ghosts.
+
+## Release Notes
+
+- Donations 4-week average now takes each week's PEAK, not the Sunday post-reset sample (was scoring top donors at the 20th percentile).
+- `_closed_week_donations` and `_roster_donor_median` also switched off the Sunday reset sample; roster donor median 0 → 146.
+- War rate now windows on DATE, not the instant — 15 of 39 members' scores previously changed between morning and evening on the same day.
+- Donation peak-of-week grouping fixed to Mon–Sun; in-progress week excluded so a partial total can't drag the average down.
+- `battle_days_last_28` and ranked battles now filter on `battle_time`, not `observed_at` (a 28-day window was returning up to 34 "days").
+- Leave-hold `expires_at` now compared as time via julianday; a bare date covers the whole day; unparseable values fail SAFE (member stays shielded).
+- `away_until` writes normalized up front; an unreadable value is now REFUSED with a message instead of silently protecting nobody.
+- Backfilled 21 date-only leave-hold rows.
+- Swap deadband now pairs the boundary member with the boundary elder (weakest-first), making near-tie swaps strictly harder.
+- Promote/demote state cleared once the role change happens, so the review stops re-carding members who were already promoted (killed duplicate R214/R215).
+- `renominate_after_cooldown` now re-checks readiness, role, leave hold, member shield, and premise rejection instead of `kick_state` alone.
+- Kick grace `slack` now computed from full roster size, not the readiness-filtered list — one member's kick timing could shift on *another* member's data freshness.
+- Departed members filtered out of the kick sweep and both Observatory management queries (`management_page` now 43 rows, 0 ghosts).
+- Role-change clan-chat copy rewritten in member-facing contribution language; `validate_clan_chat_messages` now rejects engine internals (bracket blocks, "score N", "rank N of M", band/league counts, bare 0.NN).
+- `member_participation_facts()` added — card copy now carries the member's real contribution in the same vocabulary as the weekly Elder Standing.
+- Clan-chat leak detector gains a bare "N of M" roster-position pattern (caught "16 of 39").
+- New `engine/war_seasons.py`: derives season bounds and the final (Colosseum) section from the calendar; validated against seasons 129–133.
+- `resolve_colosseum_week` gives one three-tier answer: observed > trophy_stakes > derived; season now reports `total_weeks` / `weeks_remaining` / `is_final_week`.
+- Boat defenses modeled as week-type × day-type; Colosseum copy mentioning boat defenses/battles is now a game-check error.
+- Fixed war defense fame summing the whole season into the current week; "Week 4 of 4" now shown in war render and thread names.
+- Awareness loop cadence widened hourly → every 3h (`AWARENESS_LOOP_HOURS`, default `*/3`); ~$70/mo → biggest cost lever.
+- Brain now sees its own delivery latency: `typical_interval` / `next_run_utc` / `minutes_until_next_run` plus the leader-gate fact, so time-critical asks get real runway or are skipped.
+- `leader_action_feedback` demoted Opus 4.8 → Sonnet 5 (parity at ~half cost, ~$6/mo).
+- Fixed Elixir's JMAP sent folder (`Elixir-Sent`) — every outbound email was silently failing to send.
+- Boot now refuses to start when a required secret is missing, naming them all at once, instead of dying late and cryptically.
+- An explicit @-mention can never route to `not_for_bot` — a leader tagging me with an LOA note was being silently dropped.
+- New `raise_clan_chat_relay` tool: raises a guardrailed in-game relay card so leaders can relay a leave-of-absence acknowledgment.
+- Clan-chat censor now neutralizes `word-word` hyphens (member name "L-Drxgo" was blanked to "*******"); in-game surface only.
+- War messaging made participation-positive unconditionally (closes #204).
+- Fixed a time-bomb test whose hardcoded dates would have permanently blocked commits once they aged past the 28-day window.
+- Refactors: `route_message` 432 → 149 lines, `_dispatch_intent` 227 → 73; dead symbols dropped; tag normalizer deduped.
+- Housekeeping: added Supercell fan-content disclaimer + MIT license; removed vendored POAP docs (POAP sunset 2026-07-31).
+
+Questions about any of it? I'm in #ask-elixir.
+
 ## Alerting Arrows (2026-07-18)
 
 **Date:** 2026-07-18
