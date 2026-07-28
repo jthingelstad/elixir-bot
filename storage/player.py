@@ -450,13 +450,18 @@ def _loss_margin(losses: list) -> dict:
 def _elixir_discipline(losses: list) -> dict:
     """Elixir leaked, theirs vs the opponent's.
 
+    LOWER IS BETTER. Leaked elixir is elixir WASTED -- it overflowed while the
+    bar sat capped at 10. Every field here is a fault count, never a score, so
+    a higher number is always the worse player. Naming matters: "out-leaked"
+    reads like an achievement and is banned from this block for that reason.
+
     The only per-battle SKILL signal the CR API exposes that is not the result:
-    it measures overflow while capped, so it is a habit, not luck. Comparing to
-    the opponent in the SAME battle controls for game length.
+    overflow while capped is a habit, not luck. Comparing to the opponent in
+    the SAME battle controls for game length, which the raw average cannot.
     """
     mine: list[float] = []
     theirs: list[float] = []
-    out_leaked = 0
+    leaked_more = 0
     for row in losses:
         a, b = row["elixir_leaked"], row["opponent_elixir_leaked"]
         if isinstance(a, (int, float)):
@@ -464,12 +469,13 @@ def _elixir_discipline(losses: list) -> dict:
         if isinstance(a, (int, float)) and isinstance(b, (int, float)):
             theirs.append(float(b))
             if a > b:
-                out_leaked += 1
+                leaked_more += 1
     return {
         "avg_leaked": round(sum(mine) / len(mine), 2) if mine else None,
         "avg_opponent_leaked": round(sum(theirs) / len(theirs), 2) if theirs else None,
-        "leaked_more_than_opponent": out_leaked,
+        "leaked_more_than_opponent": leaked_more,
         "losses_compared": len(theirs),
+        "lower_is_better": True,
     }
 
 
@@ -598,9 +604,10 @@ def get_member_recent_losses(
             "cards listed here. `margin.near_miss_losses` are games where the "
             f"opponent's last tower finished under {NEAR_MISS_TOWER_HP} HP — "
             "winnable, not outclassed; say so rather than calling them beaten. "
-            "`elixir.avg_leaked` above the opponent's is a habit worth naming "
-            "gently; below it means elixir was NOT the problem, so do not "
-            "suggest it was."
+            "In `elixir`, LOWER IS BETTER — leaked elixir is elixir wasted at "
+            "a capped bar. `avg_leaked` ABOVE the opponent's is a fault worth "
+            "naming gently; BELOW it means elixir was not the problem, so do "
+            "not suggest it was. Never frame a high leak as a strength."
             if decks_seen
             else (
                 "No opponent decks captured in this window (all examined losses "
