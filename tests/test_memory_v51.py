@@ -339,3 +339,68 @@ def test_unfiltered_selection_still_has_recency_backstop():
         assert any(m["title"] == "fresh clanwide" for m in got)
     finally:
         conn.close()
+
+
+def test_fts_selection_excludes_expired_and_retired():
+    """Soft expiry must hold on EVERY candidate source, including FTS.
+
+    The FTS branch of select_memories selects straight out of memories_fts and
+    carries no scope_sql() predicate, so an archived or expired memory matching
+    the query used to be scored and injected into the prompt — while the
+    member/channel/tag branches correctly excluded it.
+
+    That silently defeated the retention design: runtime/jobs/_memory.py sets
+    expires_at on stale or contradicted synthesis rows precisely so they vanish
+    from readers, and 4 of the 6 conversational lanes retrieve via FTS. A fact
+    Elixir had decided was wrong could still be recalled at it.
+    """
+    conn = db.get_connection()
+    try:
+        memory_store.ensure_memory_schema(conn)
+        _run_fts_expiry_case(conn)
+    finally:
+        conn.close()
+
+
+def _run_fts_expiry_case(memory_conn):
+    live = _seed(memory_conn, title="zorblatt live", body="The zorblatt protocol is current.")
+    _seed(
+        memory_conn,
+        title="zorblatt expired",
+        body="The zorblatt protocol lapsed.",
+        expires_at="2026-01-01T00:00:00Z",
+    )
+    archived = _seed(
+        memory_conn, title="zorblatt archived", body="The zorblatt protocol was wrong."
+    )
+    memory_store.archive_memory(archived, actor="test", conn=memory_conn)
+
+    got = memory_store.select_memories(
+        query="zorblatt", viewer_scope="public", limit=10, conn=memory_conn
+    )
+    assert [m["memory_id"] for m in got] == [live]
+
+
+def test_non_fts_candidate_sources_still_exclude_expired():
+    """Contrast case: the member/channel branches were always correct, and must
+    stay correct after the post-filter guard was added."""
+    conn = db.get_connection()
+    try:
+        memory_store.ensure_memory_schema(conn)
+        _run_non_fts_expiry_case(conn)
+    finally:
+        conn.close()
+
+
+def _run_non_fts_expiry_case(memory_conn):
+    _seed(
+        memory_conn,
+        title="lapsed member fact",
+        body="stale",
+        member_tag="#EXP1",
+        expires_at="2026-01-01T00:00:00Z",
+    )
+    got = memory_store.select_memories(
+        member_tag="#EXP1", viewer_scope="public", limit=10, conn=memory_conn
+    )
+    assert got == []

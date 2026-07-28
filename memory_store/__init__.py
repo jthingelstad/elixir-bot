@@ -659,9 +659,27 @@ def select_memories(
             match.setdefault(r["memory_id"], 0.0)
 
     scored = []
+    now_iso = _utcnow()
     for memory_id, strength in match.items():
         row = _fetch_memory(conn, memory_id)
         if not row or row["scope"] not in scopes:
+            continue
+        # Retirement/expiry must be re-checked HERE, not only in the candidate
+        # queries. The FTS branch above selects straight out of memories_fts and
+        # carries no scope_sql() predicate, so before this guard an archived or
+        # expired memory that matched the query was scored and injected into the
+        # prompt — while the member/channel/tag branches correctly excluded it.
+        #
+        # That silently defeated soft expiry: runtime/jobs/_memory.py sets
+        # expires_at on stale or contradicted synthesis rows precisely so they
+        # "vanish from readers", and 4 of the 6 conversational lanes retrieve via
+        # FTS. A fact Elixir had decided was wrong could still be recalled.
+        #
+        # This is the single choke point every candidate source passes through,
+        # so guarding it also covers any source added later.
+        if row.get("retired_at"):
+            continue
+        if row.get("expires_at") and str(row["expires_at"]) <= now_iso:
             continue
         if tags and not set(tags) <= set(row.get("tags") or []):
             continue
