@@ -30,7 +30,8 @@ def _prompt(entry: dict) -> str:
         f"Your automation identity is `{entry['id']}` / `{entry['name']}`; use the attribution "
         "contract and helper in AGENT-TEAM/README.md for every issue comment and commit. "
         "Start with the shared preflight, respect issue claims and lane boundaries, do one "
-        "focused thing, write the required AGENT-TEAM run note, and end with a clean repository. "
+        "focused thing at a time within the role's run budget, write the required AGENT-TEAM "
+        "run note, and end with a clean repository. "
         "If main is ahead of origin/main, remain read-only: never commit, push, deploy, or restart "
         "into pre-existing commits. Never push a commit this run did not create."
     )

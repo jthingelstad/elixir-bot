@@ -105,7 +105,7 @@ America/Chicago.
 | Operations Manager | Hourly (or every few hours) | Prod health needs a tight loop |
 | Data Analyst | Daily | A new game mode / card / event should surface within a day |
 | Quality Manager | Daily | Catch regressions and noise fast |
-| Build Manager | Daily | Steady backlog burn-down |
+| Build Manager | Every 6 hours | Drain up to three issues sequentially without batching work |
 | Evaluator | Weekly + after any router/prompt/workflow change | Keep baselines current; guard changes |
 | Product Manager | Weekly | Discovery benefits from a wider window |
 | Manager | Weekly | Team-health review + the notes digest |
@@ -115,6 +115,12 @@ The desired live Codex configuration is versioned in `automations.toml`. Check i
 has authorized schedule changes. The audit also catches paused roles, stale models, wrong
 cadences, missing role files, and prompts that do not enforce the full read order and clean-run
 rules.
+
+The Build Manager has one approved project-specific refinement to the shared workflow's “one
+focused thing per run” rule: it may complete up to three issues **sequentially** inside one
+90-minute run. “One focused thing” applies to each claim, change, verification cycle, and commit;
+it never permits a batched claim or a commit spanning issues. `build-manager.md` owns the exact
+loop and stop conditions.
 
 All scheduled roles share one checkout. A clean checkout that is ahead of `origin/main` is
 read-only: agents may inspect evidence and file issues, but must not commit, push, deploy, or
