@@ -69,7 +69,7 @@ def _card_mode_fields(card: dict) -> dict:
 @managed_connection
 def get_member_current_deck(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
-        "SELECT cs.current_deck_json, NULL AS current_deck_support_cards_json, "
+        "SELECT cs.current_deck_json, cs.current_deck_support_cards_json, "
         "cs.observed_at AS fetched_at "
         "FROM player_current_state cs "
         "WHERE cs.player_tag = ? ",

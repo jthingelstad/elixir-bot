@@ -59,8 +59,66 @@ def _deck_json(participant: dict) -> str | None:
         # plain one, and collapsing them makes "what beat you" advice wrong.
         if c.get("evolutionLevel"):
             slim["evolution_level"] = c["evolutionLevel"]
+        if c.get("starLevel"):
+            slim["star_level"] = c["starLevel"]
+        # Duel rounds mark which cards were actually played; absent elsewhere.
+        if c.get("used") is not None:
+            slim["used"] = bool(c["used"])
         deck.append(slim)
     return json.dumps(deck, separators=(",", ":")) if deck else None
+
+
+def _rounds_json(participant: dict) -> str | None:
+    """Per-round decks for a war duel (2-3 rounds under one battle).
+
+    A duel's top-level `cards` is every round's deck concatenated, so the
+    individual decks are only recoverable here. Keeps crowns, tower HP and
+    elixir leaked per round alongside the deck.
+    """
+    rounds = participant.get("rounds") or []
+    if not rounds:
+        return None
+    out = []
+    for r in rounds:
+        if not isinstance(r, dict):
+            continue
+        out.append(
+            {
+                "crowns": r.get("crowns"),
+                "elixir_leaked": r.get("elixirLeaked"),
+                "princess_towers_hp": r.get("princessTowersHitPoints"),
+                # Key is `cards`, matching the shape war_analytics'
+                # _extract_deck_candidates already expects for duel rounds.
+                "cards": json.loads(_deck_json(r) or "[]"),
+            }
+        )
+    return json.dumps(out, separators=(",", ":")) if out else None
+
+
+def _support_cards_json(participant: dict) -> str | None:
+    """The tower troop. 100% coverage and never stored before v17 -- 6.9% of
+    use is non-default (Dagger Duchess, Royal Chef, Cannoneer), so it is real
+    deck identity rather than a constant."""
+    cards = participant.get("supportCards") or []
+    slim = [
+        {"id": c.get("id"), "name": c.get("name"), "level": c.get("level")}
+        for c in cards
+        if isinstance(c, dict)
+    ]
+    return json.dumps(slim, separators=(",", ":")) if slim else None
+
+
+def _towers_json(participant: dict) -> str | None:
+    hp = participant.get("princessTowersHitPoints")
+    return json.dumps(hp, separators=(",", ":")) if isinstance(hp, list) else None
+
+
+def _int_or_none(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _float_or_none(value):
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
 def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
@@ -135,6 +193,40 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
                 "deck_selection": b.get("deckSelection"),
                 "deck_json": _deck_json(t0),
                 "opponent_deck_json": _deck_json(o0),
+                # --- v17: the rest of the battle record ----------------------
+                "support_cards_json": _support_cards_json(t0),
+                "elixir_leaked": _float_or_none(t0.get("elixirLeaked")),
+                "king_tower_hp": _int_or_none(t0.get("kingTowerHitPoints")),
+                "princess_towers_hp_json": _towers_json(t0),
+                "global_rank": _int_or_none(t0.get("globalRank")),
+                # Their clan AT BATTLE TIME. Not the same as their clan today,
+                # which is what every other table records.
+                "clan_tag": (t0.get("clan") or {}).get("tag"),
+                "rounds_json": _rounds_json(t0),
+                "opponent_name": o0.get("name"),
+                "opponent_clan_tag": (o0.get("clan") or {}).get("tag"),
+                "opponent_clan_name": (o0.get("clan") or {}).get("name"),
+                "opponent_clan_badge_id": _int_or_none((o0.get("clan") or {}).get("badgeId")),
+                "opponent_support_cards_json": _support_cards_json(o0),
+                "opponent_elixir_leaked": _float_or_none(o0.get("elixirLeaked")),
+                "opponent_king_tower_hp": _int_or_none(o0.get("kingTowerHitPoints")),
+                "opponent_princess_towers_hp_json": _towers_json(o0),
+                "opponent_global_rank": _int_or_none(o0.get("globalRank")),
+                "opponent_starting_trophies": _int_or_none(o0.get("startingTrophies")),
+                "opponent_trophy_change": _int_or_none(o0.get("trophyChange")),
+                "opponent_rounds_json": _rounds_json(o0),
+                "modifiers_json": (
+                    json.dumps(b["modifiers"], separators=(",", ":"))
+                    if b.get("modifiers")
+                    else None
+                ),
+                "boat_battle_side": b.get("boatBattleSide"),
+                "boat_battle_won": (
+                    int(b["boatBattleWon"]) if isinstance(b.get("boatBattleWon"), bool) else None
+                ),
+                "new_towers_destroyed": _int_or_none(b.get("newTowersDestroyed")),
+                "prev_towers_destroyed": _int_or_none(b.get("prevTowersDestroyed")),
+                "remaining_towers": _int_or_none(b.get("remainingTowers")),
                 "arena_id": arena.get("id") if isinstance(arena, dict) else None,
                 "arena_name": arena.get("name") if isinstance(arena, dict) else None,
                 "teammate_tag": teammate,
@@ -182,11 +274,65 @@ _INSERT_COLUMNS = (
     "season_id",
     "section_index",
     "war_day_index",
+    # v17 -- the rest of the battle. Every one of these is also enriched on
+    # dedup below, so a thinner first observation is never made permanent.
+    "support_cards_json",
+    "elixir_leaked",
+    "king_tower_hp",
+    "princess_towers_hp_json",
+    "global_rank",
+    "clan_tag",
+    "rounds_json",
+    "opponent_name",
+    "opponent_clan_tag",
+    "opponent_clan_name",
+    "opponent_clan_badge_id",
+    "opponent_support_cards_json",
+    "opponent_elixir_leaked",
+    "opponent_king_tower_hp",
+    "opponent_princess_towers_hp_json",
+    "opponent_global_rank",
+    "opponent_starting_trophies",
+    "opponent_trophy_change",
+    "opponent_rounds_json",
+    "modifiers_json",
+    "boat_battle_side",
+    "boat_battle_won",
+    "new_towers_destroyed",
+    "prev_towers_destroyed",
+    "remaining_towers",
 )
 
 _INSERT_SQL = (
     f"INSERT OR IGNORE INTO battle_events ({','.join(_INSERT_COLUMNS)}) "
     f"VALUES ({','.join('?' for _ in _INSERT_COLUMNS)})"
+)
+
+# Columns the enrich-on-dedup UPDATE fills when a thinner earlier observation
+# already claimed the dedup key. Derived from one list so the two paths cannot
+# drift: a column added to the INSERT but forgotten here would silently never
+# backfill (which is exactly how deck_json stayed NULL on re-polled battles).
+_ENRICH_COLUMNS = (
+    (
+        "teammate_tag",
+        "league_number",
+        "deck_json",
+        "arena_id",
+        "arena_name",
+    )
+    + _INSERT_COLUMNS[
+        _INSERT_COLUMNS.index("opponent_deck_json") : _INSERT_COLUMNS.index("arena_id")
+    ]
+    + _INSERT_COLUMNS[_INSERT_COLUMNS.index("support_cards_json") :]
+)
+
+_ENRICH_SQL = (
+    "UPDATE battle_events SET "
+    "season_id = COALESCE(season_id, ?), "
+    "section_index = COALESCE(section_index, ?), "
+    "war_day_index = COALESCE(war_day_index, ?), "
+    + ", ".join(f"{c} = COALESCE({c}, ?)" for c in _ENRICH_COLUMNS)
+    + " WHERE dedup_key = ?"
 )
 
 
@@ -227,27 +373,12 @@ def mirror_battles(
             # that first, thinner observation permanent: enrich only missing
             # facts while preserving the original native event row.
             conn.execute(
-                "UPDATE battle_events SET "
-                "season_id = COALESCE(season_id, ?), "
-                "section_index = COALESCE(section_index, ?), "
-                "war_day_index = COALESCE(war_day_index, ?), "
-                "teammate_tag = COALESCE(teammate_tag, ?), "
-                "league_number = COALESCE(league_number, ?), "
-                "deck_json = COALESCE(deck_json, ?), "
-                "opponent_deck_json = COALESCE(opponent_deck_json, ?), "
-                "arena_id = COALESCE(arena_id, ?), "
-                "arena_name = COALESCE(arena_name, ?) "
-                "WHERE dedup_key = ?",
+                _ENRICH_SQL,
                 (
                     season_id,
                     section_index,
                     war_day_index,
-                    row["teammate_tag"],
-                    row["league_number"],
-                    row["deck_json"],
-                    row["opponent_deck_json"],
-                    row["arena_id"],
-                    row["arena_name"],
+                    *(row[c] for c in _ENRICH_COLUMNS),
                     dedup_key,
                 ),
             )

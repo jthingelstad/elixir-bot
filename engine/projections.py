@@ -99,6 +99,10 @@ def refresh_player_state(conn, player_tag, profile_payload, roster_entry, observ
     # as a "rating" while the real UC rating was 1,867).
     ranked_trophies = _ranked_now.get("trophies")
     deck = p.get("currentDeck")
+    # The equipped tower troop. `get_member_current_deck` has always returned
+    # `support_cards: []` because this was never captured (#216) -- 6.9% of use
+    # is non-default, so it is real deck identity, not a constant.
+    support_deck = p.get("currentDeckSupportCards")
     vals = {
         "role": r.get("role"),
         "exp_level": p.get("expLevel") or None,
@@ -113,6 +117,9 @@ def refresh_player_state(conn, player_tag, profile_payload, roster_entry, observ
         "ranked_league": ranked_league,
         "ranked_trophies": ranked_trophies,
         "current_deck_json": json.dumps(deck, ensure_ascii=False) if deck else None,
+        "current_deck_support_cards_json": (
+            json.dumps(support_deck, ensure_ascii=False) if support_deck else None
+        ),
         "last_seen_api": r.get("last_seen_api") or r.get("lastSeen"),
     }
     cols = ", ".join(vals)

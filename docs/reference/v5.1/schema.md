@@ -223,7 +223,21 @@ CREATE TABLE battle_events (
     arena_id INTEGER, arena_name TEXT, league_number INTEGER,
     is_hosted_match INTEGER, tournament_tag TEXT, event_tag TEXT,
     -- war-race keys, populated when is_war = 1 (§14.5):
-    season_id INTEGER, section_index INTEGER, war_day_index INTEGER
+    season_id INTEGER, section_index INTEGER, war_day_index INTEGER,
+    -- v16/v17 — the rest of the battle (#216). See "Completeness" below.
+    opponent_deck_json TEXT,
+    support_cards_json TEXT, elixir_leaked REAL, king_tower_hp INTEGER,
+    princess_towers_hp_json TEXT, global_rank INTEGER, clan_tag TEXT,
+    rounds_json TEXT,
+    opponent_name TEXT, opponent_clan_tag TEXT, opponent_clan_name TEXT,
+    opponent_clan_badge_id INTEGER, opponent_support_cards_json TEXT,
+    opponent_elixir_leaked REAL, opponent_king_tower_hp INTEGER,
+    opponent_princess_towers_hp_json TEXT, opponent_global_rank INTEGER,
+    opponent_starting_trophies INTEGER, opponent_trophy_change INTEGER,
+    opponent_rounds_json TEXT,
+    modifiers_json TEXT, boat_battle_side TEXT, boat_battle_won INTEGER,
+    new_towers_destroyed INTEGER, prev_towers_destroyed INTEGER,
+    remaining_towers INTEGER
 );
 CREATE INDEX idx_battle_events_player_time ON battle_events(player_tag, battle_time DESC);
 CREATE INDEX idx_battle_events_war ON battle_events(season_id, section_index, player_tag) WHERE is_war = 1;
@@ -234,6 +248,31 @@ The battle stream realizes the §8 envelope with **typed columns instead of a pa
 blob** because it is the read-heavy stream (win rates, form, mode activity, war decks
 all query it). `deck_json` is added so war-deck reconstruction stops parsing
 `member_battle_facts.raw_json` (C6-adjacent cleanup; raw payload stays in L1 only).
+
+**Completeness is a hard requirement here (#216).** Until v16 this table kept 17
+of the ~30 facts a battle carries; the rest were parsed into scope and dropped.
+That is not recoverable later — `raw_api_payloads` is short-retention by design,
+and a battle log entry is the only place the opponent's deck, the tower troop,
+or the elixir either side leaked has ever existed. Four dropped fields had
+readers already asking for them and getting a hardcoded `NULL` back, which is
+why none of it surfaced as a bug: the reader returned a confident empty answer.
+
+Rules for this table:
+
+- **If the API sends it on a battle, store it.** The bar is not "who needs this
+  today" — it is whether it can be re-derived tomorrow. Almost none of it can.
+- Any new column must be added to BOTH `_INSERT_COLUMNS` and `_ENRICH_COLUMNS`
+  in `engine/ingest.py`. A column in the first but not the second silently never
+  backfills when a battle is re-polled; `tests/test_opponent_deck_capture.py`
+  pins this.
+- Never select a placeholder `NULL AS <field>` to satisfy a reader. Either the
+  column exists or the reader states the gap. Every instance of that pattern in
+  this codebase turned out to be a capability quietly returning nothing.
+- Deliberately not stored: `isLadderTournament` (False on all 58,105 battles
+  audited). 2v2 keeps only `opponent[0]`.
+- History is rebuildable from the rolling backups via
+  `scripts/backfill_battle_fields.py`, which replays archived payloads through
+  the *current* extractor rather than patching field by field.
 
 ### 5.2 `player_events` / `clan_events` — emitted streams
 
