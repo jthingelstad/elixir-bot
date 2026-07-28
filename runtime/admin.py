@@ -42,8 +42,9 @@ COMMAND_SPECS = {
         "help", ("help",), "Show the Elixir operator help page.", event_type="help"
     ),
     # system.* / memory.show were removed from Discord; the Observatory owns that
-    # telemetry. signal.publish-pending is gone entirely — API drift now rides the
-    # engine-health check to #elixir-log (#212), not a queue of its own.
+    # telemetry. signal.publish-pending is gone entirely — API drift is an
+    # operator concern, worked from the AGENT-TEAM Error Watch runbook
+    # (AGENT-TEAM/operations-manager.md), not a queue of its own.
     "clan.status": AdminCommandSpec(
         "clan.status",
         ("clan", "status"),

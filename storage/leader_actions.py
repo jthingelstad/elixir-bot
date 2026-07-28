@@ -1251,26 +1251,15 @@ def decide_leader_action(
                     int(updated["case_id"]),
                 ),
             )
-        except Exception as exc:
+        except Exception:
             # The card decision is the user action of record; case sync should
             # not make the Discord reaction handler fail, but the split state
             # must be visible for repair.
-            from storage.incidents import record_incident
-
-            log.warning(
-                "leader action case sync failed action_id=%s case_id=%s",
+            log.exception(
+                "leader_actions.case_sync failed: action_id=%s case_id=%s status=%s",
                 updated.get("action_id"),
                 updated.get("case_id"),
-                exc_info=True,
-            )
-            record_incident(
-                "leader_actions.case_sync",
-                exc,
-                context={
-                    "action_id": updated.get("action_id"),
-                    "case_id": updated.get("case_id"),
-                    "status": status,
-                },
+                status,
             )
     return updated
 

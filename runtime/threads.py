@@ -36,16 +36,8 @@ async def create_thread(bot, channel_id: int, name: str):
             type=discord.ChannelType.public_thread,
         )
         return thread
-    except Exception as exc:
-        log.warning("thread create failed for %r under %s", name, channel_id, exc_info=True)
-        from storage.incidents import record_incident
-
-        record_incident(
-            "threads.create",
-            exc,
-            context={"name": name, "channel_id": channel_id},
-            severity="warn",
-        )
+    except Exception:
+        log.exception("threads.create failed: name=%r channel_id=%s", name, channel_id)
         return None
 
 
@@ -62,11 +54,8 @@ async def lock_thread(bot, thread_id: int, closing_text: str | None = None) -> b
             await thread.send(closing_text)
         await thread.edit(locked=True, archived=True)
         return True
-    except Exception as exc:
-        log.warning("thread lock failed for %s", thread_id, exc_info=True)
-        from storage.incidents import record_incident
-
-        record_incident("threads.lock", exc, context={"thread_id": thread_id}, severity="warn")
+    except Exception:
+        log.exception("threads.lock failed: thread_id=%s", thread_id)
         return False
 
 

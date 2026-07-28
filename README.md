@@ -71,8 +71,8 @@ state. The important groups are:
 - Member communications: `daily-clan-insight`, `weekly-recap`,
   `weekly-member-report`, `weekly-elder-standing`, `promotion-content`, and
   `weekly-discord-invite-relay`.
-- Data and operations: `card-catalog-sync`, `api-sentinel`, `engine-health`,
-  `db-maintenance`, `db-backup`, and `memory-synthesis`.
+- Data and operations: `card-catalog-sync`, `api-sentinel`, `db-maintenance`,
+  `db-backup`, and `memory-synthesis`.
 - Optional/manual: `clan-wars-intel`; tournament watching is dynamically
   started and resumed outside the recurring registry.
 
@@ -113,7 +113,7 @@ Non-secret clan and Discord configuration lives in `prompts/CLAN.md` and
 - [db/](db/) — connection discipline, schema checks, and storage facade.
 - [storage/](storage/) — domain persistence and read helpers.
 - [agent/](agent/) — workflow prompts, model loop, tool contracts, and tools.
-- [runtime/](runtime/) — Discord routing, activities, jobs, awareness, health,
+- [runtime/](runtime/) — Discord routing, activities, jobs, awareness, logging,
   and the Observatory web app.
 - [prompts/](prompts/) — identity, purpose, clan, channel, lane, and workflow
   instructions.
@@ -178,8 +178,12 @@ Production is managed by `launchd` through `scripts/admin.sh`:
 ```bash
 bash scripts/admin.sh status
 bash scripts/admin.sh restart
-bash scripts/admin.sh activity run engine-health
+bash scripts/admin.sh activity run api-sentinel
 ```
+
+Elixir does not monitor itself: `logs/elixir-error.log` (ERROR+ with tracebacks)
+is the operator interface, and triaging it is the Operations Manager's job — see
+`AGENT-TEAM/error-watch.md`.
 
 Member self-service commands live under `/elixir`. Leadership operations live
 under `/clanops`. System telemetry and management surfaces belong in the

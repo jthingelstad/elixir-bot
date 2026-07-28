@@ -52,7 +52,7 @@ def test_silent_infrastructure_catch_is_rejected():
     assert silent("try:\n    x()\nexcept sqlite3.OperationalError:\n    pass\n")
     # Swallowed into a default is just as invisible as `pass`.
     assert silent("try:\n    x()\nexcept requests.RequestException:\n    rows = []\n")
-    # Logging it, re-raising it, or recording an incident all clear the rule.
+    # Logging it or re-raising it clears the rule.
     assert not silent(
         "try:\n    x()\nexcept sqlite3.OperationalError:\n    log.warning('nope')\n    rows = []\n"
     )

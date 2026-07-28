@@ -758,7 +758,7 @@ def register_elixir_app_commands(bot) -> None:
             if posted:
                 text = f"Recap posted for **{name}**."
             else:
-                text = f"Recap was not posted for **{name}**; see incidents/logs."
+                text = f"Recap was not posted for **{name}**; see logs/elixir-error.log."
             await interaction.followup.send(text, ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"Recap generation failed: {e}", ephemeral=True)

@@ -4,6 +4,7 @@ correctness linchpins it depends on: record_awareness_post feeding channel_memor
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import patch
 
 from runtime.awareness import deliver as deliver_mod
@@ -959,21 +960,24 @@ def test_post_receipt_links_to_persisted_loop(engine_conn):
     assert row["loop_number"] == 77
 
 
-def test_post_receipt_failure_is_fail_soft_but_records_incident(engine_conn):
-    store.record_awareness_post(
-        lane="elixir",
-        content="already sent",
-        covers=[object()],
-        message_id=99,
-        conn=engine_conn,
-    )
+def test_post_receipt_failure_is_fail_soft_but_logs_the_error(engine_conn, caplog):
+    """The post is already in Discord, so a lost local receipt must not raise —
+    but it must not be silent either. Since 2026-07-28 that visibility is the
+    ERROR log, not the runtime_incidents ledger (which never recorded a row)."""
+    with caplog.at_level(logging.ERROR, logger="elixir"):
+        store.record_awareness_post(
+            lane="elixir",
+            content="already sent",
+            covers=[object()],
+            message_id=99,
+            conn=engine_conn,
+        )
 
-    incident = engine_conn.execute(
-        "SELECT component, summary FROM runtime_incidents WHERE component = 'awareness.record_post'"
-    ).fetchone()
-    assert incident is not None
-    assert incident[0] == "awareness.record_post"
-    assert "TypeError" in incident[1]
+    failures = [r for r in caplog.records if "awareness.record_post failed" in r.getMessage()]
+    assert len(failures) == 1
+    assert failures[0].levelno >= logging.ERROR
+    assert failures[0].exc_info is not None
+    assert failures[0].exc_info[0] is TypeError
 
 
 # --------------------------------------- last_tick_at excludes failed ticks

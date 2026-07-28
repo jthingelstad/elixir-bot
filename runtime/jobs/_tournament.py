@@ -31,7 +31,6 @@ from runtime.helpers import (
     _get_singleton_channel_id,
 )
 from runtime.helpers._common import _post_to_elixir
-from storage.incidents import record_incident
 
 TOURNAMENT_POLL_MINUTES = int(os.getenv("TOURNAMENT_POLL_MINUTES", "5"))
 # Auto-detect: how many DISTINCT current members must appear in the same
@@ -396,21 +395,18 @@ async def _tournament_watch_tick():
                     admission = observations.admit("player_battlelog", p_tag, battle_log)
                     if not admission.accepted:
                         if not admission.transport_failure:
-                            await asyncio.to_thread(
-                                record_incident,
-                                "runtime.tournament_battlelog",
-                                "CR observation rejected by admission boundary",
-                                context={
-                                    "entity_key": admission.entity_key,
-                                    "errors": admission.errors,
-                                },
-                                severity="error",
+                            log.error(
+                                "runtime.tournament_battlelog: CR observation rejected by "
+                                "admission boundary: entity_key=%s errors=%s",
+                                admission.entity_key,
+                                admission.errors,
                             )
-                        log.warning(
-                            "Tournament watch: rejected battle log for %s: %s",
-                            p_tag,
-                            admission.errors,
-                        )
+                        else:
+                            log.warning(
+                                "Tournament watch: rejected battle log for %s: %s",
+                                p_tag,
+                                admission.errors,
+                            )
                     elif battle_log:
                         # Store tournament battles in dedicated table
                         for battle in battle_log:
@@ -643,13 +639,8 @@ async def _tournament_recap(tournament_tag: str) -> bool:
 
         log.info("Tournament recap posted for %s", tournament_tag)
         return True
-    except Exception as exc:
-        log.error("Tournament recap generation failed: %s", exc, exc_info=True)
-        record_incident(
-            "tournament.recap",
-            exc,
-            context={"tournament_tag": tournament_tag},
-        )
+    except Exception:
+        log.exception("tournament.recap failed: tournament_tag=%s", tournament_tag)
         return False
 
 

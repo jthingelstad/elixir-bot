@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 19
+CURRENT_SCHEMA_VERSION = 20
 
 
 _V1_STATEMENTS = (
@@ -198,7 +198,6 @@ REQUIRED_SCHEMA = {
     "card_catalog": {"card_id", "first_seen_at"},
     "api_sentinel_observations": {"observation_id", "first_entity_key"},
     "llm_calls": {"call_id", "prompt_json", "response_json"},
-    "runtime_incidents": {"incident_id", "component", "resolved_at"},
     "game_events": {"event_id", "dedup_key", "change_key"},
     "member_outreach": {"outreach_id", "player_tag", "field", "status", "consent"},
     "evergreen_nudges": {"nudge_key", "last_sent_at"},
@@ -782,9 +781,11 @@ def _apply_v13(conn: sqlite3.Connection) -> None:
     admin command with no dispatch branch. `[].tournamentTag` appeared in
     player_battlelog on 2026-07-24 and nobody was told.
 
-    Drift now rides ``runtime.health.check_api_drift`` to #elixir-log, which is
-    a live operator channel the health job already posts to, and the AGENT-TEAM
-    Data Analyst owns characterizing it. The sentinel observations themselves
+    Drift moved to ``runtime.health.check_api_drift``, posting to #elixir-log.
+    (That check lasted five days: the whole health job was retired in v20, and
+    the drift query moved out of the product runtime to the AGENT-TEAM Error
+    Watch runbook in ``AGENT-TEAM/operations-manager.md``, which is where the
+    Data Analyst's hand-off starts now.) The sentinel observations themselves
     (``api_sentinel_observations``) are untouched — only the undeliverable queue
     in front of them goes.
     """
@@ -966,6 +967,26 @@ def _apply_v19(conn: sqlite3.Connection) -> None:
     once from each side.
     """
     conn.execute("DROP TABLE IF EXISTS tournament_battles")
+
+
+def _apply_v20(conn: sqlite3.Connection) -> None:
+    """Drop ``runtime_incidents`` -- the log was always the record.
+
+    The ledger existed so a swallowed failure left a queryable row instead of
+    vanishing, and every best-effort ``except`` in the codebase wrote to it. It
+    did not work. In 25 days it recorded **0 rows** while
+    ``logs/elixir-error.log`` held **159 real errors** -- and the daily
+    ``engine-health`` job consulted the ledger, so it reported "all clear"
+    through every one of them. A #thinking permission outage ran for hours
+    behind that all-clear.
+
+    Detecting production problems is an operator/AGENT-TEAM job, not an internal
+    function of the clan bot, so the ledger and the health check both go. Every
+    ``record_incident`` call site is now a ``log.exception``/``log.error`` on
+    that module's own logger, which lands in the rotating ERROR-only log that
+    ``runtime/logging_setup.py`` writes and the Operations Manager reads.
+    """
+    conn.execute("DROP TABLE IF EXISTS runtime_incidents")
 
 
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
@@ -1152,6 +1173,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 19
+    if version < 20:
+        try:
+            _apply_v20(conn)
+            conn.execute("PRAGMA user_version = 20")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1208,7 +1238,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "cec6231f4d76a8b3534b116883dbd56d95bc74d11c002827f0276893a5cdf3bc"
+CURRENT_SCHEMA_FINGERPRINT = "449ef48a0d46831397320352403982634d143ec366f3e0959e38e75381a3763f"
 
 
 __all__ = [

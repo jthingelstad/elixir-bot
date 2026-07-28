@@ -1,6 +1,6 @@
 ---
 name: awareness-report
-description: Assess the live v5.1 awareness loop from thoughts, delivered posts, stream coverage, tool traces, and incidents
+description: Assess the live v5.1 awareness loop from thoughts, delivered posts, stream coverage, tool traces, and errors
 ---
 
 # Awareness Report
@@ -17,7 +17,9 @@ Production evidence lives in:
 - `awareness_posts`: confirmed deliveries, destination lane, Discord message
   id, and covered signal keys.
 - `stream_cursors`: the durable awareness positions.
-- `runtime_incidents` and `runtime_job_status`: failures and scheduler health.
+- `runtime_job_status`: scheduler health. Failures themselves are in
+  `logs/elixir-error.log` (the `runtime_incidents` ledger was dropped in V20 --
+  it never recorded a row).
 
 `awareness_ticks` was deleted at the v5.1 clean break. Never query it from the
 operational database.
@@ -86,16 +88,17 @@ GROUP BY tool
 ORDER BY calls DESC;
 ```
 
-Also inspect failed thoughts, posts without a linked loop number, open incidents,
-and the `awareness-loop` row in `runtime_job_status`. Use exact thought loop
+Also inspect failed thoughts, posts without a linked loop number, awareness
+errors in `logs/elixir-error.log`, and the `awareness-loop` row in
+`runtime_job_status`. Use exact thought loop
 numbers, post ids, Discord message ids, and timestamps as evidence.
 
 ## Interpretation
 
 Prioritize:
 
-1. Failed loops, cursor stalls, open incidents, or a long gap since the last
-   confirmed post.
+1. Failed loops, cursor stalls, live errors in `logs/elixir-error.log`, or a
+   long gap since the last confirmed post.
 2. Hard-post signals repeatedly resurfacing without delivery.
 3. Tool denials/errors or unusually large tool-call fan-out.
 4. Repetitive lane use, low-value copy, or silence reasons that contradict the

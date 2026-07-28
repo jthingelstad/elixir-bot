@@ -16,6 +16,7 @@ AGENT-TEAM/
   WORKFLOW.md          # the shared contract (identical across projects)
   README.md            # this file — Elixir specifics
   <role>.md            # the roster below
+  error-watch.md       # Operations Manager runbook: logs/elixir-error.log triage
   scripts/             # setup-labels.sh · preflight.sh · queue-audit.sh · new-note.sh
   notes/               # gitignored per-run scratch
   summaries/           # committed weekly Manager digests
@@ -57,11 +58,15 @@ map when gathering evidence:
   consumer. Its durable evidence is `awareness_thoughts`, `awareness_posts`,
   per-stream cursors, and `runtime_job_status`.
 - **Operational database:** `elixir-v51.db` also holds identity, management,
-  conversation, durable memory, incidents, and LLM telemetry. The pre-cut
+  conversation, durable memory, and LLM telemetry. The pre-cut
   `elixir-v5-archive-2026H2.db` is immutable historical evidence only.
 - **Runtime health:** start with `bash scripts/admin.sh status`,
-  `uv run --locked python scripts/confidence_report.py --quick --json`, open
-  `runtime_incidents`, and the repo-root `elixir-v5.log`.
+  `logs/elixir-error.log` (ERROR-only, read it whole), and
+  `uv run --locked python scripts/confidence_report.py --quick --json`.
+  Elixir does not monitor itself — the `runtime_incidents` ledger and the daily
+  `engine-health` job were retired 2026-07-28 because the ledger recorded 0 rows
+  in 25 days while the log held 159 real errors. Error detection is the
+  Operations Manager's job; the runbook is `error-watch.md`.
 
 The short version: **the engine owns facts and deterministic policy; awareness
 owns proactive communication; capabilities own shared read meaning.** Name the
@@ -70,7 +75,7 @@ layer and table that supplied every finding.
 Operations shell activity runs:
 
 ```bash
-bash scripts/admin.sh activity run engine-health
+bash scripts/admin.sh activity run api-sentinel
 ```
 
 This resolves the activity through `runtime/activities.py`, refuses entries with

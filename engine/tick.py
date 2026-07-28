@@ -64,32 +64,25 @@ def _count_admission(counters: dict, result, contract_rejections: dict) -> bool:
     return False
 
 
-def _record_contract_rejections(conn, contract_rejections: dict) -> None:
-    """Collapse a malformed endpoint batch into one queryable warning."""
+def _record_contract_rejections(contract_rejections: dict) -> None:
+    """Collapse a malformed endpoint batch into one error-log line per endpoint.
+
+    This used to write the incident ledger and suppress a repeat while an
+    identical row stayed unresolved. The ledger is gone (2026-07-28), and with
+    it the cross-tick suppression: the per-tick counters already say how often
+    this is firing, and an operator reading logs/elixir-error.log wants to see
+    that it is still happening, not one row from 25 days ago.
+    """
     if not contract_rejections:
         return
-    from storage.incidents import record_incident
-
     for endpoint, rejected in contract_rejections.items():
-        component = f"engine.observation.{endpoint}"
-        already_open = conn.execute(
-            "SELECT 1 FROM runtime_incidents WHERE component = ? "
-            "AND summary = 'CR observation rejected by admission boundary' "
-            "AND resolved_at IS NULL LIMIT 1",
-            (component,),
-        ).fetchone()
-        if already_open is not None:
-            continue
-        record_incident(
-            component,
-            "CR observation rejected by admission boundary",
-            context={
-                "count": len(rejected),
-                "observations": rejected[:10],
-                "truncated": len(rejected) > 10,
-            },
-            severity="error",
-            conn=conn,
+        log.error(
+            "engine.observation.%s: CR observation rejected by admission boundary: "
+            "count=%s observations=%s truncated=%s",
+            endpoint,
+            len(rejected),
+            rejected[:10],
+            len(rejected) > 10,
         )
 
 
@@ -249,7 +242,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
             conn.commit()
         for decision, payload in receipt_admissions:
             readiness.record_admission_decision(conn, decision, payload)
-        _record_contract_rejections(conn, contract_rejections)
+        _record_contract_rejections(contract_rejections)
         conn.commit()
 
     poll_succeeded = "poll_error" not in counters

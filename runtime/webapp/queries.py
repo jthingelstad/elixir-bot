@@ -860,14 +860,6 @@ def command_page() -> dict:
             "SELECT lane, content_preview, posted_at FROM awareness_posts "
             "ORDER BY posted_at DESC LIMIT 6",
         )
-        open_incidents = (
-            _one(
-                conn,
-                "SELECT COUNT(*) AS n FROM runtime_incidents WHERE resolved_at IS NULL",
-            )
-            or {}
-        ).get("n")
-
         outreach_counts = {
             row["status"]: row["n"]
             for row in _rows(
@@ -891,7 +883,6 @@ def command_page() -> dict:
             "war_standings": war_standings,
             "roster_count": roster_count,
             "recent_posts": recent_posts,
-            "open_incidents": open_incidents,
             "outreach_counts": outreach_counts,
             "outreach_total": sum(outreach_counts.values()),
             "outreach_recent": outreach_recent,
@@ -1092,41 +1083,6 @@ def memories_page(kind: str | None, member: str | None, q: str | None, limit: in
             "kind": kind or "",
             "member": member or "",
             "q": q or "",
-        }
-    finally:
-        conn.close()
-
-
-def incidents_page(limit: int = 200) -> dict:
-    """The incident ledger (confidence plan §1): fail-soft failures captured
-    with tracebacks, unresolved first."""
-    conn = db.get_connection()
-    try:
-        from storage.incidents import ensure_incidents_schema
-
-        ensure_incidents_schema(conn)
-        rows = _rows(
-            conn,
-            """
-            SELECT incident_id, at, component, severity, summary, detail,
-                   context_json, resolved_at
-            FROM runtime_incidents ORDER BY (resolved_at IS NOT NULL), at DESC
-            LIMIT ?""",
-            (limit,),
-        )
-        open_count = conn.execute(
-            "SELECT COUNT(*) FROM runtime_incidents WHERE resolved_at IS NULL"
-        ).fetchone()[0]
-        by_component = _rows(
-            conn,
-            """
-            SELECT component, COUNT(*) n FROM runtime_incidents
-            WHERE resolved_at IS NULL GROUP BY component ORDER BY n DESC""",
-        )
-        return {
-            "incidents": rows,
-            "open_count": open_count,
-            "by_component": by_component,
         }
     finally:
         conn.close()

@@ -116,12 +116,12 @@ After any runtime change, verify both process state and fresh behavior:
 
 ```bash
 bash scripts/admin.sh status
-tail -100 elixir-v5.log
+cat logs/elixir-error.log
 uv run --locked python scripts/confidence_report.py --json
 ```
 
 Do not call a deployment complete merely because the test suite passed. Inspect
-fresh tick/awareness output, open incidents, and the relevant Discord or
+fresh tick/awareness output, the error log, and the relevant Discord or
 Observatory behavior.
 
 ## Scheduled activities
@@ -146,7 +146,7 @@ Shell operators can use the same registry contract without starting a second
 Discord gateway session:
 
 ```bash
-bash scripts/admin.sh activity run engine-health
+bash scripts/admin.sh activity run api-sentinel
 uv run --locked python -m runtime.activity_runner run daily-clan-insight
 ```
 
@@ -170,22 +170,25 @@ Common leadership operations include:
 /clanops tournament status
 ```
 
-Use the Observatory for system telemetry, incidents, awareness-loop inspection,
-and other management views removed from Discord.
+Use the Observatory for system telemetry, awareness-loop inspection, and other
+management views removed from Discord.
 
-## Health and incident checks
+## Health and error checks
 
-Run the consolidated report:
+Elixir does not monitor itself. `logs/elixir-error.log` (ERROR+ with tracebacks,
+rotated at 2 MB × 5) is the operator interface; reading and triaging it is the
+Operations Manager's job, per `AGENT-TEAM/error-watch.md`. It is deliberately
+small enough (~6 lines/day) to read in full:
+
+```bash
+cat logs/elixir-error.log
+```
+
+Run the consolidated report, which groups that log by error kind and adds the
+`liveness` silence alarm:
 
 ```bash
 uv run --locked python scripts/confidence_report.py --json
-```
-
-Inspect unresolved best-effort failures directly when needed:
-
-```bash
-sqlite3 elixir-v51.db \
-  "SELECT at, component, summary, detail FROM runtime_incidents WHERE resolved_at IS NULL ORDER BY at DESC LIMIT 50"
 ```
 
 For model, validation, or channel failures:

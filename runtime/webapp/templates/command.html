@@ -149,14 +149,5 @@
     {% endif %}
   </div>
 
-  <div class="card">
-    <h2 style="margin-top:0;">Health</h2>
-    <dl class="kv">
-      <dt>open incidents</dt>
-      <dd>{% if open_incidents %}<span class="badge bad">{{ open_incidents }}</span> <a href="/incidents" class="muted">view →</a>{% else %}<span class="badge ok">0</span>{% endif %}</dd>
-    </dl>
-    <p class="muted" style="margin:.4rem 0 0;">System internals live under the System nav group.</p>
-  </div>
-
 </div>
 {% endblock %}
