@@ -64,6 +64,7 @@ from runtime.jobs._tournament import (  # noqa: F401
     TOURNAMENT_POLL_MINUTES,
     _tournament_recap,
     _tournament_watch_tick,
+    maybe_autowatch_tournament,
     start_tournament_watch,
     stop_tournament_watch,
 )

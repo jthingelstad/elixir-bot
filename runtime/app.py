@@ -686,6 +686,16 @@ async def _engine_tick():
             born = await _threads.ensure_war_week_thread(bot, _engine_db.connect, rr["channel_id"])
             if born:
                 counters["war_week_thread_born"] = born
+        # A tournament the clan is already playing should not need a human to
+        # type `/tournament watch`. Elixir ingests these battles anyway --
+        # `type: "tournament"` with a `tournamentTag` -- so it can start the
+        # watch itself. On 2026-07-24 five members played #2JVLYQR9 for 100
+        # minutes, Elixir saw the first battle within ~20, and nothing happened.
+        from runtime.jobs import maybe_autowatch_tournament
+
+        auto = await maybe_autowatch_tournament()
+        if auto:
+            counters["tournament_autowatch"] = auto
     except Exception:
         log.exception("engine tick post-steps failed")
     log.info("engine tick: %s", counters)

@@ -71,7 +71,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/jobs/_maintenance.py": 4,
     "runtime/jobs/_memory.py": 22,
     "runtime/jobs/_promotion.py": 3,
-    "runtime/jobs/_tournament.py": 8,  # +2: #210 stream emitters, best-effort so a tournament never dies on an emit
+    "runtime/jobs/_tournament.py": 10,  # +2: autowatch scan + clan-chat relay, best-effort so a tournament never dies on them
     "runtime/leader_action_feedback.py": 1,
     "runtime/leader_action_ui.py": 9,
     "runtime/leader_note_interpreter.py": 5,  # interpret/apply/undo/fix all fail-open off the delivery path
