@@ -104,18 +104,6 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
     "card_added": _event("game", "system", "name", time_semantics="exact"),
     "event_started": _event("game", "system", "title", time_semantics="exact"),
     "event_badge_earned": _event("game", "system", "badge_name", time_semantics="exact"),
-    # tournament stream — the fine grain INSIDE a bounded tournament (#210).
-    # These never touch the clan stream: one tournament produces dozens of
-    # battles and they would drown the awareness read in match results. The clan
-    # stream gets exactly one row per tournament (`tournament_finished`, above);
-    # this stream is scoped by tournament_tag and read by the tournament's own
-    # short-lived agent, which polls every 5 minutes while the event is live.
-    "tournament_battle_played": _event(
-        "tournament", "clan_event", "tournament_tag", "battle_time", time_semantics="exact"
-    ),
-    "tournament_member_joined": _event(
-        "tournament", "clan_event", "tournament_tag", "player_tag", time_semantics="exact"
-    ),
 }
 
 _STREAM_BY_TABLE = {
@@ -123,7 +111,6 @@ _STREAM_BY_TABLE = {
     "clan_events": "clan",
     "war_events": "war",
     "game_events": "game",
-    "tournament_events": "tournament",
 }
 
 
