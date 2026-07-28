@@ -38,15 +38,28 @@ def _resolve_outcome(battle: dict, team0: dict, opp0: dict) -> str | None:
     return "W" if cf > ca else ("L" if cf < ca else "D")
 
 
-def _deck_json(t0: dict) -> str | None:
-    cards = t0.get("cards") or []
+def _deck_json(participant: dict) -> str | None:
+    """Slim a participant's 8 cards to (id, name, level).
+
+    Applied to BOTH sides. The opponent's deck is the only record of what a
+    member actually lost to -- their tag can be re-scouted later, but the deck
+    they brought to this specific battle cannot be recovered from any endpoint
+    once it ages out of the battle log.
+    """
+    cards = participant.get("cards") or []
     if not cards:
         return None
-    deck = [
-        {"id": c.get("id"), "name": c.get("name"), "level": c.get("level")}
-        for c in cards
-        if isinstance(c, dict)
-    ]
+    deck = []
+    for c in cards:
+        if not isinstance(c, dict):
+            continue
+        slim = {"id": c.get("id"), "name": c.get("name"), "level": c.get("level")}
+        # Only ~12% of cards played are evolved, so carry the key only when it
+        # applies -- but carry it. An Evo Knight is a different threat from a
+        # plain one, and collapsing them makes "what beat you" advice wrong.
+        if c.get("evolutionLevel"):
+            slim["evolution_level"] = c["evolutionLevel"]
+        deck.append(slim)
     return json.dumps(deck, separators=(",", ":")) if deck else None
 
 
@@ -121,6 +134,7 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
                 "starting_trophies": t0.get("startingTrophies"),
                 "deck_selection": b.get("deckSelection"),
                 "deck_json": _deck_json(t0),
+                "opponent_deck_json": _deck_json(o0),
                 "arena_id": arena.get("id") if isinstance(arena, dict) else None,
                 "arena_name": arena.get("name") if isinstance(arena, dict) else None,
                 "teammate_tag": teammate,
@@ -157,6 +171,7 @@ _INSERT_COLUMNS = (
     "starting_trophies",
     "deck_selection",
     "deck_json",
+    "opponent_deck_json",
     "arena_id",
     "arena_name",
     "teammate_tag",
@@ -219,6 +234,7 @@ def mirror_battles(
                 "teammate_tag = COALESCE(teammate_tag, ?), "
                 "league_number = COALESCE(league_number, ?), "
                 "deck_json = COALESCE(deck_json, ?), "
+                "opponent_deck_json = COALESCE(opponent_deck_json, ?), "
                 "arena_id = COALESCE(arena_id, ?), "
                 "arena_name = COALESCE(arena_name, ?) "
                 "WHERE dedup_key = ?",
@@ -229,6 +245,7 @@ def mirror_battles(
                     row["teammate_tag"],
                     row["league_number"],
                     row["deck_json"],
+                    row["opponent_deck_json"],
                     row["arena_id"],
                     row["arena_name"],
                     dedup_key,

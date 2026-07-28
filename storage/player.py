@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -396,6 +397,28 @@ _LOSSES_SCOPE_PREDICATES = {
 }
 
 
+def _deck_card_modes(deck_json) -> list[tuple[str, Optional[str]]]:
+    """(name, played_as) for each card in a stored slim deck.
+
+    `played_as` follows the same 'evo'/'hero'/None convention the card-usage
+    aggregation uses, so an Evo Knight is never collapsed into a plain one.
+    Tolerant of NULL and of rows written before decks carried an evolution mode.
+    """
+    try:
+        cards = json.loads(deck_json or "[]")
+    except json.JSONDecodeError, TypeError, ValueError:
+        return []
+    if not isinstance(cards, list):
+        return []
+    out = []
+    for card in cards:
+        if not isinstance(card, dict) or not card.get("name"):
+            continue
+        mode = card.get("evolution_level")
+        out.append((card["name"], "evo" if mode == 1 else "hero" if mode == 2 else None))
+    return out
+
+
 @managed_connection
 def get_member_recent_losses(
     tag: str,
@@ -420,7 +443,7 @@ def get_member_recent_losses(
         return None
     member_id = member_row["member_id"]
     rows = conn.execute(
-        f"SELECT outcome, crowns_for, crowns_against, NULL AS opponent_deck_json, battle_time, battle_type, game_mode_name, "
+        f"SELECT outcome, crowns_for, crowns_against, opponent_deck_json, battle_time, battle_type, game_mode_name, "
         f"opponent_tag, NULL AS opponent_name, NULL AS opponent_clan_tag "
         f"FROM battle_events WHERE player_tag = ? AND {predicate} "
         f"ORDER BY battle_time DESC LIMIT ?",
@@ -429,10 +452,17 @@ def get_member_recent_losses(
     sample_battles = len(rows)
     losses = [r for r in rows if r["outcome"] == "L"]
     losses_examined = len(losses)
-    # Only opponent tags are available in battle_events (no deck lists — QA H3),
-    # so aggregate loss counts per opponent tag for cr_api scouting chains.
+    # The headline: which cards keep showing up on the other side of a loss.
+    # Counted once per battle, not once per appearance, so the number reads as
+    # "beaten by this card N times" rather than a card-slot tally.
+    card_counts: Counter[tuple[str, Optional[str]]] = Counter()
+    decks_seen = 0
     opponent_agg: dict[str, dict] = {}
     for row in losses:
+        for entry in _deck_card_modes(row["opponent_deck_json"]):
+            card_counts[entry] += 1
+        if row["opponent_deck_json"]:
+            decks_seen += 1
         opp_tag = row["opponent_tag"]
         if opp_tag:
             entry = opponent_agg.get(opp_tag)
@@ -457,11 +487,13 @@ def get_member_recent_losses(
         key=lambda o: (o["losses_count"], o.get("name") or ""),
         reverse=True,
     )
-    # QA H3: battle_events does not capture opponent deck lists (opponent_deck_json
-    # is a hardcoded NULL), so top_opponent_cards is always empty and the old
-    # coverage_note falsely implied newer battles had deck data. Be honest: report
-    # what we actually have (loss streak, crown deficit, opponent tags) and state
-    # that opponent cards aren't available, so the model doesn't fabricate them.
+    # Battles polled before schema v16 have a NULL opponent deck and are not
+    # backfillable once their raw payload ages out, so state the coverage rather
+    # than implying every examined loss contributed cards.
+    top_opponent_cards = [
+        {"name": name, "played_as": played_as, "losses_faced": count}
+        for (name, played_as), count in card_counts.most_common(top_cards)
+    ]
     return {
         "member_tag": member_tag,
         "member_name": member_row["current_name"],
@@ -471,12 +503,21 @@ def get_member_recent_losses(
         "current_loss_streak": current_loss_streak,
         "avg_crown_deficit": avg_crown_deficit,
         "opponent_tags": opponent_tags,
-        "opponent_decks_captured": False,
+        "top_opponent_cards": top_opponent_cards,
+        "losses_with_deck_data": decks_seen,
+        "opponent_decks_captured": bool(decks_seen),
         "note": (
-            "Opponent deck lists are NOT captured in battle history — specific "
-            "opponent cards are unavailable, so do not cite or invent them. Ground "
-            "loss-pattern comments in loss streak / crown deficit, and use "
-            "opponent_tags to scout an opponent via cr_api (aspect='player'/'clan')."
+            f"Opponent cards come from {decks_seen} of {losses_examined} examined "
+            "losses; the rest predate deck capture. `losses_faced` counts battles "
+            "lost with that card on the other side, not card copies. Cite only "
+            "cards listed here."
+            if decks_seen
+            else (
+                "No opponent decks captured in this window (all examined losses "
+                "predate deck capture). Do not cite or invent opponent cards — "
+                "ground comments in loss streak / crown deficit, and use "
+                "opponent_tags to scout via cr_api (aspect='player'/'clan')."
+            )
         ),
     }
 
@@ -507,7 +548,7 @@ def get_member_recent_battles(
     capped_limit = min(requested_limit, cap)
     rows = conn.execute(
         f"SELECT battle_time, battle_type, game_mode_name, outcome, crowns_for, crowns_against, "
-        f"trophy_change, deck_json, NULL AS opponent_deck_json, NULL AS opponent_name, opponent_tag, NULL AS opponent_clan_tag "
+        f"trophy_change, deck_json, opponent_deck_json, NULL AS opponent_name, opponent_tag, NULL AS opponent_clan_tag "
         f"FROM battle_events WHERE player_tag = ? AND {predicate} "
         f"ORDER BY battle_time DESC LIMIT ?",
         (member_row["member_id"], capped_limit),
