@@ -16,6 +16,7 @@ exported from the read-only archive, per the migration convention).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -55,52 +56,73 @@ def cr_fixture():
 # test that corrupts state fails even if its own asserts were too narrow.
 
 
-def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
+@contextlib.contextmanager
+def _check(name: str, skipped: list[str]):
+    """Scope one invariant check.
+
+    A fixture that builds a minimal schema legitimately lacks some of these
+    tables, so an absent table skips *this* check and records the name. Any
+    other OperationalError propagates.
+
+    This granularity is the point. Checks used to share one try/except at the
+    call site, so when #207 dropped `recognition_ledger` the second check
+    raised and every check below it stopped running — silently, for every test,
+    for the life of the sweep. `test_invariant_sweep.py` asserts `skipped` is
+    empty against the full template so that cannot happen again.
+    """
+    try:
+        yield
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc) and "no such column" not in str(exc):
+            raise
+        skipped.append(name)
+
+
+def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> list[str]:
+    """Assert the cheap structural truths, and report which checks were skipped.
+
+    Returns the names of checks whose tables were absent. Against a full-schema
+    database that list must be empty.
+    """
     problems: list[str] = []
+    skipped: list[str] = []
 
     def q1(sql):
         return conn.execute(sql).fetchone()[0]
 
     # 1) one open membership per player per clan
-    dupes = conn.execute(
-        "SELECT player_tag, COUNT(*) c FROM clan_memberships "
-        "WHERE left_at IS NULL GROUP BY player_tag, clan_tag HAVING c > 1"
-    ).fetchall()
-    if dupes:
-        problems.append(f"duplicate open memberships: {[tuple(d) for d in dupes]}")
+    with _check("clan_memberships", skipped):
+        dupes = conn.execute(
+            "SELECT player_tag, COUNT(*) c FROM clan_memberships "
+            "WHERE left_at IS NULL GROUP BY player_tag, clan_tag HAVING c > 1"
+        ).fetchall()
+        if dupes:
+            problems.append(f"duplicate open memberships: {[tuple(d) for d in dupes]}")
 
-    overlaps = q1(
-        "SELECT COUNT(*) FROM clan_memberships a JOIN clan_memberships b "
-        "ON a.player_tag = b.player_tag AND a.clan_tag = b.clan_tag "
-        "AND a.membership_id < b.membership_id "
-        "WHERE a.joined_at < COALESCE(b.left_at, '9999-12-31') "
-        "AND b.joined_at < COALESCE(a.left_at, '9999-12-31')"
-    )
-    if overlaps:
-        problems.append(f"clan_memberships has {overlaps} overlapping interval(s)")
+        overlaps = q1(
+            "SELECT COUNT(*) FROM clan_memberships a JOIN clan_memberships b "
+            "ON a.player_tag = b.player_tag AND a.clan_tag = b.clan_tag "
+            "AND a.membership_id < b.membership_id "
+            "WHERE a.joined_at < COALESCE(b.left_at, '9999-12-31') "
+            "AND b.joined_at < COALESCE(a.left_at, '9999-12-31')"
+        )
+        if overlaps:
+            problems.append(f"clan_memberships has {overlaps} overlapping interval(s)")
 
     fk_violations = conn.execute("PRAGMA foreign_key_check").fetchall()
     if fk_violations:
         problems.append(f"foreign_key_check has {len(fk_violations)} violation(s)")
 
-    # 2) recognition ledger: one claim per key (one-claim-wins)
-    if q1("SELECT COUNT(*) FROM recognition_ledger") != q1(
-        "SELECT COUNT(DISTINCT recognition_key) FROM recognition_ledger"
-    ):
-        problems.append("recognition_ledger has duplicate recognition_keys")
-
-    # 3) memories FTS mirror in sync (triggers keep them 1:1)
-    try:
+    # 2) memories FTS mirror in sync (triggers keep them 1:1)
+    with _check("memories_fts", skipped):
         n_mem, n_fts = (
             q1("SELECT COUNT(*) FROM memories"),
             q1("SELECT COUNT(*) FROM memories_fts"),
         )
         if n_mem != n_fts:
             problems.append(f"memories={n_mem} but memories_fts={n_fts}")
-    except sqlite3.OperationalError:
-        pass  # schema without FTS (some minimal fixtures)
 
-    # 4) no space-separated timestamps — the ' ' vs 'T' bug class (a bare
+    # 3) no space-separated timestamps — the ' ' vs 'T' bug class (a bare
     #    datetime('now') renders '2026-07-04 12:00:00', which compares wrong
     #    against ISO-T strings; 12 live sites were fixed for this).
     for table, col in (
@@ -110,39 +132,42 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
         ("war_events", "observed_at"),
         ("battle_events", "observed_at"),
         ("state_baselines", "observed_at"),
-        ("recognition_ledger", "claimed_at"),
         ("memories", "created_at"),
         ("memories", "updated_at"),
     ):
-        n = q1(f"SELECT COUNT(*) FROM {table} WHERE {col} LIKE '% %'")
-        if n:
-            problems.append(f"{table}.{col}: {n} space-format timestamp(s)")
+        with _check(f"{table}.{col}", skipped):
+            n = q1(f"SELECT COUNT(*) FROM {table} WHERE {col} LIKE '% %'")
+            if n:
+                problems.append(f"{table}.{col}: {n} space-format timestamp(s)")
 
-    # 5) profile-owned facts cannot be erased by a sparse roster refresh.
-    projection_mismatches = q1(
-        "WITH profile AS (SELECT entity_tag AS player_tag, "
-        "CAST(json_extract(payload_json, '$.best_trophies') AS INTEGER) AS best, "
-        "CAST(json_extract(payload_json, '$.exp_level') AS INTEGER) AS exp "
-        "FROM state_baselines WHERE entity_kind='player' AND aspect='profile') "
-        "SELECT COUNT(*) FROM profile p JOIN player_current_state cs USING(player_tag) "
-        "WHERE (p.best IS NOT NULL AND cs.best_trophies IS NOT p.best) "
-        "OR (p.exp > 0 AND cs.exp_level IS NOT p.exp)"
-    )
-    if projection_mismatches:
-        problems.append(
-            f"player_current_state has {projection_mismatches} profile-owned mismatch(es)"
+    # 4) profile-owned facts cannot be erased by a sparse roster refresh.
+    with _check("player_current_state", skipped):
+        projection_mismatches = q1(
+            "WITH profile AS (SELECT entity_tag AS player_tag, "
+            "CAST(json_extract(payload_json, '$.best_trophies') AS INTEGER) AS best, "
+            "CAST(json_extract(payload_json, '$.exp_level') AS INTEGER) AS exp "
+            "FROM state_baselines WHERE entity_kind='player' AND aspect='profile') "
+            "SELECT COUNT(*) FROM profile p JOIN player_current_state cs USING(player_tag) "
+            "WHERE (p.best IS NOT NULL AND cs.best_trophies IS NOT p.best) "
+            "OR (p.exp > 0 AND cs.exp_level IS NOT p.exp)"
         )
+        if projection_mismatches:
+            problems.append(
+                f"player_current_state has {projection_mismatches} profile-owned mismatch(es)"
+            )
 
-    best_drops = q1(
-        "WITH ordered AS (SELECT player_tag, metric_date, best_trophies, "
-        "LAG(best_trophies) OVER (PARTITION BY player_tag ORDER BY metric_date) AS prior "
-        "FROM player_daily_metrics) SELECT COUNT(*) FROM ordered "
-        "WHERE best_trophies IS NULL AND prior IS NOT NULL"
-    )
-    if best_drops:
-        problems.append(f"player_daily_metrics has {best_drops} best-trophy null regression(s)")
+    # 5) a daily metric row never nulls a best-trophy value it once carried.
+    with _check("player_daily_metrics", skipped):
+        best_drops = q1(
+            "WITH ordered AS (SELECT player_tag, metric_date, best_trophies, "
+            "LAG(best_trophies) OVER (PARTITION BY player_tag ORDER BY metric_date) AS prior "
+            "FROM player_daily_metrics) SELECT COUNT(*) FROM ordered "
+            "WHERE best_trophies IS NULL AND prior IS NOT NULL"
+        )
+        if best_drops:
+            problems.append(f"player_daily_metrics has {best_drops} best-trophy null regression(s)")
 
-    # 7) internal war timestamps use dashed ISO/date text. Battle timestamps are
+    # 6) internal war timestamps use dashed ISO/date text. Battle timestamps are
     # deliberately raw CR compact and are not part of this check.
     for table, col in (
         ("war_seasons", "started_at"),
@@ -157,16 +182,18 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
         ("war_events", "window_start"),
         ("war_events", "created_at"),
     ):
-        n = q1(
-            f"SELECT COUNT(*) FROM {table} WHERE {col} IS NOT NULL "
-            f"AND (length({col}) < 10 OR substr({col},5,1)<>'-' OR substr({col},8,1)<>'-')"
-        )
-        if n:
-            problems.append(f"{table}.{col}: {n} noncanonical timestamp(s)")
+        with _check(f"{table}.{col}", skipped):
+            n = q1(
+                f"SELECT COUNT(*) FROM {table} WHERE {col} IS NOT NULL "
+                f"AND (length({col}) < 10 OR substr({col},5,1)<>'-' OR substr({col},8,1)<>'-')"
+            )
+            if n:
+                problems.append(f"{table}.{col}: {n} noncanonical timestamp(s)")
 
     assert not problems, f"DB invariants violated{f' ({label})' if label else ''}:\n" + "\n".join(
         f"  - {p}" for p in problems
     )
+    return skipped
 
 
 @pytest.fixture(scope="session")
@@ -205,8 +232,6 @@ def _isolate_default_sqlite_db(tmp_path, monkeypatch, v51_schema_template):
         conn = sqlite3.connect(db_path)
         try:
             assert_db_invariants(conn, label="post-test sweep")
-        except sqlite3.OperationalError:
-            pass  # test replaced/gutted the schema deliberately
         finally:
             conn.close()
 
