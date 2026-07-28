@@ -1006,6 +1006,17 @@ def upsert_member_review_case(
     allow_reopen: bool = False,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict | None:
+    # Only a type some reconciler OWNS may be created. `leadership_followup` was
+    # the counter-example: it was never in CASE_TYPES, so no reconciler iterated
+    # it, and all 9 rows ever created stayed open forever while being invisible
+    # to leadership. The tool schemas constrain case_type to an enum, but that is
+    # enforced by the model API — this makes the invariant local and true for any
+    # caller, so an unclosable case cannot be created by construction.
+    if case_type not in CASE_TYPES:
+        raise ValueError(
+            f"unknown case_type {case_type!r}: a decision case must be a type a "
+            f"reconciler owns, one of {sorted(CASE_TYPES)}"
+        )
     tag = member.get("tag") or member.get("player_tag") or member.get("member_tag")
     canon_tag = _db._canon_tag(tag)
     if not canon_tag:
