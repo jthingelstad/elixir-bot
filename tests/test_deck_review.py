@@ -2,6 +2,8 @@
 war deck reconstruction, request classification, and war-suggest validation.
 """
 
+import json
+
 import pytest
 
 import db
@@ -92,7 +94,11 @@ def _battle(
 # ── Phase 1: opponent deck capture ────────────────────────────────────────────
 
 
-def test_opponent_deck_is_not_claimed_by_v51_battle_ingest():
+def test_opponent_deck_is_captured_by_battle_ingest():
+    """Inverted at schema v16 (#216). This previously asserted the OPPOSITE --
+    that no opponent deck column existed -- pinning a real gap as intended
+    behaviour. The cards are in the battle log for both sides; ingest just
+    dropped one, leaving 'what are you losing to?' unanswerable."""
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
@@ -121,9 +127,11 @@ def test_opponent_deck_is_not_claimed_by_v51_battle_ingest():
             conn=conn,
         )
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(battle_events)")}
-        assert "opponent_deck_json" not in columns
+        assert "opponent_deck_json" in columns
+        stored = conn.execute("SELECT opponent_deck_json FROM battle_events").fetchone()[0]
+        assert [c["name"] for c in json.loads(stored)] == [c["name"] for c in opp_cards]
         result = db.get_member_recent_losses("#PLAYER", scope="ladder_ranked_10", conn=conn)
-        assert result["opponent_decks_captured"] is False
+        assert result["opponent_decks_captured"] is True
     finally:
         conn.close()
 
@@ -175,8 +183,13 @@ def test_get_member_recent_losses_reports_opponent_deck_limit_honestly():
         assert out["losses_examined"] == 3
         # Most recent battle was a win, so current loss streak is 0.
         assert out["current_loss_streak"] == 0
-        assert out["opponent_decks_captured"] is False
-        assert "top_opponent_cards" not in out
+        assert out["opponent_decks_captured"] is True
+        assert out["losses_with_deck_data"] == 3
+        # Mega Knight was on the other side of every loss, and the win's deck
+        # must not leak in: Goblin Barrel appears only in the winning battle.
+        top = {c["name"]: c["losses_faced"] for c in out["top_opponent_cards"]}
+        assert top["Mega Knight"] == 3
+        assert "Goblin Barrel" not in top
         # Tag exposure: opponent_tags must surface the opponent's player tag so the
         # LLM can chain into cr_api. All three losses shared #OPP.
         assert len(out["opponent_tags"]) == 1
@@ -192,17 +205,20 @@ def test_get_member_recent_losses_returns_empty_when_no_battles():
         db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
         out = db.get_member_recent_losses("#PLAYER", scope="war_10", conn=conn)
         assert out["losses_examined"] == 0
-        # QA H3: opponent deck lists aren't captured, so the tool no longer
-        # promises top_opponent_cards — it states so honestly instead.
+        # No battles means no decks to report -- the key is present but empty,
+        # and the note must say so rather than implying cards were withheld.
         assert out["opponent_decks_captured"] is False
-        assert "top_opponent_cards" not in out
+        assert out["top_opponent_cards"] == []
         assert out["opponent_tags"] == []
     finally:
         conn.close()
 
 
-def test_get_member_recent_losses_does_not_infer_opponent_card_modes():
-    """The v5.1 event stream does not persist opponent decks or card modes."""
+def test_get_member_recent_losses_distinguishes_opponent_card_modes():
+    """An Evo Knight is a different threat from a plain Knight, so the two must
+    not collapse into one row. Inverted at v16 (#216) -- this previously
+    asserted that modes could not be inferred, which was true only because the
+    opponent's deck was being discarded at ingest."""
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
@@ -242,8 +258,10 @@ def test_get_member_recent_losses_does_not_infer_opponent_card_modes():
 
         out = db.get_member_recent_losses("#PLAYER", scope="ladder_ranked_10", limit=10, conn=conn)
         assert out["losses_examined"] == 3
-        assert out["opponent_decks_captured"] is False
-        assert "top_opponent_cards" not in out
+        assert out["opponent_decks_captured"] is True
+        counts = {(c["name"], c["played_as"]): c["losses_faced"] for c in out["top_opponent_cards"]}
+        assert counts[("Knight", "evo")] == 2
+        assert counts[("Knight", None)] == 1
     finally:
         conn.close()
 

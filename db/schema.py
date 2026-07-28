@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 15
+CURRENT_SCHEMA_VERSION = 16
 
 
 _V1_STATEMENTS = (
@@ -838,6 +838,27 @@ def _apply_v15(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS tournament_events")
 
 
+def _apply_v16(conn: sqlite3.Connection) -> None:
+    """Capture the OPPONENT's deck on every battle (#216).
+
+    The CR battle log returns 8 cards for both ``team[0]`` and ``opponent[0]``.
+    Ingest read only the polled player's, so ``battle_events`` recorded who a
+    member fought (``opponent_tag``) but never what they fought. That made the
+    question Elixir most wants to answer about a loss -- "what are you losing
+    TO?" -- unanswerable: ``get_member_recent_losses`` documents itself as
+    aggregating opponent cards, takes a ``top_cards`` argument it never used,
+    and selected a hardcoded ``NULL AS opponent_deck_json``.
+
+    Not reconstructable after the fact. A tag can be re-scouted, but the deck an
+    opponent brought to one specific battle exists only in that battle log entry
+    and ages out. Every battle polled before this migration keeps a NULL here
+    unless its raw payload is still retained (see scripts/backfill_opponent_decks.py).
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(battle_events)")}
+    if "opponent_deck_json" not in columns:
+        conn.execute("ALTER TABLE battle_events ADD COLUMN opponent_deck_json TEXT")
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -986,6 +1007,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 15
+    if version < 16:
+        try:
+            _apply_v16(conn)
+            conn.execute("PRAGMA user_version = 16")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1042,7 +1072,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "4c36141760886f1c126fa32193d73f11eaa11e9115a36dfd30ee7d0dd2cb670f"
+CURRENT_SCHEMA_FINGERPRINT = "55c931597c7fd494ad426406b885df0ba48389737ad26b7fb900e4ce31d7d8b9"
 
 
 __all__ = [
