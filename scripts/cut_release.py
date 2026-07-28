@@ -31,6 +31,7 @@ import argparse
 import datetime
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -78,6 +79,45 @@ def _bump_core_defaults(*, name: str, date: str) -> None:
     open(CORE_PY, "w").write(src)
 
 
+# Standard locations for developer tooling. The release can be launched from a
+# login shell (full PATH) OR as a subprocess of the bot, which runs under launchd
+# with PATH=/usr/bin:/bin:/usr/sbin:/sbin — no Homebrew. `git commit` then fires
+# the pre-commit hook, which needs `uv` and aborts the cut with "uv not found".
+_TOOL_DIRS = (
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    os.path.expanduser("~/.local/bin"),
+    os.path.expanduser("~/.cargo/bin"),
+)
+
+
+def _tool_env() -> dict[str, str]:
+    """Environment for child processes with developer tool dirs on PATH."""
+    env = dict(os.environ)
+    parts = [d for d in _TOOL_DIRS if os.path.isdir(d)]
+    parts += [p for p in env.get("PATH", "").split(os.pathsep) if p and p not in parts]
+    env["PATH"] = os.pathsep.join(parts)
+    return env
+
+
+def _preflight() -> None:
+    """Fail BEFORE mutating anything if the commit can't succeed.
+
+    The cut used to write RELEASES.md and agent/core.py, then die on `git
+    commit` when the pre-commit hook couldn't find `uv` — leaving a half-cut
+    working tree (staged notes, no commit, no tag, no email, no announcement)
+    that reads like the release worked. Check the toolchain up front instead."""
+    if shutil.which("uv", path=_tool_env()["PATH"]):
+        return
+    sys.stderr.write(
+        "cut_release: `uv` not found on PATH — the pre-commit hook requires it, so the\n"
+        "release commit would fail after RELEASES.md and agent/core.py were already\n"
+        f"rewritten. Searched: {', '.join(_TOOL_DIRS)} plus inherited PATH.\n"
+        "Install uv, or run the cut from a login shell that has it.\n"
+    )
+    sys.exit(1)
+
+
 def _run(args: list[str], *, timeout: int = 60) -> None:
     try:
         subprocess.run(
@@ -87,6 +127,7 @@ def _run(args: list[str], *, timeout: int = 60) -> None:
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=_tool_env(),
         )
     except subprocess.CalledProcessError as exc:
         # Surface the captured output. Otherwise a swallowed gate failure (e.g. a
@@ -138,6 +179,9 @@ def main() -> int:
 
     if args.announce_only:
         return _announce_only(args.announce_only)
+
+    if not args.dry_run:
+        _preflight()
 
     dirty = rn._git(["status", "--porcelain"]).strip()
     if dirty and not args.dry_run:
