@@ -70,6 +70,10 @@ def _git(args: list[str]) -> str:
             ["git", *args], cwd=REPO_ROOT, text=True, stderr=subprocess.DEVNULL
         )
     except subprocess.SubprocessError, OSError:
+        # Callers read '' as "no commits in that range", so a git failure and an
+        # empty range look identical to them — and the difference is a release
+        # note that silently ships with no content.
+        log.warning("git %s failed; treating as empty output", " ".join(args), exc_info=True)
         return ""
 
 
@@ -101,6 +105,9 @@ def release_history() -> list[dict]:
     try:
         text = open(RELEASES_MD).read()
     except OSError:
+        # An empty history defeats the coin-dedup below, so a release could
+        # silently reuse a name already taken.
+        log.warning("release history unreadable at %s", RELEASES_MD, exc_info=True)
         return []
     out: list[dict] = []
     for m in _RELEASE_HEADER.finditer(text):
@@ -145,6 +152,7 @@ def recent_changes(*, days: int | None = None, since_ref: str | None = None) -> 
     try:
         releases_head = "\n".join(open(RELEASES_MD).read().splitlines()[:60])
     except OSError:
+        log.warning("release history unreadable at %s", RELEASES_MD, exc_info=True)
         releases_head = ""
 
     return {

@@ -668,7 +668,15 @@ def select_memories(
                 strength = 0.8 * (1.0 / (1 + 0.05 * (rank - 1)))
                 match[r["memory_id"]] = max(match.get(r["memory_id"], 0.0), strength)
         except sqlite3.OperationalError:
-            pass
+            # FTS is a candidate *source*, so a broken index degrades recall
+            # rather than failing the call — the other sources still run. Say so
+            # loudly: silently thinner recall looks exactly like "no memories
+            # matched", and the brain cannot tell the difference.
+            log.warning(
+                "memory recall degraded: FTS candidate source unavailable (query=%r)",
+                query,
+                exc_info=True,
+            )
     if tags:
         # Tag pool is its own candidate source: a tag-scoped call must see the
         # whole pool even when the FTS query matches nothing (base strength is
@@ -772,6 +780,14 @@ def search_memories(
                 (_fts_sanitize(q), *args, limit * 4),
             ).fetchall()
         except sqlite3.OperationalError:
+            # Falls through to the substring fallback below, which is a real
+            # answer — but a much worse one. Distinguish "FTS found nothing"
+            # from "FTS is broken", because only the second needs a human.
+            log.warning(
+                "memory search fell back to substring scan: FTS unavailable (q=%r)",
+                q,
+                exc_info=True,
+            )
             rows = []
         if not rows:  # degraded substring fallback
             low = q.lower()

@@ -104,6 +104,68 @@ _REPORT_CALLS = {
     "setdefault",
 }
 
+# Exceptions that mean the world is broken, not that a value failed to parse.
+# `except (TypeError, ValueError)` around an int() is a parse guard and stays
+# unpoliced -- there are ~150 of those and they are all fine. These are
+# different: the database is down, the network failed, a file is missing,
+# Discord said no. Swallowing one silently hides an outage.
+#
+# The narrow-catch rule exists because the broad-catch rule was not enough. The
+# post-test invariant sweep died for three weeks behind `except
+# sqlite3.OperationalError: pass`, and an unrouted channel share was dropped
+# behind a resolve failure -- neither was visible to a policy that only reads
+# `except Exception`.
+_INFRASTRUCTURE_EXCEPTIONS = {
+    "CalledProcessError",
+    "ConnectionError",
+    "ConnectTimeout",
+    "DatabaseError",
+    "DiscordServerError",
+    "Forbidden",
+    "HTTPError",
+    "HTTPException",
+    "IOError",
+    "IntegrityError",
+    "InterfaceError",
+    "NotFound",
+    "OSError",
+    "OperationalError",
+    "ProgrammingError",
+    "RateLimited",
+    "ReadTimeout",
+    "RequestException",
+    "SubprocessError",
+    "Timeout",
+    "TimeoutError",
+}
+
+# Silent infrastructure catches that are genuinely fine, each with the reason.
+# Anything not on this list must log, report, record an incident, or re-raise.
+_SILENT_INFRASTRUCTURE_ALLOWED = {
+    # The failure is already logged one layer down, in _request_json, which
+    # logs every ConnectionError/Timeout/HTTPError before it propagates. These
+    # wrappers only map "it failed" to None for the caller.
+    ("cr_api.py", 272),
+    ("cr_api.py", 282),
+    ("cr_api.py", 383),
+    ("cr_api.py", 394),
+    ("cr_api.py", 428),
+    # Returns a structured (False, reason) to its caller, which surfaces it.
+    ("runtime/app.py", 1173),
+    # Columns are added lazily on first write; their absence is expected and
+    # documented at the catch.
+    ("storage/metadata.py", 276),
+    # Reports through the metadata dict it returns (preprocess_error), which
+    # travels with the attachment rather than to the log.
+    ("runtime/channel_router.py", 129),
+    # Answers the Discord interaction with the timeout, so a human is told
+    # directly — a better surface than the log.
+    ("runtime/discord_commands.py", 254),
+    # `ps -p` exits non-zero for a dead PID, which is the ordinary case this
+    # helper exists to detect. Logging it would fire on every check.
+    ("runtime/process.py", 76),
+}
+
 
 def _sources() -> list[Path]:
     paths = [path for directory in SOURCE_DIRS for path in (ROOT / directory).rglob("*.py")]
@@ -117,6 +179,28 @@ def _exception_name(handler: ast.ExceptHandler) -> str | None:
     if isinstance(handler.type, ast.Name):
         return handler.type.id
     return "other"
+
+
+def _caught_names(node: ast.expr | None) -> set[str]:
+    """Every exception name in a handler, through tuples and dotted paths."""
+    if node is None:
+        return set()
+    if isinstance(node, ast.Name):
+        return {node.id}
+    if isinstance(node, ast.Attribute):
+        return {node.attr}
+    if isinstance(node, ast.Tuple):
+        return {name for element in node.elts for name in _caught_names(element)}
+    return set()
+
+
+def _is_silent(handler: ast.ExceptHandler) -> bool:
+    """True when nothing about this failure escapes the handler."""
+    nodes = list(ast.walk(ast.Module(body=handler.body, type_ignores=[])))
+    if any(isinstance(node, ast.Raise) for node in nodes):
+        return False
+    calls = {_call_name(node) for node in nodes if isinstance(node, ast.Call)}
+    return not (calls & (_LOG_CALLS | _INCIDENT_CALLS | _REPORT_CALLS))
 
 
 def _call_name(call: ast.Call) -> str:
@@ -169,6 +253,19 @@ def check() -> tuple[list[str], Counter]:
         tree = ast.parse(path.read_text(), filename=relative)
         for handler in (node for node in ast.walk(tree) if isinstance(node, ast.ExceptHandler)):
             name = _exception_name(handler)
+
+            # Applies at every breadth: a narrow catch can hide an outage just
+            # as completely as a broad one, and used to do so unpoliced.
+            if (
+                _caught_names(handler.type) & _INFRASTRUCTURE_EXCEPTIONS
+                and _is_silent(handler)
+                and (relative, handler.lineno) not in _SILENT_INFRASTRUCTURE_ALLOWED
+            ):
+                findings.append(
+                    f"{relative}:{handler.lineno}: infrastructure failure swallowed "
+                    "without a log — an outage here would be invisible"
+                )
+
             if name not in {None, "BaseException", "Exception"}:
                 continue
             counts[relative] += 1
