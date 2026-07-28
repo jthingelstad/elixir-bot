@@ -139,32 +139,14 @@ _INFRASTRUCTURE_EXCEPTIONS = {
     "TimeoutError",
 }
 
-# Silent infrastructure catches that are genuinely fine, each with the reason.
-# Anything not on this list must log, report, record an incident, or re-raise.
-_SILENT_INFRASTRUCTURE_ALLOWED = {
-    # The failure is already logged one layer down, in _request_json, which
-    # logs every ConnectionError/Timeout/HTTPError before it propagates. These
-    # wrappers only map "it failed" to None for the caller.
-    ("cr_api.py", 272),
-    ("cr_api.py", 282),
-    ("cr_api.py", 383),
-    ("cr_api.py", 394),
-    ("cr_api.py", 428),
-    # Returns a structured (False, reason) to its caller, which surfaces it.
-    ("runtime/app.py", 1173),
-    # Columns are added lazily on first write; their absence is expected and
-    # documented at the catch.
-    ("storage/metadata.py", 276),
-    # Reports through the metadata dict it returns (preprocess_error), which
-    # travels with the attachment rather than to the log.
-    ("runtime/channel_router.py", 129),
-    # Answers the Discord interaction with the timeout, so a human is told
-    # directly — a better surface than the log.
-    ("runtime/discord_commands.py", 254),
-    # `ps -p` exits non-zero for a dead PID, which is the ordinary case this
-    # helper exists to detect. Logging it would fire on every check.
-    ("runtime/process.py", 76),
-}
+# A silent infrastructure catch that is genuinely fine opts out at the catch
+# itself, with `# hygiene: <reason>` on the except line or inside the handler.
+#
+# This was a table of (file, line) pairs for about an hour, until adding three
+# lines to runtime/app.py silently invalidated an entry 1,100 lines below and
+# the check failed on an unrelated edit. A justification that lives anywhere
+# but the code it justifies will drift away from it.
+_OPT_OUT_MARKER = "# hygiene:"
 
 
 def _sources() -> list[Path]:
@@ -192,6 +174,13 @@ def _caught_names(node: ast.expr | None) -> set[str]:
     if isinstance(node, ast.Tuple):
         return {name for element in node.elts for name in _caught_names(element)}
     return set()
+
+
+def _opts_out(handler: ast.ExceptHandler, lines: list[str]) -> bool:
+    """True when the catch carries a written justification at the site."""
+    start = handler.lineno - 1
+    end = handler.end_lineno or handler.lineno
+    return any(_OPT_OUT_MARKER in line for line in lines[start:end])
 
 
 def _is_silent(handler: ast.ExceptHandler) -> bool:
@@ -250,7 +239,9 @@ def check() -> tuple[list[str], Counter]:
 
     for path in _sources():
         relative = path.relative_to(ROOT).as_posix()
-        tree = ast.parse(path.read_text(), filename=relative)
+        source = path.read_text()
+        lines = source.splitlines()
+        tree = ast.parse(source, filename=relative)
         for handler in (node for node in ast.walk(tree) if isinstance(node, ast.ExceptHandler)):
             name = _exception_name(handler)
 
@@ -259,11 +250,12 @@ def check() -> tuple[list[str], Counter]:
             if (
                 _caught_names(handler.type) & _INFRASTRUCTURE_EXCEPTIONS
                 and _is_silent(handler)
-                and (relative, handler.lineno) not in _SILENT_INFRASTRUCTURE_ALLOWED
+                and not _opts_out(handler, lines)
             ):
                 findings.append(
                     f"{relative}:{handler.lineno}: infrastructure failure swallowed "
-                    "without a log — an outage here would be invisible"
+                    f"without a log — an outage here would be invisible. Log it, or "
+                    f"justify it with `{_OPT_OUT_MARKER} <reason>` at the catch"
                 )
 
             if name not in {None, "BaseException", "Exception"}:

@@ -127,6 +127,7 @@ def _prepare_screenshot_image(
                 )
                 return best, "image/jpeg", metadata
     except UnidentifiedImageError, OSError, ValueError:
+        # hygiene: reported on the metadata dict that travels with the attachment
         metadata["preprocess_error"] = "unreadable_image"
     return data, media_type, metadata
 

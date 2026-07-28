@@ -269,7 +269,7 @@ def _cached_fetch(endpoint_name, tag, path, ttl_seconds):
         return cached
     try:
         payload = _request_json(path, endpoint_name=endpoint_name, entity_key=tag)
-    except requests.RequestException, ValueError:
+    except requests.RequestException, ValueError:  # hygiene: _request_json logs it
         return None
     _cache_set(cache_key, payload, ttl_seconds)
     return payload
@@ -279,7 +279,7 @@ def get_clan():
     """Fetch our clan profile. Returns payload dict or None on error."""
     try:
         return _request_json(f"/clans/%23{CLAN_TAG}", endpoint_name="clan", entity_key=CLAN_TAG)
-    except requests.RequestException, ValueError:
+    except requests.RequestException, ValueError:  # hygiene: _request_json logs it
         return None
 
 
@@ -380,7 +380,7 @@ def get_cards():
     """
     try:
         return _request_json("/cards", endpoint_name="cards")
-    except requests.RequestException, ValueError:
+    except requests.RequestException, ValueError:  # hygiene: _request_json logs it
         return None
 
 
@@ -391,7 +391,7 @@ def get_events():
     """
     try:
         return _request_json("/events", endpoint_name="events")
-    except requests.RequestException, ValueError:
+    except requests.RequestException, ValueError:  # hygiene: _request_json logs it
         return None
 
 
@@ -425,7 +425,7 @@ def get_leaderboards():
     """Fetch available game-mode leaderboards."""
     try:
         return _request_json("/leaderboards", endpoint_name="leaderboards")
-    except requests.RequestException, ValueError:
+    except requests.RequestException, ValueError:  # hygiene: _request_json logs it
         return None
 
 

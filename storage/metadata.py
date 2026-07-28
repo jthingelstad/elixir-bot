@@ -274,8 +274,8 @@ def purge_old_data(conn: Optional[sqlite3.Connection] = None) -> dict[str, int]:
         )
         stats["llm_calls_blobs_pruned"] = cursor.rowcount
     except sqlite3.OperationalError:
-        # Columns not yet added on a DB that has never recorded a call — nothing
-        # to prune. (They are lazily added by record_llm_call on first write.)
+        # hygiene: columns not yet added on a DB that has never recorded a call —
+        # nothing to prune. (Lazily added by record_llm_call on first write.)
         stats["llm_calls_blobs_pruned"] = 0
     conn.commit()
     return stats
