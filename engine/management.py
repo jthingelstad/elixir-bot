@@ -167,6 +167,12 @@ _MGMT_STATE_COL = {
     "promote": "promote_state",
     "demote": "demote_state",
 }
+# Engine dimension → the leader-action card type that carries it to the board.
+_MGMT_ACTION_TYPE = {
+    "kick": "kick_recommendation",
+    "promote": "promotion_recommendation",
+    "demote": "demotion_recommendation",
+}
 
 
 def management_read_summary(conn) -> dict:
@@ -194,7 +200,43 @@ def management_read_summary(conn) -> dict:
     actionable: dict[str, list] = {"kick": [], "promote": [], "demote": []}
     building = {"kick": 0, "promote": 0, "demote": 0}
     readiness_counts = {"ready": 0, "held": 0, "unknown": 0}
+    open_ask_counts = {"kick": 0, "promote": 0, "demote": 0}
     held: list[dict] = []
+    # Which of these verdicts are actually ON THE BOARD awaiting a decision, and
+    # how the leader last answered. Without this the read could only say "the
+    # engine wants X" — indistinguishable from "the leader still owes an answer
+    # on X" — so a decided or declined item kept surfacing as a pending ask.
+    open_asks = {
+        (r["target_player_tag"], r["action_type"]): r["action_id"]
+        for r in conn.execute(
+            """SELECT target_player_tag, action_type, MAX(action_id) AS action_id
+                 FROM leader_action_recommendations
+                WHERE status = 'proposed' AND COALESCE(is_test, 0) = 0
+                  AND target_player_tag IS NOT NULL
+                GROUP BY target_player_tag, action_type"""
+        ).fetchall()
+    }
+    last_decisions = {
+        (r["target_player_tag"], r["action_type"]): {
+            "status": r["status"],
+            "decided_at": r["decided_at"],
+            "suppressed_until": r["expires_at"],
+        }
+        for r in conn.execute(
+            """SELECT target_player_tag, action_type, status, decided_at, expires_at
+                 FROM leader_action_recommendations lar
+                WHERE status IN ('done', 'rejected') AND COALESCE(is_test, 0) = 0
+                  AND target_player_tag IS NOT NULL
+                  AND decided_at = (
+                      SELECT MAX(decided_at) FROM leader_action_recommendations x
+                       WHERE x.target_player_tag = lar.target_player_tag
+                         AND x.action_type = lar.action_type
+                         AND x.status IN ('done', 'rejected')
+                         AND COALESCE(x.is_test, 0) = 0
+                  )
+                GROUP BY target_player_tag, action_type"""
+        ).fetchall()
+    }
     for row in rows:
         judgment_status = row["judgment_status"] or "unknown"
         readiness_counts[judgment_status] += 1
@@ -213,14 +255,26 @@ def management_read_summary(conn) -> dict:
         for action, col in _MGMT_STATE_COL.items():
             state = row[col] or "none"
             if state in _MGMT_ACTIONABLE[action]:
-                actionable[action].append(
-                    {
-                        "player_tag": row["player_tag"],
-                        "player_name": row["current_name"] or row["player_tag"],
-                        "role": row["role"] or "member",
-                        "state": state,
-                    }
-                )
+                ask = open_asks.get((row["player_tag"], _MGMT_ACTION_TYPE[action]))
+                last = last_decisions.get((row["player_tag"], _MGMT_ACTION_TYPE[action]))
+                entry = {
+                    "player_tag": row["player_tag"],
+                    "player_name": row["current_name"] or row["player_tag"],
+                    "role": row["role"] or "member",
+                    "state": state,
+                    # WARRANTED (the engine judges this right) is NOT the same as
+                    # ASKED (a card is open awaiting the leader). They diverge the
+                    # moment a leader declines: the member can still genuinely
+                    # warrant the action while nothing is pending. Reporting only
+                    # the former made the brain re-ask for decisions already made.
+                    "open_card": bool(ask),
+                    "open_card_action_id": ask,
+                }
+                if last:
+                    entry["last_decision"] = last
+                actionable[action].append(entry)
+                if ask:
+                    open_ask_counts[action] += 1
             elif state in _MGMT_BUILDING[action]:
                 building[action] += 1
     from engine.readiness import latest_materialization
@@ -228,6 +282,9 @@ def management_read_summary(conn) -> dict:
     materialization = latest_materialization(conn)
     return {
         "actionable": actionable,
+        # What the leader still owes an answer on. `actionable` is the engine's
+        # judgment and persists after a decline; this is the live board.
+        "open_ask_counts": open_ask_counts,
         "building_counts": building,
         "members_evaluated": len(rows),
         "readiness": {

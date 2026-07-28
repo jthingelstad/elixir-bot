@@ -1106,6 +1106,58 @@ def decide_leader_action_by_message(
     )
 
 
+# Enacting a card must clear the management state that produced it. SQL per
+# action type; `state_json` carries the hysteresis counters alongside the column.
+_ENACTED_STATE_RESET = {
+    "promotion_recommendation": (
+        "promote_state = 'none', promote_qualifying_weeks = 0, "
+        "state_json = json_set(COALESCE(state_json, '{}'), '$.promote_misses', 0)"
+    ),
+    "demotion_recommendation": (
+        "demote_state = 'none', "
+        "state_json = json_set(COALESCE(state_json, '{}'), '$.demote_weeks', 0)"
+    ),
+}
+
+
+def _reconcile_management_state(conn, action: dict, status: str) -> None:
+    """Write an enacted decision back to `member_management`.
+
+    Reconciliation used to run ONE direction: `withdraw_stale_actions` closes a
+    CARD when the STATE withdraws, but nothing wrote back the other way. So an
+    enacted promotion left `promote_state='eligible'` until the next weekly
+    review — up to 7 days — and the awareness brain reads those states as live
+    recommendations. Live on 2026-07-28: pax had been promoted and Tere demoted
+    hours earlier, yet the read still carried "promote: 1, demote: 2" with zero
+    open cards behind them. The same staleness handed Fullboat and dez42 fresh
+    "promote to Elder" cards a week after they were promoted (R214/R215); the
+    guard added then only patches it at review time, and only when the role
+    happens to mismatch.
+
+    Only DONE clears. A DECLINE leaves the state alone — the member may still
+    genuinely warrant the action (OllieTurtle remained outranked after his
+    demotion was declined), and the re-nomination cooldown already owns whether
+    a card comes back. `management_read_summary` reports warranted separately
+    from open-ask so a declined-but-still-true state stops reading as a pending
+    request.
+
+    Kick is deliberately excluded: `kick_state` is recomputed EVERY tick from
+    idleness and `run_tick_evaluators` fires a card on the transition INTO
+    'recommended'. Clearing it to 'none' would re-arm that transition and raise
+    a second card on the next tick whenever the member has not left yet.
+    """
+    if status != ACTION_DONE:
+        return
+    assignment = _ENACTED_STATE_RESET.get(action.get("action_type") or "")
+    tag = action.get("target_player_tag")
+    if not assignment or not tag:
+        return
+    conn.execute(
+        f"UPDATE member_management SET {assignment} WHERE UPPER(player_tag) = UPPER(?)",
+        (_db._canon_tag(tag),),
+    )
+
+
 @managed_connection
 def decide_leader_action(
     action_id: int,
@@ -1173,6 +1225,7 @@ def decide_leader_action(
     )
     if status == ACTION_REJECTED:
         _mark_note_pending(conn, action["action_id"], clean_note)
+    _reconcile_management_state(conn, action, status)
     updated = get_leader_action_by_id(action["action_id"], conn=conn)
     if updated and updated.get("case_id"):
         try:

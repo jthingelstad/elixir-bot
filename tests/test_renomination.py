@@ -340,3 +340,92 @@ def test_renomination_skips_departed_member(engine_conn):
     _seed_recommended(engine_conn, in_clan=False)
     _insert_kick_card(engine_conn, status="rejected", decided_at=_stamp(10))
     assert management.renominate_after_cooldown(engine_conn, now=NOW) == []
+
+
+# --- A decision reconciles the state that produced it ---------------------
+#
+# Reconciliation used to run ONE direction: withdraw_stale_actions closes a
+# CARD when the STATE withdraws, but nothing wrote back. So an enacted
+# promotion left promote_state='eligible' until the next weekly review (up to
+# 7 days), and the awareness brain reads those states as live recommendations
+# -- 2026-07-28 it reported "promote: 1, demote: 2" with zero open cards,
+# for a promotion and a demotion the leader had already carried out hours
+# earlier.
+
+
+def _seed_role_card(conn, action_type, tag="#AAA", status="proposed"):
+    conn.execute(
+        "INSERT INTO leader_action_recommendations "
+        "(action_key, action_type, objective, status, prompt_text, proposed_at, "
+        " created_at, updated_at, target_player_tag, is_test) "
+        "VALUES (?, ?, 'o', ?, 'p', ?, ?, ?, ?, 0)",
+        (f"{action_type}:{tag}", action_type, status, NOW, NOW, NOW, tag),
+    )
+    conn.commit()
+    return conn.execute(
+        "SELECT action_id FROM leader_action_recommendations WHERE target_player_tag=? "
+        "AND action_type=? ORDER BY action_id DESC LIMIT 1",
+        (tag, action_type),
+    ).fetchone()["action_id"]
+
+
+@pytest.mark.parametrize(
+    "action_type,column,seed",
+    [
+        ("promotion_recommendation", "promote_state", "promote_state"),
+        ("demotion_recommendation", "demote_state", "demote_state"),
+    ],
+)
+def test_enacted_role_card_clears_its_management_state(engine_conn, action_type, column, seed):
+    """DONE means the outcome HAPPENED, so the state that asked for it is now
+    false and must not keep advertising itself to the brain."""
+    _seed_recommended(engine_conn, kick_state="none")
+    engine_conn.execute(f"UPDATE member_management SET {seed}='eligible' WHERE player_tag='#AAA'")
+    engine_conn.commit()
+    action_id = _seed_role_card(engine_conn, action_type)
+
+    la.decide_leader_action(
+        action_id, status=la.ACTION_DONE, discord_user_id=1, emoji="✅", conn=engine_conn
+    )
+    state = engine_conn.execute(
+        f"SELECT {column} FROM member_management WHERE player_tag='#AAA'"
+    ).fetchone()[0]
+    assert state == "none"
+
+
+def test_declined_role_card_leaves_state_intact(engine_conn):
+    """A DECLINE is not an outcome: the member may still genuinely warrant the
+    action (OllieTurtle stayed outranked after his demotion was declined), and
+    the re-nomination cooldown owns whether a card returns. The read separates
+    warranted from open-ask so this stops reading as a pending request."""
+    _seed_recommended(engine_conn, kick_state="none")
+    engine_conn.execute(
+        "UPDATE member_management SET demote_state='eligible' WHERE player_tag='#AAA'"
+    )
+    engine_conn.commit()
+    action_id = _seed_role_card(engine_conn, "demotion_recommendation")
+
+    la.decide_leader_action(
+        action_id, status=la.ACTION_REJECTED, discord_user_id=1, emoji="❌", conn=engine_conn
+    )
+    state = engine_conn.execute(
+        "SELECT demote_state FROM member_management WHERE player_tag='#AAA'"
+    ).fetchone()[0]
+    assert state == "eligible"
+
+
+def test_enacted_kick_does_not_clear_kick_state(engine_conn):
+    """Kick is deliberately excluded: kick_state is recomputed EVERY tick from
+    idleness and run_tick_evaluators fires a card on the transition INTO
+    'recommended'. Clearing it would re-arm that transition and raise a second
+    card next tick whenever the member hasn't actually left."""
+    _seed_recommended(engine_conn)
+    action_id = _seed_role_card(engine_conn, "kick_recommendation")
+
+    la.decide_leader_action(
+        action_id, status=la.ACTION_DONE, discord_user_id=1, emoji="✅", conn=engine_conn
+    )
+    state = engine_conn.execute(
+        "SELECT kick_state FROM member_management WHERE player_tag='#AAA'"
+    ).fetchone()[0]
+    assert state == "recommended"
