@@ -1020,19 +1020,10 @@ def llm_page(workflow: str | None = None, limit: int = 50) -> dict:
                    substr(COALESCE(response_preview,''),1,160) AS response_preview
             FROM prompt_feedback ORDER BY prompt_feedback_id DESC LIMIT 20""",
         )
-        suggestions = _rows(
-            conn,
-            """
-            SELECT created_at, category, status, severity, title,
-                   github_issue_url
-            FROM elixir_improvement_suggestions
-            ORDER BY suggestion_id DESC LIMIT 15""",
-        )
         return {
             "calls": calls,
             "failures": failures,
             "feedback": feedback,
-            "suggestions": suggestions,
             "workflows": workflows,
             "active_workflow": workflow or "",
         }

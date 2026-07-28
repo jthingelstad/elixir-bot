@@ -20,6 +20,7 @@ Every run:
 1. Run the shared git preflight (AGENT-TEAM/scripts/preflight.sh).
 2. Pull the recent quality signal:
    * `scripts/review_agent_feedback.py` — 👎 reactions and prompt failures.
+   * `uv run --locked python scripts/leader_feedback_report.py --days 7` — how leadership actually answered Elixir's HITL cards: acceptance rate per action type, decision notes verbatim, and copy edits (where the leader rewrote Elixir's wording). Engine auto-withdrawals are excluded — those are Elixir retracting its own card, not leadership declining, and counting them understates accuracy. Low acceptance for one action type, or repeated copy edits, is the sharpest quality signal available: the notes usually say *which* half is wrong, the judgment or the wording.
    * `uv run --locked python scripts/confidence_report.py --quick --json` — incidents, output silence, confidence tests, and deterministic post-quality checks.
    * `runtime_job_status`, stream cursors, event streams, awareness thoughts/posts, and management/case evidence in `elixir-v51.db`.
    * Exact delivered copy and traces from `awareness_posts`, `awareness_thoughts`, `messages`, and `leader_action_recommendations`.
@@ -36,7 +37,7 @@ Every run:
    * `eval` — a quality dimension that is not yet measured. This is the Evaluator's input.
    * `quality` / `persona` — softer quality or persona-gap patterns for the Product Manager to weigh.
    Always link the evidence; never file a vague "feels off" issue.
-6. Once per week (or when asked), write a short quality report to `docs/tasks/quality-YYYY-MM-DD.md`: top failure modes, accept/ignore rates, noise level, regressions, and the issues you opened. **Commit the report in the same run** (`git add docs/tasks/quality-YYYY-MM-DD.md && git commit -m "Quality report YYYY-MM-DD"`) — never leave it uncommitted. Push only when the shared git preflight says doing so will not publish unrelated existing commits.
+6. Once per week (or when asked), write a short quality report to `docs/tasks/quality-YYYY-MM-DD.md`: top failure modes, accept/ignore rates, noise level, regressions, and the issues you opened. **This weekly pass is also Elixir's improvement discovery** — it replaced an in-product suggestion queue that scored its own findings into SQLite and promoted them to GitHub (#209). Elixir no longer grades its own homework: you read the evidence and file issues under the normal WORKFLOW rules, so GitHub stays the only queue and nothing can silently accumulate unread. **Commit the report in the same run** (`git add docs/tasks/quality-YYYY-MM-DD.md && git commit -m "Quality report YYYY-MM-DD"`) — never leave it uncommitted. Push only when the shared git preflight says doing so will not publish unrelated existing commits.
 7. If quality is healthy and nothing regressed: say so in one line and stop. Do not manufacture issues.
 8. End every run with `git status` clean. A dirty worktree blocks the Build Manager; if you wrote a report, it must be committed before you finish.
 

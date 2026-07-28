@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 
 
 _V1_STATEMENTS = (
@@ -734,6 +734,21 @@ def _apply_v9(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS recognition_ledger")
 
 
+def _apply_v10(conn: sqlite3.Connection) -> None:
+    """Drop ``elixir_improvement_suggestions`` — Elixir no longer grades its own
+    homework in-product (#209).
+
+    A script reviewed Elixir's own data, scored findings into this table, and
+    promoted them to GitHub. Two problems: it is a second queue that must be kept
+    in sync with GitHub (the real one), and the Observatory panel reading it
+    showed rows from 2026-06-19 for over a month because only a manual script
+    ever wrote them. Improvement discovery moved to the Quality Manager's weekly
+    AGENT-TEAM pass, which runs in Codex outside the product runtime, reads the
+    evidence, and files issues directly.
+    """
+    conn.execute("DROP TABLE IF EXISTS elixir_improvement_suggestions")
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -828,6 +843,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 9
+    if version < 10:
+        try:
+            _apply_v10(conn)
+            conn.execute("PRAGMA user_version = 10")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -884,7 +908,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "a85c7988189a39b2dff4f7663edc75fc84bed484719a9e94c0ace570d2df9c14"
+CURRENT_SCHEMA_FINGERPRINT = "665eb5f12fdc02714fa089603e0bf68dc84e196c13bcddf31c9a0a8f93ae7573"
 
 
 __all__ = [
