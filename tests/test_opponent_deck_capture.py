@@ -329,3 +329,15 @@ def test_elixir_compares_against_the_same_battle():
     assert elixir["losses_compared"] == 2  # the unpaired battle is excluded
     assert elixir["avg_leaked"] == 5.0  # all three count for own average
     assert elixir["avg_opponent_leaked"] == 5.0
+
+
+def test_elixir_block_declares_that_lower_is_better():
+    """Every field in this block is a fault count, not a score. The polarity is
+    not inferable from the field names alone, and a model that reads it
+    backwards would praise a member for wasting elixir."""
+    import storage.player as player
+
+    elixir = player._elixir_discipline([_loss(0, 1, None, leaked=9.0, opp_leaked=1.0)])
+
+    assert elixir["lower_is_better"] is True
+    assert elixir["leaked_more_than_opponent"] == 1, "9.0 wasted vs 1.0 is the WORSE player"
