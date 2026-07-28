@@ -235,6 +235,10 @@ _PURGE_TARGETS = [
     # LLM call telemetry: drop the whole row after 90d (blobs get NULLed at 14d
     # first — see the prompt-blob prune in purge_old_data).
     ("llm_calls", "recorded_at", LLM_CALL_RETENTION_DAYS),
+    # Episodes are DERIVED from messages, so they cannot outlive them. Before
+    # #215 messages purged at 30d while the episodes summarising them grew
+    # without bound -- 5,114 episode rows against a 156-row source.
+    ("memory_episodes", "created_at", CONVERSATION_RETENTION_DAYS),
 ]
 
 _PURGE_DATE_TARGETS = []

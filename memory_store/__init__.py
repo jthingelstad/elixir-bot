@@ -1,7 +1,7 @@
 """memory_store — the v5.1 memory system (docs/reference/v5.1/memory.md).
 
 Rebuilt 2026-07-04 (D1–D5 ratified): memories live in the ENGINE DB
-(`elixir-v51.db`) — `memories` + `memory_tags` + `memory_log` + `memories_fts`
+(`elixir-v51.db`) — `memories` + `memory_tags` + `memories_fts`
 replace the old two-database, twenty-object sprawl. Content was migrated
 (scripts/migrate_v51/memory_migrate.py); structure was not.
 
@@ -117,7 +117,6 @@ def ensure_memory_schema(conn: sqlite3.Connection) -> None:
 
     require_columns(conn, "memories", {"memory_id", "kind", "scope"})
     require_columns(conn, "memory_tags", {"memory_id", "tag"})
-    require_columns(conn, "memory_log", {"log_id", "memory_id"})
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'memories_fts'").fetchone():
         raise RuntimeError(
             "database schema contract missing memories_fts; open through db.get_connection()"
@@ -254,10 +253,15 @@ def _fetch_memory(conn, memory_id: int) -> Optional[dict]:
 
 
 def _log(conn, memory_id: int, action: str, actor: str, diff: Optional[dict] = None) -> None:
-    conn.execute(
-        "INSERT INTO memory_log (memory_id, action, actor, at, diff_json) VALUES (?, ?, ?, ?, ?)",
-        (memory_id, action, actor, _utcnow(), _json_or_none(diff)),
-    )
+    """Retired (#215). `memory_log` was an audit trail with zero readers -- a
+    whole-repo trace found no production SELECT -- so it was dropped in schema
+    v12 rather than kept growing at ~154 rows/week unread.
+
+    Kept as a no-op so every call site still reads as "this mutation is a
+    recorded event", and so restoring provenance later means implementing one
+    function with a real reader behind it, not re-threading a dozen callers.
+    """
+    del conn, memory_id, action, actor, diff
 
 
 # ---------------------------------------------------------------- writers
@@ -369,8 +373,15 @@ def attach_evidence_ref(
     metadata: Optional[dict] = None,
     conn=None,
 ) -> None:
-    """v5.1: the evidence-ref satellite is gone (0 rows ever) — the reference
-    lands in memory_log so provenance is still recorded."""
+    """Accepted and discarded (#215).
+
+    The evidence-ref satellite was dropped in v5.1 (0 rows ever) and this
+    forwarded to `memory_log`, which had no reader -- so the reference was
+    already unrecoverable. `memory_log` is gone in v12; this is now explicitly a
+    no-op rather than one disguised as provenance. Kept so the one live caller
+    (runtime/channel_router.py) does not need changing before a real evidence
+    store exists.
+    """
     _log(
         conn,
         memory_id,

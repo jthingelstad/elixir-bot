@@ -209,7 +209,6 @@ _DB_STATUS_MEMORY_TABLES = {
     # v5.1 memory pass (memory.md): one store in the engine DB.
     "memories",
     "memory_tags",
-    "memory_log",
     "memories_fts",
     "conversation_threads",
     "memory_episodes",
