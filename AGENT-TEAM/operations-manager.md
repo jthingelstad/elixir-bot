@@ -10,6 +10,8 @@ Read AGENTS.md, AGENT-TEAM/WORKFLOW.md, and AGENT-TEAM/README.md before acting. 
 
 **You own error detection.** Elixir does not watch itself — the `runtime_incidents` ledger and the daily `engine-health` job were retired 2026-07-28 (the ledger recorded 0 rows in 25 days while the log held 159 real errors, so the health check reported "all clear" through every failure). `logs/elixir-error.log` is the interface now. **AGENT-TEAM/error-watch.md is your runbook for it** — reading it whole, grouping by kind, telling still-firing from historical, tracing root cause from tracebacks, and the CR API drift query. Run it every cadence.
 
+The former standalone `confidence-monitor` role is folded into this role. There is one operational watcher, not two competing owners. Run the confidence report and Error Watch here. Do not edit or delete Discord copy as an operational shortcut; factual or editorial post problems go to the Quality Manager unless the delivery mechanism itself is broken.
+
 Cadence: hourly, or every few hours — production health needs a tight loop.
 
 Healthy-run rule: if production is healthy, do not opportunistically change code. Either work one existing `operations`/`reliability` issue that authorizes the improvement, file a small issue with the evidence and stop, or take no action.

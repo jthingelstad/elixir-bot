@@ -11,9 +11,10 @@ days while the log held 159 real errors — so this report said "healthy" throug
 every actual failure. The ledger was retired 2026-07-28 (schema v20); the log
 was always the record, and this now reads it directly.
 
-Exit code is NON-ZERO when there are findings, so a cron/launchd wrapper or the
-unattended `confidence-monitor` routine knows to act. `--json` emits a machine
-object for an agent to triage.
+Exit code is NON-ZERO when there are findings, so the external Operations and
+Quality Manager automations know to act. `--json` emits a machine object for an
+agent to triage. The report is read-only: it evaluates production evidence but
+does not turn its own findings into product memories or another work queue.
 
     uv run python scripts/confidence_report.py           # human summary
     uv run python scripts/confidence_report.py --json    # agent-readable
@@ -140,12 +141,9 @@ def _liveness() -> list[str]:
     error, and both of these signatures are *quiet*. This is an operator script,
     which is where the watching belongs.
     """
-    from dotenv import load_dotenv
+    from scripts.read_only_db import connect_read_only
 
-    load_dotenv(os.path.join(REPO, ".env"))
-    import db
-
-    conn = db.get_connection()
+    conn = connect_read_only()
     try:
         problems = []
         # (a) total output silence — the Pulse alone posts every ~8h, so 14h dark is wrong.
@@ -198,9 +196,24 @@ def _quality(days: int, quick: bool) -> dict:
     except Exception as exc:  # eval not built / import error
         return {"available": False, "reason": str(exc)}
     try:
-        return {"available": True, **run_eval(days=days, use_llm=not quick)}
+        return {
+            "available": True,
+            **run_eval(days=days, use_llm=not quick, record_feedback=False),
+        }
     except Exception as exc:
         return {"available": True, "error": str(exc)}
+
+
+def _finding_count(errors: list[dict], liveness: list[str], tests: dict, quality: dict) -> int:
+    """Count every failed pillar; unavailable/broken quality must not read healthy."""
+    quality_failed = not quality.get("available") or bool(quality.get("error"))
+    return (
+        len(errors)
+        + len(liveness)
+        + (0 if tests["ok"] else 1)
+        + (1 if quality_failed else 0)
+        + len(quality.get("flagged", []) if quality.get("available") else [])
+    )
 
 
 def main() -> int:
@@ -218,14 +231,10 @@ def main() -> int:
     tests = _run_tests()
     quality = _quality(args.days, args.quick)
 
-    findings = (
-        len(errors)
-        + len(liveness)
-        + (0 if tests["ok"] else 1)
-        + len(quality.get("flagged", []) if quality.get("available") else [])
-    )
+    findings = _finding_count(errors, liveness, tests, quality)
     report = {
         "healthy": findings == 0,
+        "finding_count": findings,
         "errors": errors,
         "liveness": liveness,
         "tests": tests,
@@ -247,7 +256,9 @@ def main() -> int:
         print(f"\nConfidence tests: {'PASS' if tests['ok'] else 'FAIL'} — {tests['summary']}")
         for f in tests["failures"]:
             print(f"  {f}")
-        if quality.get("available"):
+        if quality.get("error"):
+            print(f"\nPost quality: ERROR ({quality['error']})")
+        elif quality.get("available"):
             ga = quality.get("game_accuracy_rate")
             print(
                 f"\nPost quality ({quality.get('sampled', 0)} posts, {args.days}d): "

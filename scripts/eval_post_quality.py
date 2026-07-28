@@ -9,9 +9,10 @@ each post three ways:
   (c) deterministic near-duplicate detection within the same lane.
 
 Emits a per-lane scorecard + a flagged list (post + the specific bad/thin
-claim), stores idempotent editorial lessons that awareness reads on its next
-tick, records a summary row in post_quality_runs (trend), and exposes
-`run_eval(days, lane=None) -> dict` for the Phase-5 confidence report.
+claim) and exposes `run_eval(days, lane=None) -> dict` for the confidence
+report. It is read-only by default. An explicitly authorized caller may use
+`--write-feedback` to store idempotent editorial lessons; findings otherwise
+leave this process through the AGENT-TEAM GitHub workflow, not a SQLite queue.
 
     python scripts/eval_post_quality.py --days 3
     python scripts/eval_post_quality.py --days 7 --json
@@ -36,6 +37,7 @@ load_dotenv()
 import db  # noqa: E402
 from capabilities.game_truth import awareness_post_facts  # noqa: E402
 from engine import game_check  # noqa: E402
+from scripts.read_only_db import connect_read_only  # noqa: E402
 
 _DEPTH_SYSTEM = (
     "You grade a Discord clan bot's post for DEPTH and quality (not correctness "
@@ -240,10 +242,10 @@ def run_eval(
     lane: str | None = None,
     *,
     use_llm: bool = True,
-    record_feedback: bool = True,
+    record_feedback: bool = False,
 ) -> dict:
     """Grade recent posts and optionally persist idempotent editorial lessons."""
-    conn = db.get_connection()
+    conn = connect_read_only()
     try:
         posts = _sample(conn, days=days, lane=lane)
         repetitions = _repetition_findings(posts)
@@ -326,31 +328,18 @@ def run_eval(
             },
             "flagged": flagged,
         }
-        write_conn = db.get_connection()
-        try:
-            if feedback_requests:
+        if feedback_requests:
+            write_conn = db.get_connection()
+            try:
                 from engine.editor import record_post_quality_feedback
 
                 result["feedback_memories_written"] = sum(
                     record_post_quality_feedback(write_conn, **request) is not None
                     for request in feedback_requests
                 )
-            write_conn.execute(
-                "INSERT INTO post_quality_runs (run_at, days, sampled, game_accuracy_rate, "
-                "avg_depth, flagged_count, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    result["run_at"],
-                    days,
-                    n,
-                    result["game_accuracy_rate"],
-                    result["avg_depth"],
-                    len(flagged),
-                    json.dumps(result, default=str),
-                ),
-            )
-            write_conn.commit()
-        finally:
-            write_conn.close()
+                write_conn.commit()
+            finally:
+                write_conn.close()
         return result
     finally:
         if conn is not None:
@@ -393,13 +382,17 @@ def main() -> int:
     ap.add_argument("--lane", default=None)
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--no-llm", action="store_true", help="game-check only (headless)")
-    ap.add_argument("--no-feedback", action="store_true", help="do not write editorial memories")
+    ap.add_argument(
+        "--write-feedback",
+        action="store_true",
+        help="explicitly write idempotent editorial memories (default is read-only)",
+    )
     args = ap.parse_args()
     r = run_eval(
         args.days,
         args.lane,
         use_llm=not args.no_llm,
-        record_feedback=not args.no_feedback,
+        record_feedback=args.write_feedback,
     )
     if args.json:
         print(json.dumps(r, indent=2, default=str))

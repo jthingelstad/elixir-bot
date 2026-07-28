@@ -156,10 +156,10 @@ tools make them visible:
    test status + the latest post-quality scorecard, plus the `liveness` silence
    alarm (an error log cannot report a failure that produced no error, and the
    worst outages were quiet). "Is Elixir healthy?" in one answer. Run it
-   before/after any change; it's what the unattended `confidence-monitor` routine
-   executes. The scorecard samples the active awareness and assistant-message
-   paths; deterministic accuracy/repetition findings become idempotent editorial
-   memories that the next awareness read consumes as composition guidance.
+   before/after any change; the external Operations and Quality Manager routines
+   execute it. The scorecard samples the active awareness and assistant-message
+   paths read-only. Agents turn confirmed findings into GitHub issues; the report
+   never creates a second work queue or silently changes production memory.
 
 ### Review discipline
 
