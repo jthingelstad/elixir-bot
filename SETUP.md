@@ -204,17 +204,31 @@ uv run --locked python scripts/simulate.py
 
 ## Logs
 
-Production stdout and stderr are written to `elixir-v5.log`. `elixir.log` is an
-older root-level log that may still be useful for historical diagnosis; new
-launchd output goes to `elixir-v5.log`.
+Two rotating files under `logs/`, written by `runtime/logging_setup.py`:
+
+| File | Level | Rotation | Purpose |
+|---|---|---|---|
+| `logs/elixir.log` | INFO+ | 10 MB × 5 | The full narrative. |
+| `logs/elixir-error.log` | ERROR+ | 2 MB × 5 | **Watch this one.** Errors with tracebacks, ~6 lines a day. |
+
+The split exists so the error log can be read in full rather than grepped. At
+current volume `elixir-error.log` is small enough for an agent to read end to
+end every few minutes and act on what it finds.
+
+`elixir-v5.log` still receives launchd's stdout/stderr capture. That is the
+catch-all for anything that never reaches logging — interpreter tracebacks on a
+hard crash, third-party prints — not the record.
 
 Useful reads:
 
 ```bash
-tail -100 elixir-v5.log
-rg 'ERROR|Traceback|runtime_incident' elixir-v5.log
-rg 'prompt_failure' elixir-v5.log
+tail -100 logs/elixir-error.log     # what is broken right now
+tail -100 logs/elixir.log           # what happened around it
+rg 'prompt_failure' logs/elixir.log
 ```
+
+Set `ELIXIR_LOG_DIR` to relocate both files, or `ELIXIR_LOG_LEVEL` to change
+the main log's threshold. The error log is always ERROR+.
 
 ## Stateful files and retention
 

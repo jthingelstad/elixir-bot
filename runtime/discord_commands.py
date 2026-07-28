@@ -252,6 +252,7 @@ def register_elixir_app_commands(bot) -> None:
             if proc.returncode != 0:
                 text = f"release script exited {proc.returncode}:\n{text[-1500:]}"
         except asyncio.TimeoutError:
+            # hygiene: answers the interaction, so a human is told directly
             text = "Release script timed out after 10 minutes — check the host."
         except Exception as exc:  # the command must always answer the interaction
             app.log.exception("slash release failed")

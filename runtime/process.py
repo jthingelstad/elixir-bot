@@ -74,6 +74,7 @@ def _process_command(pid: int) -> str:
             stderr=subprocess.DEVNULL,
         ).strip()
     except subprocess.SubprocessError, OSError:
+        # hygiene: `ps -p` exits non-zero for a dead PID — the ordinary case here
         return ""
 
 

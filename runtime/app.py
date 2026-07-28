@@ -35,6 +35,9 @@ from runtime.system_signals import seed_startup_state
 
 load_dotenv()
 
+# Console only at import; runtime.logging_setup.configure_logging() adds the
+# rotating main/error files from main(), so importing this module in a test does
+# not create log files.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 # Quiet noisy third-party loggers so operational signals stay readable.
 # discord.py installs its own handler via utils.setup_logging() in client.run();
@@ -1170,7 +1173,7 @@ async def _send_member_dm(discord_user_id: str, content: str) -> tuple[bool, str
         return False, "user not found"
     try:
         await user.send(content)
-    except discord.Forbidden:
+    except discord.Forbidden:  # hygiene: returns the reason to its caller
         return False, "member has DMs closed"
     except Exception as exc:
         log.warning("member outreach DM send failed: %s", exc, exc_info=True)
@@ -1670,6 +1673,11 @@ PID_FILE = _process_service.PID_FILE
 
 
 def main():
+    from runtime.logging_setup import configure_logging, error_log_path, main_log_path
+
+    configure_logging()
+    log.info("logging to %s (errors also to %s)", main_log_path(), error_log_path())
+
     # Fail fast and by name. A missing secret used to surface late and cryptically
     # (a None token inside discord.py, or an auth error on the first LLM call);
     # refusing to boot names every missing variable at once instead.
