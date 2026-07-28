@@ -33,7 +33,9 @@ def _attr(name: str, default: Any = None) -> RuntimeAttrRef:
 _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ActivityDefinition(
         activity_key="engine-tick",
-        owner_lane="player-highlights",
+        # #player-highlights was deleted 2026-07-11. The tick posts nothing;
+        # #elixir-log is its operator surface, as for the other data jobs.
+        owner_lane="elixir-log",
         purpose="The v5.1 production data tick (runtime.md §2): adaptive-budget "
         "poll → battle mirror → emit → project → manage. It refreshes the "
         "streams/projections the awareness loop reads; the retired deterministic "

@@ -628,7 +628,7 @@ def select_memories(
     Deterministic; no embeddings.
 
     tags: candidates must carry ALL given tags (the Editor's rubric retrieval,
-    editor.md §3 — tag-scoped pools like 'editorial' rank within themselves)."""
+    engine/editor.py — tag-scoped pools like 'editorial' rank within themselves)."""
     scopes = _allowed_scopes(viewer_scope)
     now = datetime.now(timezone.utc)
     match: dict[int, float] = {}

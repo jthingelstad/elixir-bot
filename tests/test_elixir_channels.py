@@ -3306,7 +3306,7 @@ def test_build_schedule_report_shows_engine_tick_interval():
     ):
         report = elixir._build_schedule_report()
 
-    assert "player-highlights" in report
+    assert "elixir-log" in report
     assert "engine-tick" in report
     assert "Every 10 minutes." in report
 
@@ -3349,7 +3349,7 @@ def test_activity_registry_has_unique_keys_and_required_fields():
 def test_activity_registry_exposes_war_and_promotion_visibility():
     specs = {spec["activity_key"]: spec for spec in schedule_specs_from_registry(elixir)}
 
-    assert specs["engine-tick"]["owner_lane"] == "player-highlights"
+    assert specs["engine-tick"]["owner_lane"] == "elixir-log"
     assert specs["engine-tick"]["activity_role"] == "observer"
     assert specs["engine-tick"]["schedule"] == "Every 10 minutes."
     assert "war-poll" not in specs
