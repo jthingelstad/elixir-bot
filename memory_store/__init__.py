@@ -36,6 +36,21 @@ W_MATCH = 0.5  # subject match strength (member 1.0, channel 0.6, fts 0.8)
 W_CONF = 0.3  # stored confidence 0..1
 W_RECENCY = 0.2  # decay(updated_at)
 RECENCY_HALF_LIFE_DAYS = 45.0
+# Machine observations decay; curated knowledge does not.
+#
+# `inference` rows are Elixir noticing something ("TDuck maxed Princess card",
+# "gooba unlocked Tornado spell") — true when written, trivia three months on.
+# They are 97% of the corpus and, because the FTS branch scopes by neither
+# channel nor age, they dominate text recall: a query for "signature deck"
+# returned six rows, ALL from channels deleted in July, dated April-May, one of
+# them about a member who has since left the clan.
+#
+# So inference gets a default lifetime and ages out of recall on its own.
+# leader_note / synthesis / system are curated or structural and never expire by
+# default — an LOA, a founding date, or an agreed exception must not evaporate.
+# An explicit expires_at from the caller always wins.
+INFERENCE_TTL_DAYS = 90
+_SELF_EXPIRING_KINDS = frozenset({"inference"})
 RETIRED_PURGE_GRACE_DAYS = 30
 
 KINDS = {"leader_note", "inference", "system", "synthesis", "conversation_digest"}
@@ -295,6 +310,8 @@ def create_memory(
         ).fetchone()
         if existing:
             return _fetch_memory(conn, existing["memory_id"])
+    if expires_at is None and kind in _SELF_EXPIRING_KINDS:
+        expires_at = _iso_plus_days(now, INFERENCE_TTL_DAYS)
     cur = conn.execute(
         """INSERT INTO memories (kind, title, body, summary, scope, confidence,
                member_tag, channel_key, source_event_key, created_by,
@@ -566,6 +583,14 @@ def list_memories(
     args.append(int(limit))
     rows = conn.execute(sql, args).fetchall()
     return [_fetch_memory(conn, r["memory_id"]) for r in rows]
+
+
+def _iso_plus_days(iso_now: str, days: int) -> str:
+    """`iso_now` + N days, in the store's canonical stamp format."""
+    from datetime import datetime, timedelta, timezone
+
+    base = datetime.strptime(iso_now, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return (base + timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _recency(updated_at: str, now: datetime) -> float:
