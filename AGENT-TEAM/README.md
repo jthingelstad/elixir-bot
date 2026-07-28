@@ -17,7 +17,8 @@ AGENT-TEAM/
   README.md            # this file — Elixir specifics
   <role>.md            # the roster below
   error-watch.md       # Operations Manager runbook: logs/elixir-error.log triage
-  scripts/             # setup-labels.sh · preflight.sh · queue-audit.sh · new-note.sh
+  automations.toml     # desired Codex schedules for every rostered role
+  scripts/             # preflight, queue audit, automation audit, attribution, notes
   notes/               # gitignored per-run scratch
   summaries/           # committed weekly Manager digests
 ```
@@ -36,6 +37,10 @@ AGENT-TEAM/
 
 Data Analyst and Quality Manager are Elixir's **domain roles**; the rest are the standard core
 (shared across projects). Commit lanes and the approval gate are defined in `WORKFLOW.md`.
+
+`confidence-monitor.md` was retired on 2026-07-28. Its runtime/liveness duties are now part of
+the Operations Manager; editorial judgment remains with the Quality Manager. This removes a
+hidden eighth role that crossed both lanes and could mutate live Discord posts without an issue.
 
 Elixir is a data-driven agent: capability is downstream of the Clash Royale API data. The
 **Data Analyst sits at the front of the pipeline** as a primary input to the Product Manager —
@@ -104,6 +109,36 @@ America/Chicago.
 | Evaluator | Weekly + after any router/prompt/workflow change | Keep baselines current; guard changes |
 | Product Manager | Weekly | Discovery benefits from a wider window |
 | Manager | Weekly | Team-health review + the notes digest |
+
+The desired live Codex configuration is versioned in `automations.toml`. Check it with
+`uv run --locked python AGENT-TEAM/scripts/automation_audit.py`; use `--apply` only when Jamie
+has authorized schedule changes. The audit also catches paused roles, stale models, wrong
+cadences, missing role files, and prompts that do not enforce the full read order and clean-run
+rules.
+
+All scheduled roles share one checkout. A clean checkout that is ahead of `origin/main` is
+read-only: agents may inspect evidence and file issues, but must not commit, push, deploy, or
+restart into those pre-existing commits. Dirty, behind, or diverged checkouts stop the run.
+
+## Agent attribution
+
+Agent work should be visibly attributed without pretending that the roles are separate human or
+GitHub accounts:
+
+- End every GitHub issue comment with `— **<automation name>** (agent)`. GitHub will still show
+  Jamie's authenticated account as the commenter; changing that requires separately provisioned
+  bot accounts or a GitHub App, not a mocked identity.
+- Make authorized commits through
+  `uv run --locked python AGENT-TEAM/scripts/agent_attribution.py commit <automation-id> -- <git commit args>`.
+  The commit author becomes the automation name from `automations.toml`, while the configured
+  human remains the committer and the real verified email remains attached. Do not alter the
+  repository's persistent `user.name`, invent an email, or replace GitHub credentials.
+- Post issue comments through
+  `uv run --locked python AGENT-TEAM/scripts/agent_attribution.py issue-comment <automation-id> <issue> --body-file <path>`
+  when practical; the helper adds the signature consistently.
+
+The automation id and display name are versioned in `automations.toml`; that file is the identity
+registry as well as the schedule registry.
 
 ## North star
 

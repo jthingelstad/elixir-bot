@@ -9,8 +9,6 @@
 #
 # Prints the path it created (open it and fill it in).
 #
-# This file is byte-identical across every project's AGENT-TEAM/scripts/.
-
 set -euo pipefail
 
 role="${1:-role}"
@@ -24,9 +22,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 notes_dir="$(dirname "$script_dir")/notes"
 mkdir -p "$notes_dir"
 
-date_iso="$(date +%Y-%m-%d)"
 stamp="$(date +%Y-%m-%dT%H:%M:%S%z)"
-path="$notes_dir/${date_iso}-${role}-${slug}.md"
+file_stamp="$(date +%Y-%m-%dT%H-%M-%S%z)"
+path="$notes_dir/${file_stamp}-${role}-${slug}.md"
 
 if [ -e "$path" ]; then
   echo "$path"   # already exists — don't clobber

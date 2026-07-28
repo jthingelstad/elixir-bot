@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import db
+from scripts.read_only_db import connect_read_only
 
 
 def _print_review_item(row: dict, *, include_raw: bool) -> None:
@@ -67,11 +68,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    rows = db.list_prompt_review_items(
-        limit=args.limit,
-        workflow=args.workflow,
-        include_positive=args.include_positive,
-    )
+    conn = connect_read_only()
+    try:
+        rows = db.list_prompt_review_items(
+            limit=args.limit,
+            workflow=args.workflow,
+            include_positive=args.include_positive,
+            conn=conn,
+        )
+    finally:
+        conn.close()
     if args.json:
         print(json.dumps(rows, indent=2, ensure_ascii=False))
         return
