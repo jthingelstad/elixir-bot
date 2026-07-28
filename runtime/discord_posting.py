@@ -228,7 +228,7 @@ async def compose_and_post(channel, *, lane: str, context: str, leadership: bool
     except Exception:
         log.exception("compose_and_post: agent failed for lane %s", lane)
         return False
-    from engine.recognition.compose import looks_like_meta
+    from runtime.lanes import looks_like_meta
 
     def _extract_copy(res):
         if isinstance(res, str):

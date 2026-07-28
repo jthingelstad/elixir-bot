@@ -216,7 +216,6 @@ def _close_season_once(conn, season_id: str, observed_at: str) -> None:
     log.info("ranked season %s closed; %s results snapshotted", season_id, snapshot)
     try:
         from engine.emitters import insert_stream_event
-        from engine.recognition import ledger
 
         pod = podium(conn, season_id)
         for entry in pod:
@@ -245,13 +244,11 @@ def _close_season_once(conn, season_id: str, observed_at: str) -> None:
                     observed_at,
                 ),
             ).rowcount:
-                ledger.claim(
-                    conn,
-                    f"award:pol_champ:{season_id}:{entry['tag']}",
-                    "player",
-                    [f"pol_season_closed:{season_id}"],
-                    0,
-                )
+                # Idempotency is the awards UNIQUE constraint above. The
+                # recognition-ledger claim that used to fire here was intentless
+                # by design and read by nothing; retired with the recognizer
+                # (#207).
+                pass
         if pod:
             insert_stream_event(
                 conn,

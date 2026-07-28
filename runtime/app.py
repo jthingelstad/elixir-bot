@@ -660,7 +660,7 @@ async def _engine_tick():
     import cr_api as _cr_api
     from engine import db as engine_db
     from engine import tick as engine_tick_mod
-    from engine.recognition import compose as engine_compose
+    from runtime import lanes as engine_compose
 
     runtime_status.mark_job_start("engine_tick")
 
@@ -1620,7 +1620,7 @@ async def on_message_delete(message):
         if bot.user is None or message.author is None or message.author.id != bot.user.id:
             return
         from engine import editor as engine_editor
-        from engine.recognition import compose as engine_compose
+        from runtime import lanes as engine_compose
 
         lane_channel_ids = {
             ch["channel_id"]: ch["channel_name"] for ch in engine_compose.channels().values()
