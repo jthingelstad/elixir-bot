@@ -443,3 +443,159 @@ def test_wins_read_labels_beaten_cards_as_a_strength():
         assert "BEAT" in out["note"]
     finally:
         conn.close()
+
+
+# ── member report depth ──────────────────────────────────────────────────────
+
+
+def _rep_battle(outcome, opp_cards, *, leaked=None, own_towers=None, opp_towers=None):
+    return {
+        "outcome": outcome,
+        "opponent_deck_json": json.dumps([{"id": i, "name": n} for i, n in enumerate(opp_cards)]),
+        "elixir_leaked": leaked,
+        "opponent_elixir_leaked": 3.0,
+        "princess_towers_hp_json": own_towers,
+        "opponent_princess_towers_hp_json": opp_towers,
+        "crowns_for": 1 if outcome == "W" else 0,
+        "crowns_against": 0 if outcome == "W" else 1,
+        "support_cards_json": json.dumps([{"id": 1, "name": "Dagger Duchess"}]),
+    }
+
+
+def test_report_matchups_give_a_card_a_win_loss_record():
+    """The deepest thing the record supports: not "you lost to X" but "you are
+    1-4 against it"."""
+    from runtime import member_report as mr
+
+    battles = [_rep_battle("L", ["Mega Knight"]) for _ in range(4)]
+    battles += [_rep_battle("W", ["Mega Knight"])]
+    battles += [_rep_battle("W", ["Goblins"]) for _ in range(5)]
+
+    mu = mr._card_matchups(battles, min_faced=4)
+    by_name = {c["name"]: c for c in mu["toughest"] + mu["best"]}
+
+    assert by_name["Mega Knight"]["wins"] == 1
+    assert by_name["Mega Knight"]["losses"] == 4
+    assert mu["toughest"][0]["name"] == "Mega Knight"
+    assert mu["best"][0]["name"] == "Goblins"
+
+
+def test_report_matchup_floor_scales_with_how_much_they_played():
+    """A 0-4 record is a story in a 20-battle week and noise in a 300-battle
+    one. This clan spans both in the same week."""
+    from runtime import member_report as mr
+
+    assert mr._card_matchups([_rep_battle("W", ["A"])] * 20)["min_faced"] == 4
+    assert mr._card_matchups([_rep_battle("W", ["A"])] * 332)["min_faced"] == 8
+
+
+def test_report_elixir_splits_wins_from_losses():
+    """The split is what makes it coaching rather than trivia."""
+    from runtime import member_report as mr
+
+    e = mr._elixir_profile(
+        [
+            _rep_battle("W", ["A"], leaked=2.0),
+            _rep_battle("W", ["A"], leaked=4.0),
+            _rep_battle("L", ["A"], leaked=8.0),
+        ]
+    )
+
+    assert e["in_wins"] == 3.0
+    assert e["in_losses"] == 8.0
+    assert e["loss_minus_win_gap"] == 5.0
+    assert e["lower_is_better"] is True
+
+
+def test_report_depth_brief_states_polarity_in_every_line():
+    """The model only sees this brief, so a line that can be read backwards is
+    a line that will be. Guards the elixir and matchup framing together."""
+    from runtime import member_report as mr
+
+    ctx = {
+        "battles": {
+            "margin": {
+                "narrow_wins": 2,
+                "near_miss_losses": 3,
+                "threshold_hp": 500,
+                "three_crown_wins": 0,
+                "no_tower_lost_wins": 0,
+                "closest_loss_their_tower_hp": 40,
+            },
+            "elixir": {
+                "avg_leaked": 7.0,
+                "avg_opponent_leaked": 3.0,
+                "in_wins": 4.0,
+                "in_losses": 8.0,
+                "loss_minus_win_gap": 4.0,
+            },
+            "matchups": {
+                "toughest": [{"name": "Rascals", "played_as": None, "wins": 2, "losses": 16}],
+                "best": [{"name": "Skeletons", "played_as": None, "wins": 9, "losses": 2}],
+                "min_faced": 8,
+            },
+            "tower_troop": "Dagger Duchess",
+        }
+    }
+    brief = "\n".join(mr._depth_brief(ctx))
+
+    assert "LOWER IS BETTER" in brief
+    assert "do NOT call these dominant" in brief
+    assert "NOT a proven cause" in brief, "elixir gap is a correlation"
+    assert "these BEAT them" in brief
+    assert "never a weakness" in brief, "best matchups must not read as a problem"
+    assert "Dagger Duchess" in brief
+
+
+# ── sparklines ───────────────────────────────────────────────────────────────
+
+
+def test_tower_sparkline_marks_destroyed_towers_not_zero_height():
+    """A destroyed tower is OMITTED by the API, not zeroed. Rendering it as the
+    shortest block would read as 'barely alive' — the exact opposite."""
+    from runtime import member_report as mr
+
+    assert mr._tower_spark("[3000,3000]", 3000) == "██"
+    assert mr._tower_spark("[3000]", 3000) == "█·", "one fell"
+    assert mr._tower_spark(None, 3000) == "··", "both fell"
+
+
+def test_tower_sparkline_orders_healthiest_first():
+    """Stable ordering, so a column of these is scannable — the second glyph is
+    always the tower closer to falling."""
+    from runtime import member_report as mr
+
+    assert mr._tower_spark("[100,3000]", 3000) == mr._tower_spark("[3000,100]", 3000)
+    assert mr._tower_spark("[3000,100]", 3000)[1] < mr._tower_spark("[3000,100]", 3000)[0]
+
+
+def test_sparkline_scales_are_relative_to_the_member():
+    """Neither tower HP nor elixir has a universal max — tower HP scales with
+    tower level, and elixir runs median ~3 but reaches 300 in duels. A fixed
+    ceiling either flattens normal battles or lets outliers own the scale."""
+    from runtime import member_report as mr
+
+    battles = [
+        {
+            "princess_towers_hp_json": "[2000,1000]",
+            "opponent_princess_towers_hp_json": "[3000]",
+            "elixir_leaked": float(i),
+            "opponent_elixir_leaked": 1.0,
+        }
+        for i in range(20)
+    ]
+    scale = mr._battle_scale(battles)
+
+    assert scale["own_full_hp"] == 2000
+    assert scale["opponent_full_hp"] == 3000
+    assert scale["elixir_ceiling"] >= 6.0, "floor keeps a tidy week from reading as noise"
+    assert scale["elixir_ceiling"] < 20, "outliers must not own the scale"
+
+
+def test_sparkline_clamps_rather_than_indexing_out_of_range():
+    """A 300-elixir duel must render as a full bar, not crash the report."""
+    from runtime import member_report as mr
+
+    assert mr._spark_char(300, 12) == "█"
+    assert mr._spark_char(0, 12) == "▁"
+    assert mr._spark_char(5, 0) == "▁", "degenerate ceiling must not divide by zero"

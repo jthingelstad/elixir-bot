@@ -12,6 +12,7 @@ calls the LLM — the job wires generation in between build and render.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 import db
@@ -21,6 +22,7 @@ from engine.profiles import MODE_DISPLAY, playstyle_line
 from storage import game_events
 from storage._formatting import preferred_display_name
 from storage.game_modes import mode_group_label
+from storage.player import NEAR_MISS_TOWER_HP
 
 _ISO_CUTOFF = "%Y-%m-%dT%H:%M:%S"
 
@@ -59,7 +61,10 @@ def _window_battles(conn, tag: str, cutoff: str, until: str | None = None) -> li
         params.append(until)
     rows = conn.execute(
         f"SELECT battle_time, game_mode_name, mode_group, outcome, crowns_for, crowns_against, "
-        f"trophy_change, is_war, is_ranked, is_special_event, teammate_tag, deck_json "
+        f"trophy_change, is_war, is_ranked, is_special_event, teammate_tag, deck_json, "
+        f"opponent_deck_json, opponent_name, opponent_clan_name, support_cards_json, "
+        f"elixir_leaked, opponent_elixir_leaked, princess_towers_hp_json, "
+        f"opponent_princess_towers_hp_json "
         f"FROM battle_events WHERE {where} ORDER BY battle_time DESC",
         tuple(params),
     ).fetchall()
@@ -126,6 +131,226 @@ def _deck_card_names(deck_json) -> list[str]:
     except ValueError, TypeError:
         return []
     return [str(c["name"]) for c in (cards or []) if isinstance(c, dict) and c.get("name")]
+
+
+def _deck_card_modes(deck_json) -> list[tuple[str, str | None]]:
+    """(name, played_as) per card — an Evo Knight is not a plain Knight."""
+    if not deck_json:
+        return []
+    try:
+        cards = json.loads(deck_json) if isinstance(deck_json, str) else deck_json
+    except ValueError, TypeError:
+        return []
+    out = []
+    for card in cards or []:
+        if not isinstance(card, dict) or not card.get("name"):
+            continue
+        mode = card.get("evolution_level")
+        out.append((str(card["name"]), "evo" if mode == 1 else "hero" if mode == 2 else None))
+    return out
+
+
+def _towers(towers_json) -> list[int]:
+    """Surviving princess tower HP. The API omits destroyed towers rather than
+    zeroing them, so length is the survivor count and NULL means both fell."""
+    if not towers_json:
+        return []
+    try:
+        towers = json.loads(towers_json) if isinstance(towers_json, str) else towers_json
+    except ValueError, TypeError:
+        return []
+    return [t for t in (towers or []) if isinstance(t, int) and not isinstance(t, bool)]
+
+
+_SPARK = "▁▂▃▄▅▆▇█"
+_DEAD = "·"
+
+
+def _spark_char(value: float, ceiling: float) -> str:
+    """One block glyph for `value` on a 0..ceiling scale."""
+    if ceiling <= 0:
+        return _SPARK[0]
+    idx = int(round((max(0.0, min(float(value), ceiling)) / ceiling) * (len(_SPARK) - 1)))
+    return _SPARK[idx]
+
+
+def _tower_spark(towers_json, full_hp: float) -> str:
+    """Two glyphs: the health of the two princess towers, tallest = healthiest.
+
+    A destroyed tower is OMITTED by the API rather than zeroed, so a short list
+    means the missing ones fell -- rendered as `·`. Scanning a column of these
+    shows at a glance which games went to the wire.
+    """
+    towers = sorted(_towers(towers_json), reverse=True)
+    glyphs = [_spark_char(hp, full_hp) for hp in towers[:2]]
+    return "".join(glyphs) + _DEAD * (2 - len(glyphs))
+
+
+def _battle_scale(battles: list[dict]) -> dict:
+    """Per-member reference points for the sparklines.
+
+    Both scales are RELATIVE TO THIS MEMBER, because neither has a universal
+    maximum. Tower HP scales with tower level, so their healthiest observed
+    tower is their 100%.
+
+    Elixir needed the same treatment: leaked runs median 3.3 but reaches 300 in
+    long duels, so a fixed ceiling either flattens every normal battle into the
+    bottom block or lets outliers own the scale. The member's own 90th
+    percentile puts the spread where their games actually are and saturates
+    about a tenth of them. Own and opponent share one ceiling so the two glyphs
+    in a cell are directly comparable.
+    """
+    own = [hp for b in battles for hp in _towers(b.get("princess_towers_hp_json"))]
+    opp = [hp for b in battles for hp in _towers(b.get("opponent_princess_towers_hp_json"))]
+    leaked = sorted(
+        float(v)
+        for b in battles
+        for v in (b.get("elixir_leaked"), b.get("opponent_elixir_leaked"))
+        if isinstance(v, (int, float)) and not isinstance(v, bool)
+    )
+    ceiling = leaked[int(len(leaked) * 0.9)] if leaked else 0.0
+    return {
+        "own_full_hp": max(own) if own else 0,
+        "opponent_full_hp": max(opp) if opp else 0,
+        # Floor keeps a very tidy week from rendering noise as a full bar.
+        "elixir_ceiling": max(ceiling, 6.0),
+    }
+
+
+def _card_matchups(battles: list[dict], *, min_faced: int | None = None, limit: int = 4) -> dict:
+    """Win/loss record against each card the member actually faced.
+
+    The deepest thing the new battle record supports: not "you lost to Mega
+    Knight" but "you are 1-8 against it". A card seen in both wins and losses
+    is a matchup, and a matchup has a record. Counted once per battle so a duel
+    (2-3 sub-decks under one row) cannot double-count a shared card.
+
+    `min_faced` guards against reading a story into two games; every entry
+    reports `faced` so the sample is never hidden.
+    """
+    # Scale the sample floor to how much the member actually played. A 0-4
+    # record is a story in a 20-battle week and noise in a 300-battle one, and
+    # this clan spans both in the same week.
+    if min_faced is None:
+        min_faced = max(4, len(battles) // 40)
+    rec: dict[tuple[str, str | None], dict] = {}
+    for b in battles:
+        outcome = b.get("outcome")
+        if outcome not in ("W", "L"):
+            continue
+        for key in set(_deck_card_modes(b.get("opponent_deck_json"))):
+            slot = rec.setdefault(key, {"wins": 0, "losses": 0})
+            slot["wins" if outcome == "W" else "losses"] += 1
+    rows = []
+    for (name, played_as), slot in rec.items():
+        faced = slot["wins"] + slot["losses"]
+        if faced < min_faced:
+            continue
+        rows.append(
+            {
+                "name": name,
+                "played_as": played_as,
+                "faced": faced,
+                "wins": slot["wins"],
+                "losses": slot["losses"],
+                "win_rate": round(slot["wins"] / faced, 3),
+            }
+        )
+    # Ties broken by sample size so the better-evidenced matchup leads.
+    hardest = sorted(rows, key=lambda r: (r["win_rate"], -r["faced"]))
+    return {
+        "toughest": hardest[:limit],
+        "best": list(reversed(hardest))[:limit],
+        "cards_with_a_record": len(rows),
+        "min_faced": min_faced,
+    }
+
+
+def _margin_profile(battles: list[dict]) -> dict:
+    """How close the week's results actually were.
+
+    A 0-1 loss with the opponent's last tower at 90 HP and a 0-3 sweep are both
+    a loss in the tally; a three-crown win and a game survived at 31 HP are both
+    a win. Crowns cannot separate them — surviving tower HP can.
+    """
+    wins = [b for b in battles if b.get("outcome") == "W"]
+    losses = [b for b in battles if b.get("outcome") == "L"]
+
+    def _weakest(rows, column):
+        lows = [min(t) for r in rows if (t := _towers(r.get(column)))]
+        return (
+            sum(1 for x in lows if x < NEAR_MISS_TOWER_HP),
+            min(lows) if lows else None,
+            len(lows),
+        )
+
+    near_miss, closest_loss, loss_data = _weakest(losses, "opponent_princess_towers_hp_json")
+    narrow, closest_win, win_data = _weakest(wins, "princess_towers_hp_json")
+    return {
+        "three_crown_wins": sum(1 for b in wins if int(b.get("crowns_for") or 0) >= 3),
+        "no_tower_lost_wins": sum(
+            1 for b in wins if len(_towers(b.get("princess_towers_hp_json"))) == 2
+        ),
+        "narrow_wins": narrow,
+        "closest_win_own_tower_hp": closest_win,
+        "one_crown_losses": sum(
+            1
+            for b in losses
+            if int(b.get("crowns_against") or 0) - int(b.get("crowns_for") or 0) == 1
+        ),
+        "near_miss_losses": near_miss,
+        "closest_loss_their_tower_hp": closest_loss,
+        "threshold_hp": NEAR_MISS_TOWER_HP,
+        "wins_with_tower_data": win_data,
+        "losses_with_tower_data": loss_data,
+    }
+
+
+def _elixir_profile(battles: list[dict]) -> dict:
+    """Elixir wasted in wins vs in losses. LOWER IS BETTER, always.
+
+    Leaked elixir overflowed while the bar sat capped, so it is a habit rather
+    than luck — and splitting by result is what makes it coaching instead of
+    trivia. A member who leaks 4 in wins and 7 in losses has found something
+    specific to work on. It is a CORRELATION: losing also causes passive play,
+    so the report names it as a pattern, never as the cause.
+    """
+
+    def _avg(rows, column):
+        vals = [
+            float(r[column])
+            for r in rows
+            if isinstance(r.get(column), (int, float)) and not isinstance(r.get(column), bool)
+        ]
+        return (round(sum(vals) / len(vals), 2) if vals else None), len(vals)
+
+    wins = [b for b in battles if b.get("outcome") == "W"]
+    losses = [b for b in battles if b.get("outcome") == "L"]
+    win_avg, win_n = _avg(wins, "elixir_leaked")
+    loss_avg, loss_n = _avg(losses, "elixir_leaked")
+    overall, overall_n = _avg(battles, "elixir_leaked")
+    opp_overall, _ = _avg(battles, "opponent_elixir_leaked")
+    gap = round(loss_avg - win_avg, 2) if win_avg is not None and loss_avg is not None else None
+    return {
+        "avg_leaked": overall,
+        "avg_opponent_leaked": opp_overall,
+        "in_wins": win_avg,
+        "in_losses": loss_avg,
+        "loss_minus_win_gap": gap,
+        "battles_measured": overall_n,
+        "wins_measured": win_n,
+        "losses_measured": loss_n,
+        "lower_is_better": True,
+    }
+
+
+def _tower_troop(battles: list[dict]) -> str | None:
+    """The tower troop they actually played most this week."""
+    counts: Counter[str] = Counter()
+    for b in battles:
+        for name, _mode in _deck_card_modes(b.get("support_cards_json")):
+            counts[name] += 1
+    return counts.most_common(1)[0][0] if counts else None
 
 
 def _section_label(b: dict) -> tuple[str, str]:
@@ -313,6 +538,12 @@ def build_member_report_context(
                 "battle_of_week": botw,
                 "log": battles,
                 "by_type": _battles_by_type(battles),
+                # v17 depth (#216): the tally says WHAT happened, these say why.
+                "scale": _battle_scale(battles),
+                "matchups": _card_matchups(battles),
+                "margin": _margin_profile(battles),
+                "elixir": _elixir_profile(battles),
+                "tower_troop": _tower_troop(battles),
             },
             "badges": badges,
             "cards": cards,
@@ -474,6 +705,76 @@ def _progress_brief(ctx: dict) -> str | None:
     return "PROGRESS THIS WEEK: " + "; ".join(i["text"] for i in items)
 
 
+def _card_line(c: dict) -> str:
+    mode = f" ({c['played_as']})" if c.get("played_as") else ""
+    return f"{c['name']}{mode} {c['wins']}-{c['losses']}"
+
+
+def _depth_brief(ctx: dict) -> list[str]:
+    """The v17 battle facts, phrased so the model cannot invert them (#216).
+
+    Every line states its own polarity. These are the numbers most likely to be
+    narrated backwards -- praising a high elixir leak, or calling a game
+    survived at 40 HP a dominant win -- and the model only sees this brief, so
+    the guardrail has to live in the sentence rather than in a separate prompt.
+    """
+    b = ctx["battles"]
+    out: list[str] = []
+
+    m = b.get("margin") or {}
+    close: list[str] = []
+    if m.get("three_crown_wins"):
+        close.append(f"{m['three_crown_wins']} three-crown wins")
+    if m.get("no_tower_lost_wins"):
+        close.append(f"{m['no_tower_lost_wins']} wins without losing a tower")
+    if m.get("narrow_wins"):
+        close.append(
+            f"{m['narrow_wins']} wins that were nearly losses (own last tower under "
+            f"{m['threshold_hp']} HP — do NOT call these dominant)"
+        )
+    if m.get("near_miss_losses"):
+        close.append(
+            f"{m['near_miss_losses']} losses where the opponent's last tower finished under "
+            f"{m['threshold_hp']} HP (winnable, not outclassed)"
+        )
+    if m.get("closest_loss_their_tower_hp") is not None:
+        close.append(f"closest loss left their tower on {m['closest_loss_their_tower_hp']} HP")
+    if close:
+        out.append("HOW CLOSE: " + "; ".join(close))
+
+    e = b.get("elixir") or {}
+    if e.get("avg_leaked") is not None:
+        parts = [f"leaked {e['avg_leaked']} per battle vs opponents' {e['avg_opponent_leaked']}"]
+        if e.get("in_wins") is not None and e.get("in_losses") is not None:
+            parts.append(f"{e['in_wins']} in wins vs {e['in_losses']} in losses")
+        out.append(
+            "ELIXIR WASTED (LOWER IS BETTER — leaked elixir overflowed while capped; "
+            "never call a high number good): " + "; ".join(parts)
+        )
+        gap = e.get("loss_minus_win_gap")
+        if gap is not None and gap >= 1.0:
+            out.append(
+                f"ELIXIR PATTERN: wastes {gap} more per battle in losses than in wins — "
+                "a real pattern worth naming gently, but it is a correlation, NOT a "
+                "proven cause of the losses"
+            )
+
+    mu = b.get("matchups") or {}
+    if mu.get("toughest"):
+        out.append(
+            f"TOUGHEST MATCHUPS (their record against cards faced {mu['min_faced']}+ times; "
+            "these BEAT them): " + ", ".join(_card_line(c) for c in mu["toughest"])
+        )
+    if mu.get("best"):
+        out.append(
+            "BEST MATCHUPS (cards they HANDLE — a strength, never a weakness): "
+            + ", ".join(_card_line(c) for c in mu["best"])
+        )
+    if b.get("tower_troop"):
+        out.append(f"TOWER TROOP: {b['tower_troop']}")
+    return out
+
+
 def facts_for_model(ctx: dict) -> str:
     """A compact, numbers-only brief the narrative model may speak to — and only
     this. Keeps the voice grounded: no card/number/event appears here that isn't
@@ -506,6 +807,7 @@ def facts_for_model(ctx: dict) -> str:
             f"BATTLE OF THE WEEK: {b['outcome']} {b['crowns_for']}-{b['crowns_against']} "
             f"in {b['mode']} (trophy {int(b['trophy_change'] or 0):+d})"
         )
+    lines.extend(_depth_brief(ctx))
     prog = _progress_brief(ctx)
     if prog:
         lines.append(prog)
@@ -599,6 +901,92 @@ def _fallback_progress(ctx: dict) -> str:
     return f"You stacked up {n} milestone{'s' if n != 1 else ''} worth flagging this week:"
 
 
+def _matchup_row(c: dict) -> str:
+    mode = f" _{c['played_as']}_" if c.get("played_as") else ""
+    return (
+        f"| {c['name']}{mode} | {c['wins']}–{c['losses']} | {_pct(c['win_rate'])}% | {c['faced']} |"
+    )
+
+
+def _render_edge(ctx: dict) -> str | None:
+    """The deterministic depth block: matchup records, how close, elixir.
+
+    Deliberately NOT left to the narrative model. These are the numbers a
+    reader will act on, and a paraphrase can invert them -- so the figures are
+    rendered from the facts and the model only gets to talk around them.
+    """
+    b = ctx["battles"]
+    m = b.get("margin") or {}
+    e = b.get("elixir") or {}
+    mu = b.get("matchups") or {}
+    block: list[str] = []
+
+    if mu.get("toughest"):
+        block += [
+            "**Your matchups**",
+            "",
+            f"Cards you faced at least {mu['min_faced']} times this week, and how you did.",
+            "",
+            "| Card | Record | Win rate | Faced |",
+            "|---|---|---|---|",
+        ]
+        block += [_matchup_row(c) for c in mu["toughest"]]
+        best = [c for c in mu.get("best") or [] if c["win_rate"] > 0.5]
+        seen = {(c["name"], c["played_as"]) for c in mu["toughest"]}
+        best = [c for c in best if (c["name"], c["played_as"]) not in seen]
+        if best:
+            block.append("")
+            block.append(
+                "You handled these: "
+                + ", ".join(f"**{c['name']}** ({c['wins']}–{c['losses']})" for c in best[:3])
+                + "."
+            )
+
+    close: list[str] = []
+    if m.get("near_miss_losses"):
+        close.append(
+            f"**{m['near_miss_losses']}** of your losses ended with their last tower under "
+            f"{m['threshold_hp']} HP"
+            + (
+                f" — the closest left it on **{m['closest_loss_their_tower_hp']}**"
+                if m.get("closest_loss_their_tower_hp") is not None
+                else ""
+            )
+        )
+    if m.get("three_crown_wins"):
+        close.append(f"**{m['three_crown_wins']}** three-crown wins")
+    if m.get("no_tower_lost_wins"):
+        close.append(f"**{m['no_tower_lost_wins']}** wins without losing a tower")
+    if m.get("narrow_wins"):
+        close.append(f"**{m['narrow_wins']}** wins that were nearly losses")
+    if close:
+        if block:
+            block.append("")
+        block.append("**How close it was**")
+        block.append("")
+        block.extend(f"- {c}" for c in close)
+
+    if e.get("in_wins") is not None and e.get("in_losses") is not None:
+        if block:
+            block.append("")
+        gap = e.get("loss_minus_win_gap")
+        line = (
+            f"**Elixir wasted** — {e['in_wins']} per battle in your wins, "
+            f"{e['in_losses']} in your losses"
+        )
+        if gap is not None and gap >= 1.0:
+            line += f". That {gap} gap is the clearest pattern in your week"
+        line += ". Lower is better — it's elixir that overflowed while you were capped."
+        block.append(line)
+
+    if b.get("tower_troop"):
+        if block:
+            block.append("")
+        block.append(f"_Tower troop: {b['tower_troop']}_")
+
+    return "\n".join(block) if block else None
+
+
 def render_member_report(ctx: dict, narrative: dict | None = None) -> tuple[str, str]:
     """Assemble the email. The deterministic layer owns the scorecard, the progress
     milestone bullets, and a per-mode-family battle table under each type's intro;
@@ -644,30 +1032,58 @@ def render_member_report(ctx: dict, narrative: dict | None = None) -> tuple[str,
         block.extend(f"- {p['emoji']} {p['text']}" for p in progress)
         parts.append("\n".join(block))
 
+    edge = _render_edge(ctx)
+    if edge:
+        parts.append(edge)
+
     if nar.get("meta"):
         parts.append(nar["meta"])
 
     # Battle log, segmented by mode family — a card-aware intro then that type's table.
     intros = nar.get("battle_intros") or {}
     by_type = ctx["battles"].get("by_type") or {}
+    scale = ctx["battles"].get("scale") or {
+        "own_full_hp": 0,
+        "opponent_full_hp": 0,
+        "elixir_ceiling": 12.0,
+    }
     for key, g in by_type.items():
         section = [
             f"## {g['label']} ({g['count']} battles)",
             "",
             intros.get(key) or _fallback_battle_intro(g),
             "",
-            "| When | Mode | Result | Crowns | 🏆 |",
-            "|---|---|---|---|---|",
+            "| When | Mode | Result | Crowns | 🏆 | Towers | Elixir |",
+            "|---|---|---|---|---|---|---|",
         ]
         for b in g["rows"]:
             mode = humanize_game_mode(b.get("game_mode_name")) or _mode_label(b.get("mode_group"))
             crowns = f"{b.get('crowns_for', 0)}–{b.get('crowns_against', 0)}"
             tc = b.get("trophy_change")
             tro = f"{int(tc):+d}" if tc is not None else ""
+            towers = (
+                f"{_tower_spark(b.get('princess_towers_hp_json'), scale['own_full_hp'])}"
+                f" {_tower_spark(b.get('opponent_princess_towers_hp_json'), scale['opponent_full_hp'])}"
+            )
+            leaked = b.get("elixir_leaked")
+            opp_leaked = b.get("opponent_elixir_leaked")
+            elixir = (
+                f"{_spark_char(leaked, scale['elixir_ceiling'])}"
+                f"{_spark_char(opp_leaked, scale['elixir_ceiling'])}"
+                if isinstance(leaked, (int, float)) and isinstance(opp_leaked, (int, float))
+                else ""
+            )
             section.append(
                 f"| {_fmt_dt(b.get('battle_time'))} | {mode} | "
-                f"{_outcome_cell(b.get('outcome'))} | {crowns} | {tro} |"
+                f"{_outcome_cell(b.get('outcome'))} | {crowns} | {tro} | {towers} | {elixir} |"
             )
+        # A legend per table, because these columns are unreadable without one.
+        section.append("")
+        section.append(
+            "_**Towers** — your two princess towers, then theirs. Taller = healthier, "
+            f"`{_DEAD}` = destroyed. **Elixir** — wasted by you, then them; "
+            "taller = more wasted, so shorter is better._"
+        )
         parts.append("\n".join(section))
 
     parts.append(nar.get("closer") or "Same time next week. Keep the crowns coming. — E")
