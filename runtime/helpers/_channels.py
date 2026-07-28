@@ -170,7 +170,10 @@ async def _share_channel_result(result, workflow):
     share_content = result.get("share_content", "")
     if not share_content:
         return
-    target_ref = result.get("share_channel") or "#clan-events"
+    # #clan-events was deleted 2026-07-11; #elixir is the consolidated public
+    # home. The old default resolved to nothing, so an unrouted share was
+    # logged as "Unknown share target channel" and silently dropped.
+    target_ref = result.get("share_channel") or "#elixir"
     target = prompts.resolve_channel_reference(target_ref)
     if not target:
         _log().warning("Unknown share target channel: %s", target_ref)

@@ -1617,7 +1617,7 @@ async def on_message(message):
 
 @bot.event
 async def on_message_delete(message):
-    """Editor deletion feeder (editor.md §3): an admin deleting one of
+    """Editor deletion feeder (engine/editor.py): an admin deleting one of
     Elixir's OWN posts in one of its posting lanes is the strongest
     anti-pattern signal — capture the copy before it's gone."""
     try:

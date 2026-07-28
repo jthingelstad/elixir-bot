@@ -633,7 +633,7 @@ def update_leader_action_copy_text(
             int(action_id),
         ),
     )
-    # Editor copy-edit feeder (editor.md §3): the leader's rewrite is a paired
+    # Editor copy-edit feeder (engine/editor.py): the leader's rewrite is a paired
     # before/after exemplar for the rubric. Never blocks the edit itself.
     try:
         from engine import editor as _editor
