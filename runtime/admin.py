@@ -41,8 +41,9 @@ COMMAND_SPECS = {
     "help": AdminCommandSpec(
         "help", ("help",), "Show the Elixir operator help page.", event_type="help"
     ),
-    # system.* / memory.show / signal.publish-pending were removed from Discord —
-    # the Observatory web app owns that telemetry/management (co-leaders don't need it).
+    # system.* / memory.show were removed from Discord; the Observatory owns that
+    # telemetry. signal.publish-pending is gone entirely — API drift now rides the
+    # engine-health check to #elixir-log (#212), not a queue of its own.
     "clan.status": AdminCommandSpec(
         "clan.status",
         ("clan", "status"),
@@ -778,27 +779,6 @@ async def _run_runtime_job(job_name: str, preview: bool) -> str:
     except Exception as exc:
         return f"`{display_name}` failed: {exc}"
     return f"Ran `{display_name}`."
-
-
-async def _run_system_signals(preview: bool) -> str:
-    import elixir
-
-    if preview:
-        async with _preview_job_runtime() as captured_posts:
-            try:
-                count = await elixir._publish_pending_system_signal_updates(
-                    seed_startup_signals=True
-                )
-            except Exception as exc:
-                return f"`signal.publish-pending` failed in preview mode: {exc}"
-            summary = f"Published {count} pending system signal(s) in preview mode."
-            return f"{summary}\n\n{_format_preview_posts(captured_posts)}"
-
-    try:
-        count = await elixir._publish_pending_system_signal_updates(seed_startup_signals=True)
-    except Exception as exc:
-        return f"`signal.publish-pending` failed: {exc}"
-    return f"Published {count} pending system signal(s)."
 
 
 _MEMBER_QUERY_MAX_LEN = 64

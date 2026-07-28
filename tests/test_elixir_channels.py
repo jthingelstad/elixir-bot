@@ -2946,42 +2946,6 @@ def test_slash_activity_run_defers_before_dispatching():
     followup.send.assert_not_awaited()
 
 
-def test_queue_startup_system_signals_enqueues_well_formed_announcements():
-    from runtime.system_signals import STARTUP_SYSTEM_SIGNALS
-
-    with patch("elixir.db.queue_system_signal") as mock_queue:
-        elixir.queue_startup_system_signals()
-
-    queued_keys = [call.args[0] for call in mock_queue.call_args_list]
-    assert queued_keys == [s["signal_key"] for s in STARTUP_SYSTEM_SIGNALS]
-    assert len(queued_keys) == len(set(queued_keys)), "duplicate signal_keys"
-
-    for system_signal in STARTUP_SYSTEM_SIGNALS:
-        payload = system_signal["payload"]
-        assert payload.get("title", "").startswith("Achievement Unlocked"), system_signal[
-            "signal_key"
-        ]
-        assert payload.get("message"), system_signal["signal_key"]
-        assert payload.get("capability_area"), system_signal["signal_key"]
-        assert system_signal["signal_type"] in {"capability_unlock"}, system_signal["signal_key"]
-
-
-def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
-    conn = elixir.db.get_connection(":memory:")
-    try:
-        elixir.queue_startup_system_signals(conn=conn)
-        pending = elixir.db.list_pending_system_signals(conn=conn)
-    finally:
-        conn.close()
-
-    from runtime.system_signals import STARTUP_SYSTEM_SIGNALS
-
-    expected_keys = {s["signal_key"] for s in STARTUP_SYSTEM_SIGNALS}
-    actual_keys = {item["signal_key"] for item in pending}
-    assert actual_keys == expected_keys
-    assert len(pending) == len(STARTUP_SYSTEM_SIGNALS)
-
-
 def test_cr_api_auth_failure_alert_posts_once_per_signature():
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
 

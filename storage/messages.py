@@ -23,61 +23,6 @@ from storage.identity import save_memory_episode, upsert_discord_user
 
 
 @managed_connection
-def queue_system_signal(
-    signal_key: str,
-    signal_type: str,
-    payload: Optional[dict],
-    conn: Optional[sqlite3.Connection] = None,
-) -> None:
-    conn.execute(
-        "INSERT OR IGNORE INTO system_signals (signal_key, signal_type, created_at, payload_json) VALUES (?, ?, ?, ?)",
-        (signal_key, signal_type, _utcnow(), _json_or_none(payload) or "{}"),
-    )
-    conn.commit()
-
-
-@managed_connection
-def list_pending_system_signals(
-    conn: Optional[sqlite3.Connection] = None,
-) -> list[dict]:
-    rows = conn.execute(
-        "SELECT signal_key, signal_type, created_at, payload_json "
-        "FROM system_signals WHERE announced_at IS NULL "
-        "ORDER BY created_at ASC, system_signal_id ASC"
-    ).fetchall()
-    signals = []
-    for row in rows:
-        payload = {}
-        if row["payload_json"]:
-            try:
-                payload = json.loads(row["payload_json"])
-            except TypeError, ValueError, json.JSONDecodeError:
-                payload = {}
-        item = dict(payload)
-        item.setdefault("type", row["signal_type"])
-        item["signal_key"] = row["signal_key"]
-        item["signal_type"] = row["signal_type"]
-        item["created_at"] = row["created_at"]
-        item["signal_log_type"] = f"system_signal::{row['signal_key']}"
-        signals.append(item)
-    return signals
-
-
-@managed_connection
-def mark_system_signal_announced(
-    signal_key: str, conn: Optional[sqlite3.Connection] = None
-) -> None:
-    conn.execute(
-        "UPDATE system_signals SET announced_at = ? WHERE signal_key = ? AND announced_at IS NULL",
-        (_utcnow(), signal_key),
-    )
-    conn.commit()
-
-
-# -- Messaging --------------------------------------------------------------
-
-
-@managed_connection
 def save_message(
     scope: str,
     author_type: str,

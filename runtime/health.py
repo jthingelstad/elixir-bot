@@ -109,6 +109,39 @@ def check_new_incidents(conn) -> list[str]:
     return [f"{n} unresolved incident(s) in the last 24h — see /incidents"] if n else []
 
 
+def check_api_drift(conn) -> list[str]:
+    """New Clash Royale API SHAPE, surfaced to an operator (#212).
+
+    The sentinel has always recorded drift into `api_sentinel_observations`,
+    but nothing evaluated it: the delivery path was removed from Discord with a
+    comment saying the Observatory owned it, and the Observatory never did. So
+    `[].tournamentTag` appeared in player_battlelog on 2026-07-24 and nobody was
+    told. Health already has a working operator channel (#elixir-log), so drift
+    rides that instead of its own queue.
+
+    Only STRUCTURAL drift alerts. New `event` tags appear constantly as
+    Supercell runs events and are pure noise; a new schema path, progress key,
+    or game mode is a signal that Elixir's model of the payload may now be
+    wrong. Windowed at 48h so the historical backlog (738 unannounced rows,
+    mostly from the sentinel's initial seeding) does not alert forever.
+    """
+    try:
+        rows = conn.execute(
+            """SELECT sentinel_type, name, endpoint FROM api_sentinel_observations
+                WHERE sentinel_type IN ('schema_path', 'progress_key', 'battle_game_mode')
+                  AND announced_signal_key IS NULL
+                  AND first_seen_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-2 days')
+                ORDER BY first_seen_at DESC LIMIT 10"""
+        ).fetchall()
+    except Exception as exc:  # a broken check is itself a finding
+        return [f"api drift check failed: {exc!r}"]
+    if not rows:
+        return []
+    shown = ", ".join(f"{r[0]}:{r[1]} ({r[2]})" for r in rows[:5])
+    more = f" (+{len(rows) - 5} more)" if len(rows) > 5 else ""
+    return [f"{len(rows)} new CR API shape change(s) in 48h — {shown}{more}"]
+
+
 def check_data_integrity(conn) -> list[str]:
     """Relational + semantic invariants that a plain integrity_check misses."""
     problems: list[str] = []
@@ -239,6 +272,7 @@ def run_all(conn, previous_size: int | None = None) -> tuple[list[str], int]:
         check_awareness_outbox,
         check_output_silence,
         check_data_integrity,
+        check_api_drift,
     ):
         try:
             problems.extend(check(conn))
