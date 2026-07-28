@@ -39,14 +39,21 @@ rationale and may describe components later retired from production.
 | Human clan decisions | management state machines and leadership UI | decision cases, leader actions, revisits |
 | Operational truth | activity registry, incidents, runtime status | `runtime_job_status`, `runtime_incidents`, tick history |
 
-## Deliberately isolated legacy
+## Retired proactive stack
 
-`engine/recognition/` and `engine/delivery.py` remain executable only for
-explicit offline comparisons. `engine.legacy_proactive.prepare_queue()` creates
-their `communication_intents` table in SQLite TEMP storage for one connection;
-the operational schema does not contain the retired queue or editor-verdict
-history. The durable `recognition_ledger` remains because awards and historical
-one-claim semantics still use it.
+`engine/recognition/`, `engine/delivery.py` and `engine/legacy_proactive.py` were
+removed in #207. The awareness loop is the sole proactive owner, in code as well
+as in practice — nothing is kept executable for comparison.
+
+`recognition_ledger` went with them. It had been assumed load-bearing because it
+held `award:` keys, but award idempotency is
+`UNIQUE(award_type, season_id, section_index, player_tag)` on `awards` with
+`INSERT OR IGNORE`; the ledger claim fired *after* and *conditional on* that
+insert, and all 17 award claims carried `intent_id = NULL` — they never posted.
+Nothing outside the retired package read the table.
+
+`engine/offline.py` survives as the API-free replay harness that
+`scripts/replay_gate.py` drives; its optional `legacy_proactive` seam is gone.
 
 ## Change rule
 

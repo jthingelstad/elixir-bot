@@ -25,7 +25,7 @@ Rollback before close-out = old git ref + copy the archive back + relaunch.
 - `elixir.py` — Main bot: Discord events, APScheduler, channel routing
 - `elixir_agent.py` — Stable public LLM entrypoint; routes observation, channel replies, and content generation through the `agent/` package
 - `cr_api.py` — Clash Royale API client (clan roster, war status, river race log). The **only** API ingress; every successful response appends an `api_observation_receipts` row under its true endpoint, while identical response bodies share one `raw_api_payloads` content row
-- `engine/` — The v5.1 data engine (spec: `docs/reference/v5.1/`): `tick.py` (production orchestrator), `observations.py` (admission + canonical envelopes), `materialize.py` (the shared observation application path used by production, interactive refresh, and replay), `readiness.py` (source freshness + durable materialization generations), `event_contracts.py` (event vocabulary/routing), `clock.py`, `ingest.py`, `baselines.py` + `emitters/`, `change_sets.py`, `management.py`, `polling.py`, `projections.py`, and `offline.py`. `recognition/` + `delivery.py` are retired proactive machinery, reachable only through `legacy_proactive.py` in explicit offline rehearsals.
+- `engine/` — The v5.1 data engine (spec: `docs/reference/v5.1/`): `tick.py` (production orchestrator), `observations.py` (admission + canonical envelopes), `materialize.py` (the shared observation application path used by production, interactive refresh, and replay), `readiness.py` (source freshness + durable materialization generations), `event_contracts.py` (event vocabulary/routing), `clock.py`, `ingest.py`, `baselines.py` + `emitters/`, `change_sets.py`, `management.py`, `polling.py`, `projections.py`, and `offline.py`. The deterministic `recognition/` + `delivery.py` proactive stack was retired entirely in #207 — the awareness loop is the sole proactive owner. `offline.py` remains as the API-free replay harness `scripts/replay_gate.py` drives.
 - `capabilities/` — Canonical domain answers shared by agent tools, awareness, scheduled reports, memory synthesis, and admin surfaces. Consumers may compact or present these facts differently, but do not recalculate them. Versioned contracts currently cover `game_modes.py`, `war.py`, `members.py`, `management.py`, and `awards.py`; management answers are explicitly leadership-scoped, while the other contracts are audience-neutral facts.
 - `db/` — SQLite access package: connection discipline, identity helpers, and the storage facade
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
@@ -64,10 +64,9 @@ admitted input lands in `materialization_inputs`, and the final
 and battle-log refreshes create `interactive` generations through the same
 application service; offline replay uses it too. Awareness and primary
 capabilities read one SQLite snapshot and expose its `data_generation`. The production
-entrypoint has no compose/send arguments and cannot enable the retired poster.
-The offline engine follows the
-same awareness-only default, with `legacy_proactive=True` as its explicit
-adapter seam. Emitter change sets must satisfy their event/table postconditions
+entrypoint has no compose/send arguments and cannot post proactively; neither can
+the offline engine, whose `legacy_proactive` adapter seam was removed with the
+deterministic recognizer in #207. Awareness is the sole proactive owner. Emitter change sets must satisfy their event/table postconditions
 before a baseline advances. Counters land in
 `runtime_job_status` (`engine_tick` row) every tick.
 
@@ -177,7 +176,7 @@ SQLite at `elixir-v51.db` (overridable via `ELIXIR_DB_PATH`; gitignored).
 Three database files exist, with distinct roles:
 
 - **`elixir-v51.db`** — the operational engine DB. The clean-break baseline source is `scripts/migrate_v51/schema_v51.py`; ordered post-cut evolution lives in `db/schema.py`. `db.get_connection()` refuses databases without the v5.1 spine, migrates compatible v5.1 databases forward, and is the sole initializer.
-- Durable memory lives IN the engine DB since 2026-07-04 (the v5.1 memory pass, `docs/reference/v5.1/memory.md`): `memories` + `memory_tags` + `memory_log` + `memories_fts`, accessed through the `memory_store` seam. The old `elixir-v5-memory.db` is archived (`elixir-v5-memory-archive-2026H2.db`, read-only); `ELIXIR_V5_MEMORY_DB` is retired. **One database for all runtime activity.**
+- Durable memory lives IN the engine DB since 2026-07-04 (the v5.1 memory pass, `docs/reference/v5.1/memory.md`): `memories` + `memory_tags` + `memories_fts`, accessed through the `memory_store` seam. `inference` rows carry a 90-day default TTL and are reclaimed by db-maintenance; curated kinds (`leader_note`, `synthesis`, `system`) never expire by default (#215). The old `elixir-v5-memory.db` is archived (`elixir-v5-memory-archive-2026H2.db`, read-only); `ELIXIR_V5_MEMORY_DB` is retired. **One database for all runtime activity.**
 - **`elixir-v5-archive-2026H2.db`** — the pre-cut cold archive. Read-only (chmod 444), never written; open with `file:…?immutable=1`. Everything historical lives here.
 
 The engine DB follows the layered retention model (`docs/reference/v5.1/schema.md`):
@@ -185,11 +184,11 @@ The engine DB follows the layered retention model (`docs/reference/v5.1/schema.m
 - L1 API provenance: append-only `api_observation_receipts` plus deduplicated `raw_api_payloads` content (14 d)
 - L2 current-state baselines: `state_baselines` (diff substrate; not a read model)
 - L3 event streams: `battle_events` (180 d), `player_events` (180 d), `clan_events` (365 d), `war_events` (365 d)
-- L4 rollups (durable): `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics`, `clan_daily_battle_rollups`
+- L4 rollups (durable): `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics`
 - L5 identity & tenure (durable): `players`, `player_metadata`, `player_aliases`, `clans`, `discord_users`, `discord_links`, `clan_memberships` — **the CR tag is the key everywhere**; "is X a member" = has an open `clan_memberships` row
 - L6 projections (disposable, rebuilt from streams): `player_current_state`, `player_card_collection`, `player_recent_form`, `member_management`
-- Awareness control: per-stream positions in `stream_cursors`, plus `awareness_thoughts`, `awareness_delivery_intents`, `awareness_posts`, and `watches`
-- Recognition history: `recognition_ledger` retains intentless award claims plus the retired recognizer's claims; old delivery details live in the pre-migration backup/cold archive, while explicit offline comparisons use a TEMP `communication_intents` queue
+- Awareness control: per-stream positions in `stream_cursors`, plus `awareness_thoughts`, `awareness_delivery_intents`, and `awareness_posts`. Standing concerns live in `memories` as `Watch:` / `Hold:` titles — the separate `watches` table was never written and was dropped in #211
+- Award idempotency: `UNIQUE(award_type, season_id, section_index, player_tag)` on `awards`. The `recognition_ledger` that once mirrored it held intentless claims nothing read, and went with the recognizer in #207
 - Clan management: `leader_action_recommendations`, `decision_cases`, `revisits`
 - Bounded war stream: `war_seasons` (durable), `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days`
 - Awards (durable): `awards` — `war_champ` is a ranked podium (season points); `iron_king` is PARTICIPATION (4/4 decks every battle day — unranked, any number earn it, never crown one); `rookie_mvp` = members in their FIRST war season; `free_pass` rotates to the highest-ranked War Champ who did NOT win it last month (`engine/emitters/war.py:close_season`). The LIVE in-progress races are computed on demand via `storage.awards.get_award_races` (top-10, points, tie-aware) and surfaced in the awareness read as `award_races`; `war_champ_lead_change` / `rookie_mvp_lead_change` events emit on a leader change.
@@ -345,20 +344,14 @@ uv run --locked python scripts/review_agent_feedback.py --workflow clanops --jso
   - site generation uses `MAX_CONTEXT_MEMBERS_FULL` (50)
 - When clipping occurs, context includes an omitted-members summary line.
 
-## System Signals
+## Announcements and API drift
 
-One-time capability or upgrade announcements should use the queued `system_signals` path, not an ad hoc Discord post.
+The `system_signals` queue was retired in #212 — it had no drain, so nothing it held was ever delivered. The two things it used to carry now have real owners:
 
-- Define startup-seeded system signals in `runtime/system_signals.py`
-- Add one entry to `STARTUP_SYSTEM_SIGNALS` with:
-  - stable `signal_key`
-  - `signal_type` such as `capability_unlock`
-  - `payload` fields the channel-update workflow can talk about, including `audience` when the update is meant for the clan
-- Startup queues these signals idempotently via `queue_startup_system_signals()`
-- Pending system signals are published by `runtime/system_status_post.py` (`_post_system_signal_updates`) — a direct post to the target lane that marks each announced after a successful send. The `api-sentinel` activity drives this for CR-API drift notes
-- Elixir also posts a separate startup check-in to the #elixir-log webhook with the running build hash and a short Clash Royale-flavored line
+- **Feature / release news** → `scripts/cut_release.py`: RELEASES.md, a #announcements post, and email to members with a verified address. One flow, already used for every release.
+- **CR API drift** → the `api-sentinel` activity records first-seen schema paths into `api_sentinel_observations`, and the engine-health check `check_api_drift` posts *structural* drift (new schema path, progress key, or game mode — never routine new event tags) to #elixir-log within 48h. The alert is deliberately thin; the AGENT-TEAM **Data Analyst** owns characterizing it and filing the issue.
 
-This keeps feature announcements discoverable: future changes should usually mean “edit one list” instead of remembering startup-hook details.
+Elixir also posts a startup check-in to the #elixir-log webhook with the running build hash and a short Clash Royale-flavored line.
 
 ## Query Layer (Current)
 

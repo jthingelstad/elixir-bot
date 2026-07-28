@@ -21,7 +21,7 @@
 > durable per-stream cursors, plans across the whole situation, sends, records
 > `awareness_posts`, and atomically acknowledges cursor checkpoints with its
 > thought. The deterministic recognizer/`communication_intents` delivery chain
-> is isolated behind `engine.legacy_proactive` for offline rehearsal only.
+> it replaced was retired entirely in #207.
 > Multi-table roster and season-close transitions are derived as explicit
 > change sets and must satisfy postconditions before their baselines advance.
 > Post-cut schema changes are ordered in `db/schema.py`; runtime modules do not

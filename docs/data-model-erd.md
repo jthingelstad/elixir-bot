@@ -27,7 +27,6 @@ erDiagram
     battle_events ||--o{ player_daily_battle_rollups : rolls_up
     player_events ||--o{ player_daily_metrics : rolls_up
     clan_events ||--o{ clan_daily_metrics : rolls_up
-    battle_events ||--o{ clan_daily_battle_rollups : rolls_up
 
     players ||--o| player_current_state : projects
     players ||--o| player_recent_form : projects
@@ -46,7 +45,6 @@ erDiagram
     awareness_thoughts ||--o{ awareness_posts : plans
     conversation_threads ||--o{ messages : contains
     memories ||--o{ memory_tags : classified_by
-    memories ||--o{ memory_log : changes
 ```
 
 ## Layer ownership
@@ -56,12 +54,12 @@ erDiagram
 | API buffer | `raw_api_payloads` | Append-only raw responses, retained for 14 days; never the system of record. |
 | Diff substrate | `state_baselines` | Latest normalized comparison state; first sight emits no change event. |
 | Streams | `battle_events`, `player_events`, `clan_events`, `war_events` | Durable typed facts with deterministic dedup keys. |
-| Rollups | `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics`, `clan_daily_battle_rollups` | Durable Chicago-day aggregates. |
+| Rollups | `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics` | Durable Chicago-day aggregates. (`clan_daily_battle_rollups` dropped in #211 — its writer had lost its caller and the live trend path reads `battle_events`.) |
 | Identity and tenure | `players`, `clans`, `clan_memberships`, `player_aliases`, `discord_users`, `discord_links` | Clash Royale tag is the natural player key; membership is an open tenure row. |
 | Projections | `player_current_state`, `player_card_collection`, `player_recent_form`, `member_management` | Rebuildable query models, not primary history. |
 | War and awards | `war_seasons`, `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days`, `awards` | Bounded war truth plus durable honors. |
-| Awareness and leadership | `awareness_thoughts`, `awareness_posts`, `watches`, `decision_cases`, `leader_action_recommendations`, `revisits` | Deliberation, confirmed delivery, standing concerns, and policy outcomes. |
-| Conversation and memory | `conversation_threads`, `messages`, `memories`, `memory_tags`, `memory_log`, `memories_fts` | Channel-scoped conversation and public/leadership durable memory. |
+| Awareness and leadership | `awareness_thoughts`, `awareness_posts`, `decision_cases`, `leader_action_recommendations`, `revisits` | Deliberation, confirmed delivery, and policy outcomes. Standing concerns live in `memories` as `Watch:` / `Hold:` titles; the `watches` table was never written and was dropped in #211. |
+| Conversation and memory | `conversation_threads`, `messages`, `memories`, `memory_tags`, `memories_fts` | Channel-scoped conversation and public/leadership durable memory. (`memory_log` dropped in #215 — an audit trail with no reader.) |
 | Runtime control | `stream_cursors`, `poll_state`, `materialization_runs`, `runtime_job_status`, `runtime_incidents` | Progress, adaptive polling, data-product readiness/provenance, job health, and best-effort failure visibility. |
 
 ## Invariants
