@@ -1021,13 +1021,15 @@ TOOLS = [
     {
         "name": "record_leadership_followup",
         "description": (
-            "Queue an operational suggestion for the leadership channel. Use when you detect a "
-            "pattern that calls for a leader action — a rank swing, a recurring no-show, a "
-            "compliance gap. Always opens a durable decision case (the tracked home for the "
-            "concern) plus a leadership-scoped memory tagged 'followup' as its narrative note. "
-            "Pass case_type only when the followup is a member kick/promotion/demotion review that "
-            "should also become a #leader-actions card; otherwise omit it and it is tracked as a "
-            "general followup case. Keep the recommendation concrete (who, what, when) so a human "
+            "Record an operational observation as a durable leadership-scoped memory tagged "
+            "'followup'. Use when you detect a pattern worth remembering — a rank swing, a "
+            "recurring no-show, a compliance gap. "
+            "IMPORTANT — this is a NOTE, not an escalation. On its own it reaches no human: "
+            "it does not post anywhere and does not raise a card. To actually ask leadership "
+            "for something, either post to the leader-lounge lane (#leaders), or pass "
+            "case_type + member_tag so it becomes a #actions card a leader can decide. "
+            "The result tells you which happened via 'escalated'. "
+            "Keep the recommendation concrete (who, what, when) so a human "
             "can act on it without re-doing the analysis. "
             "ATOMIC — each call is ONE decision a leader can act on or decline on its own. Never "
             "bundle multiple members or multiple actions into one followup: three kick reviews are "
