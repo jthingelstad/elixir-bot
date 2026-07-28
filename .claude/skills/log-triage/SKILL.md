@@ -1,17 +1,29 @@
 ---
 name: log-triage
-description: Analyze elixir-v5.log for errors, recurring failures, and operational signals, then recommend concrete actions
+description: Analyze Elixir's error and main logs for failures, recurring issues, and operational signals, then recommend concrete actions
 ---
 
 # Log Triage
 
-Read `/Users/otto/Projects/elixir-bot/elixir-v5.log`, surface what's actually going wrong (vs. noise), group recurring issues, and hand the user a short prioritized action list. The goal is to answer "what should I fix next?" — not to paraphrase the log.
+Surface what's actually going wrong (vs. noise), group recurring issues, and hand the user a short prioritized action list. The goal is to answer "what should I fix next?" — not to paraphrase the log.
+
+## Which file to read
+
+Start with the error log. It exists so that this triage is cheap.
+
+| File | Contents | How to use it |
+|---|---|---|
+| `/Users/otto/Projects/elixir-bot/logs/elixir-error.log` | ERROR+ with tracebacks, ~6 lines/day | **Read this first, in full.** It is the list of things that are broken. |
+| `/Users/otto/Projects/elixir-bot/logs/elixir.log` | INFO+, the full narrative | Read *around* an error's timestamp for context, and for the health checks below. |
+| `/Users/otto/Projects/elixir-bot/elixir-v5.log` | launchd stdout/stderr catch-all | Only when a crash left nothing in the rotating logs — an interpreter traceback that killed the process, or third-party output. Not the record. |
+
+Both rotating files have `.1`–`.5` siblings after rotation; widen to those only if you need history beyond the current file.
 
 ## Scope
 
-Default to the last 24 hours of entries unless the user specifies a window (e.g. "since yesterday's deploy", "last hour"). Log lines begin with `YYYY-MM-DD HH:MM:SS,mmm [LEVEL] logger: ...`, so filter by timestamp prefix when narrowing.
+Default to the last 24 hours unless the user specifies a window (e.g. "since the last check", "since yesterday's deploy"). Log lines begin with `YYYY-MM-DD HH:MM:SS,mmm [LEVEL] logger: ...`, so filter by timestamp prefix when narrowing.
 
-If the log is very large (>10k lines), start by tailing the last ~2000 lines. Only widen the window if the user asked for historical context or an issue's first occurrence isn't in the tail.
+Read `logs/elixir-error.log` in full regardless of window — it is small by design, and knowing whether a signature is *new* requires seeing what came before it.
 
 ## What to look for
 
