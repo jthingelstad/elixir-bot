@@ -360,6 +360,11 @@ def _member_view(
         current_summary = {
             "observed_at": current.get("fetched_at"),
             "card_names": _names(current["cards"]),
+            # The tower troop is part of a modern CR deck, not a cosmetic. It
+            # was captured at v18 (#216) but this view still dropped it, so a
+            # "what deck does X run" answer silently omitted a real choice --
+            # 6.9% of the clan runs something other than Tower Princess.
+            "tower_troop": _names(current.get("support_cards") or []) or None,
             "archetype": _archetype(current["cards"]),
             "historical_performance": (
                 {

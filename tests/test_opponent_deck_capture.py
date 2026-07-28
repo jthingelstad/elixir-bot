@@ -326,7 +326,7 @@ def test_elixir_compares_against_the_same_battle():
     )
 
     assert elixir["leaked_more_than_opponent"] == 1
-    assert elixir["losses_compared"] == 2  # the unpaired battle is excluded
+    assert elixir["battles_compared"] == 2  # the unpaired battle is excluded
     assert elixir["avg_leaked"] == 5.0  # all three count for own average
     assert elixir["avg_opponent_leaked"] == 5.0
 
@@ -341,3 +341,105 @@ def test_elixir_block_declares_that_lower_is_better():
 
     assert elixir["lower_is_better"] is True
     assert elixir["leaked_more_than_opponent"] == 1, "9.0 wasted vs 1.0 is the WORSE player"
+
+
+# ── wins: the mirror of the losses read ──────────────────────────────────────
+
+
+def _win(crowns_for, crowns_against, own_towers):
+    return {
+        "crowns_for": crowns_for,
+        "crowns_against": crowns_against,
+        "princess_towers_hp_json": own_towers,
+    }
+
+
+def test_win_margin_separates_a_sweep_from_a_coin_flip():
+    """'On a 5-game streak' is the same sentence whether those were three-crown
+    sweeps or games survived at 30 HP. This is what tells them apart."""
+    import storage.player as player
+
+    margin = player._win_margin(
+        [
+            _win(3, 0, "[3000,2900]"),  # dominant, untouched
+            _win(1, 0, "[2800,31]"),  # won, but nearly lost a tower
+            _win(2, 1, "[2600]"),  # lost a tower, still won
+        ]
+    )
+
+    assert margin["three_crown_wins"] == 1
+    assert margin["narrow_wins"] == 1
+    assert margin["closest_own_tower_hp"] == 31
+    # The 31-HP win kept both towers AND was narrow. Both are true; the name
+    # says what was measured rather than implying dominance.
+    assert margin["no_tower_lost_wins"] == 2
+
+
+def test_tower_pressure_reads_the_side_actually_under_pressure():
+    """A loss measures the OPPONENT's towers (how close to winning); a win
+    measures the member's OWN (how close to losing). Same maths, opposite
+    column -- so the two reads stay comparable."""
+    import storage.player as player
+
+    battles = [{"mine": "[100]", "theirs": "[3000]"}]
+
+    near_mine, low_mine, _ = player._tower_pressure(battles, "mine")
+    near_theirs, low_theirs, _ = player._tower_pressure(battles, "theirs")
+
+    assert (near_mine, low_mine) == (1, 100)
+    assert (near_theirs, low_theirs) == (0, 3000)
+
+
+def test_wins_read_labels_beaten_cards_as_a_strength():
+    """`beaten_cards` is what the member BEAT. Read as a weakness it inverts
+    the advice entirely, so the note must say so and the key must not look
+    like the losses read's `top_opponent_cards`."""
+    import db
+
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
+        db.snapshot_player_battlelog(
+            "#PLAYER",
+            [
+                {
+                    "battleTime": f"20260410T12000{i}.000Z",
+                    "type": "PvP",
+                    "gameMode": {"id": 1, "name": "test"},
+                    "arena": {"id": 1, "name": "Arena"},
+                    "deckSelection": "collection",
+                    "team": [
+                        {
+                            "tag": "#PLAYER",
+                            "crowns": 3,
+                            "cards": [{"id": 1, "name": "Hog Rider", "level": 14}],
+                            "princessTowersHitPoints": [3000, 2900],
+                        }
+                    ],
+                    "opponent": [
+                        {
+                            "tag": "#OPP",
+                            "crowns": 0,
+                            "cards": [{"id": 2, "name": "Golem", "level": 12}],
+                        }
+                    ],
+                }
+                for i in range(3)
+            ],
+            conn=conn,
+        )
+        out = db.get_member_recent_wins("#PLAYER", scope="overall_10", conn=conn)
+
+        assert out["wins_examined"] == 3
+        assert out["current_win_streak"] == 3
+        assert out["beaten_cards"][0] == {
+            "name": "Golem",
+            "played_as": None,
+            "wins_over": 3,
+        }
+        assert "top_opponent_cards" not in out, "must not collide with the losses read"
+        assert out["margin"]["three_crown_wins"] == 3
+        assert out["margin"]["no_tower_lost_wins"] == 3
+        assert "BEAT" in out["note"]
+    finally:
+        conn.close()

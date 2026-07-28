@@ -166,6 +166,15 @@ def get_member_intelligence(
             limit=losses_limit,
             conn=conn,
         )
+    if "wins" in requested:
+        result["wins"] = _invoke(
+            source,
+            "get_member_recent_wins",
+            tag,
+            scope=scope,
+            limit=losses_limit,
+            conn=conn,
+        )
     if "battles" in requested:
         result["battles"] = _invoke(
             source,
