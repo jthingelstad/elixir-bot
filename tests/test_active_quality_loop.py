@@ -39,10 +39,7 @@ def test_active_sampler_reads_awareness_and_assistant_messages(engine_conn):
         (plan["posts"][0]["content"], _now(-1)),
     )
     engine_conn.execute(
-        "INSERT INTO conversation_threads "
-        "(scope_type, scope_key, created_at, last_active_at) "
-        "VALUES ('channel', 'ask', ?, ?)",
-        (_now(-1), _now(-1)),
+        "INSERT INTO conversation_threads (scope_type, scope_key) VALUES ('channel', 'ask')"
     )
     thread_id = engine_conn.execute(
         "SELECT thread_id FROM conversation_threads WHERE scope_key = 'ask'"

@@ -107,6 +107,167 @@ def test_v21_migration_discards_legacy_cases_and_preserves_leader_actions(tmp_pa
         conn.close()
 
 
+def test_v22_contract_preserves_conversations_and_drops_dead_schema(tmp_path):
+    """The destructive contract follows the deployed code-first cutover (#224)."""
+    path = tmp_path / "v21.db"
+    build(str(path), None)
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        # Reconstruct the affected v21 tables on a throwaway current database.
+        conn.executescript(
+            """
+            DROP TABLE messages;
+            DROP TABLE channel_state;
+            DROP TABLE conversation_threads;
+
+            CREATE TABLE discord_channels (
+                channel_id TEXT PRIMARY KEY,
+                channel_name TEXT,
+                channel_kind TEXT,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
+            );
+            CREATE TABLE channel_state (
+                channel_id TEXT PRIMARY KEY
+                    REFERENCES discord_channels(channel_id) ON DELETE CASCADE,
+                last_elixir_post_at TEXT,
+                last_topics_json TEXT,
+                recent_style_notes_json TEXT,
+                last_summary TEXT
+            );
+            CREATE TABLE conversation_threads (
+                thread_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope_type TEXT NOT NULL,
+                scope_key TEXT NOT NULL,
+                channel_id TEXT
+                    REFERENCES discord_channels(channel_id) ON DELETE SET NULL,
+                discord_user_id TEXT
+                    REFERENCES discord_users(discord_user_id) ON DELETE SET NULL,
+                member_id INTEGER,
+                created_at TEXT NOT NULL,
+                last_active_at TEXT NOT NULL,
+                UNIQUE(scope_type, scope_key)
+            );
+            CREATE INDEX idx_threads_scope
+                ON conversation_threads(scope_type, scope_key);
+            CREATE TABLE messages (
+                message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                discord_message_id TEXT UNIQUE,
+                thread_id INTEGER NOT NULL
+                    REFERENCES conversation_threads(thread_id) ON DELETE CASCADE,
+                channel_id TEXT
+                    REFERENCES discord_channels(channel_id) ON DELETE SET NULL,
+                discord_user_id TEXT
+                    REFERENCES discord_users(discord_user_id) ON DELETE SET NULL,
+                member_id INTEGER,
+                author_type TEXT NOT NULL,
+                workflow TEXT,
+                event_type TEXT,
+                content TEXT NOT NULL,
+                summary TEXT,
+                created_at TEXT NOT NULL,
+                raw_json TEXT,
+                intent_id INTEGER
+            );
+            CREATE INDEX idx_messages_thread_time
+                ON messages(thread_id, created_at DESC);
+            CREATE INDEX idx_messages_intent
+                ON messages(intent_id, created_at DESC);
+            CREATE TABLE arena_relay_screenshot_observations (
+                observation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_message_id TEXT NOT NULL UNIQUE,
+                observed_at TEXT NOT NULL,
+                screenshot_type TEXT NOT NULL DEFAULT 'unknown',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO discord_users "
+            "(discord_user_id, username, first_seen_at, last_seen_at) "
+            "VALUES ('user-1', 'tester', '2026-07-01', '2026-07-29')"
+        )
+        conn.execute(
+            "INSERT INTO discord_channels VALUES "
+            "('channel-1', 'ask-elixir', 'text', '2026-07-01', '2026-07-29')"
+        )
+        conn.execute(
+            "INSERT INTO conversation_threads "
+            "(thread_id, scope_type, scope_key, channel_id, discord_user_id, "
+            "member_id, created_at, last_active_at) VALUES "
+            "(41, 'channel', 'channel-1', 'channel-1', 'user-1', 7, "
+            "'2026-07-01', '2026-07-29')"
+        )
+        conn.execute(
+            "INSERT INTO messages "
+            "(message_id, discord_message_id, thread_id, channel_id, "
+            "discord_user_id, member_id, author_type, workflow, event_type, "
+            "content, summary, created_at, raw_json, intent_id) VALUES "
+            "(51, 'message-1', 41, 'channel-1', 'user-1', 7, 'assistant', "
+            "'interactive', 'channel_response', 'Full transcript', 'Summary', "
+            "'2026-07-29', '{\"ok\": true}', 9)"
+        )
+        conn.execute(
+            "INSERT INTO channel_state VALUES "
+            "('channel-1', '2026-07-29', '[\"war\"]', '[\"brief\"]', 'Summary')"
+        )
+        conn.execute(
+            "INSERT INTO arena_relay_screenshot_observations "
+            "(source_message_id, observed_at, created_at, updated_at) "
+            "VALUES ('screenshot-1', '2026-07-29', '2026-07-29', '2026-07-29')"
+        )
+        conn.execute("PRAGMA user_version = 21")
+        conn.commit()
+
+        apply_schema_migrations(conn)
+
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert "arena_relay_screenshot_observations" not in tables
+        assert "discord_channels" not in tables
+        assert {row[1] for row in conn.execute("PRAGMA table_info(conversation_threads)")} == {
+            "thread_id",
+            "scope_type",
+            "scope_key",
+        }
+        assert {row[1] for row in conn.execute("PRAGMA table_info(channel_state)")} == {
+            "channel_id",
+            "last_summary",
+        }
+        assert conn.execute(
+            "SELECT thread_id, scope_type, scope_key FROM conversation_threads"
+        ).fetchone() == (41, "channel", "channel-1")
+        assert conn.execute(
+            "SELECT message_id, discord_message_id, thread_id, channel_id, "
+            "discord_user_id, member_id, content, summary, raw_json, intent_id FROM messages"
+        ).fetchone() == (
+            51,
+            "message-1",
+            41,
+            "channel-1",
+            "user-1",
+            7,
+            "Full transcript",
+            "Summary",
+            '{"ok": true}',
+            9,
+        )
+        assert conn.execute("SELECT * FROM channel_state").fetchone() == (
+            "channel-1",
+            "Summary",
+        )
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+        apply_schema_migrations(conn)
+        assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
+    finally:
+        conn.close()
+
+
 def test_legacy_migration_backfills_awareness_then_removes_retired_queue(tmp_path):
     path = tmp_path / "pre-v1.db"
     build(str(path), None)

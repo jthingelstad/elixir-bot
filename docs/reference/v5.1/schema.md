@@ -87,6 +87,11 @@ inside the §5 target once the deferred pass lands. 33 of today's table names
 cease to exist: 26 dropped outright, 7 transformed to tag-keyed successors
 (§8 below).
 
+Forward migration v22 removed the write-only `arena_relay_screenshot_observations`
+and `discord_channels` tables. It retained `conversation_threads` as the
+`(scope_type, scope_key)` identity map, retained transcript facts in `messages`,
+and reduced `channel_state` to `channel_id` plus `last_summary`.
+
 *(`cake_day_announcements` was originally listed as a carried ops singleton; it
 drops instead — verified 2026-07-03: the table is **empty**, on a 7-day purge
 (`storage/metadata.py:411`), written only by the Gen-B roster path

@@ -8,7 +8,6 @@ from typing import Optional
 from db import (
     CONVERSATION_MAX_PER_SCOPE,
     CONVERSATION_RETENTION_DAYS,
-    _ensure_channel,
     _ensure_member,
     _ensure_thread,
     _json_or_none,
@@ -56,7 +55,6 @@ def save_message(
             ).fetchone()
             if link:
                 member_id = link["member_id"]
-    _ensure_channel(conn, channel_id, channel_name=channel_name, channel_kind=channel_kind)
     thread_id = _ensure_thread(conn, scope)
     now = _utcnow()
     summary = summary if summary is not None else (content[:200] if content else "")
