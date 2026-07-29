@@ -142,6 +142,10 @@ GitHub accounts:
 - Post issue comments through
   `uv run --locked python AGENT-TEAM/scripts/agent_attribution.py issue-comment <automation-id> <issue> --body-file <path>`
   when practical; the helper adds the signature consistently.
+- For any multiline issue description, use `gh issue create --body-file <path>`
+  (or `--body-file -` with a quoted heredoc). Do not put escaped `\\n` sequences
+  in an inline `--body` argument: GitHub renders those as visible text rather than
+  Markdown line breaks.
 
 The automation id and display name are versioned in `automations.toml`; that file is the identity
 registry as well as the schedule registry.
