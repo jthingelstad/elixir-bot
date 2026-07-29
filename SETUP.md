@@ -52,10 +52,10 @@ Non-secret configuration is checked in:
 
 ## Database safety
 
-The default operational database is `elixir-v51.db`. An empty database is
-initialized from `scripts/migrate_v51/schema_v51.py` and then receives bounded
-forward migrations from `db/schema.py`. A non-empty database without the v5.1
-spine is refused; it is never rebuilt or upgraded in place.
+The default operational database is `elixir-v51.db`. An empty database and all
+bounded forward migrations are initialized through `db/schema.py`. A non-empty
+database without the v5.1 spine is refused; it is never rebuilt or upgraded in
+place.
 
 The immutable pre-cut archive is `elixir-v5-archive-2026H2.db`. Never point the
 running bot at it and never change its read-only permissions. It is **not
@@ -272,6 +272,5 @@ The cleanup command never removes `elixir-v51.db` or either archive.
 - Activity registry: [runtime/activities.py](runtime/activities.py)
 - Channel contract: [prompts/DISCORD.md](prompts/DISCORD.md)
 - Process helper: [scripts/admin.sh](scripts/admin.sh)
-- Baseline schema: [scripts/migrate_v51/schema_v51.py](scripts/migrate_v51/schema_v51.py)
-- Forward schema changes: [db/schema.py](db/schema.py)
+- Baseline and forward schema: [db/schema.py](db/schema.py)
 - Runtime confidence: [scripts/confidence_report.py](scripts/confidence_report.py)

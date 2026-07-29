@@ -149,10 +149,11 @@ returns a known memory by a word in its body.
 
 ## 5. Build plan — ✅ built 2026-07-04
 
-1. Schema: tables above into `schema_v51.py` (+count) and live CREATEs.
+1. Schema: tables above into migration 0 (+count) and live CREATEs; the current
+   canonical entrypoint is `db/schema.py`.
 2. `engine/memory.py` (or evolve `memory_store/`): writers + ranked retrieval;
    `build_memory_context` v2 behind the existing call shape.
-3. Migration script `scripts/migrate_v51/memory_migrate.py` (M1–M4, idempotent,
+3. Migration script `scripts/migrate_memory_v51.py` (M1–M4, idempotent,
    parity prints), then M5 archive + seam repoint.
 4. Observatory `/memories` (browse, search, member filter, kind filter).
 5. Tests: ranking golden cases, migration parity, FTS round-trip, retention;

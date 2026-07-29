@@ -188,7 +188,7 @@ no new intent type until we see real volume).
 ## 4. Build plan (after D1–D6)
 
 1. Schema: `pol_seasons`, `pol_season_results`, `battle_events.teammate_tag`
-   (+ `schema_v51.py` count), raw-buffer teammate backfill script.
+   (+ migration-0 count), raw-buffer teammate backfill script.
 2. Emitter: `ranked` aspect extension + rollover detection +
    `pol_season_closed` emission (first-diff guard per D6).
 3. Season close consumer: results fill + `pol_champ` awards + the podium

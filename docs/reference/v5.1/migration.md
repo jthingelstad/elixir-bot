@@ -71,8 +71,8 @@ decision store and schema v21 removed it plus the nullable leader-action link.
 
 ## Phase 3 — Durable carry-forward (transform, not copy — feedback New-6)
 
-All transforms are one-time scripts (`scripts/migrate_v51/*.py`), each idempotent
-and re-runnable against the read-only archive. `member_id → player_tag` resolution
+The cutover transforms were one-time, idempotent scripts and now live only in
+Git history. `member_id → player_tag` resolution
 joins through the archive's `members` table.
 
 | # | Target | Source | Transform notes |

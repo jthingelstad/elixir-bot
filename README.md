@@ -110,15 +110,14 @@ Non-secret clan and Discord configuration lives in `prompts/CLAN.md` and
 - [cr_api.py](cr_api.py) — sole Clash Royale API ingress.
 - [engine/](engine/) — five-step data engine, emitters, projections,
   management, polling, and offline rehearsal.
-- [db/](db/) — connection discipline, schema checks, and storage facade.
+- [db/](db/) — canonical schema builder and migrations, connection discipline,
+  schema checks, and storage facade.
 - [storage/](storage/) — domain persistence and read helpers.
 - [agent/](agent/) — workflow prompts, model loop, tool contracts, and tools.
 - [runtime/](runtime/) — Discord routing, activities, jobs, awareness, logging,
   and the Observatory web app.
 - [prompts/](prompts/) — identity, purpose, clan, channel, lane, and workflow
   instructions.
-- [scripts/migrate_v51/](scripts/migrate_v51/) — v5.1 baseline schema,
-  archive transforms, and parity/rehearsal tools.
 - [tests/](tests/) — unit, integration, fixture, invariant, and entrypoint tests.
 
 ## Database model

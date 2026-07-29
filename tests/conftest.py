@@ -9,9 +9,9 @@ The autouse fixtures protect the live database and the Anthropic API:
 - `_block_real_llm_calls` patches `agent.core._get_client` so any test that
   reaches the bottom-level API call raises a loud RuntimeError.
 
-The schema template is built once per session from
-scripts.migrate_v51.schema_v51 (new-table DDL inline; carried-table DDL
-exported from the read-only archive, per the migration convention).
+The schema template is built once per session through `db.schema`, the same
+public builder used by runtime cold starts. Its private migration-0 DDL keeps a
+frozen carried-table fallback for archive-less CI.
 """
 
 from __future__ import annotations
@@ -198,13 +198,16 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> list[str]
 
 @pytest.fixture(scope="session")
 def v51_schema_template(tmp_path_factory):
-    """Build the v5.1 schema once; tests copy this template. Uses the local
-    archive when present, else the frozen carried_ddl.sql (CI has no archive)."""
-    from scripts.migrate_v51.schema_v51 import build
+    """Build the current production schema once; tests copy this template.
+
+    Uses the local archive when present and the frozen private fallback when
+    absent (including CI).
+    """
+    from db.schema import build_database
 
     template = str(tmp_path_factory.mktemp("schema") / "v51-template.db")
-    build(template, _ARCHIVE if os.path.exists(_ARCHIVE) else None)
-    # build() leaves the DB in WAL mode with the schema in the -wal sidecar;
+    build_database(template, _ARCHIVE if os.path.exists(_ARCHIVE) else None)
+    # build_database() leaves the DB in WAL mode with the schema in the -wal sidecar;
     # checkpoint so a plain file copy carries the full schema.
     conn = sqlite3.connect(template)
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")

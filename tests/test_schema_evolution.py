@@ -11,15 +11,15 @@ from db.schema import (
     CURRENT_SCHEMA_FINGERPRINT,
     CURRENT_SCHEMA_VERSION,
     apply_schema_migrations,
+    build_database,
     schema_fingerprint,
 )
-from scripts.migrate_v51.schema_v51 import build
 from storage.identity import get_system_status
 
 
 def test_fresh_build_matches_committed_schema_fingerprint(tmp_path):
     path = tmp_path / "fresh.db"
-    build(str(path), None)
+    build_database(str(path), None)
     conn = sqlite3.connect(path)
     try:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
@@ -28,9 +28,65 @@ def test_fresh_build_matches_committed_schema_fingerprint(tmp_path):
         conn.close()
 
 
+def test_fixture_builder_and_runtime_cold_start_share_schema(tmp_path):
+    explicit_path = tmp_path / "explicit.db"
+    runtime_path = tmp_path / "runtime.db"
+    build_database(str(explicit_path), None)
+
+    explicit = sqlite3.connect(explicit_path)
+    runtime = db.get_connection(runtime_path)
+    try:
+        assert schema_fingerprint(explicit) == schema_fingerprint(runtime)
+        assert schema_fingerprint(runtime) == CURRENT_SCHEMA_FINGERPRINT
+        assert runtime.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+    finally:
+        explicit.close()
+        runtime.close()
+
+
+def test_migration_zero_omits_nonhistorical_orphan_tables():
+    from db._schema_baseline import create_baseline_schema
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        create_baseline_schema(conn)
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert {
+            "recognition_ledger",
+            "tournament_battles",
+            "memory_log",
+            "clan_daily_battle_rollups",
+            "event_threads",
+            "post_quality_runs",
+        }.isdisjoint(tables)
+    finally:
+        conn.close()
+
+
+def test_v24_removes_live_only_awareness_prompt_column(tmp_path):
+    path = tmp_path / "v23-live-shape.db"
+    build_database(str(path), None)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("ALTER TABLE awareness_thoughts ADD COLUMN prompt_json TEXT")
+        conn.execute("PRAGMA user_version = 23")
+        conn.commit()
+
+        apply_schema_migrations(conn)
+
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(awareness_thoughts)")}
+        assert "prompt_json" not in columns
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
+    finally:
+        conn.close()
+
+
 def test_v23_migration_adds_admin_command_telemetry_additively(tmp_path):
     path = tmp_path / "v22.db"
-    build(str(path), None)
+    build_database(str(path), None)
     conn = sqlite3.connect(path)
     try:
         conn.execute("DROP TABLE admin_command_invocations")
@@ -66,7 +122,7 @@ def test_v21_migration_discards_legacy_cases_and_preserves_leader_actions(tmp_pa
     """The contract migration deletes all 39 inert cases and their nullable
     action link only after the case-free writer has shipped (#216)."""
     path = tmp_path / "v20.db"
-    build(str(path), None)
+    build_database(str(path), None)
     conn = sqlite3.connect(path)
     try:
         # Reconstruct the retired v20 objects on a throwaway current database.
@@ -144,7 +200,7 @@ def test_v21_migration_discards_legacy_cases_and_preserves_leader_actions(tmp_pa
 def test_v22_contract_preserves_conversations_and_drops_dead_schema(tmp_path):
     """The destructive contract follows the deployed code-first cutover (#224)."""
     path = tmp_path / "v21.db"
-    build(str(path), None)
+    build_database(str(path), None)
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys = ON")
     try:
@@ -304,7 +360,7 @@ def test_v22_contract_preserves_conversations_and_drops_dead_schema(tmp_path):
 
 def test_legacy_migration_backfills_awareness_then_removes_retired_queue(tmp_path):
     path = tmp_path / "pre-v1.db"
-    build(str(path), None)
+    build_database(str(path), None)
     conn = sqlite3.connect(path)
     try:
         conn.execute("DROP TABLE awareness_posts")
@@ -399,7 +455,7 @@ def test_v8_migration_drops_editor_verdicts_forward_from_v7(tmp_path):
     was backed out, then the feature removed) migrates forward to v8, dropping the
     ledger. Idempotent, and the result matches the committed fingerprint."""
     path = tmp_path / "v7.db"
-    build(str(path), None)
+    build_database(str(path), None)
     conn = sqlite3.connect(path)
     try:
         # Simulate a pre-v8 database that still has the critic's ledger.
@@ -432,7 +488,7 @@ def test_v6_migration_adds_member_outreach_forward_from_v5(tmp_path):
     """A live v5 database (no member_outreach) migrates forward to v6, gaining the
     DM-outreach state table. Idempotent, and the result matches the fingerprint."""
     path = tmp_path / "v5.db"
-    build(str(path), None)
+    build_database(str(path), None)
     conn = sqlite3.connect(path)
     try:
         conn.execute("DROP TABLE member_outreach")
@@ -459,7 +515,7 @@ def test_v7_migration_adds_leader_note_feedback_columns_forward_from_v6(tmp_path
     to v7, gaining the note-interpretation lifecycle and premise-rejection columns
     on leader_action_recommendations. Idempotent, matches the committed fingerprint."""
     path = tmp_path / "v6.db"
-    build(str(path), None)
+    build_database(str(path), None)
     conn = sqlite3.connect(path)
     try:
         # Simulate a pre-v7 database: drop the index, then the added columns,

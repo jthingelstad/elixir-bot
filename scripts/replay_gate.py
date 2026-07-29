@@ -21,8 +21,8 @@ content + observation time, any second-pass delta is a current-code defect:
 This separates "the code got better than history" from "the current code is
 not idempotent" instead of hiding both behind an arbitrary slop threshold.
 
-Finishes with the season-close rehearsal (scripts/migrate_v51/
-rehearse_season_close.py) on the same scratch copy when the latest season is
+Finishes with the season-close rehearsal (scripts/rehearse_season_close.py) on
+the same scratch copy when the latest season is
 still open there, and the global DB invariants (tests/conftest.py).
 
 Usage:
@@ -224,7 +224,7 @@ def main() -> int:
             proc = subprocess.run(
                 [
                     sys.executable,
-                    os.path.join(_REPO, "scripts/migrate_v51/rehearse_season_close.py"),
+                    os.path.join(_REPO, "scripts/rehearse_season_close.py"),
                     scratch,
                 ],
                 capture_output=True,

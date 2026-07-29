@@ -1,9 +1,8 @@
 # Data Model ERD
 
-Logical map of Elixir's v5.1 operational database. The executable baseline is
-[`scripts/migrate_v51/schema_v51.py`](../scripts/migrate_v51/schema_v51.py);
-bounded post-cut additions live in [`db/schema.py`](../db/schema.py). This page
-shows ownership and flow rather than every column.
+Logical map of Elixir's v5.1 operational database. The executable baseline and
+bounded post-cut additions share the canonical [`db/schema.py`](../db/schema.py)
+entrypoint. This page shows ownership and flow rather than every column.
 
 ```mermaid
 erDiagram

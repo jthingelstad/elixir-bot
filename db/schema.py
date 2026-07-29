@@ -9,10 +9,53 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 23
+CURRENT_SCHEMA_VERSION = 24
+EXPECTED_TABLE_COUNT = 59
+
+
+def initialize_empty_database(
+    conn: sqlite3.Connection,
+    archive_path: str | None = None,
+) -> None:
+    """Build the complete current schema on an empty connection.
+
+    Migration 0 and every ordered post-cut change live under :mod:`db`; both
+    runtime cold starts and test fixtures enter through this function so they
+    cannot validate different schema definitions.
+    """
+    existing = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1"
+    ).fetchone()
+    if existing is not None:
+        raise RuntimeError("initialize_empty_database requires an empty database")
+
+    from db._schema_baseline import create_baseline_schema
+
+    create_baseline_schema(conn, archive_path)
+    apply_schema_migrations(conn)
+
+
+def build_database(db_path: str, archive_path: str | None = None) -> None:
+    """Create a current database file without overwriting an existing path."""
+    if os.path.exists(db_path):
+        raise SystemExit(f"{db_path} already exists — refusing to overwrite")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        initialize_empty_database(conn, archive_path)
+        count = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'memories_fts%'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    print(f"created {db_path}: {count} designed tables (expected {EXPECTED_TABLE_COUNT})")
+    if count != EXPECTED_TABLE_COUNT:
+        raise SystemExit("table count mismatch — reconcile with schema.md §2 before proceeding")
 
 
 _V1_STATEMENTS = (
@@ -1150,6 +1193,19 @@ def _apply_v23(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v24(conn: sqlite3.Connection) -> None:
+    """Remove a live-only, unread awareness column exposed by schema parity (#228).
+
+    ``prompt_json`` was added directly to the deployed ``awareness_thoughts``
+    table before the versioned schema ladder owned that table. No current or
+    historical repository reader/writer uses it; LLM prompt capture belongs to
+    ``llm_calls.prompt_json``. The fresh schema never declared the column, so
+    dropping it makes the deployed semantic contract match fresh builds.
+    """
+    if "prompt_json" in _columns(conn, "awareness_thoughts"):
+        conn.execute("ALTER TABLE awareness_thoughts DROP COLUMN prompt_json")
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1372,6 +1428,14 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+    if version < 24:
+        try:
+            _apply_v24(conn)
+            conn.execute("PRAGMA user_version = 24")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1413,29 +1477,165 @@ def require_columns(
 
 
 def schema_fingerprint(conn: sqlite3.Connection) -> str:
-    """Stable hash of designed tables, indexes, triggers, and virtual tables."""
-    rows = conn.execute(
-        "SELECT type, name, tbl_name, sql FROM sqlite_master "
-        "WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' "
-        "AND name NOT LIKE 'memories_fts_%' "
-        "ORDER BY type, name"
+    """Stable hash of the semantic schema contract.
+
+    Existing databases reached the same structure through ``ALTER TABLE``
+    while fresh databases declare current columns directly. SQLite preserves
+    those histories in ``sqlite_master.sql`` (column order, comments, and
+    formatting), so hashing raw DDL falsely reports drift. This contract hashes
+    columns, checks, keys, indexes, foreign keys, strict/without-rowid flags,
+    triggers, and virtual-table declarations while ignoring cosmetic DDL history.
+    """
+
+    def quoted(name: str) -> str:
+        return "'" + name.replace("'", "''") + "'"
+
+    def normalized_sql(sql: str | None) -> str | None:
+        if sql is None:
+            return None
+        without_comments = re.sub(r"--[^\n]*", " ", sql)
+        return re.sub(r"\s+", " ", without_comments).strip()
+
+    def check_constraints(sql: str) -> list[str]:
+        """Extract balanced CHECK expressions without depending on DDL layout."""
+        body = re.sub(r"--[^\n]*", " ", sql)
+        checks: list[str] = []
+        for match in re.finditer(r"\bCHECK\s*\(", body, re.IGNORECASE):
+            start = match.end() - 1
+            depth = 0
+            quote: str | None = None
+            index = start
+            while index < len(body):
+                char = body[index]
+                if quote is not None:
+                    if char == quote:
+                        if index + 1 < len(body) and body[index + 1] == quote:
+                            index += 2
+                            continue
+                        quote = None
+                elif char in {"'", '"'}:
+                    quote = char
+                elif char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth -= 1
+                    if depth == 0:
+                        expression = re.sub(r"\s+", " ", body[start + 1 : index]).strip()
+                        checks.append(expression)
+                        break
+                index += 1
+        return sorted(checks)
+
+    table_flags = {
+        str(row[1]): {"without_rowid": int(row[4]), "strict": int(row[5])}
+        for row in conn.execute("PRAGMA table_list")
+        if str(row[1]) != "sqlite_schema"
+    }
+    table_contract: dict[str, object] = {}
+    contract: dict[str, object] = {"tables": table_contract, "other_objects": []}
+    tables = conn.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type='table' "
+        "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'memories_fts_%' ORDER BY name"
     ).fetchall()
-    canonical = "\n".join(
-        "|".join((str(row[0]), str(row[1]), str(row[2]), re.sub(r"\s+", " ", row[3]).strip()))
-        for row in rows
-    )
+    for table_name, table_sql in tables:
+        name = str(table_name)
+        sql = str(table_sql or "")
+        if re.match(r"\s*CREATE\s+VIRTUAL\s+TABLE", sql, re.IGNORECASE):
+            table_contract[name] = {
+                "virtual_sql": normalized_sql(sql),
+                **table_flags.get(name, {}),
+            }
+            continue
+
+        columns = sorted(
+            (
+                str(row[1]),
+                str(row[2] or ""),
+                int(row[3]),
+                None if row[4] is None else str(row[4]),
+                int(row[5]),
+                int(row[6]),
+            )
+            for row in conn.execute(f"PRAGMA table_xinfo({quoted(name)})")
+        )
+        foreign_keys = sorted(
+            (
+                str(row[2]),
+                str(row[3]),
+                str(row[4]),
+                str(row[5]),
+                str(row[6]),
+                str(row[7]),
+                int(row[1]),
+            )
+            for row in conn.execute(f"PRAGMA foreign_key_list({quoted(name)})")
+        )
+        indexes = []
+        for index_row in conn.execute(f"PRAGMA index_list({quoted(name)})"):
+            index_name = str(index_row[1])
+            origin = str(index_row[3])
+            index_columns = [
+                (
+                    int(row[0]),
+                    "column"
+                    if int(row[1]) >= 0
+                    else "rowid"
+                    if int(row[1]) == -1
+                    else "expression",
+                    None if row[2] is None else str(row[2]),
+                    int(row[3]),
+                    str(row[4]),
+                    int(row[5]),
+                )
+                for row in conn.execute(f"PRAGMA index_xinfo({quoted(index_name)})")
+            ]
+            master = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='index' AND name=?",
+                (index_name,),
+            ).fetchone()
+            indexes.append(
+                {
+                    "name": index_name if origin == "c" else None,
+                    "unique": int(index_row[2]),
+                    "origin": origin,
+                    "partial": int(index_row[4]),
+                    "columns": index_columns,
+                    "sql": normalized_sql(master[0]) if master else None,
+                }
+            )
+        indexes.sort(key=lambda value: json.dumps(value, sort_keys=True))
+        table_contract[name] = {
+            "columns": columns,
+            "checks": check_constraints(sql),
+            "foreign_keys": foreign_keys,
+            "indexes": indexes,
+            **table_flags.get(name, {}),
+        }
+
+    contract["other_objects"] = [
+        (str(row[0]), str(row[1]), str(row[2]), normalized_sql(row[3]))
+        for row in conn.execute(
+            "SELECT type, name, tbl_name, sql FROM sqlite_master "
+            "WHERE type IN ('trigger','view') AND sql IS NOT NULL "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
+        )
+    ]
+    canonical = json.dumps(contract, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "5511b11ccdcce295aae08211243ca9417ad9e0871cab3f0f6fad20614063acd9"
+CURRENT_SCHEMA_FINGERPRINT = "f7e93fe16dc820800d71b423f01900402b7e81cf8eacc50a259eb635670dde5c"
 
 
 __all__ = [
     "CURRENT_SCHEMA_FINGERPRINT",
     "CURRENT_SCHEMA_VERSION",
+    "EXPECTED_TABLE_COUNT",
     "apply_schema_migrations",
     "assert_current_schema",
+    "build_database",
+    "initialize_empty_database",
     "require_columns",
     "schema_fingerprint",
 ]

@@ -276,9 +276,9 @@ def main() -> int:
     db_path = os.path.join(scratch_dir, "sim.db")
     os.environ["ELIXIR_DB_PATH"] = db_path  # storage.* facades in step 5
 
-    from scripts.migrate_v51.schema_v51 import build
+    from db.schema import build_database
 
-    build(db_path, os.path.join(_REPO, "elixir-v5-archive-2026H2.db"))
+    build_database(db_path, os.path.join(_REPO, "elixir-v5-archive-2026H2.db"))
 
     import engine.tick as tick_mod
     from engine.db import connect

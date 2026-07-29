@@ -1,32 +1,20 @@
-"""v5.1 baseline schema — migration Phase 2 (docs/reference/v5.1/schema.md).
+"""Private migration-0 DDL for :mod:`db.schema`.
 
-Creates elixir-v51.db: hand-written DDL for every NEW or CHANGED table
-(reproduced from docs/reference/v5.1/schema.md §3–§7 and runtime.md §4), plus a verbatim
-DDL export from the read-only archive for carried-as-is tables (README/schema
-convention: carried tables ship via the archive's live DDL).
+This is the frozen clean-break v5.1 baseline: hand-written DDL for tables that
+were new or changed at the cut, plus a frozen export for tables carried from
+the pre-cut archive. ``db.schema`` owns the public fresh-build API and applies
+the ordered post-cut migrations after this baseline.
 
-This module is the `_migration_0` source of truth for the new engine. Explicit
-forward changes live in ``db.schema`` and are applied after this baseline.
-
-Usage:
-    uv run python scripts/migrate_v51/schema_v51.py \
-        --db elixir-v51.db --archive elixir-v5-archive-2026H2.db
-
-Expected table count: EXPECTED_TABLE_COUNT designed tables after the current
-forward migration (the constant below is the enforced value).
+Consumers must import the builder from ``db.schema`` rather than this private
+module. Keeping migration 0 beside the forward ladder gives schema ownership
+one home while preserving the exact upgrade path for existing databases.
 """
 
 from __future__ import annotations
 
-import argparse
 import os
 import re
 import sqlite3
-import sys
-
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
 
 # ------------------------------------------------------------------ new DDL
 # Sources: schema.md §3 (identity), §4 (ingest), §5 (streams), §6 (rollups &
@@ -267,28 +255,6 @@ CREATE TABLE clan_daily_metrics (          -- carried minus raw_json (L1 owns ra
 CREATE INDEX idx_clan_daily_metrics_date ON clan_daily_metrics(metric_date DESC);
 CREATE INDEX idx_clan_daily_metrics_clan_date ON clan_daily_metrics(clan_tag, metric_date DESC);
 
-CREATE TABLE clan_daily_battle_rollups (   -- carried as-is (already clan_tag-keyed)
-    rollup_id INTEGER PRIMARY KEY,
-    battle_date TEXT NOT NULL,
-    clan_tag TEXT NOT NULL,
-    clan_name TEXT,
-    mode_group TEXT NOT NULL,
-    game_mode_id INTEGER, game_mode_name TEXT,
-    members_active INTEGER NOT NULL DEFAULT 0,
-    battles INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0,
-    losses INTEGER NOT NULL DEFAULT 0, draws INTEGER NOT NULL DEFAULT 0,
-    crowns_for INTEGER NOT NULL DEFAULT 0, crowns_against INTEGER NOT NULL DEFAULT 0,
-    trophy_change_total INTEGER NOT NULL DEFAULT 0,
-    captured_battles INTEGER, expected_battle_delta INTEGER, completeness_ratio REAL,
-    is_complete INTEGER NOT NULL DEFAULT 0,
-    last_aggregated_at TEXT NOT NULL,
-    UNIQUE(clan_tag, battle_date, mode_group, game_mode_id)
-);
-CREATE INDEX idx_clan_daily_battle_rollups_date
-    ON clan_daily_battle_rollups(battle_date DESC, mode_group);
-CREATE INDEX idx_clan_daily_battle_rollups_clan_date
-    ON clan_daily_battle_rollups(clan_tag, battle_date DESC, mode_group);
-
 -- §6.2 Projections (L6, disposable) -------------------------------------------
 CREATE TABLE player_current_state (
     player_tag TEXT PRIMARY KEY REFERENCES players(player_tag) ON DELETE CASCADE,
@@ -337,16 +303,6 @@ CREATE TABLE member_management (
     promote_qualifying_weeks INTEGER NOT NULL DEFAULT 0,
     kick_state_since TEXT,
     state_json TEXT NOT NULL DEFAULT '{}'
-);
-
--- §7.1 Recognition history ---------------------------------------------------
-CREATE TABLE recognition_ledger (
-    recognition_key TEXT PRIMARY KEY,
-    stream TEXT NOT NULL,
-    event_refs_json TEXT NOT NULL,
-    score INTEGER NOT NULL,
-    claimed_at TEXT NOT NULL,
-    intent_id INTEGER
 );
 
 -- §7.3 revisits (leader_action_recommendations exports verbatim from the
@@ -453,21 +409,6 @@ CREATE TABLE poll_state (
     updated_at TEXT NOT NULL
 );
 
--- tournament_battles: carried minus player*_member_id (schema.md §7.6) ---------
-CREATE TABLE tournament_battles (
-    tournament_battle_id INTEGER PRIMARY KEY,
-    tournament_id INTEGER NOT NULL REFERENCES tournaments(tournament_id) ON DELETE CASCADE,
-    battle_time TEXT NOT NULL,
-    player1_tag TEXT NOT NULL, player1_name TEXT,
-    player1_crowns INTEGER, player1_deck_json TEXT,
-    player2_tag TEXT NOT NULL, player2_name TEXT,
-    player2_crowns INTEGER, player2_deck_json TEXT,
-    winner_tag TEXT, deck_selection TEXT,
-    game_mode_id INTEGER, arena_name TEXT, raw_json TEXT,
-    UNIQUE(tournament_id, battle_time, player1_tag, player2_tag)
-);
-CREATE INDEX idx_tournament_battles_tournament ON tournament_battles(tournament_id);
-
 -- tournament_participants: carried minus member_id (player_tag already present) --
 CREATE TABLE tournament_participants (
     participant_id INTEGER PRIMARY KEY,
@@ -506,36 +447,9 @@ CREATE TABLE runtime_incidents (
 CREATE INDEX idx_incidents_open ON runtime_incidents(resolved_at, at DESC);
 CREATE INDEX idx_incidents_component ON runtime_incidents(component, at DESC);
 
--- post_quality_runs: retrospective post-quality scorecard history (confidence
--- plan §3; added 2026-07-05 — lazily created live by scripts/eval_post_quality.py)
-CREATE TABLE post_quality_runs (
-    run_id INTEGER PRIMARY KEY,
-    run_at TEXT NOT NULL,
-    days INTEGER NOT NULL,
-    sampled INTEGER NOT NULL,
-    game_accuracy_rate REAL,
-    avg_depth REAL,
-    flagged_count INTEGER NOT NULL,
-    detail_json TEXT
-);
-
 -- Ranked season lifecycle (ranked-and-profiles.md §2.1; D1–D7 ratified
 -- 2026-07-04). Ids are canonical 'YYYY-MM' (the month the season starts in;
 -- first-Monday to first-Monday). Discovered lifecycle, war-tracker style.
--- event_threads: bounded-event thread rooms (channels.md §2, 2026-07-05) —
--- game-event threads under #battle-feed; war-week threads ride
--- war_weeks.thread_id. Born at observed birth, locked at observed death.
-CREATE TABLE event_threads (
-    event_thread_id INTEGER PRIMARY KEY,
-    kind TEXT NOT NULL DEFAULT 'game_mode',
-    mode_name TEXT NOT NULL,
-    thread_id INTEGER,
-    born_at TEXT NOT NULL,
-    last_seen_at TEXT,
-    locked_at TEXT
-);
-CREATE INDEX idx_event_threads_mode ON event_threads(mode_name, locked_at);
-
 CREATE TABLE pol_seasons (
     pol_season_id TEXT PRIMARY KEY,
     started_at TEXT,
@@ -581,15 +495,6 @@ CREATE TABLE memory_tags (
 );
 CREATE INDEX idx_memory_tags_tag ON memory_tags(tag);
 
-CREATE TABLE memory_log (
-    log_id INTEGER PRIMARY KEY,
-    memory_id INTEGER NOT NULL,
-    action TEXT NOT NULL,
-    actor TEXT NOT NULL,
-    at TEXT NOT NULL,
-    diff_json TEXT
-);
-
 CREATE VIRTUAL TABLE memories_fts USING fts5(
     title, summary, body,
     content='memories',
@@ -612,8 +517,7 @@ END;
 """
 
 # Tables whose DDL exports verbatim from the archive (schema.md: "carried
-# as-is, verified live DDL"). tournaments must come before tournament_battles'
-# FK — it's in this list, and NEW_DDL runs after the export.
+# as-is, verified live DDL").
 CARRIED_VERBATIM = [
     "raw_api_payloads",
     "discord_users",
@@ -642,9 +546,6 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 59  # +member_outreach (V6); -editor_verdicts (V8); -recognition_ledger (V9); -elixir_improvement_suggestions (V10); -memory_log (V12); -system_signals (V13); -4 dead tables (V14); tournament_events added V11 then dropped V15; -tournament_battles (V19, folded into battle_events); -runtime_incidents (V20, the error log is the record); -decision_cases (V21; also drops leader_action_recommendations.case_id); -arena_relay_screenshot_observations and discord_channels (V22; also contracts conversation metadata); +admin_command_invocations (V23)
-
-
 _DEAD_MEMBERS_FK = re.compile(
     r"\s+REFERENCES members\(member_id\)(\s+ON DELETE (SET NULL|CASCADE))?"
 )
@@ -666,12 +567,12 @@ def export_carried_ddl(archive: sqlite3.Connection) -> list[str]:
     return stmts
 
 
-CARRIED_DDL_FILE = os.path.join(os.path.dirname(__file__), "carried_ddl.sql")
+CARRIED_DDL_FILE = os.path.join(os.path.dirname(__file__), "_schema_baseline.sql")
 
 
 def carried_ddl(archive_path: str | None) -> list[str]:
     """Prefer the live archive when present; fall back to the frozen export
-    (carried_ddl.sql) so CI and archive-less checkouts can build. The archive
+    (_schema_baseline.sql) so CI and archive-less checkouts can build. The archive
     is immutable, so the two sources can never legitimately diverge — when
     both are available we assert exactly that."""
     frozen = None
@@ -686,7 +587,9 @@ def carried_ddl(archive_path: str | None) -> list[str]:
         finally:
             archive.close()
         if frozen is not None and [s.strip() for s in live] != frozen:
-            raise SystemExit("carried_ddl.sql has drifted from the archive export — regenerate it")
+            raise SystemExit(
+                "_schema_baseline.sql has drifted from the archive export — regenerate it"
+            )
         return live
     if frozen is None:
         raise SystemExit(
@@ -695,37 +598,15 @@ def carried_ddl(archive_path: str | None) -> list[str]:
     return frozen
 
 
-def build(db_path: str, archive_path: str | None) -> None:
-    if os.path.exists(db_path):
-        raise SystemExit(f"{db_path} already exists — refusing to overwrite")
-    new = sqlite3.connect(db_path)
-    try:
-        new.execute("PRAGMA journal_mode=WAL")
-        for stmt in carried_ddl(archive_path):
-            new.execute(stmt)
-        new.executescript(NEW_DDL)
-        from db.schema import apply_schema_migrations
+def create_baseline_schema(conn: sqlite3.Connection, archive_path: str | None = None) -> None:
+    """Create migration 0 on an empty connection.
 
-        apply_schema_migrations(new)
-        count = new.execute(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
-            "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'memories_fts%'"
-        ).fetchone()[0]
-    finally:
-        new.close()
-    print(f"created {db_path}: {count} designed tables (expected {EXPECTED_TABLE_COUNT})")
-    if count != EXPECTED_TABLE_COUNT:
-        raise SystemExit("table count mismatch — reconcile with schema.md §2 before proceeding")
+    ``db.schema`` is responsible for advancing this frozen baseline through
+    the ordered migrations and validating the final contract.
+    """
+    for statement in carried_ddl(archive_path):
+        conn.execute(statement)
+    conn.executescript(NEW_DDL)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", default="elixir-v51.db")
-    parser.add_argument("--archive", default="elixir-v5-archive-2026H2.db")
-    args = parser.parse_args()
-    build(args.db, args.archive)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+__all__ = ["create_baseline_schema"]

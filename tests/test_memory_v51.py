@@ -199,7 +199,7 @@ def test_migration_parity_seeded_source(tmp_path):
     src.commit()
     src.close()
 
-    from scripts.migrate_v51.memory_migrate import run
+    from scripts.migrate_memory_v51 import run
 
     conn = db.get_connection()
     try:  # fixture DB path — run() opens by path, so resolve it

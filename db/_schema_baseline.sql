@@ -1,4 +1,4 @@
--- Carried-table DDL, exported verbatim from the read-only archive
+-- Private migration-0 carried-table DDL for db.schema, exported verbatim from the read-only archive
 -- (elixir-v5-archive-2026H2.db) with dead members-FK clauses stripped.
 -- The archive is immutable, so this export is frozen truth - it lets
 -- CI and any archive-less checkout build the v5.1 schema.
