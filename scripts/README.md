@@ -84,7 +84,7 @@ uv run --locked python scripts/review_agent_feedback.py --include-positive    # 
 
 ## Eval harnesses
 
-All three hit the real Claude API via `CLAUDE_API_KEY` (loaded from `.env`) and
+Both hit the real Claude API via `CLAUDE_API_KEY` (loaded from `.env`) and
 the real local database. They write JSON to `scripts/*_results.json`, which is
 gitignored.
 
@@ -100,20 +100,6 @@ uv run --locked python scripts/eval_intent_router.py --rounds 2 --per-round 50
 
 Use when you've changed the intent router prompt, added a route, or want to
 stress edge cases without paying for full pipeline runs.
-
-### `eval_deck_conversations.py`
-**Deck pipeline depth-test.** Stratifies active members by war participation
-(regular / occasional / rare / never), asks the LLM to write a 3-turn Discord
-conversation tuned to each member's profile, then runs each turn through the
-real deck workflow with tool-call capture and conversation-history carry.
-
-```bash
-uv run --locked python scripts/eval_deck_conversations.py --members 6 --turns 3
-uv run --locked python scripts/eval_deck_conversations.py --members 6 --seed 42
-```
-
-Summary covers route + mode distribution, tool calls, errors, mode
-inheritance on follow-ups, and war-suggest deck-count validation (expects 4).
 
 ### `eval_all_requests.py`
 **Unified cross-bucket eval.** Three buckets per round:

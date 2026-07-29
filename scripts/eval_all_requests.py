@@ -6,8 +6,7 @@ Drives three buckets through the real Elixir pipeline:
                     Routes via `classify_intent` → run `respond_in_channel` for
                     llm_chat / help / status / etc.  Deck-dispatched routes are
                     handed off to bucket 2.
-  2. **deck**     — deck review / suggest / display. Uses the same pipeline as
-                    `scripts/eval_deck_conversations.py` but keyed off the router.
+  2. **deck**     — deck review / suggest / display, keyed off the router.
   3. **cr_api**   — external lookups by CR tag. The prompts embed real non-clan
                     tags (players, clans, tournaments) so the LLM must reach for
                     the new `cr_api` tool to answer. Verifies the tool fires and

@@ -1,9 +1,8 @@
 """OfflineEngine — the rehearsal seam (migration.md Phase 0 item 4 / Phase 6).
 
 Replays archived raw payloads through ingest → emit → project, with no API,
-Discord, or LLM. This is general replay infrastructure for the LIVE tick path —
-scripts/replay_gate.py drives it as a hard verification gate, and
-scripts/migrate_v51/rehearsal.py uses it too.
+Discord, or LLM. This is general replay infrastructure for the LIVE tick path;
+scripts/replay_gate.py drives it as a hard verification gate.
 
 The optional ``legacy_proactive`` seam that invoked the deterministic
 recognizer/renderer here was removed with that stack (#207): the awareness loop

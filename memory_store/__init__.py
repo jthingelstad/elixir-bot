@@ -80,8 +80,7 @@ STATUSES = {"active", "archived", "deleted"}
 
 def _utcnow() -> str:
     # Engine Z-convention (cold review #8): the table briefly held three
-    # timestamp formats on day one; scripts/migrate_v51/fix_memories_ts.py
-    # normalized the migrated rows to match.
+    # timestamp formats on day one; the v5.1 cutover normalized them to match.
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

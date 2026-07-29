@@ -853,7 +853,7 @@ def _apply_v16(conn: sqlite3.Connection) -> None:
     Not reconstructable after the fact. A tag can be re-scouted, but the deck an
     opponent brought to one specific battle exists only in that battle log entry
     and ages out. Every battle polled before this migration keeps a NULL here
-    unless its raw payload is still retained (see scripts/backfill_opponent_decks.py).
+    unless its raw payload is still retained (see scripts/backfill_battle_fields.py).
     """
     columns = {row[1] for row in conn.execute("PRAGMA table_info(battle_events)")}
     if "opponent_deck_json" not in columns:
@@ -957,7 +957,7 @@ def _apply_v19(conn: sqlite3.Connection) -> None:
 
     Its 7 rows predated ``battle_events`` (which starts 2026-05-07) so they were
     replayed into the main stream first, from the full ``raw_json`` payload each
-    row carried -- see scripts/migrate_tournament_battles.py. They came out
+    row carried. They came out
     RICHER than the table held: support cards, elixir leaked and tower HP, none
     of which it had columns for.
 
