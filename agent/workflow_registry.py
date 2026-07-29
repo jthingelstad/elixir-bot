@@ -48,6 +48,7 @@ _WRITE_TOOL_NAMES = {
 AWARENESS_WRITE_TOOL_NAMES = {
     "save_clan_memory",
     "flag_member_watch",
+    "raise_clan_chat_relay",
     "record_leadership_followup",
     "schedule_revisit",
 }

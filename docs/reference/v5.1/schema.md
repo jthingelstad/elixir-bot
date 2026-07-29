@@ -478,9 +478,11 @@ ordered schema migrations, not lazily by runtime code.
 - `decision_cases` — **carried, slimmed to one implementation** (the live table is
   already generic + tag-keyed; verified DDL). It serves the member-review queue only.
   A case is opened ONLY for a type in `CASE_TYPES` — one some reconciler owns — and
-  `upsert_member_review_case` rejects anything else. The awareness write tools
-  (`flag_member_watch`, `record_leadership_followup`) reach it only by supplying such a
-  `case_type` together with a member; without both they record a memory and nothing more.
+  `upsert_member_review_case` rejects anything else. The awareness write tool
+  `record_leadership_followup` reaches it only by supplying such a `case_type` together
+  with a member; without both it records a memory and nothing more. `flag_member_watch`
+  is deliberately private state only (ordinary watches and explicit leave holds) and
+  never creates a decision case.
   The retired `leadership_followup` type was the counter-example: outside `CASE_TYPES`,
   so nothing could ever close it (#208).
   Columns `source_signal_key` / `source_signal_type` are renamed
@@ -685,7 +687,8 @@ omitted.
 | | season_window / war_season | war_races | war_seasons, war_weeks |
 | write: `update_member` | 4 fields | member_metadata | player_metadata |
 | write: `save_clan_memory` | — | clan_memories (+ satellites) | unchanged (deferred pass) |
-| write: `flag_member_watch` / `record_leadership_followup` | — | decision_cases, clan_memories | clan_memories always; decision_cases only with a `CASE_TYPES` case_type + member (#208) |
+| write: `flag_member_watch` / `record_leadership_followup` | — | decision_cases, clan_memories | `flag_member_watch`: clan_memories only; `record_leadership_followup`: clan_memories always, decision_cases only with a `CASE_TYPES` case_type + member (#208) |
+| write: `raise_clan_chat_relay` | — | — | leader_action_recommendations (`in_game_relay`) |
 | write: `schedule_revisit` | — | revisits | revisits |
 
 **Notable upgrades over today:** `at_risk` and `promotion_candidates` stop
