@@ -935,11 +935,12 @@ TOOLS = [
     {
         "name": "flag_member_watch",
         "description": (
-            "Flag a member for leadership attention with a short reason. Use when you notice a "
-            "pattern the next tick or a human leader should look at — extended silence, activity "
-            "drop-off, rank slide, war no-show. Persists as a leadership-scoped memory tagged "
-            "'watch-list'. Prefer this over save_clan_memory when the point is 'keep an eye on "
-            "this member'; use save_clan_memory when the point is durable knowledge."
+            "Record private member state for future awareness ticks. Use for an observed pattern "
+            "to watch — extended silence, activity drop-off, rank slide, war no-show — or for an "
+            "explicit leave hold when a member told leaders they will be away. This tool never "
+            "raises a #actions card and never asks a leader to decide anything. Use "
+            "record_leadership_followup for a member-review decision; use raise_clan_chat_relay "
+            "for paste-ready in-game copy."
         ),
         "input_schema": {
             "type": "object",
@@ -967,16 +968,6 @@ TOOLS = [
                         "clock keeps running. A hold is an approved absence, not an observed one."
                     ),
                 },
-                "case_type": {
-                    "type": "string",
-                    "enum": [
-                        "inactivity_review",
-                        "promotion_review",
-                        "demotion_review",
-                        "war_recovery",
-                    ],
-                    "description": "Optional durable decision-case type to create or update when this watch is actionable.",
-                },
             },
             "required": ["member_tag", "reason"],
         },
@@ -991,7 +982,8 @@ TOOLS = [
             "('X and Y are away for a week'). The workflow for an away/LOA notice is TWO steps — "
             "first call flag_member_watch with away_until for EACH member (records the leave "
             "hold that pauses their kick clock), THEN call this once to relay a warm "
-            "acknowledgement to clan chat. "
+            "acknowledgement to clan chat. This tool never records the leave hold itself and is "
+            "not a substitute for flag_member_watch. "
             "Copy rules (enforced — invalid copy is rejected, not posted): <=200 characters, "
             "plain text only (no markdown, links, or @mentions), and avoid the in-game chat "
             "filter — write 'and' not '&', and never '+<number>'. Name the members and keep it "
@@ -1032,6 +1024,9 @@ TOOLS = [
             "Record an operational observation as a durable leadership-scoped memory tagged "
             "'followup'. Use when you detect a pattern worth remembering — a rank swing, a "
             "recurring no-show, a compliance gap. "
+            "This is the ONLY awareness write tool that can open a member-review decision card. "
+            "Do not use it for a leave hold or paste-ready clan-chat copy: use flag_member_watch "
+            "with away_until and raise_clan_chat_relay for those distinct outcomes. "
             "IMPORTANT — this is a NOTE, not an escalation. On its own it reaches no human: "
             "it does not post anywhere and does not raise a card. To actually ask leadership "
             "for something, either post to the leader-lounge lane (#leaders), or pass "

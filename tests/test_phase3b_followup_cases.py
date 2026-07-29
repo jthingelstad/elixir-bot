@@ -107,7 +107,9 @@ def test_flag_member_watch_default_is_memory_only():
     assert "case_id" not in result  # a plain watch is an annotation, not a case
 
 
-def test_flag_member_watch_with_case_type_opens_case():
+def test_flag_member_watch_rejects_legacy_case_type_and_opens_no_case():
+    """Member watches are private state; followups exclusively own review cards."""
+    before = len(db.list_decision_cases(limit=100))
     result = _execute_flag_member_watch(
         {
             "member_tag": "#WATCH2",
@@ -115,9 +117,10 @@ def test_flag_member_watch_with_case_type_opens_case():
             "case_type": "inactivity_review",
         }
     )
-    assert result.get("case_id")
-    case = db.get_decision_case(result["case_key"])
-    assert case["case_type"] == "inactivity_review"
+    assert result["error"] == "unsupported_case_type"
+    assert "record_leadership_followup" in result["detail"]
+    assert "case_id" not in result
+    assert len(db.list_decision_cases(limit=100)) == before
 
 
 def test_unknown_case_type_is_refused_at_the_storage_boundary():

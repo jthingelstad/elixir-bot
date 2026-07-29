@@ -31,7 +31,7 @@ BROAD_EXCEPTION_BASELINE = {
     "agent/factual_admission.py": 1,
     "agent/intent_router.py": 1,
     "agent/release_notes.py": 2,
-    "agent/tool_exec.py": 9,
+    "agent/tool_exec.py": 8,  # -1: #225 removed the obsolete watch-to-case fallback
     "agent/workflows.py": 10,
     "capabilities/decks.py": 2,
     "capabilities/members.py": 1,

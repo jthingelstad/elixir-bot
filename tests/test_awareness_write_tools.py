@@ -8,7 +8,7 @@ Covers:
 - `save_clan_memory` called from workflow="awareness" records as
   `elixir_inference` rather than `leader_note`
 - The per-tick write budget rejects the 4th write with a structured error
-- Tool policy exposes the new write tools to awareness only
+- Tool policy exposes every awareness-intended write tool to awareness
 """
 
 import json
@@ -60,11 +60,29 @@ def memdb(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_awareness_toolset_includes_the_three_write_tools():
+def test_every_awareness_intended_write_tool_is_reachable():
+    intended = {
+        "save_clan_memory",
+        "flag_member_watch",
+        "raise_clan_chat_relay",
+        "record_leadership_followup",
+        "schedule_revisit",
+    }
     tool_names = {t["name"] for t in TOOLSETS_BY_WORKFLOW["awareness"]}
-    assert "save_clan_memory" in tool_names
-    assert "flag_member_watch" in tool_names
-    assert "record_leadership_followup" in tool_names
+    assert AWARENESS_WRITE_TOOL_NAMES == intended
+    assert intended <= _WRITE_TOOL_NAMES
+    assert intended <= tool_names
+
+
+def test_member_state_decision_and_relay_tools_have_distinct_contracts():
+    tools = {tool["name"]: tool for tool in TOOLSETS_BY_WORKFLOW["awareness"]}
+    watch_properties = tools["flag_member_watch"]["input_schema"]["properties"]
+    followup_properties = tools["record_leadership_followup"]["input_schema"]["properties"]
+
+    assert "away_until" in watch_properties
+    assert "case_type" not in watch_properties
+    assert "case_type" in followup_properties
+    assert tools["raise_clan_chat_relay"]["input_schema"]["required"] == ["copy"]
 
 
 def test_update_member_is_not_exposed_to_awareness():
@@ -76,9 +94,11 @@ def test_update_member_is_not_exposed_to_awareness():
 
 def test_write_tool_names_include_new_tools():
     assert "flag_member_watch" in _WRITE_TOOL_NAMES
+    assert "raise_clan_chat_relay" in _WRITE_TOOL_NAMES
     assert "record_leadership_followup" in _WRITE_TOOL_NAMES
     assert "save_clan_memory" in _WRITE_TOOL_NAMES
     assert "flag_member_watch" in AWARENESS_WRITE_TOOL_NAMES
+    assert "raise_clan_chat_relay" in AWARENESS_WRITE_TOOL_NAMES
     assert "record_leadership_followup" in AWARENESS_WRITE_TOOL_NAMES
 
 
@@ -152,31 +172,52 @@ def test_flag_member_watch_rejects_missing_args(memdb):
     assert "error" in result
 
 
-def test_flag_member_watch_can_upsert_decision_case(memdb):
+def test_loa_flow_records_engine_hold_and_clan_chat_relay(memdb):
+    """The two-step LOA flow writes both durable outcomes end to end."""
+    from engine import management
+
     db.snapshot_members(
         [{"tag": "#ABC123", "name": "Vijay", "role": "member"}],
     )
+    away_until = (datetime.now(timezone.utc) + timedelta(days=2)).date().isoformat()
 
-    raw = tool_exec._execute_tool(
+    hold_raw = tool_exec._execute_tool(
         "flag_member_watch",
         {
             "member_tag": "Vijay",
-            "reason": "Silent past the inactivity threshold; review removal.",
-            "case_type": "inactivity_review",
+            "reason": "Told leaders he is travelling for two days.",
+            "away_until": away_until,
         },
         workflow="awareness",
     )
-    result = json.loads(raw)
+    hold = json.loads(hold_raw)
+    assert hold["success"] is True
+    assert hold["type"] == "hold"
+    assert management._has_leadership_hold("#ABC123") is True
 
-    assert result["success"] is True
-    assert result["case_id"]
-    case = db.get_decision_case_by_id(result["case_id"])
-    assert case["case_type"] == "inactivity_review"
-    assert case["target_player_tag"] == "#ABC123"
+    relay_raw = tool_exec._execute_tool(
+        "raise_clan_chat_relay",
+        {
+            "copy": "Noted Vijay is away for two days — see you when you're back!",
+            "reason": "Acknowledge Vijay's leave in clan chat.",
+            "member_tag": "Vijay",
+        },
+        workflow="awareness",
+    )
+    relay = json.loads(relay_raw)
+    assert relay["success"] is True
+    action = memdb.execute(
+        "SELECT action_type, target_player_tag, copy_current_text "
+        "FROM leader_action_recommendations WHERE action_id = ?",
+        (relay["action_id"],),
+    ).fetchone()
+    assert action["action_type"] == "in_game_relay"
+    assert action["target_player_tag"] == "#ABC123"
+    assert action["copy_current_text"] == relay["clan_chat_copy"]
 
 
-def test_awareness_write_does_not_reopen_a_leader_closed_case(memdb):
-    """QA H20/H21: an awareness write must not silently reopen a decision case
+def test_followup_write_does_not_reopen_a_leader_closed_case(memdb):
+    """QA H21: an awareness write must not silently reopen a decision case
     a leader deliberately resolved/dismissed.
 
     Uses `inactivity_review` — the real type behind a removal review. This test
@@ -187,10 +228,11 @@ def test_awareness_write_does_not_reopen_a_leader_closed_case(memdb):
     db.snapshot_members([{"tag": "#ZZZ9", "name": "Rook", "role": "member"}])
     first = json.loads(
         tool_exec._execute_tool(
-            "flag_member_watch",
+            "record_leadership_followup",
             {
                 "member_tag": "Rook",
-                "reason": "Silent; review removal.",
+                "topic": "Removal review",
+                "recommendation": "Silent; review removal.",
                 "case_type": "inactivity_review",
             },
             workflow="awareness",
@@ -204,10 +246,11 @@ def test_awareness_write_does_not_reopen_a_leader_closed_case(memdb):
     # A later awareness write must NOT reopen it.
     json.loads(
         tool_exec._execute_tool(
-            "flag_member_watch",
+            "record_leadership_followup",
             {
                 "member_tag": "Rook",
-                "reason": "Still silent.",
+                "topic": "Removal review",
+                "recommendation": "Still silent.",
                 "case_type": "inactivity_review",
             },
             workflow="awareness",

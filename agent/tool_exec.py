@@ -1203,10 +1203,17 @@ def _execute_flag_member_watch(arguments):
     reason = (arguments.get("reason") or "").strip()
     expires_at = arguments.get("expires_at")
     away_until = (arguments.get("away_until") or "").strip()
-    case_type = (arguments.get("case_type") or "").strip()
 
     if not member_tag_input or not reason:
         return {"error": "flag_member_watch requires member_tag and reason"}
+    if arguments.get("case_type"):
+        return {
+            "error": "unsupported_case_type",
+            "detail": (
+                "flag_member_watch records private watch/leave state only; use "
+                "record_leadership_followup with member_tag + case_type for a review card."
+            ),
+        }
 
     resolved_tag = _resolve_member_tag(member_tag_input)
     # A leave HOLD (member told leaders they're away) is a `Hold:` memory that
@@ -1254,19 +1261,6 @@ def _execute_flag_member_watch(arguments):
         ["leave-hold"] if is_hold else ["watch-list"],
         actor="elixir:awareness-tool",
     )
-    case = None
-    if case_type:
-        try:
-            case = db.upsert_member_review_case(
-                case_type=case_type,
-                member={"tag": resolved_tag},
-                title=f"Watch: {resolved_tag}",
-                recommendation=reason,
-                rationale=reason,
-                due_at=expires_at,
-            )
-        except Exception as exc:
-            log.warning("flag_member_watch case upsert failed: %s", exc)
     result = {
         "success": True,
         "memory_id": memory["memory_id"],
@@ -1275,9 +1269,6 @@ def _execute_flag_member_watch(arguments):
     }
     if is_hold:
         result["away_until"] = away_until
-    if case:
-        result["case_id"] = case.get("case_id")
-        result["case_key"] = case.get("case_key")
     return result
 
 
