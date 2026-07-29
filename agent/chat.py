@@ -1,4 +1,6 @@
+import copy
 import json
+import re
 import time
 
 from agent.core import (
@@ -24,6 +26,10 @@ from agent.tool_policy import (
 
 EXTERNAL_LOOKUP_CAP = 5
 EXTERNAL_LOOKUP_CAP_BY_WORKFLOW = {"intel_report": 10}
+_REFERENCE_CODE_RE = re.compile(
+    r"(?<![A-Za-z0-9])([RLM])([1-9][0-9]*)(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
 from anthropic import APIConnectionError, APIError
 
 from agent.tool_exec import _execute_tool
@@ -218,6 +224,37 @@ def _tool_names(tool_defs):
     return {t["name"] for t in (tool_defs or [])}
 
 
+def _extract_reference_codes(value) -> set[str]:
+    """Return concrete, positive R/L/M codes present in structured context."""
+    if not isinstance(value, str):
+        try:
+            value = json.dumps(value, default=str, ensure_ascii=False)
+        except TypeError, ValueError:
+            value = str(value)
+    return {
+        f"{match.group(1).upper()}{match.group(2)}" for match in _REFERENCE_CODE_RE.finditer(value)
+    }
+
+
+def _awareness_tools_with_reference_codes(tool_defs, reference_codes):
+    """Expose lookup_reference only for exact codes awareness has actually seen."""
+    tools = [tool for tool in (tool_defs or []) if tool["name"] != "lookup_reference"]
+    codes = sorted(_extract_reference_codes(list(reference_codes or ())))
+    if not codes:
+        return tools
+
+    reference_tool = copy.deepcopy(TOOL_DEFINITIONS_BY_NAME["lookup_reference"]["tool"])
+    reference_input = reference_tool["input_schema"]["properties"]["reference"]
+    reference_input["enum"] = codes
+    reference_input["description"] = (
+        "Use exactly one reference code already present in this awareness turn: "
+        + ", ".join(codes)
+        + "."
+    )
+    tools.append(reference_tool)
+    return tools
+
+
 def _estimate_message_chars(messages):
     """Cheap prompt-size proxy for telemetry."""
     total = 0
@@ -392,6 +429,7 @@ def _chat_with_tools(
     return_errors=False,
     tool_stats=None,
     on_event=None,
+    reference_codes=None,
 ):
     """Run a chat completion with tool-calling loop.
 
@@ -416,6 +454,11 @@ def _chat_with_tools(
 
     if allowed_tools is None:
         allowed_tools = TOOLSETS_BY_WORKFLOW.get(workflow, ALL_TOOLS)
+    awareness_reference_codes = _extract_reference_codes(list(reference_codes or ()))
+    if workflow == "awareness":
+        allowed_tools = _awareness_tools_with_reference_codes(
+            allowed_tools, awareness_reference_codes
+        )
     allowed_tool_names = _tool_names(allowed_tools)
 
     # Workflow policy owns clanops writes. Awareness writes are gated by a
@@ -628,6 +671,24 @@ def _chat_with_tools(
                     }
                 )
             elif (
+                workflow == "awareness"
+                and fn_name == "lookup_reference"
+                and str(fn_args.get("reference") or "").strip().upper()
+                not in awareness_reference_codes
+            ):
+                denied_tool_count += 1
+                log.warning(
+                    "tool_denied workflow=awareness tool=lookup_reference "
+                    "reason=reference_not_in_context"
+                )
+                result = json.dumps(
+                    {
+                        "error": "reference_not_in_context",
+                        "tool": fn_name,
+                        "hint": "Use only an R/L/M code present in this awareness turn.",
+                    }
+                )
+            elif (
                 fn_name in EXTERNAL_LOOKUP_TOOL_NAMES
                 and external_lookup_calls >= external_lookup_cap
             ):
@@ -701,6 +762,14 @@ def _chat_with_tools(
                     )
                     if is_awareness_write and _tool_result_succeeded(result):
                         tool_stats["write_calls_succeeded"] += 1
+                    if workflow == "awareness" and _tool_result_succeeded(result):
+                        discovered_codes = _extract_reference_codes(result)
+                        if not discovered_codes <= awareness_reference_codes:
+                            awareness_reference_codes.update(discovered_codes)
+                            allowed_tools = _awareness_tools_with_reference_codes(
+                                allowed_tools, awareness_reference_codes
+                            )
+                            allowed_tool_names = _tool_names(allowed_tools)
             trace_entry = {
                 "tool": fn_name,
                 "args": _summarize_tool_args(fn_args),

@@ -1861,6 +1861,103 @@ def test_chat_with_tools_normalizes_tool_call_messages_for_followup_rounds():
     assert result["content"] == "We are in war day."
 
 
+def test_awareness_reference_lookup_unlocks_only_from_tool_result_codes():
+    responses = [
+        _native_tool_use_response("get_elixir_state", {"aspect": "recent_events"}),
+        _native_tool_use_response("lookup_reference", {"reference": "M340"}),
+        _native_text_response(json.dumps({"posts": [], "skipped_reason": "quiet"})),
+    ]
+    offered_tools = []
+
+    def fake_create_chat_completion(**kwargs):
+        offered_tools.append(kwargs.get("tools") or [])
+        return responses.pop(0)
+
+    tool_results = [
+        json.dumps({"latest_memory": {"reference": "M340"}}),
+        json.dumps({"reference": "M340", "kind": "memory", "title": "Known"}),
+    ]
+    with (
+        patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion),
+        patch("agent.chat._execute_tool", side_effect=tool_results),
+    ):
+        result = elixir_agent._chat_with_tools(
+            "system",
+            "user",
+            workflow="awareness",
+            allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["awareness"],
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["awareness"],
+            strict_json=True,
+            reference_codes=set(),
+        )
+
+    assert result == {"posts": [], "skipped_reason": "quiet"}
+    assert "lookup_reference" not in {tool["name"] for tool in offered_tools[0]}
+    reference_tool = next(tool for tool in offered_tools[1] if tool["name"] == "lookup_reference")
+    assert reference_tool["input_schema"]["properties"]["reference"]["enum"] == ["M340"]
+
+
+def test_awareness_reference_lookup_resolves_only_situation_codes():
+    responses = [
+        _native_tool_use_response("lookup_reference", {"reference": "R137"}),
+        _native_text_response(json.dumps({"posts": [], "skipped_reason": "quiet"})),
+    ]
+    offered_tools = []
+
+    def fake_create_chat_completion(**kwargs):
+        offered_tools.append(kwargs.get("tools") or [])
+        return responses.pop(0)
+
+    with (
+        patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion),
+        patch(
+            "agent.chat._execute_tool",
+            return_value=json.dumps({"reference": "R137", "kind": "leader_action"}),
+        ) as execute,
+    ):
+        result = elixir_agent._chat_with_tools(
+            "system",
+            "user",
+            workflow="awareness",
+            allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["awareness"],
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["awareness"],
+            strict_json=True,
+            reference_codes={"R137"},
+        )
+
+    assert result == {"posts": [], "skipped_reason": "quiet"}
+    reference_tool = next(tool for tool in offered_tools[0] if tool["name"] == "lookup_reference")
+    assert reference_tool["input_schema"]["properties"]["reference"]["enum"] == ["R137"]
+    execute.assert_called_once_with("lookup_reference", {"reference": "R137"}, workflow="awareness")
+
+
+def test_awareness_reference_lookup_denies_invented_code_even_when_tool_is_available():
+    responses = [
+        _native_tool_use_response("lookup_reference", {"reference": "R0"}),
+        _native_text_response(json.dumps({"posts": [], "skipped_reason": "quiet"})),
+    ]
+    tool_stats = {}
+
+    with (
+        patch("agent.chat._create_chat_completion", side_effect=responses),
+        patch("agent.chat._execute_tool") as execute,
+    ):
+        result = elixir_agent._chat_with_tools(
+            "system",
+            "user",
+            workflow="awareness",
+            allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["awareness"],
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["awareness"],
+            strict_json=True,
+            tool_stats=tool_stats,
+            reference_codes={"R137"},
+        )
+
+    assert result == {"posts": [], "skipped_reason": "quiet"}
+    execute.assert_not_called()
+    assert tool_stats["tool_trace"][0]["result"] == "error: reference_not_in_context"
+
+
 def test_chat_with_tools_skips_blank_conversation_history():
     response = _native_text_response(
         json.dumps(

@@ -327,32 +327,52 @@ def test_run_awareness_loop_numbers_loops_and_captures_tool_trace(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# run_awareness_tick — always the full read + write tool surface
+# run_awareness_tick — full write surface, reference lookup only with evidence
 # ---------------------------------------------------------------------------
 
 
 def test_run_awareness_tick_uses_the_write_surface():
-    """The brain always runs with the awareness toolset (read + write). Shadow
-    mode was removed — there is no read-only variant."""
+    """The brain keeps its write surface while omitting unsupported reference lookup."""
     import agent.workflows as workflows
     from agent.tool_policy import TOOLSETS_BY_WORKFLOW
 
     captured = {}
 
     def _capture(*args, **kwargs):
-        captured["allowed_tools"] = kwargs.get("allowed_tools")
+        captured.update(kwargs)
         return {"posts": []}
 
     with patch.object(workflows, "_chat_with_tools", side_effect=_capture):
-        workflows.run_awareness_tick({"time": None})
+        result = workflows.run_awareness_tick({"time": None, "note": "dummy placeholder R0"})
 
+    assert result == {"posts": []}
     assert captured["allowed_tools"] is TOOLSETS_BY_WORKFLOW["awareness"]
+    assert captured["reference_codes"] == set()
     # The write surface is actually present (not the read-only set).
     allowed_names = {t["name"] for t in captured["allowed_tools"]}
     write_names = {t["name"] for t in WRITE_TOOLS}
     assert write_names, "expected write tools to exist"
     assert "save_clan_memory" in allowed_names
     assert allowed_names & write_names
+
+
+def test_run_awareness_tick_allows_only_concrete_reference_codes():
+    """A real Situation code remains resolvable without admitting invented probes."""
+    import agent.workflows as workflows
+
+    captured = {}
+    expected = {"posts": [], "skipped_reason": "same quiet decision"}
+
+    def _capture(*args, **kwargs):
+        captured.update(kwargs)
+        return expected
+
+    situation = {"leader_context": "Review R137; compare it with memory M340."}
+    with patch.object(workflows, "_chat_with_tools", side_effect=_capture):
+        result = workflows.run_awareness_tick(situation)
+
+    assert result == expected
+    assert captured["reference_codes"] == {"R137", "M340"}
 
 
 def test_repair_awareness_plan_has_headroom_for_multi_post_plans():
