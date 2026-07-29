@@ -177,6 +177,9 @@ _LLM_COST_CASE = """
         WHEN model LIKE 'claude-opus%' OR model LIKE 'Codex-opus%'
         THEN COALESCE(prompt_tokens,0)*15 + COALESCE(cache_read_tokens,0)*1.5
              + COALESCE(cache_creation_tokens,0)*18.75 + COALESCE(completion_tokens,0)*75
+        WHEN model LIKE 'claude-sonnet-5%' OR model LIKE 'Codex-sonnet-5%'
+        THEN COALESCE(prompt_tokens,0)*2 + COALESCE(cache_read_tokens,0)*0.2
+             + COALESCE(cache_creation_tokens,0)*2.5 + COALESCE(completion_tokens,0)*10
         WHEN model LIKE 'claude-sonnet%' OR model LIKE 'Codex-sonnet%'
         THEN COALESCE(prompt_tokens,0)*3 + COALESCE(cache_read_tokens,0)*0.3
              + COALESCE(cache_creation_tokens,0)*3.75 + COALESCE(completion_tokens,0)*15

@@ -94,7 +94,7 @@ def test_llm_cost_page_aggregates_by_workflow_and_prices_models():
     Opus branch fixes a $0 undercount in the canonical formula)."""
     conn = db.get_connection()
     try:
-        # 1M completion tokens: sonnet → $15, opus → $75.
+        # 1M completion tokens: Sonnet 5 introductory pricing → $10, Opus → $75.
         conn.execute(
             "INSERT INTO llm_calls (recorded_at, workflow, model, ok, "
             "completion_tokens, total_tokens) VALUES "
@@ -113,7 +113,7 @@ def test_llm_cost_page_aggregates_by_workflow_and_prices_models():
 
     data = queries.llm_cost_page()
     by_wf = {w["workflow"]: w for w in data["workflows_7d"]}
-    assert abs(by_wf["awareness"]["cost_usd"] - 15.0) < 0.01
+    assert abs(by_wf["awareness"]["cost_usd"] - 10.0) < 0.01
     assert abs(by_wf["memory_synthesis"]["cost_usd"] - 75.0) < 0.01  # opus priced, not $0
 
     async def body(client):

@@ -5,7 +5,7 @@ description: Analyze the llm_calls table in elixir-v51.db to break down Elixir's
 
 # LLM Cost Report
 
-Read `/Users/otto/Projects/elixir-bot/elixir-v51.db` (table `llm_calls`), compute real spend using correct Sonnet 4.6 and Haiku 4.5 pricing, and hand the user a short prioritized report: where the money goes, whether caching is paying off, daily trend, anomalies, and concrete next levers. Pairs with `log-triage` ("is the bot alive?") and `awareness-report` ("is the bot making good calls?") — this one answers "where is the money going?"
+Read `/Users/otto/Projects/elixir-bot/elixir-v51.db` (table `llm_calls`), compute real spend using current Sonnet 5 introductory pricing, Sonnet 4.6 fallback pricing, and Haiku 4.5 pricing, and hand the user a short prioritized report: where the money goes, whether caching is paying off, daily trend, anomalies, and concrete next levers. Pairs with `log-triage` ("is the bot alive?") and `awareness-report` ("is the bot making good calls?") — this one answers "where is the money going?"
 
 Budget context: the user's target is **$20/month (~$0.67/day)**. Report current spend against that bar.
 
@@ -38,6 +38,7 @@ Use these exact numbers (per 1M tokens). Update this block if Anthropic changes 
 
 | Model | Prompt | Completion | Cache read | Cache write |
 |---|---:|---:|---:|---:|
+| Sonnet 5 (`claude-sonnet-5`) | $2.00 | $10.00 | $0.20 | $2.50 |
 | Sonnet 4.6 (`claude-sonnet-4-6`) | $3.00 | $15.00 | $0.30 | $3.75 |
 | Haiku 4.5 (`claude-haiku-4-5-20251001`) | $1.00 | $5.00 | $0.10 | $1.25 |
 
@@ -56,7 +57,9 @@ Run all four queries against `elixir-v51.db` via read-only `sqlite3` and interpr
 ```sql
 SELECT date(recorded_at) AS day,
        COUNT(*) AS calls,
-       ROUND(SUM(CASE WHEN model LIKE 'claude-sonnet%'
+       ROUND(SUM(CASE WHEN model LIKE 'claude-sonnet-5%'
+            THEN prompt_tokens*2 + cache_read_tokens*0.2 + cache_creation_tokens*2.5 + completion_tokens*10
+            WHEN model LIKE 'claude-sonnet%'
             THEN prompt_tokens*3 + cache_read_tokens*0.3 + cache_creation_tokens*3.75 + completion_tokens*15
             WHEN model LIKE 'claude-haiku%'
             THEN prompt_tokens*1 + cache_read_tokens*0.1 + cache_creation_tokens*1.25 + completion_tokens*5
@@ -75,7 +78,9 @@ What it tells you: daily burn rate, spikes, and whether the trend is rising or f
 SELECT workflow,
        model,
        COUNT(*) AS calls,
-       ROUND(SUM(CASE WHEN model LIKE 'claude-sonnet%'
+       ROUND(SUM(CASE WHEN model LIKE 'claude-sonnet-5%'
+            THEN prompt_tokens*2 + cache_read_tokens*0.2 + cache_creation_tokens*2.5 + completion_tokens*10
+            WHEN model LIKE 'claude-sonnet%'
             THEN prompt_tokens*3 + cache_read_tokens*0.3 + cache_creation_tokens*3.75 + completion_tokens*15
             WHEN model LIKE 'claude-haiku%'
             THEN prompt_tokens*1 + cache_read_tokens*0.1 + cache_creation_tokens*1.25 + completion_tokens*5
@@ -115,7 +120,9 @@ What it tells you: whether cache is paying off per workflow. Flag any workflow w
 ```sql
 WITH daily AS (
   SELECT date(recorded_at) AS day,
-         SUM(CASE WHEN model LIKE 'claude-sonnet%'
+         SUM(CASE WHEN model LIKE 'claude-sonnet-5%'
+              THEN prompt_tokens*2 + cache_read_tokens*0.2 + cache_creation_tokens*2.5 + completion_tokens*10
+              WHEN model LIKE 'claude-sonnet%'
               THEN prompt_tokens*3 + cache_read_tokens*0.3 + cache_creation_tokens*3.75 + completion_tokens*15
               WHEN model LIKE 'claude-haiku%'
               THEN prompt_tokens*1 + cache_read_tokens*0.1 + cache_creation_tokens*1.25 + completion_tokens*5

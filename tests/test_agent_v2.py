@@ -1627,6 +1627,24 @@ def test_create_chat_completion_caches_other_workflows():
     assert last_tool.get("cache_control") == {"type": "ephemeral"}
 
 
+def test_create_chat_completion_skips_cache_for_single_shot_leader_feedback():
+    response = _mock_anthropic_response()
+    create = Mock(return_value=response)
+    mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    with (
+        patch("agent.core._get_client", return_value=mock_client),
+        patch("elixir_agent.runtime_status.record_llm_call"),
+    ):
+        elixir_agent._create_chat_completion(
+            workflow="leader_action_feedback",
+            system="sys",
+            messages=[{"role": "user", "content": "feedback"}],
+        )
+
+    assert "cache_control" not in create.call_args.kwargs["system"][0]
+    assert create.call_args.kwargs["messages"][-1]["content"] == "feedback"
+
+
 def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
     # Three-tier policy (Jamie 2026-07-04): sonnet-5 = interactive +
     # communication; opus = low-volume intensive writing; haiku = the rest.
