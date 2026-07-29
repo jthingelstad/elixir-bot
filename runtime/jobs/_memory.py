@@ -801,7 +801,15 @@ async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
     except Exception:
         log.info("memory contradiction cards skipped: arena-relay unavailable", exc_info=True)
         return 0
-    channel = bot.get_channel(channel_config["id"])
+    if not isinstance(channel_config, dict) or not channel_config.get("id"):
+        log.warning("memory contradiction cards skipped: arena-relay channel is unconfigured")
+        return 0
+    channel_id = channel_config["id"]
+    try:
+        channel = bot.get_channel(channel_id)
+    except Exception:
+        log.warning("memory contradiction cards skipped: arena-relay lookup failed", exc_info=True)
+        return 0
     if not channel:
         log.warning("memory contradiction cards skipped: arena-relay channel not found")
         return 0
@@ -827,7 +835,7 @@ async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
             prompt_text=prompt_text,
             rationale=rationale,
             target_channel_key="arena-relay",
-            target_channel_id=channel_config["id"],
+            target_channel_id=channel_id,
             source_signal_key=f"memory_contradiction:{memory_id}",
             source_signal_type="memory_contradiction",
             ui_version=LEADER_ACTION_UI_VERSION,
@@ -844,7 +852,7 @@ async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
             "assistant",
             prompt_text,
             summary=f"Leader action R{action.get('action_id')}: memory review",
-            channel_id=channel_config["id"],
+            channel_id=channel_id,
             channel_name=channel_name,
             channel_kind=channel_kind,
             workflow="arena-relay",
