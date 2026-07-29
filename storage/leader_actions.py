@@ -355,7 +355,6 @@ def create_leader_action_recommendation(
     baseline: dict | None = None,
     expires_at: str | None = None,
     action_key: str | None = None,
-    case_id: int | None = None,
     is_test: bool = False,
     ui_version: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
@@ -384,12 +383,11 @@ def create_leader_action_recommendation(
             target_player_tag, target_player_name, source_signal_key, source_signal_type,
             source_message_id, prompt_text, rationale, baseline_json, proposed_at,
             expires_at, copy_original_text, copy_current_text, is_test, ui_version,
-            case_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(action_key) DO UPDATE SET
             target_channel_key = excluded.target_channel_key,
             target_channel_id = excluded.target_channel_id,
-            case_id = COALESCE(excluded.case_id, leader_action_recommendations.case_id),
             source_message_id = COALESCE(excluded.source_message_id, leader_action_recommendations.source_message_id),
             rationale = excluded.rationale,
             baseline_json = COALESCE(leader_action_recommendations.baseline_json, excluded.baseline_json),
@@ -421,7 +419,6 @@ def create_leader_action_recommendation(
             (copy_current_text or copy_original_text or "").strip() or None,
             1 if is_test else 0,
             (ui_version or "").strip() or None,
-            int(case_id) if case_id is not None else None,
             now,
             now,
         ),
@@ -696,7 +693,6 @@ def _compact_action_for_feedback(action: dict) -> dict:
     outcome = action.get("outcome") or {}
     return {
         "action_id": action.get("action_id"),
-        "case_id": action.get("case_id"),
         "action_type": action.get("action_type"),
         "objective": action.get("objective"),
         "status": action.get("status"),
@@ -1218,9 +1214,169 @@ def decide_leader_action(
     return get_leader_action_by_id(action["action_id"], conn=conn)
 
 
-# Authoritative leave_source values written when a leader verifies a departure
-# (vs the inferred 'roster_diff'). See storage.cases._departure_was_kick, which
-# prefers these over the 14-day inference.
+# A departure is attributed to a kick when a kick recommendation was marked
+# done within this window before the member left. An explicit leader
+# classification overrides this inference.
+_KICK_ATTRIBUTION_DAYS = 14
+
+
+def _departure_was_kick(conn, tag: str, left_at: str | None) -> bool:
+    """Return whether the latest departure is known or inferred to be a kick."""
+    verified = conn.execute(
+        """SELECT leave_source FROM clan_memberships
+           WHERE UPPER(player_tag) = UPPER(?) AND left_at IS NOT NULL
+           ORDER BY left_at DESC, membership_id DESC LIMIT 1""",
+        (tag,),
+    ).fetchone()
+    source = (verified["leave_source"] if verified else None) or ""
+    if source == "leader_verified_kick":
+        return True
+    if source == "leader_verified_leave":
+        return False
+    params: list = [tag]
+    window = ""
+    anchor = _parse_utc(left_at) if left_at else None
+    if anchor:
+        cutoff = (anchor - timedelta(days=_KICK_ATTRIBUTION_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+        window = "AND COALESCE(decided_at, proposed_at) >= ?"
+        params.append(cutoff)
+    row = conn.execute(
+        f"""SELECT 1 FROM leader_action_recommendations
+            WHERE action_type = 'kick_recommendation' AND target_player_tag = ?
+              AND status = 'done' AND COALESCE(is_test, 0) = 0 {window} LIMIT 1""",
+        params,
+    ).fetchone()
+    return row is not None
+
+
+# A departure is only carded if it was detected within this window, avoiding a
+# flood of historical departures on first deploy.
+_DEPARTURE_CARD_LOOKBACK_DAYS = 2
+
+
+@managed_connection
+def raise_departure_verification_cards(
+    *,
+    now: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Raise action cards for recent departures whose cause is ambiguous."""
+    current = str(now or "").strip() or _db._utcnow()
+    anchor = _parse_utc(current) or datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = (anchor - timedelta(days=_DEPARTURE_CARD_LOOKBACK_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+    rows = conn.execute(
+        """SELECT cm.membership_id, cm.player_tag, cm.left_at,
+                  COALESCE(p.display_name, p.current_name, cm.player_tag) AS name,
+                  CAST(julianday(cm.left_at) - julianday(cm.joined_at) AS INTEGER) AS tenure_days
+           FROM clan_memberships cm
+           LEFT JOIN players p ON p.player_tag = cm.player_tag
+           WHERE cm.left_at IS NOT NULL
+             AND cm.leave_source = 'roster_diff'
+             AND cm.left_at >= ?""",
+        (cutoff,),
+    ).fetchall()
+    raised: list[dict] = []
+    for row in rows:
+        tag = row["player_tag"]
+        if _departure_was_kick(conn, tag, row["left_at"]):
+            conn.execute(
+                "UPDATE clan_memberships SET leave_source = 'leader_verified_kick' "
+                "WHERE membership_id = ?",
+                (row["membership_id"],),
+            )
+            continue
+        signal_key = f"engine:departure:{tag}:{row['left_at']}"
+        exists = conn.execute(
+            """SELECT 1 FROM leader_action_recommendations
+               WHERE action_type = 'departure_verification'
+                 AND (source_signal_key = ?
+                      OR (UPPER(target_player_tag) = UPPER(?) AND status = 'proposed'))
+                 AND COALESCE(is_test, 0) = 0 LIMIT 1""",
+            (signal_key, tag),
+        ).fetchone()
+        if exists:
+            continue
+        name = row["name"]
+        tenure = row["tenure_days"]
+        tenure_text = f"{tenure} days" if tenure is not None else "unknown tenure"
+        create_leader_action_recommendation(
+            action_type="departure_verification",
+            objective=f"Confirm departure: did {name} leave or get kicked?",
+            prompt_text=(
+                f"{name} is no longer in the clan (tenure {tenure_text}). Elixir can't tell "
+                f"if they LEFT on their own or were KICKED — click one. On a LEAVE, add a "
+                f"note with any context for the farewell (e.g. “alt account of X”, or a "
+                f"detail worth a mention) and I'll compose the goodbye with it. No public "
+                f"goodbye is posted until this is verified; a KICK is never announced."
+            ),
+            rationale=f"Departure detected {row['left_at']}; leave_source unverified (roster_diff).",
+            target_player_tag=tag,
+            target_player_name=name,
+            source_signal_key=signal_key,
+            source_signal_type="engine_departure",
+            conn=conn,
+        )
+        raised.append({"player_tag": tag, "player_name": name, "left_at": row["left_at"]})
+    return raised
+
+
+# Unanswered departure cards settle to a benign unverified leave so the action
+# board stays clean and no stale goodbye fires.
+_DEPARTURE_CARD_TIMEOUT_DAYS = 3
+
+
+@managed_connection
+def expire_departure_verification_cards(
+    *,
+    now: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Auto-settle departure cards that leaders did not answer in time."""
+    current = str(now or "").strip() or _db._utcnow()
+    anchor = _parse_utc(current) or datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = (anchor - timedelta(days=_DEPARTURE_CARD_TIMEOUT_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+    rows = conn.execute(
+        """SELECT action_id, target_player_tag FROM leader_action_recommendations
+           WHERE action_type = 'departure_verification' AND status = 'proposed'
+             AND COALESCE(is_test, 0) = 0
+             AND COALESCE(proposed_at, created_at) <= ?""",
+        (cutoff,),
+    ).fetchall()
+    expired: list[dict] = []
+    for row in rows:
+        tag = row["target_player_tag"]
+        if tag:
+            conn.execute(
+                """UPDATE clan_memberships SET leave_source = 'leave_unverified'
+                   WHERE membership_id = (
+                       SELECT membership_id FROM clan_memberships
+                       WHERE UPPER(player_tag) = UPPER(?) AND left_at IS NOT NULL
+                         AND leave_source = 'roster_diff'
+                       ORDER BY left_at DESC, membership_id DESC LIMIT 1
+                   )""",
+                (tag,),
+            )
+        conn.execute(
+            """UPDATE leader_action_recommendations
+               SET status = 'done', decided_at = ?, decided_by_discord_user_id = 'system',
+                   decision_emoji = '⌛',
+                   decision_note = COALESCE(decision_note, ?),
+                   outcome_json = ?, updated_at = ?
+               WHERE action_id = ?""",
+            (
+                current,
+                "Auto-settled: no leader verification within the window; treated as "
+                "an organic leave. No public goodbye was posted.",
+                _json_dumps({"classification": "leave_unverified", "auto_settled": True}),
+                current,
+                row["action_id"],
+            ),
+        )
+        expired.append({"action_id": row["action_id"], "target_player_tag": tag})
+    return expired
+
+
+# Authoritative leave_source values written when a leader verifies a departure.
 LEAVE_SOURCE_VERIFIED = {
     "leave": "leader_verified_leave",
     "kick": "leader_verified_kick",
@@ -1244,9 +1400,7 @@ def classify_departure(
     Writes the authoritative ``clan_memberships.leave_source`` (the member's row
     always exists, unlike a decision case), marks the card done-with-classification,
     and — when the leader added a comment on WHY — records it as a durable
-    leadership memory on that member. Open member-review cases reconcile against
-    the new leave_source on the next engine tick (see
-    ``storage.cases.reconcile_departed_member_cases``)."""
+    leadership memory on that member."""
     classification = (classification or "").strip().lower()
     if classification not in LEAVE_SOURCE_VERIFIED:
         raise ValueError(f"invalid departure classification: {classification}")

@@ -375,7 +375,7 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
         # Departure verification remains action-board state. Decision cases were
         # retired in #216; leader_action_recommendations is the sole decision
         # lifecycle and therefore needs no cross-store reconciliation.
-        from storage.cases import (
+        from storage.leader_actions import (
             expire_departure_verification_cards,
             raise_departure_verification_cards,
         )
