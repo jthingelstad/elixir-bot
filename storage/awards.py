@@ -400,26 +400,6 @@ def get_rookie_mvp_candidates(
     ]
 
 
-def _apply_tie_aware_ranks(entries: list[dict], value_key: str) -> None:
-    """Assign competition ranks in place (1, 2, 2, 4 …): equal ``value_key``
-    share a rank, and each entry gets ``tied`` (bool) + ``tie_count`` so callers
-    can phrase ties correctly ("tied for 2nd, three-way at 2,400"). ``entries``
-    must already be sorted by ``value_key`` descending."""
-    counts: dict = {}
-    for e in entries:
-        counts[e.get(value_key)] = counts.get(e.get(value_key), 0) + 1
-    prev_value = object()
-    rank = 0
-    for i, e in enumerate(entries):
-        v = e.get(value_key)
-        if v != prev_value:
-            rank = i + 1
-            prev_value = v
-        e["rank"] = rank
-        e["tied"] = counts.get(v, 0) > 1
-        e["tie_count"] = counts.get(v, 0)
-
-
 @managed_connection
 def get_war_participant_candidates(
     season_id: Optional[int] = None,

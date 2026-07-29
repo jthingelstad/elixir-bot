@@ -166,50 +166,6 @@ async def _ensure_member_role(
         return False, "Couldn't assign the Member role due to Discord permissions."
 
 
-async def remove_member_role_for_tag(member_tag: str, *, reason: str) -> tuple[bool, str]:
-    """Remove the Member role from the Discord user linked to a clan member.
-
-    Called when a clan member leaves (kicked or quit). Keeps the discord_links
-    row intact so a rejoin recognises the same person.
-    """
-    import runtime.app as app
-
-    if not app.MEMBER_ROLE_ID:
-        return False, "Member role is not configured."
-
-    role_status = app._member_role_grant_status()
-    if not role_status["ok"]:
-        return False, f"Member role management unavailable: {role_status['reason']}."
-
-    identity = await asyncio.to_thread(db.get_member_identity, member_tag)
-    discord_user_id = identity.get("discord_user_id") if identity else None
-    if not discord_user_id:
-        return False, f"No linked Discord user for {member_tag}."
-
-    guild = app.bot.get_guild(app.GUILD_ID) if app.GUILD_ID else None
-    if guild is None:
-        return False, "Guild not cached in the running bot."
-
-    guild_member = guild.get_member(int(discord_user_id))
-    if guild_member is None:
-        return False, f"Discord user {discord_user_id} not in guild."
-
-    member_role = guild.get_role(app.MEMBER_ROLE_ID)
-    if not member_role:
-        return False, "Configured Member role was not found in the guild."
-    if member_role not in guild_member.roles:
-        return True, f"{guild_member.display_name} did not have the Member role."
-
-    try:
-        await guild_member.remove_roles(member_role, reason=reason)
-        return True, f"Removed Member role from {guild_member.display_name}."
-    except discord.Forbidden:
-        app.log.exception(
-            "Cannot remove member role from %s — check bot permissions", guild_member.id
-        )
-        return False, "Couldn't remove the Member role due to Discord permissions."
-
-
 async def handle_member_join(member: discord.Member):
     await asyncio.to_thread(
         db.upsert_discord_user,

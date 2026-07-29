@@ -51,7 +51,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/activity_runner.py": 3,
     "runtime/admin.py": 2,  # -2: #212 retired the dead signal.publish-pending impl
     "runtime/alerts.py": 2,  # +1: schedule_job_failure_alert best-effort loop-schedule guard
-    "runtime/app.py": 39,  # +7: DM-outreach bridges + ask facts-brief profile lookup; +1: _outreach_log webhook guard; -2: retired _record_incident boundary + the _engine_health job
+    "runtime/app.py": 38,  # dead war-thread post-step retired in #223
     "runtime/awareness/deliver.py": 10,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
@@ -72,7 +72,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/jobs/_maintenance.py": 4,
     "runtime/jobs/_memory.py": 23,  # +1: optional contradiction-card channel lookup fails soft (#229)
     "runtime/jobs/_promotion.py": 3,
-    "runtime/jobs/_tournament.py": 9,  # autowatch scan + clan-chat relay; -1 with the retired tournament_events emitter
+    "runtime/jobs/_tournament.py": 7,  # autowatch scan + clan-chat relay
     "runtime/leader_action_feedback.py": 1,
     "runtime/leader_action_ui.py": 9,
     "runtime/leader_note_interpreter.py": 5,  # interpret/apply/undo/fix all fail-open off the delivery path
@@ -82,7 +82,6 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/startup.py": 3,
     "runtime/status.py": 3,
     "runtime/system_signals.py": 1,
-    "runtime/threads.py": 3,
     "runtime/webapp/chat.py": 2,
     "runtime/webapp/queries.py": 5,  # +1: command war-snapshot best-effort (like war_page)
     "runtime/webapp/routes.py": 4,

@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-import agent.tools
 import db
 import storage.war
 from storage import war_analytics, war_members, war_status
@@ -27,8 +26,8 @@ def test_db_facade_public_surface_is_reviewed():
         *(f"{name}:db" for name in db._CORE_EXPORTS),
         *(f"{name}:{module}" for name, module in db._FACADE_EXPORTS.items()),
     ]
-    assert len(entries) == 296
-    assert _digest(entries) == "cff761bd9657b65454a04e794fdba1d890ca77ba1e1ffaaea0c54a5062b00d21"
+    assert len(entries) == 242
+    assert _digest(entries) == "2f127f3b6eecc8e7b52aa6fb058932268621a0709120ae9237d88d0ebd4b1936"
     assert db._CORE_EXPORTS.isdisjoint(db._FACADE_EXPORTS)
     assert db.__all__ == sorted(db._CORE_EXPORTS | set(db._FACADE_EXPORTS))
 
@@ -66,15 +65,6 @@ def test_db_facade_is_stable_across_import_order(script):
     subprocess.run([sys.executable, "-c", script], cwd=ROOT, check=True)
 
 
-def test_tool_facade_public_surface_is_reviewed():
-    assert len(agent.tools.__all__) == 21
-    assert _digest(agent.tools.__all__) == (
-        "980882faf82e67c3fe5085d443f305f8e709b3c5817b984d2a96aa3eac15032a"
-    )
-    assert agent.tools.execute_tool is agent.tools._execute_tool
-    assert all(hasattr(agent.tools, name) for name in agent.tools.__all__)
-
-
 def test_war_facade_is_exact_union_of_read_domains():
     source_names = [
         *war_status.__all__,
@@ -90,5 +80,5 @@ def test_war_facade_is_exact_union_of_read_domains():
 
 
 def test_facades_do_not_copy_module_namespaces():
-    for relative in ("db/__init__.py", "agent/tools.py", "storage/war.py"):
+    for relative in ("db/__init__.py", "storage/war.py"):
         assert "__export_public" not in (ROOT / relative).read_text()

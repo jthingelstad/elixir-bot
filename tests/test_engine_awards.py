@@ -222,24 +222,6 @@ def test_replayed_season_close_preserves_recorded_outcome(engine_conn):
     )
 
 
-def test_tie_aware_ranks_share_a_rank_and_flag_ties():
-    """Competition ranking (1,2,2,4) with tie flags — so Elixir can say
-    'three tied for 2nd' instead of inventing an order between equal points."""
-    from storage.awards import _apply_tie_aware_ranks
-
-    rows = [
-        {"points": 2700},
-        {"points": 2400},
-        {"points": 2400},
-        {"points": 2400},
-        {"points": 2150},
-    ]
-    _apply_tie_aware_ranks(rows, "points")
-    assert [r["rank"] for r in rows] == [1, 2, 2, 2, 5]
-    assert [r["tied"] for r in rows] == [False, True, True, True, False]
-    assert rows[1]["tie_count"] == 3
-
-
 def test_award_races_tie_aware_and_iron_king_unranked():
     """get_award_races: War Champ top-N tie-aware with points; Iron King is a
     participation list (no ranks); Rookie MVP is first-war-season only."""

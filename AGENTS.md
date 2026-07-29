@@ -38,7 +38,7 @@ Rollback before close-out = old git ref + copy the archive back + relaunch.
 - `runtime/clan_chat_copy.py` — Dedicated Clash Royale in-game clan chat copy generation, validation, and fallback guardrails
 - `runtime/channel_router.py` — Discord message routing for interactive channels
 - `storage/`, `agent/`, `runtime/` — Domain-first implementation packages for persistence, LLM behavior, and Discord runtime; root modules remain the stable public API surface
-- Facade discipline: `elixir_agent.py`, `agent/tools.py`, and `storage/war.py` are explicit static facades. `db` uses an explicit name→source registry with lazy resolution to avoid its storage import cycle; duplicate declarations fail at import instead of being chosen by order. `elixir` is a sys.modules alias for `runtime.app`, whose explicit import blocks declare the runtime surface that tests and `runtime.activities` address by name. No namespace-copy re-export machinery — if a name should be public, add it to the explicit lists.
+- Facade discipline: `elixir_agent.py` and `storage/war.py` are explicit static facades. `db` uses an explicit name→source registry with lazy resolution to avoid its storage import cycle; duplicate declarations fail at import instead of being chosen by order. `elixir` is a sys.modules alias for `runtime.app`, whose explicit import blocks declare the runtime surface that tests and `runtime.activities` address by name. No namespace-copy re-export machinery — if a name should be public, add it to the explicit lists.
 
 ## The Engine (v5.1)
 
