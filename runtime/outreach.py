@@ -1,11 +1,6 @@
 """DM-outreach flow (Phase 1): propose leader-gated cards to collect missing
 member profile info, and act on the leader's decision.
 
-The whole feature is member-facing, so it is gated by ``ELIXIR_DM_OUTREACH=1``
-(OFF by default → fully dormant): the flag both raises #actions cards and, on a
-leader's approval, delivers the DM. (The former ``ELIXIR_DM_OUTREACH_SEND``
-dry-run gate was collapsed away 2026-07-17 once the flow was trusted in prod.)
-
 A leader approves every card before any DM. The Discord + DB side effects are
 injected so this module stays unit-testable. See storage/member_outreach.py for
 the durable state and elixir-dm-outreach for the design.
@@ -14,7 +9,6 @@ the durable state and elixir-dm-outreach for the design.
 from __future__ import annotations
 
 import logging
-import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
@@ -41,17 +35,6 @@ STATUS_DECLINE = "rejected"
 COOLDOWN_DAYS = 14  # don't re-ask a member within this window after an attempt
 CARDS_PER_RUN = 3  # cap cards raised per proposal run so #actions never floods
 _ISO = "%Y-%m-%dT%H:%M:%SZ"
-
-
-def outreach_enabled() -> bool:
-    return os.getenv("ELIXIR_DM_OUTREACH", "0") == "1"
-
-
-def send_enabled() -> bool:
-    # Collapsed onto the single ELIXIR_DM_OUTREACH gate (2026-07-17): when
-    # outreach is enabled, an approved card delivers the DM for real. Kept as a
-    # named helper so the approve path reads intently.
-    return outreach_enabled()
 
 
 def _now(now: Optional[str]) -> str:
@@ -93,9 +76,7 @@ def propose_cards(
     deterministic ``compose_ask`` template if omitted, empty, or it raises.
     ``raise_card(target, copy)`` creates + posts the #actions card and returns the
     action dict (with ``action_id``), or None on failure. Returns the outreach rows
-    moved to 'proposed'. No-op (returns []) unless ``ELIXIR_DM_OUTREACH=1``."""
-    if not outreach_enabled():
-        return []
+    moved to 'proposed'."""
     now = _now(now)
     targets = mo.eligible_targets(limit=limit, now=now, conn=conn)
     proposed: list[dict] = []

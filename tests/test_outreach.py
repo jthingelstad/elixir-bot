@@ -16,25 +16,10 @@ def test_compose_ask_names_the_member_and_invites_opt_out():
     assert "no thanks" in copy.lower()  # opt-out is always offered
 
 
-def test_propose_is_dormant_unless_enabled(tmp_path, monkeypatch):
+def test_propose_raises_cards_and_marks_proposed(tmp_path):
     conn = db.get_connection(str(tmp_path / "t.db"))
     try:
         _seed(conn)
-        monkeypatch.delenv("ELIXIR_DM_OUTREACH", raising=False)
-        raised = []
-        out = outreach.propose_cards(
-            raise_card=lambda t, c: raised.append(t) or {"action_id": 1}, conn=conn
-        )
-        assert out == [] and raised == []  # gated off by default
-    finally:
-        conn.close()
-
-
-def test_propose_raises_cards_and_marks_proposed(tmp_path, monkeypatch):
-    conn = db.get_connection(str(tmp_path / "t.db"))
-    try:
-        _seed(conn)
-        monkeypatch.setenv("ELIXIR_DM_OUTREACH", "1")
         calls = []
 
         def raise_card(target, copy):
@@ -55,11 +40,10 @@ def test_propose_raises_cards_and_marks_proposed(tmp_path, monkeypatch):
         conn.close()
 
 
-def test_propose_uses_injected_agent_compose(tmp_path, monkeypatch):
+def test_propose_uses_injected_agent_compose(tmp_path):
     conn = db.get_connection(str(tmp_path / "t.db"))
     try:
         _seed(conn)
-        monkeypatch.setenv("ELIXIR_DM_OUTREACH", "1")
         seen = []
         outreach.propose_cards(
             raise_card=lambda t, c: seen.append(c) or {"action_id": 1},
@@ -71,11 +55,10 @@ def test_propose_uses_injected_agent_compose(tmp_path, monkeypatch):
         conn.close()
 
 
-def test_propose_falls_back_to_template_when_compose_empty_or_raises(tmp_path, monkeypatch):
+def test_propose_falls_back_to_template_when_compose_empty_or_raises(tmp_path):
     conn = db.get_connection(str(tmp_path / "t.db"))
     try:
         _seed(conn)
-        monkeypatch.setenv("ELIXIR_DM_OUTREACH", "1")
         # Empty compose -> template.
         seen = []
         outreach.propose_cards(

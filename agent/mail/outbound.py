@@ -29,11 +29,7 @@ def send(
     the HTML alternative gets Elixir's styled signature footer. Use bcc for broadcasts
     so recipients don't see each other's addresses."""
     text_body = f"{body.rstrip()}\n\n{_TEXT_SIG}" if sign else body
-    html_body = (
-        email_render.text_to_html(body, signature_html=_HTML_SIG if sign else None)
-        if email_jmap.HTML_ENABLED
-        else None
-    )
+    html_body = email_render.text_to_html(body, signature_html=_HTML_SIG if sign else None)
     return email_jmap.send_email(
         to=to,
         subject=subject,

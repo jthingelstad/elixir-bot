@@ -23,6 +23,7 @@ from runtime import onboarding, prompt_feedback
 from runtime import process as _process_service
 from runtime import status as runtime_status
 from runtime.activities import (
+    AWARENESS_LOOP_HOURS_DEFAULT,
     format_scheduler_startup_summary,
     register_scheduled_activities,
 )
@@ -84,7 +85,7 @@ ASK_ELIXIR_DAILY_INSIGHT_HOUR = int(os.getenv("ASK_ELIXIR_DAILY_INSIGHT_HOUR", "
 # is an always-on Sonnet agentic turn, and hourly was more attentiveness than the
 # clan needs. Hard-posts now wait up to 3h (was <=1h). Revert via env if too slow.
 AWARENESS_LOOP_MINUTE = int(os.getenv("AWARENESS_LOOP_MINUTE", "5"))
-AWARENESS_LOOP_HOURS = os.getenv("AWARENESS_LOOP_HOURS", "*/3")
+AWARENESS_LOOP_HOURS = os.getenv("AWARENESS_LOOP_HOURS", AWARENESS_LOOP_HOURS_DEFAULT)
 ASK_ELIXIR_DAILY_INSIGHT_MINUTE = int(os.getenv("ASK_ELIXIR_DAILY_INSIGHT_MINUTE", "0"))
 PROMOTION_CONTENT_DAY = os.getenv("PROMOTION_CONTENT_DAY", "fri")
 PROMOTION_CONTENT_HOUR = int(os.getenv("PROMOTION_CONTENT_HOUR", "9"))
@@ -319,7 +320,6 @@ from runtime.jobs._maintenance import (  # noqa: E402,F401
 )
 from runtime.jobs._memory import (  # noqa: E402,F401
     MEMORY_SYNTHESIS_DAY,
-    MEMORY_SYNTHESIS_DRY_RUN,
     MEMORY_SYNTHESIS_HOUR,
     MEMORY_SYNTHESIS_POSTS_PER_CHANNEL,
     _apply_memory_synthesis_plan,
@@ -1067,10 +1067,8 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
 
 # -- DM outreach (Phase 1) -------------------------------------------------
 #
-# Gated by ELIXIR_DM_OUTREACH (OFF by default): it raises cards AND, on a
-# leader's approval, delivers the DM. A leader approves every card before any
-# member is messaged. Flow logic lives in runtime/outreach.py; these are the
-# thin Discord bridges.
+# A leader approves every card before any member is messaged. Flow logic lives
+# in runtime/outreach.py; these are the thin Discord bridges.
 
 
 def _outreach_tenure(joined_date) -> str | None:
@@ -1094,18 +1092,7 @@ def _outreach_tenure(joined_date) -> str | None:
 
 
 async def _send_member_dm(discord_user_id: str, content: str) -> tuple[bool, str]:
-    """Deliver an outreach DM to a member. Returns (ok, detail). When
-    ELIXIR_DM_OUTREACH is off, logs what would be sent and reports 'dry_run'
-    so the flow can be exercised without messaging anyone."""
-    from runtime import outreach
-
-    if not outreach.send_enabled():
-        log.info(
-            "member outreach [dry-run]: would DM %s (%d chars)",
-            discord_user_id,
-            len(content or ""),
-        )
-        return True, "dry_run"
+    """Deliver an outreach DM to a member. Returns ``(ok, detail)``."""
     try:
         uid = int(discord_user_id)
     except TypeError, ValueError:
@@ -1191,13 +1178,13 @@ async def _ops_log(message: str) -> None:
 
 
 async def _member_outreach_propose():
-    """Scheduled: offer a few leader-gated outreach cards. No-op unless
-    ELIXIR_DM_OUTREACH=1. Runs the (sync, tested) propose_cards with an async
-    card-raise bridge."""
+    """Scheduled: offer a few leader-gated outreach cards.
+
+    Runs the synchronous, tested ``propose_cards`` flow with an async card-raise
+    bridge.
+    """
     from runtime import outreach
 
-    if not outreach.outreach_enabled():
-        return
     loop = asyncio.get_running_loop()
 
     def _raise_sync(target, copy):

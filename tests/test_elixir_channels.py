@@ -4729,7 +4729,7 @@ def _make_inbound_dm_message(discord_user_id, content):
     return SimpleNamespace(author=author, channel=dm_channel, guild=None, content=content)
 
 
-def test_inbound_dm_routes_to_outreach_when_enabled():
+def test_inbound_dm_routes_to_outreach():
     message = _make_inbound_dm_message(922500832962957343, "sure — storie@gmail.com")
 
     async def fake_to_thread(fn, *args, **kwargs):
@@ -4738,7 +4738,6 @@ def test_inbound_dm_routes_to_outreach_when_enabled():
     with (
         patch("runtime.channel_router.asyncio.to_thread", side_effect=fake_to_thread),
         patch("runtime.channel_router.db.upsert_discord_user"),
-        patch("runtime.outreach.outreach_enabled", return_value=True),
         patch("runtime.app._handle_outreach_dm", new=AsyncMock()) as mock_handle,
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
     ):
@@ -4746,25 +4745,6 @@ def test_inbound_dm_routes_to_outreach_when_enabled():
 
     mock_handle.assert_awaited_once_with(message)
     mock_process.assert_not_awaited()  # a DM must never fall through to command processing
-
-
-def test_inbound_dm_ignored_when_outreach_disabled():
-    message = _make_inbound_dm_message(922500832962957343, "hello?")
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("runtime.channel_router.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.channel_router.db.upsert_discord_user"),
-        patch("runtime.outreach.outreach_enabled", return_value=False),
-        patch("runtime.app._handle_outreach_dm", new=AsyncMock()) as mock_handle,
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-    ):
-        asyncio.run(channel_router.route_message(message))
-
-    mock_handle.assert_not_awaited()
-    mock_process.assert_not_awaited()  # still short-circuits — Elixir is not a general DM bot
 
 
 def test_mention_overrides_not_for_bot_to_llm_chat():

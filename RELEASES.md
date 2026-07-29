@@ -93,7 +93,7 @@ The hard lesson of this batch was the 2026-07-18 outage: my posting permissions 
 - Fixed: inbound-DM detection now keys on *DMChannel* type, not `.recipient` — member replies to outreach DMs were being silently dropped.
 - Fixed: approving/declining an outreach card via button/modal now actually sends (or skips) the member DM.
 - DM outreach built in phases: *member_outreach* state table (schema v6), leader-gated card + DM send, DM-receive reply state machine reusing the existing email/6-digit verification core.
-- *ELIXIR_DM_OUTREACH_SEND* collapsed into the single *ELIXIR_DM_OUTREACH* gate; flag-graduation convention documented in AGENTS.md.
+- The outreach send dry-run switch collapsed into its launch gate; flag-graduation convention documented in AGENTS.md.
 - Member report: battle log segmented by mode family with card-aware LLM intros; special events split by specific mode (Crazy Arena ≠ Showdown); new "Your progress this week" section.
 - Observatory: new *Command* home; nav regrouped Command / Decisions / Clan / Elixir / System; new /awareness, /cost, /api-sentinel, /activities pages; per-member leader-action trail; DM-outreach funnel card; Command war glance now uses the rich war-season snapshot; light visual polish.
 - clan_chat_copy guardrail: write "and" not "&", "up 821" not "+821", avoid filter-tripping slang — in-game surface only.
@@ -456,7 +456,7 @@ Elixir can now act on what it sees. v4.5 gave the awareness loop perception — 
 - New `memory-synthesis` activity runs Sunday 22:00 Chicago. An LLM turn receives the week's memories, posts from leadership/war/clan channels, live clan state, and prior synthesis arcs, then returns a structured plan.
 - Arc memories persist with `source_type=elixir_synthesis`, `confidence=1.0`, scoped to leadership by default. Stale memory IDs are expired via `clan_memories.expires_at`. Contradictions between stored memory and live state are flagged in the digest.
 - Migration 29 widens the `clan_memories.source_type` CHECK to include `elixir_synthesis` via a full table rewrite (FTS + triggers + indices rebuilt).
-- `MEMORY_SYNTHESIS_DRY_RUN=true` logs the plan without persisting — safe for first-run validation.
+- The initial memory-synthesis dry-run path logged plans without persisting for first-run validation.
 - Digest and contradiction list post to `#leader-lounge`.
 
 ### Feature Flag Cleanup (#11)

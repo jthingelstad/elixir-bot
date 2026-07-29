@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+AWARENESS_LOOP_HOURS_DEFAULT = "*/3"
+
 
 @dataclass(frozen=True)
 class RuntimeAttrRef:
@@ -151,8 +153,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         owner_lane="arena-relay",
         purpose="DM-outreach (Phase 1): pick current members missing a verified "
         "email and offer up to a few leader-gated 'Profile Outreach' cards in "
-        "#actions. FULLY DORMANT unless ELIXIR_DM_OUTREACH=1; a leader approves "
-        "each card before any DM is delivered.",
+        "#actions. A leader approves each card before any DM is delivered.",
         job_id="member-outreach-propose",
         job_function="_member_outreach_propose",
         schedule_kind="cron",
@@ -162,7 +163,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "max_instances": 1,
             "coalesce": True,
         },
-        delivery_targets=("Discord: #actions Profile Outreach card (leader-gated + flag-gated)",),
+        delivery_targets=("Discord: #actions Profile Outreach card (leader-gated)",),
         activity_role="communicator",
     ),
     ActivityDefinition(
@@ -357,7 +358,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         # hourly 2026-07-23 for cost) and AWARENESS_LOOP_MINUTE are the tunables.
         schedule_kind="cron",
         schedule_config={
-            "hour": _attr("AWARENESS_LOOP_HOURS", "*/3"),
+            "hour": _attr("AWARENESS_LOOP_HOURS", AWARENESS_LOOP_HOURS_DEFAULT),
             "minute": _attr("AWARENESS_LOOP_MINUTE", 5),
             "max_instances": 1,
             "coalesce": True,

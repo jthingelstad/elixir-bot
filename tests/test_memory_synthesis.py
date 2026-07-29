@@ -79,7 +79,7 @@ def test_apply_plan_writes_arc_memories_with_elixir_synthesis_source(memdb):
         "contradictions": [],
         "digest": "short digest",
     }
-    stats = _apply_memory_synthesis_plan(plan, week_id="131:5", dry_run=False)
+    stats = _apply_memory_synthesis_plan(plan, week_id="131:5")
     assert stats["arcs_written"] == 1
     assert stats["stale_expired"] == 0
 
@@ -120,29 +120,13 @@ def test_apply_plan_expires_stale_memory_ids(memdb):
         "contradictions": [],
         "digest": "",
     }
-    stats = _apply_memory_synthesis_plan(plan, week_id=None, dry_run=False)
+    stats = _apply_memory_synthesis_plan(plan, week_id=None)
     assert stats["stale_expired"] == 1
 
     visible = {m["memory_id"] for m in list_memories(viewer_scope="leadership")}
     # The stale memory is expired and should not surface in active reads.
     assert stale["memory_id"] not in visible
     assert keeper["memory_id"] in visible
-
-
-def test_apply_plan_dry_run_persists_nothing(memdb):
-    plan = {
-        "arc_memories": [
-            {"title": "Would-be arc", "body": "body", "scope": "leadership", "tags": []}
-        ],
-        "stale_memory_ids": [],
-        "contradictions": [],
-        "digest": "dry",
-    }
-    stats = _apply_memory_synthesis_plan(plan, week_id="131:5", dry_run=True)
-    assert stats["dry_run"] is True
-    assert stats["arcs_requested"] == 1
-    assert stats["arcs_written"] == 0
-    assert list_memories(viewer_scope="leadership") == []
 
 
 def test_apply_plan_auto_expires_non_leader_contradictions(memdb):
@@ -187,7 +171,7 @@ def test_apply_plan_auto_expires_non_leader_contradictions(memdb):
         ],
         "digest": "flagged",
     }
-    stats = _apply_memory_synthesis_plan(plan, week_id=None, dry_run=False)
+    stats = _apply_memory_synthesis_plan(plan, week_id=None)
     assert stats["contradictions_flagged"] == 2
     assert stats["contradictions_auto_expired"] == 1
     assert stats["contradictions_leader_review"] == 1
@@ -513,10 +497,8 @@ def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
                 "contradictions_leader_review": 1,
                 "arcs_requested": 0,
                 "stale_requested": 0,
-                "dry_run": False,
             },
         ),
-        patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
         patch("runtime.jobs._memory.upsert_weekly_summary_memory") as mock_memory,
         patch(
             "runtime.jobs._memory.elixir_log.post_event_async", new=AsyncMock()
@@ -591,10 +573,8 @@ def test_memory_synthesis_cycle_keeps_success_when_arena_relay_is_unconfigured()
                 "contradictions_leader_review": 1,
                 "arcs_requested": 0,
                 "stale_requested": 0,
-                "dry_run": False,
             },
         ),
-        patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
         patch("runtime.jobs._memory.upsert_weekly_summary_memory") as mock_memory,
         patch("runtime.jobs._memory.prompts.discord_singleton_lane", return_value=None),
         patch("runtime.jobs._memory.bot.get_channel") as mock_channel,
@@ -635,10 +615,8 @@ def test_memory_synthesis_cycle_quiet_week_posts_nothing():
                 "contradictions_flagged": 0,
                 "arcs_requested": 0,
                 "stale_requested": 0,
-                "dry_run": False,
             },
         ),
-        patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
         patch("runtime.jobs._memory.upsert_weekly_summary_memory") as mock_memory,
         patch(
             "runtime.jobs._memory.elixir_log.post_event_async", new=AsyncMock()
@@ -701,10 +679,8 @@ def test_memory_synthesis_cycle_retries_truncated_agent_with_reduced_context():
                 "contradictions_flagged": 0,
                 "arcs_requested": 0,
                 "stale_requested": 0,
-                "dry_run": False,
             },
         ) as mock_apply,
-        patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
         patch("runtime.jobs._memory.runtime_status.mark_job_start"),
         patch("runtime.jobs._memory.runtime_status.mark_job_success") as mock_success,
         patch("runtime.jobs._memory.runtime_status.mark_job_failure") as mock_failure,
