@@ -24,6 +24,7 @@ from capabilities import game_modes as game_mode_capability
 from capabilities import management as management_capability
 from capabilities import war as war_capability
 from engine.event_contracts import hard_post_event_types, lane_by_event_type
+from runtime.activities import AWARENESS_LOOP_HOURS_DEFAULT
 from storage import events_read, leader_actions, revisits
 
 log = logging.getLogger("elixir")
@@ -110,7 +111,7 @@ def _delivery_block() -> dict:
 
         from apscheduler.triggers.cron import CronTrigger
 
-        hours = os.getenv("AWARENESS_LOOP_HOURS", "*/3")
+        hours = os.getenv("AWARENESS_LOOP_HOURS", AWARENESS_LOOP_HOURS_DEFAULT)
         minute = int(os.getenv("AWARENESS_LOOP_MINUTE", "5"))
         trig = CronTrigger(hour=hours, minute=minute, timezone=ZoneInfo("America/Chicago"))
         nxt = trig.get_next_fire_time(None, now)

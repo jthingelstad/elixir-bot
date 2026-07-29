@@ -81,8 +81,8 @@ before a baseline advances. Counters land in
 ### Feature flags — dark-launch, then graduate
 
 Member-facing or behaviour-changing features ship behind an `ELIXIR_*` env flag
-(OFF by default) so they can be validated in prod before they're trusted — e.g.
-`ELIXIR_DM_OUTREACH`, `ELIXIR_NOTE_INTERPRET`, `ELIXIR_AWARENESS_GATE`.
+(OFF by default) so they can be validated in prod before they're trusted. The
+current awareness gate remains a genuine kill-switch while it is still watched.
 
 **A flag is scaffolding, not furniture.** Every dark-launch flag carries an
 implicit graduation step: once the feature is trusted, **remove the flag** — make
@@ -92,7 +92,7 @@ indefinitely; that is how `.env` and the code accrete dead toggles.
 
 Rules of thumb:
 - A flag that is fully ON in prod and no longer being toggled is a graduation
-  candidate — collapse it (see `ELIXIR_DM_OUTREACH_SEND`, retired 2026-07-17).
+  candidate — collapse it into the live behavior.
 - When you retire a flag, grep the whole repo (`.env`, code, tests, RELEASES.md)
   and remove every reference; a retired flag left in `.env` reads as live config.
 - A flag read nowhere in code is dead — delete it from `.env` on sight.
@@ -314,7 +314,8 @@ Important rules:
   - `clanops` -> read + write tools
   - `reception` -> no tools
   - `roster_bios` -> read tools only
-- Write tools are gated by workflow policy and `CLANOPS_WRITE_TOOLS_ENABLED` (default enabled for `clanops` only).
+- Write tools are gated by workflow policy: `clanops` can use read + write tools;
+  every other interactive workflow remains read-only.
 - Tool outputs are wrapped in a compact envelope (`ok`, `error`, `truncated`, `meta`, `data`) and truncated for context budget safety.
 - Leader/member factual answers should prefer structured query tools over clipped roster context. Resolve members by name/Discord handle before using tag-based tools when needed.
 - Strict JSON workflow contracts are validated in code with one repair retry:

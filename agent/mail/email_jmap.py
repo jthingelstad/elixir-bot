@@ -37,7 +37,6 @@ SENT_PARENT = os.getenv("ELIXIR_EMAIL_SENT_PARENT", "Sent")
 # every send raised JMAPError("Could not find mailbox Sent/Elixir") and the
 # weekly clan recap + member report emails silently stopped going out.
 SENT_FOLDER = os.getenv("ELIXIR_EMAIL_SENT_FOLDER", "Elixir-Sent")
-HTML_ENABLED = os.getenv("ELIXIR_EMAIL_HTML_ENABLED", "1") != "0"
 
 
 class JMAPError(RuntimeError):
@@ -243,7 +242,7 @@ class JMAPClient:
         bcc_recipients = _addresses(bcc)
         create_id = "elixirDraft"
         submit_id = "elixirSend"
-        if html_body is None and HTML_ENABLED:
+        if html_body is None:
             html_body = email_render.text_to_html(body)
         if html_body:
             body_structure = {

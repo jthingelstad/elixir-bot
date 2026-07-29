@@ -36,7 +36,6 @@ from runtime.jobs._maintenance import (  # noqa: F401
 )
 from runtime.jobs._memory import (  # noqa: F401
     MEMORY_SYNTHESIS_DAY,
-    MEMORY_SYNTHESIS_DRY_RUN,
     MEMORY_SYNTHESIS_HOUR,
     MEMORY_SYNTHESIS_MEMORY_BODY_CHARS,
     MEMORY_SYNTHESIS_MEMORY_LIMIT,

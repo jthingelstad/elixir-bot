@@ -2,7 +2,6 @@ import json
 import time
 
 from agent.core import (
-    CLANOPS_WRITE_TOOLS_ENABLED,
     MAX_CONTEXT_MEMBERS_DEFAULT,
     MAX_TOOL_ROUNDS,
     TOOL_RESULT_MAX_CHARS,
@@ -418,9 +417,9 @@ def _chat_with_tools(
         allowed_tools = TOOLSETS_BY_WORKFLOW.get(workflow, ALL_TOOLS)
     allowed_tool_names = _tool_names(allowed_tools)
 
-    # Clanops writes are gated by the long-standing env var. Awareness writes
-    # are gated by a per-tick budget enforced in the tool-call loop below.
-    is_clanops_write_ok = workflow == "clanops" and CLANOPS_WRITE_TOOLS_ENABLED
+    # Workflow policy owns clanops writes. Awareness writes are gated by a
+    # per-tick budget enforced in the tool-call loop below.
+    is_clanops_write_ok = workflow == "clanops"
     is_awareness_write_ok = workflow == "awareness"
 
     max_tool_rounds = MAX_ROUNDS_BY_WORKFLOW.get(workflow, MAX_TOOL_ROUNDS)

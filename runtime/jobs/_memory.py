@@ -10,7 +10,6 @@ only genuine leader-judgment contradictions are eligible for #actions.
 __all__ = [
     "MEMORY_SYNTHESIS_DAY",
     "MEMORY_SYNTHESIS_HOUR",
-    "MEMORY_SYNTHESIS_DRY_RUN",
     "MEMORY_SYNTHESIS_POSTS_PER_CHANNEL",
     "MEMORY_SYNTHESIS_MEMORY_LIMIT",
     "MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT",
@@ -64,12 +63,6 @@ bot = _BotProxy()
 
 MEMORY_SYNTHESIS_DAY = os.getenv("MEMORY_SYNTHESIS_DAY", "sun")
 MEMORY_SYNTHESIS_HOUR = int(os.getenv("MEMORY_SYNTHESIS_HOUR", "22"))
-MEMORY_SYNTHESIS_DRY_RUN = os.getenv("MEMORY_SYNTHESIS_DRY_RUN", "").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
 MEMORY_SYNTHESIS_MEMORY_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_MEMORY_LIMIT", "80"))
 MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT", "12"))
 MEMORY_SYNTHESIS_POSTS_PER_CHANNEL = int(os.getenv("MEMORY_SYNTHESIS_POSTS_PER_CHANNEL", "12"))
@@ -695,12 +688,11 @@ def _build_memory_synthesis_context():
     }
 
 
-def _apply_memory_synthesis_plan(plan: dict, *, week_id: str | None, dry_run: bool = False) -> dict:
+def _apply_memory_synthesis_plan(plan: dict, *, week_id: str | None) -> dict:
     """Persist arc memories + expire stale ids. Returns a small stats dict.
 
     Writes happen synchronously in this helper so the caller can thread it
-    through ``asyncio.to_thread``. In dry-run mode the function returns
-    counts without persisting anything.
+    through ``asyncio.to_thread``.
     """
     from memory_store import create_memory
 
@@ -718,11 +710,7 @@ def _apply_memory_synthesis_plan(plan: dict, *, week_id: str | None, dry_run: bo
         "contradictions_leader_review": len(leader_review_items),
         "arcs_requested": len(arcs),
         "stale_requested": len(stale_ids),
-        "dry_run": bool(dry_run),
     }
-
-    if dry_run:
-        return stats
 
     actor = "elixir:memory-synthesis"
     now_stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -936,20 +924,10 @@ async def _memory_synthesis_cycle():
         _apply_memory_synthesis_plan,
         plan,
         week_id=week_id,
-        dry_run=MEMORY_SYNTHESIS_DRY_RUN,
     )
 
     digest = (plan.get("digest") or "").strip()
     contradictions = list(plan.get("contradictions") or [])
-
-    if MEMORY_SYNTHESIS_DRY_RUN:
-        if digest:
-            log.info("memory_synthesis dry_run digest preview: %s", digest[:400])
-        runtime_status.mark_job_success(
-            "memory_synthesis",
-            f"dry_run: arcs={stats['arcs_requested']} stale={stats['stale_requested']} contradictions={stats['contradictions_flagged']}",
-        )
-        return
 
     if digest:
         # The digest stays in durable memory as the week's canonical summary —

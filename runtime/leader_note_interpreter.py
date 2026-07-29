@@ -9,14 +9,13 @@ Undo / Fix-reading controls.
 
 Fire-on-submit (mirrors ``runtime.leader_action_feedback``): the modal handlers
 call ``queue_leader_note_interpretation(action_id, bot=...)`` right after they
-persist the note. Gated by ``ELIXIR_NOTE_INTERPRET`` so it can be dark-launched.
+persist the note.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
 
 import db
 
@@ -26,10 +25,6 @@ log = logging.getLogger("elixir.leader_note_interpreter")
 # a member who should be actioned, so they require a confident classification.
 _MIN_CONFIDENCE = 0.6
 _GUARDED_KINDS = ("invalidate_premise", "persist_context")
-
-
-def _enabled() -> bool:
-    return os.getenv("ELIXIR_NOTE_INTERPRET", "0").strip() == "1"
 
 
 def _confident(effect: dict, kind: str) -> bool:
@@ -153,11 +148,13 @@ def revert_and_reset_note(action_id: int, note: str, discord_user_id):
 
 
 def queue_leader_note_interpretation(action_id: int | None, *, bot=None):
-    """Fire-and-forget interpretation of the note on ``action_id``. No-op when the
-    feature is disabled. In an async context it schedules a task (interpretation
-    runs in a thread, the card refresh back on the loop); with no running loop
-    (sync callers / tests) it runs synchronously without a card refresh."""
-    if action_id is None or not _enabled():
+    """Fire-and-forget interpretation of the note on ``action_id``.
+
+    In an async context it schedules a task (interpretation runs in a thread,
+    the card refresh back on the loop); with no running loop (sync callers /
+    tests) it runs synchronously without a card refresh.
+    """
+    if action_id is None:
         return None
     try:
         loop = asyncio.get_running_loop()
