@@ -28,6 +28,85 @@ def test_fresh_build_matches_committed_schema_fingerprint(tmp_path):
         conn.close()
 
 
+def test_v21_migration_discards_legacy_cases_and_preserves_leader_actions(tmp_path):
+    """The contract migration deletes all 39 inert cases and their nullable
+    action link only after the case-free writer has shipped (#216)."""
+    path = tmp_path / "v20.db"
+    build(str(path), None)
+    conn = sqlite3.connect(path)
+    try:
+        # Reconstruct the retired v20 objects on a throwaway current database.
+        conn.execute("ALTER TABLE leader_action_recommendations ADD COLUMN case_id INTEGER")
+        conn.execute(
+            "CREATE INDEX idx_leader_actions_case ON leader_action_recommendations(case_id, status)"
+        )
+        conn.executescript(
+            """CREATE TABLE decision_cases (
+                case_id INTEGER PRIMARY KEY,
+                case_key TEXT NOT NULL UNIQUE,
+                case_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                target_player_tag TEXT,
+                title TEXT NOT NULL,
+                opened_at TEXT NOT NULL,
+                state_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX idx_decision_cases_status_due
+                ON decision_cases(status, updated_at DESC);
+            CREATE INDEX idx_decision_cases_target
+                ON decision_cases(target_player_tag, case_type, status);
+            """
+        )
+        conn.executemany(
+            "INSERT INTO decision_cases "
+            "(case_id, case_key, case_type, status, title, opened_at, created_at, updated_at) "
+            "VALUES (?, ?, 'inactivity_review', 'resolved', ?, '2026-07-01', "
+            "'2026-07-01', '2026-07-02')",
+            [(case_id, f"legacy:{case_id}", f"Legacy case {case_id}") for case_id in range(1, 40)],
+        )
+        conn.execute(
+            "INSERT INTO leader_action_recommendations "
+            "(action_key, action_type, objective, prompt_text, rationale, proposed_at, "
+            "created_at, updated_at, case_id) VALUES "
+            "('preserved-action', 'promotion_recommendation', 'Promote X', 'Review X', "
+            "'Strong evidence', '2026-07-02', '2026-07-02', '2026-07-02', 1)"
+        )
+        conn.execute("PRAGMA user_version = 20")
+        conn.commit()
+
+        assert conn.execute("SELECT COUNT(*) FROM decision_cases").fetchone()[0] == 39
+        assert conn.execute(
+            "SELECT case_id FROM leader_action_recommendations WHERE action_key='preserved-action'"
+        ).fetchone() == (1,)
+
+        apply_schema_migrations(conn)
+
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        assert (
+            conn.execute("SELECT 1 FROM sqlite_master WHERE name='decision_cases'").fetchone()
+            is None
+        )
+        assert (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='idx_leader_actions_case'"
+            ).fetchone()
+            is None
+        )
+        assert "case_id" not in {
+            row[1] for row in conn.execute("PRAGMA table_info(leader_action_recommendations)")
+        }
+        assert conn.execute(
+            "SELECT objective, rationale, status FROM leader_action_recommendations "
+            "WHERE action_key='preserved-action'"
+        ).fetchone() == ("Promote X", "Strong evidence", "proposed")
+        apply_schema_migrations(conn)
+        assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
+    finally:
+        conn.close()
+
+
 def test_legacy_migration_backfills_awareness_then_removes_retired_queue(tmp_path):
     path = tmp_path / "pre-v1.db"
     build(str(path), None)

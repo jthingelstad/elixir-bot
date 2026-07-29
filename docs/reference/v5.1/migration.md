@@ -53,7 +53,7 @@ once before Phase 4 deletes code.
 
 Fresh `elixir-v51.db` created from `schema.md` DDL as `_migration_0` (the repo's
 baseline-schema convention, AGENTS.md). For tables schema.md marks "carried
-as-is / verified live DDL" (leader actions, decision cases, revisits, the
+as-is / verified live DDL" (leader actions, revisits, the
 tournaments star, `raw_api_payloads`, `runtime_job_status`, the ops
 singletons), the DDL source is an **export from the archive**
 (`sqlite3 archive .schema <table>`), applied with only the renames schema.md
@@ -66,6 +66,8 @@ break. Compatible v5.1 databases then advance through the ordered migrations in
 `db/schema.py`, keyed by `PRAGMA user_version`; pre-v5.1 databases are still
 refused. Runtime modules never lazily `CREATE` or `ALTER`. Fresh builds run the
 same forward path and are locked by a committed schema fingerprint test.
+The initial cutover also carried `decision_cases`; #216 retired that duplicate
+decision store and schema v21 removed it plus the nullable leader-action link.
 
 ## Phase 3 — Durable carry-forward (transform, not copy — feedback New-6)
 

@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 20
+CURRENT_SCHEMA_VERSION = 21
 
 
 _V1_STATEMENTS = (
@@ -989,6 +989,22 @@ def _apply_v20(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS runtime_incidents")
 
 
+def _apply_v21(conn: sqlite3.Connection) -> None:
+    """Remove the retired decision-case schema after the #216 cutover.
+
+    ``leader_action_recommendations`` has been the sole active decision store
+    since the code-only cutover. Operations deployed and exercised the final
+    writer with no ``case_id`` dependency before this contract migration was
+    allowed to ship. The 39 legacy case rows are intentionally discarded per
+    the product decision; leader-action history remains intact.
+    """
+    conn.execute("DROP INDEX IF EXISTS idx_leader_actions_case")
+    conn.execute("DROP TABLE IF EXISTS decision_cases")
+    columns = _columns(conn, "leader_action_recommendations")
+    if "case_id" in columns:
+        conn.execute("ALTER TABLE leader_action_recommendations DROP COLUMN case_id")
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1182,6 +1198,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 20
+    if version < 21:
+        try:
+            _apply_v21(conn)
+            conn.execute("PRAGMA user_version = 21")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1238,7 +1263,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "449ef48a0d46831397320352403982634d143ec366f3e0959e38e75381a3763f"
+CURRENT_SCHEMA_FINGERPRINT = "4bc29bb6c17daf0fcdef027d7a6ae32ed75e8e28247d786c822753ca620c9e97"
 
 
 __all__ = [

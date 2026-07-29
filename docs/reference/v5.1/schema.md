@@ -475,12 +475,10 @@ ordered schema migrations, not lazily by runtime code.
   (status flow, decision emoji/notes, copy-edit diffs, baseline/outcome JSON,
   `is_test`; verified live DDL). It is `target_player_tag`-keyed and is the one
   authoritative decision store. Kick-suppression (C1) keeps reading it.
-- `decision_cases` — **retired by #216**. No active workflow or storage facade
-  reads or writes the table; `leader_action_recommendations` is the one
-  authoritative decision store. The table and nullable
-  `leader_action_recommendations.case_id` remain inert only until this code-only
-  cutover is deployed, after which the contract migration will remove them and
-  discard the 39 legacy case rows rather than archive them.
+- `decision_cases` — **retired by #216 and removed by schema v21** along with
+  nullable `leader_action_recommendations.case_id`. The 39 legacy rows were
+  deliberately discarded after the code-only cutover was deployed;
+  `leader_action_recommendations` is the one authoritative decision store.
 - `revisits` — carried as-is (`signal_key` renamed `revisit_key`; it is an opaque
   dedup string, not a Gen B FK — verified: `UNIQUE(signal_key, due_at)`, no FK).
 
