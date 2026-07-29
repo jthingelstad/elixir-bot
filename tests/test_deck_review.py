@@ -802,3 +802,87 @@ def test_respond_in_deck_review_war_review_with_decks_does_not_inject_new_player
     msg = captured["user_msg"]
     assert "PRE-FETCHED WAR DECK RECONSTRUCTION" in msg
     assert "NEW WAR PLAYER" not in msg
+
+
+# ── Phase 6: bounded truncation recovery ─────────────────────────────────────────
+
+
+_DECK_REVIEW_TRUNCATION = {
+    "_error": {
+        "kind": "truncation",
+        "phase": "initial_response",
+        "detail": "LLM response truncated by max_tokens=4096",
+    }
+}
+
+
+def test_respond_in_deck_review_retries_4096_truncation_with_strict_json():
+    """Regression for #217's two live #ask-elixir requests: a deck-review
+    completion that reaches the 4096-token ceiling gets one bounded retry and
+    returns the retry's valid, user-visible strict-JSON response."""
+    from unittest.mock import patch
+
+    from agent import workflows
+
+    calls = []
+    response = {
+        "event_type": "deck_review_response",
+        "summary": "Deck reviewed",
+        "content": "Your deck has a clear win condition and two safe swaps.",
+    }
+
+    def fake_chat(system_prompt, user_msg, **kwargs):
+        calls.append({"user_msg": user_msg, **kwargs})
+        return _DECK_REVIEW_TRUNCATION if len(calls) == 1 else response
+
+    with patch.object(workflows, "_chat_with_tools", side_effect=fake_chat):
+        result = workflows.respond_in_deck_review(
+            question="review my deck",
+            author_name="someone",
+            channel_name="#ask-elixir",
+            mode="regular",
+            subject="review",
+        )
+
+    assert result == response
+    assert [call["max_tokens"] for call in calls] == [4096, 8192]
+    assert all(call["strict_json"] is True for call in calls)
+    assert all(call["return_errors"] is True for call in calls)
+    assert calls[0]["response_schema"] == calls[1]["response_schema"]
+    assert "previous attempt reached the response limit" not in calls[0]["user_msg"]
+    assert "previous attempt reached the response limit" in calls[1]["user_msg"]
+
+
+def test_respond_in_deck_review_retries_truncated_image_request_once():
+    """The retry preserves screenshot content and stops after one retry when
+    the model keeps truncating."""
+    from unittest.mock import patch
+
+    from agent import workflows
+
+    image_block = {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "abc"},
+    }
+    calls = []
+
+    def fake_chat(system_prompt, user_msg, **kwargs):
+        calls.append({"user_msg": user_msg, **kwargs})
+        return _DECK_REVIEW_TRUNCATION
+
+    with patch.object(workflows, "_chat_with_tools", side_effect=fake_chat):
+        result = workflows.respond_in_deck_review(
+            question="review this deck",
+            author_name="someone",
+            channel_name="#ask-elixir",
+            mode="regular",
+            subject="review",
+            image_blocks=[image_block],
+        )
+
+    assert result == _DECK_REVIEW_TRUNCATION
+    assert len(calls) == 2
+    assert calls[0]["user_msg"][1] == image_block
+    assert calls[1]["user_msg"][1] == image_block
+    assert calls[1]["user_msg"][-1]["type"] == "text"
+    assert "complete JSON object" in calls[1]["user_msg"][-1]["text"]

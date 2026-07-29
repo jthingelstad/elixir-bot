@@ -621,7 +621,7 @@ def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None, on_ev
 
 
 def _is_truncation_error(result) -> bool:
-    """True when a run_awareness_tick result is a truncation failure payload."""
+    """True when a strict workflow returns a truncation failure payload."""
     return (
         isinstance(result, dict)
         and isinstance(result.get("_error"), dict)
@@ -951,17 +951,42 @@ def respond_in_deck_review(
     history = list(conversation_history or [])
     user_msg = _with_image_blocks(base_user_msg, image_blocks)
     last_result = None
-    for attempt in range(max_attempts):
-        result = _chat_with_tools(
-            system_prompt,
-            user_msg,
-            conversation_history=history,
-            workflow="deck_review",
-            allowed_tools=TOOLSETS_BY_WORKFLOW["deck_review"],
-            response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["deck_review"],
-            strict_json=True,
-            return_errors=True,
+
+    def _run_deck_turn(turn_user_msg):
+        def _run(message, max_tokens):
+            return _chat_with_tools(
+                system_prompt,
+                message,
+                conversation_history=history,
+                workflow="deck_review",
+                allowed_tools=TOOLSETS_BY_WORKFLOW["deck_review"],
+                response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["deck_review"],
+                strict_json=True,
+                return_errors=True,
+                max_tokens=max_tokens,
+            )
+
+        result = _run(turn_user_msg, 4096)
+        if not _is_truncation_error(result):
+            return result
+
+        log.warning(
+            "deck_review truncated (max_tokens=4096, phase=%s); retrying once with headroom",
+            result["_error"].get("phase"),
         )
+        retry_nudge = (
+            "Your previous attempt reached the response limit and was discarded. "
+            "Retry once with concise analysis and recommendations, but keep every required "
+            "deck-review JSON field and finish the complete JSON object."
+        )
+        if isinstance(turn_user_msg, list):
+            retry_user_msg = [*turn_user_msg, {"type": "text", "text": retry_nudge}]
+        else:
+            retry_user_msg = f"{turn_user_msg}\n\n{retry_nudge}"
+        return _run(retry_user_msg, 8192)
+
+    for attempt in range(max_attempts):
+        result = _run_deck_turn(user_msg)
         last_result = result
         if not validate:
             return result
