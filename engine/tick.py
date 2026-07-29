@@ -372,57 +372,14 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
         counters["kick_transitions"] = len(transitions)
         withdrawals = management.withdraw_stale_actions(conn, now=now_iso)
         counters["management_withdrawals"] = sum(int(w.get("count", 1)) for w in withdrawals)
-        # Propagate terminal leader-action state onto its backing decision case:
-        # a done kick/promotion/demotion resolves its review the moment the leader
-        # decides — before the member even leaves the roster. Nothing wired this
-        # before, so completed actions left their cases OPEN and they resurfaced
-        # as stale recommendations to the awareness brain.
+        # Departure verification remains action-board state. Decision cases were
+        # retired in #216; leader_action_recommendations is the sole decision
+        # lifecycle and therefore needs no cross-store reconciliation.
         from storage.cases import (
             expire_departure_verification_cards,
             raise_departure_verification_cards,
-            reconcile_departed_member_cases,
-            reconcile_uncorroborated_member_cases,
-            sync_terminal_leader_action_cases,
         )
 
-        synced_cases = sync_terminal_leader_action_cases(now=now_iso, conn=conn)
-        counters["action_cases_synced"] = len(synced_cases)
-        if synced_cases:
-            log.info(
-                "synced %d decision case(s) from terminal leader-actions: %s",
-                len(synced_cases),
-                ", ".join(
-                    f"{c['target_player_name']}({c['case_type']}:{c['outcome']})"
-                    for c in synced_cases
-                ),
-            )
-        # Backstop: close any member-review case whose subject has left but whose
-        # departure wasn't already resolved above (organic leave, manual clear).
-        # A fulfilled kick resolves as kicked; an organic leave dismisses.
-        departed_cases = reconcile_departed_member_cases(now=now_iso, conn=conn)
-        counters["departed_cases_reconciled"] = len(departed_cases)
-        if departed_cases:
-            log.info(
-                "reconciled %d member-review case(s) for departed members: %s",
-                len(departed_cases),
-                ", ".join(
-                    f"{c['target_player_name']}({c['case_type']}:{c['outcome']})"
-                    for c in departed_cases
-                ),
-            )
-        # Backstop 2: dismiss in-clan member-review cases the engine no longer
-        # corroborates (state=none past the grace window, no open card) — the
-        # brain/signal path can open cases the deterministic engine never backs
-        # (Ratko #365 lingered as a "due" nag for a week). Runs after the terminal
-        # + departed reconcilers so it only sees genuinely-orphaned open cases.
-        uncorroborated = reconcile_uncorroborated_member_cases(now=now_iso, conn=conn)
-        counters["uncorroborated_cases_dismissed"] = len(uncorroborated)
-        if uncorroborated:
-            log.info(
-                "dismissed %d uncorroborated member-review case(s): %s",
-                len(uncorroborated),
-                ", ".join(f"{c['target_player_name']}({c['case_type']})" for c in uncorroborated),
-            )
         # Departure verification: a leave and a kick are different signals the
         # roster diff can't tell apart. Raise a #leader-actions card for recent
         # unverified departures (settling already-enacted kicks silently), and

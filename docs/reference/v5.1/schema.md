@@ -73,7 +73,7 @@ tables unchanged and is not redesigned here.
 | L5 Identity & tenure (durable) | `players`, `player_metadata`, `player_aliases`, `clans`, `discord_users`, `discord_links`, `clan_memberships` | 7 |
 | L6 Projections / read models | `player_current_state`, `player_card_collection`, `player_recent_form`, `member_management` | 4 |
 | Awareness runtime | `awareness_thoughts`, `awareness_delivery_intents`, `awareness_posts` | 3 |
-| Clan management | `leader_action_recommendations`, `decision_cases`, `revisits` | 3 |
+| Clan management | `leader_action_recommendations`, `revisits` | 3 |
 | Bounded stream: war | `war_seasons`, `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days` | 5 |
 | Bounded stream: tournaments | `tournaments`, `tournament_battles`, `tournament_participants` | 3 |
 | Awards (durable) | `awards` | 1 |
@@ -475,18 +475,11 @@ ordered schema migrations, not lazily by runtime code.
   (status flow, decision emoji/notes, copy-edit diffs, baseline/outcome JSON,
   `is_test`; verified live DDL). Changes: none structural — it is already
   `target_player_tag`-keyed. Kick-suppression (C1) keeps reading it.
-- `decision_cases` — **carried, slimmed to one implementation** (the live table is
-  already generic + tag-keyed; verified DDL). It serves the member-review queue only.
-  A case is opened ONLY for a type in `CASE_TYPES` — one some reconciler owns — and
-  `upsert_member_review_case` rejects anything else. The awareness write tool
-  `record_leadership_followup` reaches it only by supplying such a `case_type` together
-  with a member; without both it records a memory and nothing more. `flag_member_watch`
-  is deliberately private state only (ordinary watches and explicit leave holds) and
-  never creates a decision case.
-  The retired `leadership_followup` type was the counter-example: outside `CASE_TYPES`,
-  so nothing could ever close it (#208).
-  Columns `source_signal_key` / `source_signal_type` are renamed
-  `source_event_key` / `source_event_type` (Gen B naming retired).
+- `decision_cases` — **retired by #216**. No active workflow reads or writes the
+  table; `leader_action_recommendations` is the one authoritative decision store.
+  The table and nullable `leader_action_recommendations.case_id` remain inert only
+  for the deploy-safe cutover and are removed by the post-deploy contract migration.
+  Existing case rows are discarded rather than archived.
 - `revisits` — carried as-is (`signal_key` renamed `revisit_key`; it is an opaque
   dedup string, not a Gen B FK — verified: `UNIQUE(signal_key, due_at)`, no FK).
 
@@ -615,7 +608,7 @@ same (no listed name exists post-cut), but only the transforms carry data.
 |---|---|
 | `game_event_stream`, `event_rollups`, `project_event_links`, `communication_intent_event_links` (Gen A + bridges) | streams (L3), rollups (L4), `recognition_ledger.event_refs_json` |
 | `signal_log`, `signal_outcomes`, `awareness_ticks` (Gen B) | `communication_intents` + `stream_cursors` |
-| `detections`, `elixir_projects` (Gen C engine internals) | stream events + recognition ledger (projects retire with no v5.1 equivalent; decision support lives in `decision_cases` / leader actions). The archive's `detections` also seeds the ledger's calendar claims (migration T14). |
+| `detections`, `elixir_projects` (Gen C engine internals) | stream events + recognition ledger (projects retire with no v5.1 equivalent; decision support lives in leader actions). The archive's `detections` also seeds the ledger's calendar claims (migration T14). |
 | `member_battle_facts` | `battle_events` (§7: tag-keyed survivor; stream starts fresh) |
 | `member_state_snapshots`, `player_profile_snapshots` | `state_baselines` + `player_events` + `player_daily_metrics` |
 | `member_card_collection_snapshots`, `member_card_usage_snapshots`, `member_deck_snapshots` | `player_card_collection`, `battle_events.deck_json`, `player_current_state.current_deck_json` |
@@ -639,7 +632,7 @@ same (no listed name exists post-cut), but only the transforms carry data.
 
 *(Re-keyed in place, name unchanged — not in this list: `discord_links`,
 `clan_memberships`, `war_participation`, `awards`, `tournaments` star,
-`decision_cases`, `revisits`.)*
+`revisits`.)*
 
 ## 9. Read-model coverage matrix (§14.5 / §17.1)
 
@@ -683,11 +676,11 @@ omitted.
 | `lookup_cards` / card tools | — | card_catalog, member_card_collection_snapshots | card_catalog, player_card_collection |
 | `get_awards` | list / leaderboard / current_standings | awards, war_participation | awards, war_participation standings query |
 | `get_elixir_state` | event_summary / recent_events / game_modes | detections + event_core tables | player_events / clan_events / battle_events / war_events + game_mode_contexts |
-| | decision_cases / communication_* | decision_cases, communication_intents (+ Gen A/B links) | decision_cases, communication_intents, recognition_ledger |
+| | leader_actions / communication_* | decision cases, communication intents (+ Gen A/B links) | leader_action_recommendations, awareness_delivery_intents |
 | | season_window / war_season | war_races | war_seasons, war_weeks |
 | write: `update_member` | 4 fields | member_metadata | player_metadata |
 | write: `save_clan_memory` | — | clan_memories (+ satellites) | unchanged (deferred pass) |
-| write: `flag_member_watch` / `record_leadership_followup` | — | decision_cases, clan_memories | `flag_member_watch`: clan_memories only; `record_leadership_followup`: clan_memories always, decision_cases only with a `CASE_TYPES` case_type + member (#208) |
+| write: `flag_member_watch` / `record_leadership_followup` | — | decision cases, clan memories | `flag_member_watch`: memories only; `record_leadership_followup`: memories always, leader_action_recommendations only with an action_type + member (#216) |
 | write: `raise_clan_chat_relay` | — | — | leader_action_recommendations (`in_game_relay`) |
 | write: `schedule_revisit` | — | revisits | revisits |
 

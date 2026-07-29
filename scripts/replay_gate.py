@@ -255,7 +255,7 @@ def main() -> int:
             "-q",
             "tests/test_entrypoints_smoke.py",
             "tests/test_lane_registration.py",
-            "tests/test_pipeline_integration.py",
+            "tests/test_awareness_loop.py",
             "tests/test_cold_start_tick.py",
         ],
         capture_output=True,

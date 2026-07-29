@@ -257,45 +257,6 @@ def test_plain_decline_sets_no_suppression_window(engine_conn):
     assert updated["expires_at"] is None  # default cooldown applies, no note window
 
 
-# ----------------------------------------------- decline dismisses its case
-
-
-def test_decline_dismisses_backing_case(engine_conn):
-    engine_conn.execute(
-        "INSERT INTO decision_cases (case_key, case_type, status, title, "
-        " opened_at, created_at, updated_at) "
-        "VALUES ('inactivity_review:#CASE', 'inactivity_review', 'open', "
-        " 'Inactivity review', ?, ?, ?)",
-        (NOW, NOW, NOW),
-    )
-    case_id = engine_conn.execute(
-        "SELECT case_id FROM decision_cases WHERE case_key='inactivity_review:#CASE'"
-    ).fetchone()["case_id"]
-    engine_conn.execute(
-        "INSERT INTO leader_action_recommendations "
-        "(action_key, action_type, objective, status, prompt_text, proposed_at, "
-        " created_at, updated_at, target_player_tag, case_id, is_test) "
-        "VALUES ('k:#CASE', 'kick_recommendation', 'o', 'proposed', 'p', ?, ?, ?, '#CASE', ?, 0)",
-        (NOW, NOW, NOW, case_id),
-    )
-    engine_conn.commit()
-    action_id = engine_conn.execute(
-        "SELECT action_id FROM leader_action_recommendations WHERE target_player_tag='#CASE'"
-    ).fetchone()["action_id"]
-
-    la.decide_leader_action(
-        action_id,
-        status=la.ACTION_REJECTED,
-        discord_user_id=1,
-        emoji="❌",
-        conn=engine_conn,
-    )
-    status = engine_conn.execute(
-        "SELECT status FROM decision_cases WHERE case_id=?", (case_id,)
-    ).fetchone()["status"]
-    assert status == "dismissed"
-
-
 # --- Sweep re-applies the tick evaluator's guards -------------------------
 #
 # renominate_after_cooldown used to select on kick_state alone. That is safe

@@ -280,11 +280,10 @@ def test_build_context_includes_operations_context(memdb, monkeypatch):
     )
     monkeypatch.setattr(
         memory_job.db,
-        "decision_case_snapshot",
-        lambda **kwargs: {
-            "due": [{"case_id": 1, "case_type": "inactivity_review"}],
-            "open": [],
-        },
+        "list_leader_actions",
+        lambda **kwargs: [
+            {"action_id": 1, "action_type": "kick_recommendation", "status": "proposed"}
+        ],
     )
     monkeypatch.setattr(
         memory_job.db,
@@ -303,7 +302,7 @@ def test_build_context_includes_operations_context(memdb, monkeypatch):
     assert operations["war_season"]["season_id"] == 133
     assert operations["game_modes"]["windows"]["7d"]["modes"]["ranked"]["battles"] == 12
     assert operations["season_window"]["weeks_recorded"] == 2
-    assert operations["decision_cases"]["due"][0]["case_id"] == 1
+    assert operations["leader_actions"][0]["action_id"] == 1
     assert operations["awareness_activity"]["thoughts"][0]["loop_number"] == 5
 
 
@@ -411,10 +410,14 @@ def test_reduce_memory_synthesis_context_for_retry_bounds_large_payload():
                 },
             },
             "season_window": {"season_id": 131},
-            "decision_cases": {
-                "due": [{"case_id": idx, "summary": "d" * 500} for idx in range(12)],
-                "open": [{"case_id": idx, "reason": "r" * 500} for idx in range(12)],
-            },
+            "leader_actions": [
+                {
+                    "action_id": idx,
+                    "action_type": "kick_recommendation",
+                    "objective": "d" * 500,
+                }
+                for idx in range(12)
+            ],
             "awareness_activity": {
                 "thoughts": [
                     {"loop_number": idx, "skipped_reason": "r" * 500} for idx in range(20)
@@ -450,8 +453,7 @@ def test_reduce_memory_synthesis_context_for_retry_bounds_large_payload():
         memory_job.MEMORY_SYNTHESIS_RETRY_AWARENESS_LIMIT
     )
     assert (
-        len(operations["decision_cases"]["due"])
-        == memory_job.MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT
+        len(operations["leader_actions"]) == memory_job.MEMORY_SYNTHESIS_RETRY_LEADER_ACTION_LIMIT
     )
     assert len(operations["war_season"]["state"]["race"]["standings"]) == 5
     assert len(operations["game_modes"]["windows"]["7d"]["modes"]["ranked"]["top_members"]) == 3

@@ -475,7 +475,7 @@ TOOLS = [
         "name": "get_elixir_state",
         "description": (
             "Inspect Elixir's internal operating state: the normalized game-event stream, "
-            "awareness decisions and confirmed posts, and open/due decision cases. "
+            "awareness decisions and confirmed posts, and leader-action cards. "
             "Use this when leaders ask what Elixir is monitoring, "
             "which recommendations are open, why something was posted or skipped, or what Elixir "
             "would do next. Leadership-only aspects are blocked outside leadership workflows. "
@@ -495,7 +495,7 @@ TOOLS = [
                         "game_modes",
                         "season_window",
                         "war_season",
-                        "decision_cases",
+                        "leader_actions",
                         "awareness_activity",
                     ],
                 },
@@ -525,13 +525,10 @@ TOOLS = [
                     "type": "string",
                     "description": "Optional subject key filter for event views.",
                 },
-                "case_type": {
-                    "type": "string",
-                    "description": "Optional decision case type filter.",
-                },
                 "status": {
                     "type": "string",
-                    "description": "Optional status filter for decision cases.",
+                    "enum": ["proposed", "done", "rejected", "deferred", "all"],
+                    "description": "Optional leader-action status filter; defaults to proposed.",
                 },
                 "limit": {
                     "type": "integer",
@@ -1024,13 +1021,13 @@ TOOLS = [
             "Record an operational observation as a durable leadership-scoped memory tagged "
             "'followup'. Use when you detect a pattern worth remembering — a rank swing, a "
             "recurring no-show, a compliance gap. "
-            "This is the ONLY awareness write tool that can open a member-review decision card. "
+            "This is the ONLY awareness write tool that can open a member-review action card. "
             "Do not use it for a leave hold or paste-ready clan-chat copy: use flag_member_watch "
             "with away_until and raise_clan_chat_relay for those distinct outcomes. "
             "IMPORTANT — this is a NOTE, not an escalation. On its own it reaches no human: "
             "it does not post anywhere and does not raise a card. To actually ask leadership "
             "for something, either post to the leader-lounge lane (#leaders), or pass "
-            "case_type + member_tag so it becomes a #actions card a leader can decide. "
+            "action_type + member_tag so it becomes a #actions card a leader can decide. "
             "The result tells you which happened via 'escalated'. "
             "Keep the recommendation concrete (who, what, when) so a human "
             "can act on it without re-doing the analysis. "
@@ -1054,13 +1051,12 @@ TOOLS = [
                     "type": "string",
                     "description": "Player tag, name, or Discord handle if the followup is scoped to a specific member. Optional.",
                 },
-                "case_type": {
+                "action_type": {
                     "type": "string",
                     "enum": [
-                        "inactivity_review",
-                        "promotion_review",
-                        "demotion_review",
-                        "war_recovery",
+                        "kick_recommendation",
+                        "promotion_recommendation",
+                        "demotion_recommendation",
                     ],
                     "description": "Set this (WITH member_tag) for a member kick/promotion/demotion review, and it becomes a #actions card a leader can decide — the only way this tool reaches a human. Omit it and the followup is recorded as a memory only; nothing is posted and no leader is asked anything.",
                 },
@@ -1171,27 +1167,23 @@ TOOLS = [
         "description": (
             "Resolve one of Elixir's own shorthand reference codes and return its "
             "full record. Elixir emits these codes itself, so when a leader mentions "
-            "one in chat ('look at R137', 'why did L60 stay quiet?', 'what's C12?'), "
+            "one in chat ('look at R137', 'why did L60 stay quiet?'), "
             "call this tool to pull the real record BEFORE answering — never guess "
             "what a code means or invent its contents.\n\n"
             "Reference kinds (the leading letter selects the kind, case-insensitive):\n"
             "- R<n> — a leader-action recommendation: a kick / promotion / demotion / "
             "relay card Elixir raised to the leadership action board for a human to "
-            "decide. Returns action_type, status (proposed/done/declined), the target "
+            "decide. Returns action_type, status (proposed/done/rejected), the target "
             "member (name + tag), objective, rationale, the in-game clan-chat copy, and "
             "the decision (who decided, when, any note) plus outcome if decided.\n"
             "- L<n> — an awareness loop: one hourly deliberation tick. Returns whether "
             "it posted or stayed silent, its reasoning, what it posted (channel + "
             "summary + members), and read health (errors / degraded blocks / hard-post "
             "signal count).\n"
-            "- C<n> — a decision case: the standing deliberation behind a member review "
-            "(the 'why over time' an R card is a snapshot of). Returns case_type, "
-            "status, title, target member, recommendation, rationale, priority, and the "
-            "open/due/resolved timeline.\n"
             "- M<n> — a stored clan memory: a durable note Elixir wrote. Returns the "
             "memory kind, title, body, summary, scope, subject member, status "
             "(active/archived), author, and tags.\n\n"
-            "Accepts the code with the letter ('R137', 'L60', 'C12', 'M340') or a bare "
+            "Accepts the code with the letter ('R137', 'L60', 'M340') or a bare "
             "number plus an explicit `kind`. Returns {error, hint} when the code "
             "doesn't resolve."
         ),
@@ -1201,15 +1193,15 @@ TOOLS = [
                 "reference": {
                     "type": "string",
                     "description": (
-                        "The reference code, e.g. 'R137', 'L60', 'C12', or 'M340'. The "
+                        "The reference code, e.g. 'R137', 'L60', or 'M340'. The "
                         "leading letter selects the kind (R = leader action, L = loop, "
-                        "C = decision case, M = memory). A bare number is allowed when "
+                        "M = memory). A bare number is allowed when "
                         "`kind` is given."
                     ),
                 },
                 "kind": {
                     "type": "string",
-                    "enum": ["leader_action", "loop", "case", "memory"],
+                    "enum": ["leader_action", "loop", "memory"],
                     "description": (
                         "Explicit kind, only needed when `reference` is a bare number "
                         "with no letter prefix."

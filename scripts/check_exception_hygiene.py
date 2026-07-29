@@ -90,7 +90,7 @@ BROAD_EXCEPTION_BASELINE = {
     "storage/_formatting.py": 2,
     "storage/identity.py": 2,
     # storage/incidents.py removed with the ledger it wrote (2026-07-28).
-    "storage/leader_actions.py": 3,
+    "storage/leader_actions.py": 2,
 }
 
 _LOG_CALLS = {"critical", "debug", "error", "exception", "info", "warn", "warning"}

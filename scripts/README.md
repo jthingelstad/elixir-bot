@@ -47,14 +47,14 @@ Override via env:
 
 ### `elixir_state.py`
 Read-only inspection of Elixir's event streams, awareness activity, war state,
-and decision cases.
+and leader actions.
 
 ```bash
 uv run --locked python scripts/elixir_state.py summary
 uv run --locked python scripts/elixir_state.py events --days 28 --scope leadership
 uv run --locked python scripts/elixir_state.py awareness --limit 25
 uv run --locked python scripts/elixir_state.py war --json
-uv run --locked python scripts/elixir_state.py cases --status due
+uv run --locked python scripts/elixir_state.py actions --status proposed
 ```
 
 Use this when you need to answer "what is Elixir monitoring?", "what

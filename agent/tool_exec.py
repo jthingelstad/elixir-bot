@@ -1024,28 +1024,20 @@ def _execute_get_elixir_state(arguments, workflow=None):
     if aspect == "awareness_activity":
         return db.get_awareness_activity(limit=limit)
 
-    if aspect == "decision_cases":
-        status = (arguments.get("status") or "").strip()
-        case_type = arguments.get("case_type")
-        if status == "due":
-            return {
-                "due": db.list_due_decision_cases(case_type=case_type, limit=limit),
-            }
-        if status and status != "all":
-            return {
-                "cases": db.list_decision_cases(
-                    statuses=(status,),
-                    case_type=case_type,
-                    limit=limit,
-                ),
-            }
-        return db.decision_case_snapshot(open_limit=limit, due_limit=limit)
+    if aspect == "leader_actions":
+        status = (arguments.get("status") or "").strip() or "proposed"
+        return {
+            "actions": db.list_leader_actions(
+                status=None if status == "all" else status,
+                limit=limit,
+            )
+        }
 
     if aspect == "operational_summary":
         # A dashboard, not a data dump. Every block is structurally bounded so
         # the result stays under the tool envelope's char cap as data grows —
         # otherwise the envelope blindly drops whole arrays mid-deliberation.
-        case_limit = min(limit, 10)
+        action_limit = min(limit, 10)
         return {
             "event_windows": event_facades.summarize_event_windows(
                 windows=_ELIXIR_STATE_WINDOWS, scope=None
@@ -1053,9 +1045,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
             "recent_events": event_facades.list_recent_events(days=7, limit=10),
             "game_modes": game_mode_capability.get_clan_game_mode_windows(windows=(7,)),
             "war_season": war_capability.get_war_season_view(view="snapshot", source=db)["data"],
-            "decision_cases": db.decision_case_snapshot(
-                open_limit=case_limit, due_limit=case_limit, dedupe=True
-            ),
+            "leader_actions": db.list_leader_actions(status="proposed", limit=action_limit),
             "awareness": db.get_awareness_activity(limit=min(limit, 15)),
         }
 
@@ -1211,7 +1201,7 @@ def _execute_flag_member_watch(arguments):
             "error": "unsupported_case_type",
             "detail": (
                 "flag_member_watch records private watch/leave state only; use "
-                "record_leadership_followup with member_tag + case_type for a review card."
+                "record_leadership_followup with member_tag + action_type for a review card."
             ),
         }
 
@@ -1386,19 +1376,24 @@ def _execute_record_leadership_followup(arguments):
     that member so the member-context view surfaces it.
 
     A NOTE IS NOT AN ESCALATION. This raises a #actions card only when
-    ``case_type`` AND ``member_tag`` are both supplied; otherwise nothing reaches
-    a human and the result says so (``escalated``). See the comment below the
-    memory write for why the generic case path was removed.
+    ``action_type`` AND ``member_tag`` are both supplied; otherwise nothing
+    reaches a human and the result says so (``escalated``).
     """
     from memory_store import attach_tags, create_memory
 
     topic = (arguments.get("topic") or "").strip()
     recommendation = (arguments.get("recommendation") or "").strip()
     member_tag_input = arguments.get("member_tag")
-    case_type = (arguments.get("case_type") or "").strip()
+    action_type = (arguments.get("action_type") or "").strip()
 
     if not topic or not recommendation:
         return {"error": "record_leadership_followup requires topic and recommendation"}
+    if action_type and action_type not in {
+        "kick_recommendation",
+        "promotion_recommendation",
+        "demotion_recommendation",
+    }:
+        return {"error": "unsupported_action_type", "action_type": action_type}
 
     resolved_tag = _resolve_member_tag(member_tag_input) if member_tag_input else None
     title = f"Followup: {topic}"
@@ -1420,38 +1415,27 @@ def _execute_record_leadership_followup(arguments):
         return {"error": "record_leadership_followup_failed", "detail": str(exc)}
 
     attach_tags(memory["memory_id"], ["followup"], actor="elixir:awareness-tool")
-    # A decision case is opened ONLY for a member review that also becomes a
-    # #actions card. The generic paths used to open a `leadership_followup` case
-    # instead — and that record was invisible and immortal:
-    #
-    #   * nothing surfaced it. No card, no post; the sole surface was an
-    #     unlabelled "open cases" count on the Observatory, which the clan leader
-    #     could not interpret ("I don't even know what a case is").
-    #   * nothing could close it. `leadership_followup` is not in CASE_TYPES, the
-    #     set every reconciler iterates, so all 9 ever created were still open.
-    #   * the brain READS open cases each tick, saw its own stale pile, and its
-    #     only recourse was to file another one — 3 of the 9 were Elixir
-    #     reporting on the staleness of the other 6.
-    #
-    # It cost a real report: case #376 (2026-07-23) correctly diagnosed the
-    # stale-role bug and named Fullboat, dez42 and L-Drxgo four days before the
-    # weekly review raised those exact cards and a human had to catch it.
-    #
-    # The memory above still records the observation durably. What is gone is the
-    # false promise of an open work item nobody owns. To actually reach a leader,
-    # post to the leader-lounge lane (#leaders) or raise a member-scoped card.
-    case = None
-    if case_type and resolved_tag:
+    # #216: the action board is the only active decision store. The previous
+    # path wrote a decision case and merely described it as a card; no runtime
+    # consumer actually turned that case into an R card. Create the human-visible
+    # action directly, with a stable per-member/type key so an automated write
+    # cannot reopen a leader-closed decision.
+    action = None
+    if action_type and resolved_tag:
         try:
-            case = db.upsert_member_review_case(
-                case_type=case_type,
-                member={"tag": resolved_tag},
-                title=f"Followup: {topic}",
-                recommendation=recommendation,
+            action = db.create_leader_action_recommendation(
+                action_type=action_type,
+                objective=f"Followup: {topic}",
+                prompt_text=recommendation,
                 rationale=recommendation,
+                target_player_tag=resolved_tag,
+                source_signal_key=f"awareness:followup:{action_type}:{resolved_tag}",
+                source_signal_type="awareness_leadership_followup",
+                action_key=f"awareness:followup:{action_type}:{resolved_tag}",
             )
         except Exception as exc:
-            log.warning("record_leadership_followup case upsert failed: %s", exc)
+            log.warning("record_leadership_followup action upsert failed: %s", exc)
+    escalated = bool(action and action.get("status") == "proposed")
     result = {
         "success": True,
         "memory_id": memory["memory_id"],
@@ -1460,32 +1444,34 @@ def _execute_record_leadership_followup(arguments):
         # Say plainly whether this reached leadership. Without it the tool reads
         # as an escalation in every case, which is how observations went
         # unanswered for weeks while the brain believed it had reported them.
-        "escalated": bool(case),
+        "escalated": escalated,
     }
-    if case:
-        result["case_id"] = case.get("case_id")
-        result["case_key"] = case.get("case_key")
+    if action:
+        result["action_id"] = action.get("action_id")
+        result["action_key"] = action.get("action_key")
+        result["action_status"] = action.get("status")
+        if not escalated:
+            result["note"] = "Leadership already decided this member review; no card was reopened."
     else:
         result["note"] = (
             "Recorded as a leadership memory only — no leader has been asked anything. "
             "If this needs a human to act, post it to the leader-lounge lane (#leaders), "
-            "or call again with case_type + member_tag to raise a #actions card."
+            "or call again with action_type + member_tag to raise a #actions card."
         )
     return result
 
 
-_REFERENCE_RE = re.compile(r"^\s*([rlcm])?\s*#?(\d+)\s*$", re.IGNORECASE)
+_REFERENCE_RE = re.compile(r"^\s*([rlm])?\s*#?(\d+)\s*$", re.IGNORECASE)
 _REFERENCE_KIND_BY_LETTER = {
     "r": "leader_action",
     "l": "loop",
-    "c": "case",
     "m": "memory",
 }
 
 
 def _execute_lookup_reference(arguments, workflow=None):
     """Resolve one of Elixir's own shorthand codes to its record: 'R<n>' (leader
-    action), 'L<n>' (awareness loop), 'C<n>' (decision case), 'M<n>' (memory).
+    action), 'L<n>' (awareness loop), or 'M<n>' (memory).
     Elixir authors these codes, so a leader who cites one in chat is pointing at a
     real row — resolve it rather than guess."""
     raw = str(arguments.get("reference") or "").strip()
@@ -1495,7 +1481,7 @@ def _execute_lookup_reference(arguments, workflow=None):
             "error": "unparseable_reference",
             "reference": raw,
             "hint": "Expected a code like 'R137' (leader action), 'L60' (loop), "
-            "'C12' (case), or 'M340' (memory).",
+            "or 'M340' (memory).",
         }
     letter, number = match.group(1), int(match.group(2))
     kind = (
@@ -1507,34 +1493,15 @@ def _execute_lookup_reference(arguments, workflow=None):
         return {
             "error": "ambiguous_reference",
             "reference": raw,
-            "hint": "Bare number with no R/L/C/M prefix — pass kind="
-            "'leader_action' | 'loop' | 'case' | 'memory'.",
+            "hint": "Bare number with no R/L/M prefix — pass kind="
+            "'leader_action' | 'loop' | 'memory'.",
         }
 
     if kind == "case":
-        case = db.get_decision_case_by_id(number)
-        if not case:
-            return {
-                "error": "not_found",
-                "reference": f"C{number}",
-                "hint": f"No decision case C{number} exists.",
-            }
         return {
+            "error": "retired_reference_kind",
             "reference": f"C{number}",
-            "kind": "decision_case",
-            "case_id": case.get("case_id"),
-            "case_type": case.get("case_type"),
-            "status": case.get("status"),
-            "title": case.get("title"),
-            "target_member": case.get("target_player_name"),
-            "target_tag": case.get("target_player_tag"),
-            "recommendation": case.get("recommendation"),
-            "rationale": case.get("rationale"),
-            "priority": case.get("priority"),
-            "opened_at": case.get("opened_at"),
-            "due_at": case.get("due_at"),
-            "resolved_at": case.get("resolved_at"),
-            "resolution": case.get("resolution"),
+            "hint": "Decision cases were discarded; current leadership decisions use R<n>.",
         }
 
     if kind == "memory":

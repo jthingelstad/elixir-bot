@@ -1,5 +1,4 @@
-"""lookup_reference tool: resolve Elixir's own R<n> (leader action) and L<n>
-(awareness loop) shorthand codes to their records."""
+"""Resolve Elixir's R<n>, L<n>, and M<n> shorthand codes."""
 
 from __future__ import annotations
 
@@ -74,24 +73,6 @@ def test_resolve_loop_reference(engine_conn, _isolate_default_sqlite_db):
     assert out["read_health"]["hard_post_signal_count"] == 0
 
 
-def test_resolve_case_reference(engine_conn, _isolate_default_sqlite_db):
-    engine_conn.execute(
-        "INSERT INTO decision_cases "
-        "(case_id, case_key, case_type, status, title, target_player_name, "
-        " recommendation, rationale, opened_at, created_at, updated_at) "
-        "VALUES (12, 'kickreview:test', 'inactivity_review', 'open', "
-        " 'Kick review: pokemon', 'pokemon', 'Watch one more week', "
-        " 'idle 9.5 days on a full roster', ?, ?, ?)",
-        (NOW, NOW, NOW),
-    )
-    engine_conn.commit()
-    out = _execute_lookup_reference({"reference": "C12"})
-    assert out["kind"] == "decision_case"
-    assert out["case_id"] == 12
-    assert out["target_member"] == "pokemon"
-    assert out["status"] == "open"
-
-
 def test_resolve_memory_reference(_isolate_default_sqlite_db):
     from memory_store import create_memory
 
@@ -121,7 +102,11 @@ def test_reference_error_cases(engine_conn, _isolate_default_sqlite_db):
     # well-formed but nonexistent
     assert _execute_lookup_reference({"reference": "R9999"})["error"] == "not_found"
     assert _execute_lookup_reference({"reference": "L9999"})["error"] == "not_found"
-    assert _execute_lookup_reference({"reference": "C9999"})["error"] == "not_found"
+    assert _execute_lookup_reference({"reference": "C9999"})["error"] == "unparseable_reference"
+    assert (
+        _execute_lookup_reference({"reference": "9999", "kind": "case"})["error"]
+        == "retired_reference_kind"
+    )
     assert (
         _execute_lookup_reference({"reference": "M9999"}, workflow="clanops")["error"]
         == "not_found"

@@ -36,7 +36,7 @@ rationale and may describe components later retired from production.
 | Shared domain meaning | `capabilities/` | versioned dictionary contracts |
 | Proactive judgment and voice | awareness workflow | `awareness_thoughts`, `awareness_posts`, stream cursors |
 | Interactive answers | agent workflows and tool policy | `messages`, scoped memories, LLM telemetry |
-| Human clan decisions | management state machines and leadership UI | decision cases, leader actions, revisits |
+| Human clan decisions | management state machines and leadership UI | leader actions and revisits |
 | Operational truth | activity registry, runtime status, process logging | `runtime_job_status`, tick history, `logs/elixir-error.log` |
 
 ## Retired proactive stack
