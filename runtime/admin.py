@@ -33,13 +33,56 @@ class AdminCommandSpec:
     leader_only: bool = False
     write: bool = False
     event_type: str | None = None
+    root: str = "clanops"
+
+    @property
+    def discord_path(self) -> tuple[str, ...]:
+        return (self.root, *self.path)
 
 
 RELAY_STATUS_VIEWS = {"all", "pending", "decided"}
 
 COMMAND_SPECS = {
+    "elixir.help": AdminCommandSpec(
+        "elixir.help",
+        ("help",),
+        "How to use Elixir as a clan member.",
+        event_type="elixir_help",
+        root="elixir",
+    ),
+    "email.set": AdminCommandSpec(
+        "email.set",
+        ("email", "set"),
+        "Add an email to your profile; I'll send a code to verify it.",
+        write=True,
+        event_type="email_set",
+        root="elixir",
+    ),
+    "email.verify": AdminCommandSpec(
+        "email.verify",
+        ("email", "verify"),
+        "Enter the 6-digit code I emailed you.",
+        write=True,
+        event_type="email_verify",
+        root="elixir",
+    ),
+    "email.show": AdminCommandSpec(
+        "email.show",
+        ("email", "show"),
+        "Show the email on your profile.",
+        event_type="email_show",
+        root="elixir",
+    ),
     "help": AdminCommandSpec(
         "help", ("help",), "Show the Elixir operator help page.", event_type="help"
+    ),
+    "release": AdminCommandSpec(
+        "release",
+        ("release",),
+        "Draft or publish Elixir release notes (leader).",
+        leader_only=True,
+        write=True,
+        event_type="release",
     ),
     # system.* / memory.show were removed from Discord; the Observatory owns that
     # telemetry. signal.publish-pending is gone entirely — API drift is an
@@ -83,6 +126,14 @@ COMMAND_SPECS = {
         "Audit Discord ↔ clan member linkage and surface gaps.",
         leader_only=True,
         event_type="member_audit_discord",
+    ),
+    "member.email": AdminCommandSpec(
+        "member.email",
+        ("member", "email"),
+        "Show or set a member's email (leader).",
+        leader_only=True,
+        write=True,
+        event_type="member_email",
     ),
     "member.set": AdminCommandSpec(
         "member.set",
@@ -172,6 +223,10 @@ COMMAND_SPECS = {
         event_type="tournament_history",
     ),
 }
+
+_COMMAND_SPEC_BY_DISCORD_PATH = {spec.discord_path: spec for spec in COMMAND_SPECS.values()}
+if len(_COMMAND_SPEC_BY_DISCORD_PATH) != len(COMMAND_SPECS):
+    raise RuntimeError("Admin command specs must have unique Discord paths")
 
 COMMAND_GROUP_ORDER = [
     "clan",

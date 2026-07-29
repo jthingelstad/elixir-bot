@@ -19,7 +19,7 @@ from runtime.activities import (
     register_scheduled_activities,
     schedule_specs_from_registry,
 )
-from runtime.admin import admin_command_requires_leader
+from runtime.admin import COMMAND_SPECS, admin_command_requires_leader
 from runtime.discord_commands import register_elixir_app_commands
 
 
@@ -2291,6 +2291,25 @@ def test_command_surface_is_split_member_vs_leader():
             assert root.get_command(gone) is None
 
 
+def test_command_specs_cover_every_registered_leaf_command():
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+
+    def leaf_paths(command, prefix=()):
+        path = (*prefix, command.name)
+        children = getattr(command, "commands", None)
+        if children is None:
+            return {path}
+        return {leaf for child in children for leaf in leaf_paths(child, path)}
+
+    registered = {path for root in bot.tree.commands for path in leaf_paths(root)}
+    specified = {spec.discord_path for spec in COMMAND_SPECS.values()}
+
+    assert len(registered) == 25
+    assert registered == specified
+    assert all(spec.event_type for spec in COMMAND_SPECS.values())
+
+
 def test_member_help_is_ungated():
     """/elixir help is member-facing: no leader role, no #clanops channel needed,
     and it never emits the leader/channel gate messages."""
@@ -2306,12 +2325,64 @@ def test_member_help_is_ungated():
         followup=SimpleNamespace(send=AsyncMock()),
         edit_original_response=AsyncMock(),
     )
-    asyncio.run(help_cmd.callback(interaction))
+    with patch("runtime.discord_commands.db.record_admin_command_invocation") as mock_record:
+        asyncio.run(help_cmd.callback(interaction))
 
     response.defer.assert_awaited_once_with(ephemeral=True)
     sent = response.send_message.await_args.args[0]
     assert "/elixir email set" in sent
     assert "Leader role required" not in sent and "#clanops" not in sent
+    mock_record.assert_called_once_with(
+        "elixir.help",
+        "elixir_help",
+        discord_user_id=42,
+        channel_id=999,
+        write_requested=False,
+        accepted=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "kwargs", "command_key", "event_type", "write_requested"),
+    [
+        ("set", {"address": "member@example.com"}, "email.set", "email_set", True),
+        ("verify", {"code": "123456"}, "email.verify", "email_verify", True),
+        ("show", {}, "email.show", "email_show", False),
+    ],
+)
+def test_member_email_commands_record_telemetry_before_identity_resolution(
+    name, kwargs, command_key, event_type, write_requested
+):
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+    email_group = _root(bot, "elixir").get_command("email")
+    command = email_group.get_command(name)
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    interaction = SimpleNamespace(
+        channel=SimpleNamespace(id=999, name="general", type="text"),
+        user=SimpleNamespace(id=42, name="member", display_name="Member", roles=[]),
+        response=response,
+        followup=SimpleNamespace(send=AsyncMock()),
+        edit_original_response=AsyncMock(),
+    )
+
+    with (
+        patch("runtime.discord_commands.db.record_admin_command_invocation") as mock_record,
+        patch(
+            "runtime.discord_commands.db.get_linked_member_for_discord_user",
+            return_value=None,
+        ),
+    ):
+        asyncio.run(command.callback(interaction, **kwargs))
+
+    mock_record.assert_called_once_with(
+        command_key,
+        event_type,
+        discord_user_id=42,
+        channel_id=999,
+        write_requested=write_requested,
+        accepted=True,
+    )
 
 
 def test_register_elixir_app_commands_includes_relay_status():
@@ -2402,6 +2473,7 @@ def test_slash_non_relay_command_still_rejected_in_arena_relay():
             "runtime.discord_commands.dispatch_admin_command",
             new=AsyncMock(return_value="war report"),
         ) as mock_dispatch,
+        patch("runtime.discord_commands.db.record_admin_command_invocation") as mock_record,
     ):
         asyncio.run(war_status_command.callback(interaction))
 
@@ -2412,6 +2484,14 @@ def test_slash_non_relay_command_still_rejected_in_arena_relay():
     mock_dispatch.assert_not_awaited()
     interaction.edit_original_response.assert_not_awaited()
     followup.send.assert_not_awaited()
+    mock_record.assert_called_once_with(
+        "clan.war",
+        "war_status_report",
+        discord_user_id=123,
+        channel_id=300,
+        write_requested=False,
+        accepted=False,
+    )
 
 
 def test_register_elixir_app_commands_includes_member_audit_discord():

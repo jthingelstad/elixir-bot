@@ -200,7 +200,7 @@ The engine DB follows the layered retention model (`docs/reference/v5.1/schema.m
 - Bounded war stream: `war_seasons` (durable), `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days`
 - Awards (durable): `awards` — `war_champ` is a ranked podium (season points); `iron_king` is PARTICIPATION (4/4 decks every battle day — unranked, any number earn it, never crown one); `rookie_mvp` = members in their FIRST war season; `free_pass` rotates to the highest-ranked War Champ who did NOT win it last month (`engine/emitters/war.py:close_season`). The LIVE in-progress races are computed on demand via `storage.awards.get_award_races` (top-10, points, tie-aware) and surfaced in the awareness read as `award_races`; `war_champ_lead_change` / `rookie_mvp_lead_change` events emit on a leader change.
 - Engine control: `stream_cursors` (durable), `poll_state`, `runtime_job_status`, `materialization_runs`, `materialization_inputs`
-- Ops singletons + tournaments star + the conversation set (`conversation_threads`, `messages`, `memory_facts`, `memory_episodes`)
+- Ops telemetry (`llm_calls`, `prompt_failures`, `admin_command_invocations`) + tournaments star + the conversation set (`conversation_threads`, `messages`, `memory_facts`, `memory_episodes`)
 
 All `db` module functions accept an optional `conn` parameter — pass one in tests, omit in production.
 

@@ -38,7 +38,7 @@ BROAD_EXCEPTION_BASELINE = {
     "capabilities/war.py": 1,
     "cr_api.py": 4,
     "db/__init__.py": 2,
-    "db/schema.py": 22,  # +1: V22 migration rollback/re-raise (same pattern as v2-v21)
+    "db/schema.py": 23,  # +1: V23 migration rollback/re-raise (same pattern as v2-v22)
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
@@ -58,7 +58,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/awareness/read.py": 1,
     "runtime/awareness/store.py": 1,
     "runtime/channel_router.py": 20,
-    "runtime/discord_commands.py": 7,
+    "runtime/discord_commands.py": 8,  # +1: command telemetry is fail-soft and logs before continuing
     "runtime/discord_posting.py": 2,
     "runtime/elder_standing.py": 1,
     "runtime/email_verification.py": 1,

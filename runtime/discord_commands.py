@@ -77,17 +77,26 @@ def register_elixir_app_commands(bot) -> None:
         command_name: str,
         write: bool = False,
     ) -> bool:
-        if not (
+        channel_allowed = bool(
             app._is_clanops_channel(interaction.channel)
             or _is_arena_relay_command_channel(app, interaction.channel, command_name)
-        ):
+        )
+        role_allowed = not admin_command_requires_leader(command_name) or app._has_leader_role(
+            interaction.user
+        )
+        accepted = channel_allowed and role_allowed
+        await record_command_invocation(
+            interaction,
+            command_name=command_name,
+            write=write,
+            accepted=accepted,
+        )
+        if not channel_allowed:
             await send_interaction_text(
                 interaction, "Use `/clanops ...` in `#clanops`.", ephemeral=True
             )
             return False
-        if admin_command_requires_leader(command_name) and not app._has_leader_role(
-            interaction.user
-        ):
+        if not role_allowed:
             await send_interaction_text(
                 interaction, "Leader role required for this command.", ephemeral=True
             )
@@ -101,6 +110,31 @@ def register_elixir_app_commands(bot) -> None:
         )
         return True
 
+    async def record_command_invocation(
+        interaction: discord.Interaction,
+        *,
+        command_name: str,
+        write: bool,
+        accepted: bool = True,
+    ) -> None:
+        """Persist metadata-only command usage without blocking the command."""
+        spec = COMMAND_SPECS.get(command_name)
+        if spec is None or not spec.event_type:
+            app.log.error("slash command telemetry missing spec: command=%s", command_name)
+            return
+        try:
+            await asyncio.to_thread(
+                db.record_admin_command_invocation,
+                command_name,
+                spec.event_type,
+                discord_user_id=getattr(interaction.user, "id", None),
+                channel_id=getattr(interaction.channel, "id", None),
+                write_requested=write,
+                accepted=accepted,
+            )
+        except Exception:
+            app.log.exception("slash command telemetry failed: command=%s", command_name)
+
     async def run_admin_interaction(
         interaction: discord.Interaction,
         *,
@@ -108,7 +142,6 @@ def register_elixir_app_commands(bot) -> None:
         preview: bool = False,
         short: bool = False,
         args: dict | None = None,
-        event_type: str | None = None,
         write: bool = False,
     ):
         if not await validate_admin_interaction(
@@ -152,10 +185,11 @@ def register_elixir_app_commands(bot) -> None:
                 break
         return choices
 
-    @elixir_commands.command(name="help", description="How to use Elixir as a clan member.")
+    @elixir_commands.command(name="help", description=COMMAND_SPECS["elixir.help"].description)
     async def slash_elixir_help(interaction: discord.Interaction):
         # Member-facing help — no admin gate. Explains the self-service email flow
         # and points leaders at /clanops.
+        await record_command_invocation(interaction, command_name="elixir.help", write=False)
         await interaction.response.defer(ephemeral=True)
         content = (
             "**Elixir — for members** 👑\n\n"
@@ -168,7 +202,7 @@ def register_elixir_app_commands(bot) -> None:
         )
         await send_interaction_text(interaction, content, ephemeral=True)
 
-    @clanops_commands.command(name="help", description="Show Elixir leader operations help.")
+    @clanops_commands.command(name="help", description=COMMAND_SPECS["help"].description)
     async def slash_clanops_help(interaction: discord.Interaction):
         if not await validate_admin_interaction(interaction, command_name="help", write=False):
             return
@@ -205,7 +239,7 @@ def register_elixir_app_commands(bot) -> None:
 
     @clanops_commands.command(
         name="release",
-        description="Draft or publish Elixir release notes (leader).",
+        description=COMMAND_SPECS["release"].description,
     )
     @app_commands.describe(
         name="Optional: use this release name instead of coining one",
@@ -266,7 +300,6 @@ def register_elixir_app_commands(bot) -> None:
             interaction,
             command_name="clan.status",
             short=short,
-            event_type=COMMAND_SPECS["clan.status"].event_type,
         )
 
     @clan_commands.command(name="war", description=COMMAND_SPECS["clan.war"].description)
@@ -274,7 +307,6 @@ def register_elixir_app_commands(bot) -> None:
         await run_admin_interaction(
             interaction,
             command_name="clan.war",
-            event_type=COMMAND_SPECS["clan.war"].event_type,
         )
 
     @clan_commands.command(name="members", description=COMMAND_SPECS["clan.members"].description)
@@ -290,7 +322,6 @@ def register_elixir_app_commands(bot) -> None:
             interaction,
             command_name="clan.members",
             args={"detail": detail},
-            event_type=COMMAND_SPECS["clan.members"].event_type,
         )
 
     @member_commands.command(name="show", description=COMMAND_SPECS["member.show"].description)
@@ -301,7 +332,6 @@ def register_elixir_app_commands(bot) -> None:
             interaction,
             command_name="member.show",
             args={"member": member},
-            event_type=COMMAND_SPECS["member.show"].event_type,
         )
 
     @relay_commands.command(name="status", description=COMMAND_SPECS["relay.status"].description)
@@ -322,7 +352,6 @@ def register_elixir_app_commands(bot) -> None:
             interaction,
             command_name="relay.status",
             args={"view": view, "limit": str(limit)},
-            event_type=COMMAND_SPECS["relay.status"].event_type,
         )
 
     from runtime.leader_action_ui import leader_action_spec, leader_action_type_choices
@@ -397,7 +426,6 @@ def register_elixir_app_commands(bot) -> None:
             interaction,
             command_name="member.verify-discord",
             args={"member": member},
-            event_type=COMMAND_SPECS["member.verify-discord"].event_type,
             write=True,
         )
 
@@ -409,7 +437,6 @@ def register_elixir_app_commands(bot) -> None:
         await run_admin_interaction(
             interaction,
             command_name="member.audit-discord",
-            event_type=COMMAND_SPECS["member.audit-discord"].event_type,
         )
 
     @member_commands.command(name="set", description=COMMAND_SPECS["member.set"].description)
@@ -433,7 +460,6 @@ def register_elixir_app_commands(bot) -> None:
             interaction,
             command_name="member.set",
             args={"member": member, "field": field, "value": value},
-            event_type=COMMAND_SPECS["member.set"].event_type,
             write=True,
         )
 
@@ -454,7 +480,6 @@ def register_elixir_app_commands(bot) -> None:
             interaction,
             command_name="member.clear",
             args={"member": member, "field": field},
-            event_type=COMMAND_SPECS["member.clear"].event_type,
             write=True,
         )
 
@@ -467,7 +492,6 @@ def register_elixir_app_commands(bot) -> None:
         await run_admin_interaction(
             interaction,
             command_name="activity.list",
-            event_type=COMMAND_SPECS["activity.list"].event_type,
         )
 
     @activity_commands.command(name="show", description=COMMAND_SPECS["activity.show"].description)
@@ -478,7 +502,6 @@ def register_elixir_app_commands(bot) -> None:
             interaction,
             command_name="activity.show",
             args={"activity": activity},
-            event_type=COMMAND_SPECS["activity.show"].event_type,
         )
 
     @activity_commands.command(name="run", description=COMMAND_SPECS["activity.run"].description)
@@ -495,7 +518,6 @@ def register_elixir_app_commands(bot) -> None:
             command_name="activity.run",
             args={"activity": activity},
             preview=preview,
-            event_type=COMMAND_SPECS["activity.run"].event_type,
             write=True,
         )
 
@@ -506,7 +528,9 @@ def register_elixir_app_commands(bot) -> None:
         name="tournament", description="Clan tournament tracking commands"
     )
 
-    @tournament_commands.command(name="watch", description="Start watching a tournament by tag.")
+    @tournament_commands.command(
+        name="watch", description=COMMAND_SPECS["tournament.watch"].description
+    )
     @app_commands.describe(tag="Tournament tag (e.g. #2QJJRJPR)")
     async def slash_tournament_watch(interaction: discord.Interaction, tag: str):
         if not await validate_admin_interaction(
@@ -602,7 +626,7 @@ def register_elixir_app_commands(bot) -> None:
         await send_interaction_text(interaction, "\n".join(lines), use_followup=True)
 
     @tournament_commands.command(
-        name="status", description="Show active tournament tracking status."
+        name="status", description=COMMAND_SPECS["tournament.status"].description
     )
     async def slash_tournament_status(interaction: discord.Interaction):
         if not await validate_admin_interaction(
@@ -665,7 +689,9 @@ def register_elixir_app_commands(bot) -> None:
         ]
         await send_interaction_text(interaction, "\n".join(lines), ephemeral=True)
 
-    @tournament_commands.command(name="stop", description="Stop watching the active tournament.")
+    @tournament_commands.command(
+        name="stop", description=COMMAND_SPECS["tournament.stop"].description
+    )
     async def slash_tournament_stop(interaction: discord.Interaction):
         if not await validate_admin_interaction(
             interaction, command_name="tournament.stop", write=True
@@ -704,7 +730,7 @@ def register_elixir_app_commands(bot) -> None:
         )
 
     @tournament_commands.command(
-        name="recap", description="Generate or regenerate a tournament recap."
+        name="recap", description=COMMAND_SPECS["tournament.recap"].description
     )
     @app_commands.describe(tag="Tournament tag (defaults to most recent)")
     async def slash_tournament_recap(interaction: discord.Interaction, tag: str | None = None):
@@ -763,7 +789,9 @@ def register_elixir_app_commands(bot) -> None:
         except Exception as e:
             await interaction.followup.send(f"Recap generation failed: {e}", ephemeral=True)
 
-    @tournament_commands.command(name="history", description="List past tournaments.")
+    @tournament_commands.command(
+        name="history", description=COMMAND_SPECS["tournament.history"].description
+    )
     async def slash_tournament_history(interaction: discord.Interaction):
         if not await validate_admin_interaction(
             interaction, command_name="tournament.history", write=False
@@ -837,10 +865,11 @@ def register_elixir_app_commands(bot) -> None:
 
     @email_commands.command(
         name="set",
-        description="Add an email to your profile; I'll send a code to verify it.",
+        description=COMMAND_SPECS["email.set"].description,
     )
     @app_commands.describe(address="The email address to link to your clan profile.")
     async def slash_email_set(interaction: discord.Interaction, address: str):
+        await record_command_invocation(interaction, command_name="email.set", write=True)
         await interaction.response.defer(ephemeral=True)
         tag = await _resolve_caller_tag(interaction)
         if not tag:
@@ -861,9 +890,10 @@ def register_elixir_app_commands(bot) -> None:
                 interaction, f"Couldn't do that — {result['error']}", ephemeral=True
             )
 
-    @email_commands.command(name="verify", description="Enter the 6-digit code I emailed you.")
+    @email_commands.command(name="verify", description=COMMAND_SPECS["email.verify"].description)
     @app_commands.describe(code="The 6-digit code from the email.")
     async def slash_email_verify(interaction: discord.Interaction, code: str):
+        await record_command_invocation(interaction, command_name="email.verify", write=True)
         await interaction.response.defer(ephemeral=True)
         tag = await _resolve_caller_tag(interaction)
         if not tag:
@@ -883,8 +913,9 @@ def register_elixir_app_commands(bot) -> None:
                 interaction, f"Couldn't verify — {result['error']}", ephemeral=True
             )
 
-    @email_commands.command(name="show", description="Show the email on your profile.")
+    @email_commands.command(name="show", description=COMMAND_SPECS["email.show"].description)
     async def slash_email_show(interaction: discord.Interaction):
+        await record_command_invocation(interaction, command_name="email.show", write=False)
         await interaction.response.defer(ephemeral=True)
         tag = await _resolve_caller_tag(interaction)
         if not tag:
@@ -903,7 +934,7 @@ def register_elixir_app_commands(bot) -> None:
         await send_interaction_text(interaction, f"📧 **{email}** — {status}", ephemeral=True)
 
     # ── Admin: view/set a member's email (leader-only), in the identity family.
-    @member_commands.command(name="email", description="Show or set a member's email (leader).")
+    @member_commands.command(name="email", description=COMMAND_SPECS["member.email"].description)
     @app_commands.describe(
         member="Member name or tag.",
         address="Email to set; use 'clear' to remove; omit to just show.",
