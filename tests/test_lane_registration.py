@@ -28,6 +28,14 @@ def _routed_lanes() -> set[str]:
     return set(channels())
 
 
+def _voice_file_lanes() -> set[str]:
+    return {
+        os.path.splitext(filename)[0]
+        for filename in os.listdir(_LANES_DIR)
+        if filename.endswith(".md")
+    }
+
+
 def test_every_routed_lane_is_in_channel_lane_config():
     """A lane the delivery path can resolve but the validator doesn't know →
     on_ready crash (the #battle-feed class)."""
@@ -81,6 +89,12 @@ def test_every_config_lane_has_a_voice_file():
     assert not missing, (
         f"CHANNEL_LANE_CONFIG lanes with no prompts/lanes/<lane>.md: {sorted(missing)}"
     )
+
+
+def test_lane_voice_files_exactly_match_the_channel_registry():
+    """An unreferenced lane prompt is dead because prompts are loaded by name,
+    never globbed; keep the prompt corpus equal to the live registry."""
+    assert _voice_file_lanes() == set(prompts.CHANNEL_LANE_CONFIG)
 
 
 def test_every_discord_md_lane_is_in_channel_lane_config():

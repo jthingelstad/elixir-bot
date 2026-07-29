@@ -58,7 +58,7 @@ A River Race has **two different scores**, and they are two different races. Nev
 - Battle days are when the clan actively races and boat progress matters.
 - Each player gets 4 war decks per battle day.
 - The main clan priority during battle is using all 4 war decks.
-- Public war messaging recognizes participation: how many members played, who completed all 4, the points they contributed, and the race movement they created.
+- Public war messaging recognizes participation and is recognition-only: how many members played, who completed all 4, the points they contributed, and the race movement they created.
 - Never count, name, call out, remind, pressure, or create urgency around members who have not played or still have decks left. Do not use the roster total as a denominator that implies who is missing.
 - On the final battle day, use the remaining clock only to frame participant achievements and the live race — never as a last-chance participation nudge.
 
