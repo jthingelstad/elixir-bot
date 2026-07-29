@@ -603,3 +603,9 @@ class TestPerTurnCap:
         from agent.tool_policy import EXTERNAL_LOOKUP_TOOL_NAMES
 
         assert "cr_api" in EXTERNAL_LOOKUP_TOOL_NAMES
+
+
+def test_intel_report_has_budget_for_two_calls_per_opponent():
+    from agent.chat import EXTERNAL_LOOKUP_CAP_BY_WORKFLOW
+
+    assert EXTERNAL_LOOKUP_CAP_BY_WORKFLOW["intel_report"] >= 8

@@ -940,8 +940,8 @@ def respond_in_deck_review(
                     "When you mention any card in your response — especially as a swap target — "
                     "use ONLY the level shown above. Never invent or infer a card's level. "
                     "If a card you want to suggest does not appear in this list, the player does "
-                    "not own it; pick a different candidate. Do NOT call lookup_member_cards or "
-                    "get_member_card_profile to re-confirm levels — this list is already the truth.\n"
+                    "not own it; pick a different candidate. Do NOT call get_member_cards "
+                    "to re-confirm levels — this list is already the truth.\n"
                 )
 
     base_user_msg += _format_memory_context(memory_context)
@@ -1538,7 +1538,7 @@ def generate_tournament_recap(recap_context):
 def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_context=None):
     """Run the Clan Wars Intel Report workflow.
 
-    The LLM fetches intel on each competitor via cr_api + get_clan_intel_report,
+    The LLM fetches intel on each competitor via cr_api,
     then composes a Discord-ready multi-message post. Returns the parsed
     response dict (with `content` as an array of message strings) or None.
     """
@@ -1554,7 +1554,7 @@ def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_co
         f"{season_line}\n"
         f"Our clan: #{our_tag.lstrip('#').upper()}\n"
         f"Current river race opponents: {opponents_line}\n\n"
-        "Use get_clan_intel_report on each opponent to gather threat analysis, "
+        "Use cr_api aspect='clan' and aspect='clan_war' on each opponent, "
         "then compose the Clan Wars Intel Report for #river-race."
     )
     our_state_lines = []
@@ -1584,7 +1584,7 @@ def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_co
     if our_state_lines:
         user_msg += (
             "\n\n=== OUR CLAN STATE (background only, for framing our side; the opponent "
-            "intel you fetch via get_clan_intel_report is the post's focus and ground truth) ===\n"
+            "live opponent intel you fetch via cr_api is the post's focus and ground truth) ===\n"
             + "\n".join(our_state_lines)
             + "\n"
         )

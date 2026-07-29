@@ -488,7 +488,7 @@ def _execute_cr_api_inner(arguments):
     if aspect in ("clan", "clan_members") and normalized_tag == cr_api.CLAN_TAG:
         return {
             "error": "our_clan_use_local_tools",
-            "hint": "Use get_clan_roster or get_clan_health for our own clan — local data is deeper.",
+            "hint": "Use get_clan_roster, get_elixir_state, or get_river_race for our own clan — local data is deeper.",
         }
 
     if aspect == "player":

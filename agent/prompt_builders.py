@@ -315,7 +315,7 @@ def _clan_chat_copy_system():
 def _intel_report_system():
     """System prompt for the scheduled Clan Wars Intel Report workflow.
 
-    The LLM fetches intel on each current competitor via cr_api + get_clan_intel_report,
+    The LLM fetches intel on each current competitor through cr_api,
     then composes a Discord-ready multi-message post for #elixir.
     """
     return _build_system_prompt(
@@ -327,9 +327,9 @@ def _intel_report_system():
         "posted to #elixir.\n\n"
         "Tools:\n"
         "- cr_api(aspect='clan_war', tag='<our tag>') — confirm the five clans in our current race.\n"
-        "- cr_api(aspect='clan', tag='#X') — quick profile look at an opponent clan.\n"
-        "- get_clan_intel_report(clan_tag='#X') — the main tool. Returns roster metrics, war engagement, "
-        "and a 1-5 threat rating per opponent. Call this once per opponent.\n\n"
+        "- cr_api(aspect='clan', tag='#X') — profile and roster summary for each opponent.\n"
+        "- cr_api(aspect='clan_war', tag='#X') — current war standing and participation.\n"
+        "Use only those live facts to compare opponents; do not invent a hidden scoring formula.\n\n"
         "Structure the output as a multi-message Discord post:\n"
         "- First message: a 2–4 sentence strategic assessment — which clans pose the biggest threats "
         "and why, any notable weaknesses we could exploit. Be direct and actionable.\n"
@@ -380,14 +380,14 @@ def _interactive_system(channel_name):
         "This includes computing averages or totals across a deck — resolve each card's elixir cost via lookup_cards first. Memory is never the source for elixir costs.\n\n"
         "The cr_api tool is your bridge to the live Clash Royale API for ANY external player, clan, or tournament by tag. "
         "Reach for it when a user hands you a tag — e.g. 'tell me about player #ABC', 'how is clan #XYZ', 'scout the clan I just lost to'. "
-        "For OUR clan and OUR members, prefer local tools (get_member, get_clan_roster, get_clan_health, get_clan_game_modes, get_river_race) — local data is deeper. "
+        "For OUR clan and OUR members, prefer local tools (get_member, get_clan_roster, get_elixir_state, get_river_race) — local data is deeper. "
         "For card data, always use lookup_cards, not cr_api. "
         "Chain aspect='player_battles' into aspect='player' or aspect='clan' to scout opponents. "
         "If the user asks about something the CR API doesn't expose (battle IDs, match IDs, historical clan rosters), say so plainly — do not improvise.\n\n"
         "For member-specific factual questions like join date, how long someone has been playing, recent activity, deck, war status, or trend details, use the member tools instead of relying on the clipped roster snapshot or memory.\n\n"
         'When a request is genuinely ambiguous in a way that would change which tool you call (e.g. "my cards" could mean current deck, war decks, full collection, ready-to-upgrade, or by rarity; "recent" could mean today\'s session vs last 10 battles), ask one focused clarifying question instead of guessing. Skip the clarification when there\'s an obvious default or the answer wouldn\'t change much across interpretations.\n\n'
-        'For card questions, start with `get_member_card_profile` — it\'s a cheap fixed-size digest that answers most broad questions ("how am I doing on cards", "what should I upgrade", "do I have legendaries", "tell me about my cards"). It includes per-rarity counts, ready-to-upgrade tops, closest-to-max tops, and king-tower gaps. Only call `lookup_member_cards` when the user wants a specific slice the digest doesn\'t cover. Pick the filter that matches their intent: `deck=true` for the current Trophy Road deck, `mode=war` for war decks (note: inferred, not authoritative), `rarity=legendary` etc. for collection-by-rarity, `ready_to_upgrade=true` for what they can level up right now, `name=<card>` for a single card.\n\n'
-        "Do not call `get_member` with `include=['cards']` — that path returns a verbose 100+ card payload that overflows context. Use the card-specific tools above instead.\n\n"
+        'For broad card questions, call `get_member_cards(view="profile")`. For a specific slice, call `get_member_cards(view="lookup", filter={...})`; choose deck, war, rarity, upgrade, maxed, Evo/Hero, or name filters to match the request.\n\n'
+        "Do not call `get_member` with `include=['cards']` — that path returns a verbose 100+ card payload that overflows context. Use get_member_cards instead.\n\n"
         "When card data includes mode fields like `supports_evo`, `supports_hero`, `evo_unlocked`, `hero_unlocked`, `mode_label`, or `mode_status_label`, explain them in player terms as Evo, Hero, or Evo + Hero. "
         'Those current-deck and collection fields describe ownership, support, or current slot configuration; do not call them "evolution level," and do not infer battle deployment from them. '
         "When battle-derived entries such as `signature_cards`, losses cards, or opponent card summaries include `played_as`, that means the card was actually deployed in that mode in recent battles. "
@@ -403,7 +403,7 @@ def _interactive_system(channel_name):
         "Only say that exact account age is not recorded when those fields are actually missing.\n\n"
         "If someone asks how a member or the clan is trending over time, use the trend tools instead of inferring from a single-day snapshot.\n\n"
         "For clan-wide activity questions, pull Elixir's structured event-stream state instead of the clipped roster snapshot. "
-        "How is the clan playing across game modes — Trophy Road, Path of Legends (Ranked), 2v2, events — comes from `get_clan_game_modes` or `get_elixir_state` aspect='game_modes' (per-mode battle counts, win rates, and most-active players). "
+        "How is the clan playing across game modes — Trophy Road, Path of Legends (Ranked), 2v2, events — comes from `get_elixir_state` aspect='game_modes' (per-mode battle counts, win rates, and most-active players). "
         "For 'what's been happening' / 'this week' use `get_elixir_state` aspect='recent_events' or aspect='event_summary'; "
         "for the River Race season trajectory — week-by-week rank and fame — use aspect='season_window'. "
         "Questions like 'who's been grinding ranked', 'how's our 2v2 going', or 'what's our season looking like' should pull these, not the roster snapshot.\n\n"
@@ -460,7 +460,7 @@ def _clanops_system(channel_name):
         "Do not reconstruct this from Discord history alone when structured state is available.\n\n"
         "The cr_api tool is your bridge to the live Clash Royale API for ANY external player, clan, or tournament by tag. "
         "Reach for it when a user hands you a tag — e.g. 'tell me about player #ABC', 'how is clan #XYZ', 'scout the clan I just lost to'. "
-        "For OUR clan and OUR members, prefer local tools (get_member, get_clan_roster, get_clan_health, get_clan_game_modes, get_river_race) — local data is deeper. "
+        "For OUR clan and OUR members, prefer local tools (get_member, get_clan_roster, get_elixir_state, get_river_race) — local data is deeper. "
         "For card data, always use lookup_cards, not cr_api. "
         "Chain aspect='player_battles' into aspect='player' or aspect='clan' to scout opponents. "
         "If the user asks about something the CR API doesn't expose (battle IDs, match IDs, historical clan rosters), say so plainly — do not improvise.\n\n"
@@ -526,7 +526,7 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
         "Use screenshot evidence as the user's provided context, then use tools for authoritative card facts, player collection levels, recent losses, war state, and recommendations.\n\n"
         "Always call lookup_cards before claiming anything about a card's elixir cost, rarity, type, or evolution capability — and BEFORE computing any average or total elixir cost across a deck or set of cards. Memory is NEVER an acceptable source for elixir costs, even when 'just adding them up'.\n"
         "If the user message includes a VERIFIED CARD ELIXIR COSTS block, treat those values as authoritative and use them directly instead of calling lookup_cards again for those cards.\n"
-        'Before suggesting any card swap, verify the player owns the candidate at competitive level. Use `lookup_member_cards(filter={"name":"<card>"})` for a single-card check, or `get_member_card_profile` for a collection overview. Never recommend a card the player does not own at competitive level. Do NOT call get_member with include=[\'cards\'] — that path is deprecated.\n'
+        'Before suggesting any card swap, verify the player owns the candidate at competitive level. Use `get_member_cards(view="lookup", filter={"name":"<card>"})` for a single-card check, or view="profile" for a collection overview. Never recommend a card the player does not own at competitive level. Do NOT call get_member with include=[\'cards\'] — that path is deprecated.\n'
         "Always call get_deck_intelligence(view='member') before giving advice, using scope='war', 'ranked', 'ladder', or 'ladder_ranked' to match the user's mode. Ground claims in its observed primary deck, variants, stability, substitutions, and W/L evidence. Elixir does NOT store opponent deck lists, so never cite specific opponent cards or claim a matchup pattern the evidence does not contain. Use cr_api on a named opponent only when a specific live lookup is genuinely needed.\n\n"
     )
 
@@ -559,8 +559,8 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
     else:
         mode_guidance = (
             "REGULAR MODE: Use get_member with include=['deck'] to fetch the player's current Trophy Road deck. "
-            "For collection-wide questions, start with `get_member_card_profile` (compact digest) and reach for "
-            "`lookup_member_cards` with a specific filter (e.g. rarity, ready_to_upgrade, near_max) only when "
+            "For collection-wide questions, start with `get_member_cards(view='profile')` and use "
+            "view='lookup' with a specific filter (e.g. rarity, ready_to_upgrade, near_max) only when "
             "the digest doesn't cover the slice you need.\n\n"
         )
 

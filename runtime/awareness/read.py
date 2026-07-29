@@ -227,7 +227,7 @@ def _mode_pulse(conn) -> dict:
         rate, trophy delta; ranked rows carry PoL league) — so the brain sees WHO
         is grinding each mode, not just aggregates.
     Both are compact (~1.5K vs the ~14K raw summary). The brain drills deeper via
-    the get_clan_game_modes tool."""
+    the get_elixir_state(game_modes) tool."""
     snapshot = game_mode_capability.get_clan_game_modes(
         days=_MODE_PULSE_DAYS,
         limit=5,

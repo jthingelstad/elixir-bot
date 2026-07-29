@@ -691,7 +691,7 @@ carried forward deliberately, and backed by an immutable archive**.
 
 Layer 6 (projections / read models) is where Elixir *answers questions* — the ~30
 member/leader query tools (`resolve_member`, `get_member`, `get_river_race`,
-`get_clan_health`, `get_awards`, …). Today these are bound to the tables v5.1 replaces:
+`get_elixir_state`, `get_awards`, …). Today these are bound to the tables v5.1 replaces:
 a scan found ~190 queries across 16 tables, ~60–70% of them broken by the core-table
 swap (§17.1). So porting them is **part of v5.1**, not deferred — they are the read side
 of the engine.

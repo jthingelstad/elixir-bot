@@ -1,4 +1,4 @@
-"""Evaluate the new card tools (get_member_card_profile, lookup_member_cards)
+"""Evaluate the consolidated get_member_cards tool
 via multi-turn conversations through the interactive workflow.
 
 This is the card-focused multi-turn harness. It runs each turn through
@@ -9,14 +9,14 @@ null-response failures from 2026-04-24 happened.
 Question buckets target the specific paths we care about:
 
   1. **broad** — digest territory: "review my cards", "tell me about my
-     collection". Should fire `get_member_card_profile`.
+     collection". Should fire `get_member_cards(view='profile')`.
   2. **upgrade** — "what should I upgrade", "what's ready to level up".
-     Should hit `lookup_member_cards(filter={ready_to_upgrade: true})` or
+     Should hit `get_member_cards(view='lookup', filter={ready_to_upgrade: true})` or
      surface ready-list from the digest.
   3. **rarity** — "what legendaries do I have", "show me my epics".
-     Should hit `lookup_member_cards(filter={rarity: ...})`.
+     Should hit `get_member_cards(view='lookup', filter={rarity: ...})`.
   4. **single_card** — "is my fireball maxed", "what level is my hog rider".
-     Should hit `lookup_member_cards(filter={name: ...})`.
+     Should hit `get_member_cards(view='lookup', filter={name: ...})`.
   5. **ambiguous** — bare "my cards", "tell me what I have". Should either
      fire the digest OR ask a clarifying question.
   6. **meta** — "what info do you have about my cards", "what details can
@@ -359,10 +359,12 @@ def run_turn(
         for name, args in row["tool_calls"] or []
     )
     row["used_card_profile"] = any(
-        name == "get_member_card_profile" for name, _ in row["tool_calls"] or []
+        name == "get_member_cards" and (args.get("view") or "profile") == "profile"
+        for name, args in row["tool_calls"] or []
     )
     row["used_lookup_member_cards"] = any(
-        name == "lookup_member_cards" for name, _ in row["tool_calls"] or []
+        name == "get_member_cards" and args.get("view") == "lookup"
+        for name, args in row["tool_calls"] or []
     )
 
     return row
@@ -422,7 +424,7 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
     print(f"Null/empty responses: {null_responses}  ← target: 0")
     print(f"Deprecated include=['cards']: {len(deprecated)}  ← target: 0 (regression check)")
     print(f"Card profile fired: {used_profile}/{total} turns")
-    print(f"lookup_member_cards fired: {used_lookup}/{total} turns")
+    print(f"get_member_cards lookup view fired: {used_lookup}/{total} turns")
     print(f"Clarifying questions: {len(clarifying)}/{total}")
 
     if errors:

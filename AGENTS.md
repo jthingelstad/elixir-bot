@@ -365,15 +365,15 @@ Elixir also posts a startup check-in to the #elixir-log webhook with the running
 
 Elixir’s core member/leader questions should be answered from structured capabilities, query helpers, and tools, not prompt reconstruction. Shared domain answers live in `capabilities/`; LLM tools are adapters over those contracts rather than their sole owners. The versioned capability layer covers canonical game truth, clan game modes, live/season war intelligence, facet-based member intelligence, deck and clan-local metagame intelligence, authoritative management decisions, and provisional-versus-durable awards. These contracts feed tools, awareness, reports, memory synthesis, and admin/Observatory reads. External API refresh remains outside member capabilities, and management capabilities package the engine verdict without rescoring it.
 
-The LLM has a set of domain-aligned tools (defined in `agent/tool_defs.py`) organized into five groups:
+The LLM has a 14-tool, domain-aligned surface (defined in `agent/tool_defs.py`) with one owner per question:
 
 - **Member domain**: `resolve_member`, `get_member` (include: profile, form, battles, war, trend, deck, losses, history, memories, chests, awards), `get_member_war_detail` (aspect: summary, attendance, battles, missed_days, vs_clan_avg, war_decks)
-- **River Race domain**: `get_river_race` (live race state + competing clan standings, read off the war clock), `get_war_season` (aspect: summary, standings, win_rates, boat_battles, score_trend, season_comparison, trending, perfect_attendance, no_participation), `get_clan_intel_report`
-- **Clan domain**: `get_clan_roster` (aspect: list, summary, recent_joins, longest_tenure, role_changes, max_cards, trends), `get_clan_health` (aspect: at_risk, hot_streaks, losing_streaks, trophy_drops, promotion_candidates — at_risk and promotion_candidates read the `member_management` projection, so tools and the leader-action pipeline can never disagree), `get_clan_game_modes` (aspect: summary, ranked, side_modes, events)
-- **Deck, card + awards domain**: `get_deck_intelligence` (member primary deck/variants/stability, clan-local archetype spread, leadership-gated named-card balance impact with source/date/direction), `lookup_cards`, `get_member_card_profile`, `lookup_member_cards`, `get_awards`
-- **Elixir state + utility**: `get_elixir_state` (aspects: recent stream events / event windows / game modes, awareness decisions and confirmed posts, leader actions, and season state), `cr_api` (live Clash Royale API bridge for any external player/clan/tournament), `update_member`, `save_clan_memory`, `flag_member_watch`, `record_leadership_followup`, `schedule_revisit`
+- **River Race domain**: `get_river_race` (live race state + competing clan standings, read off the war clock)
+- **Clan domain**: `get_clan_roster` (aspect: list, summary, recent_joins, longest_tenure, role_changes, max_cards, card_owners, donations, trends)
+- **Deck, card + awards domain**: `get_deck_intelligence` (member primary deck/variants/stability, clan-local archetype spread, leadership-gated named-card balance impact with source/date/direction), `lookup_cards`, `get_member_cards` (profile or filtered lookup), `get_awards`
+- **Elixir state + utility**: `get_elixir_state` (recent stream events / event windows / game modes, awareness decisions and confirmed posts, leader actions, and season state), `cr_api` (live external player/clan/tournament data), `save_clan_memory`, `record_leadership_followup` (optional member-action card and/or timed revisit), `lookup_reference`
 
-War tools include `war_player_type` (regular/occasional/rare/never) per member. Leadership evaluations include CR account age. Sensitive aspects (at_risk, promotion_candidates) are gated to leadership workflows at execution time.
+War tools include `war_player_type` (regular/occasional/rare/never) per member. Management judgments come from the deterministic management capability and leader-action pipeline, not a parallel LLM health tool.
 
 ### Mostly LLM
 

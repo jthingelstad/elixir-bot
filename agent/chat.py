@@ -23,6 +23,7 @@ from agent.tool_policy import (
 )
 
 EXTERNAL_LOOKUP_CAP = 5
+EXTERNAL_LOOKUP_CAP_BY_WORKFLOW = {"intel_report": 10}
 from anthropic import APIConnectionError, APIError
 
 from agent.tool_exec import _execute_tool
@@ -428,6 +429,7 @@ def _chat_with_tools(
     denied_tool_count = 0
     validation_failure_count = 0
     external_lookup_calls = 0
+    external_lookup_cap = EXTERNAL_LOOKUP_CAP_BY_WORKFLOW.get(workflow, EXTERNAL_LOOKUP_CAP)
     completion_latencies_ms = []
     completion_chars = 0
 
@@ -627,7 +629,7 @@ def _chat_with_tools(
                 )
             elif (
                 fn_name in EXTERNAL_LOOKUP_TOOL_NAMES
-                and external_lookup_calls >= EXTERNAL_LOOKUP_CAP
+                and external_lookup_calls >= external_lookup_cap
             ):
                 denied_tool_count += 1
                 log.warning(
@@ -640,7 +642,7 @@ def _chat_with_tools(
                     {
                         "error": "external_lookup_cap_reached",
                         "tool": fn_name,
-                        "cap": EXTERNAL_LOOKUP_CAP,
+                        "cap": external_lookup_cap,
                         "hint": "External CR API lookups are capped per turn. Summarize with what you already have.",
                     }
                 )

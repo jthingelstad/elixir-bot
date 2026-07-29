@@ -165,7 +165,9 @@ def test_every_advertised_tool_has_an_executor():
         and isinstance(node.comparators[0], ast.Constant)
         and isinstance(node.comparators[0].value, str)
     }
-    assert advertised == tool_exec.TOOL_EXECUTOR_NAMES == dispatched
+    assert advertised == tool_exec.ADVERTISED_TOOL_EXECUTOR_NAMES
+    assert tool_exec.TOOL_EXECUTOR_NAMES == dispatched
+    assert advertised <= dispatched
 
 
 def test_leader_action_card_builds_for_every_type(engine_conn):
