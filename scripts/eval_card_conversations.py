@@ -1,8 +1,8 @@
 """Evaluate the new card tools (get_member_card_profile, lookup_member_cards)
 via multi-turn conversations through the interactive workflow.
 
-This is the card-focused twin of eval_deck_conversations.py. It runs each
-turn through `respond_in_channel(workflow="interactive")` — the same path
+This is the card-focused multi-turn harness. It runs each turn through
+`respond_in_channel(workflow="interactive")` — the same path
 that handles #ask-elixir card questions in production, where the original
 null-response failures from 2026-04-24 happened.
 
