@@ -127,10 +127,16 @@ def test_borrowed_conn_is_not_committed_by_writer():
 
 
 def test_action_writer_has_no_decision_case_schema_dependency(engine_conn):
-    """The code-only cutover must be live before the contract migration drops
-    the legacy link column."""
-    engine_conn.execute("DROP INDEX idx_leader_actions_case")
-    engine_conn.execute("ALTER TABLE leader_action_recommendations DROP COLUMN case_id")
+    """The action writer remains independent of the retired case schema."""
+    assert (
+        engine_conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='idx_leader_actions_case'"
+        ).fetchone()
+        is None
+    )
+    assert "case_id" not in {
+        row[1] for row in engine_conn.execute("PRAGMA table_info(leader_action_recommendations)")
+    }
 
     created = create_leader_action_recommendation(
         action_type="promotion_recommendation",

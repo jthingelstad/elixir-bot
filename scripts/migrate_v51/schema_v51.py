@@ -13,7 +13,7 @@ Usage:
         --db elixir-v51.db --archive elixir-v5-archive-2026H2.db
 
 Expected table count: EXPECTED_TABLE_COUNT designed tables after the current
-forward migration (currently 71; the constant below is the enforced value).
+forward migration (the constant below is the enforced value).
 """
 
 from __future__ import annotations
@@ -349,35 +349,8 @@ CREATE TABLE recognition_ledger (
     intent_id INTEGER
 );
 
--- §7.3 decision_cases / revisits (renames; leader_action_recommendations
--- exports verbatim from the archive) ------------------------------------------
-CREATE TABLE decision_cases (
-    case_id INTEGER PRIMARY KEY,
-    case_key TEXT NOT NULL UNIQUE,
-    case_type TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'open',
-    subject_type TEXT,
-    subject_key TEXT,
-    target_player_tag TEXT,
-    target_player_name TEXT,
-    title TEXT NOT NULL,
-    recommendation TEXT,
-    rationale TEXT,
-    priority INTEGER NOT NULL DEFAULT 0,
-    source_event_key TEXT,             -- was source_signal_key (Gen B naming retired)
-    source_event_type TEXT,            -- was source_signal_type
-    opened_at TEXT NOT NULL,
-    due_at TEXT,
-    resolved_at TEXT,
-    resolution TEXT,
-    state_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-CREATE INDEX idx_decision_cases_status_due ON decision_cases(status, due_at, updated_at DESC);
-CREATE INDEX idx_decision_cases_subject ON decision_cases(subject_type, subject_key, case_type, status);
-CREATE INDEX idx_decision_cases_target ON decision_cases(target_player_tag, case_type, status);
-
+-- §7.3 revisits (leader_action_recommendations exports verbatim from the
+-- archive, then V21 removes its retired case_id compatibility column) ----------
 CREATE TABLE revisits (
     revisit_id INTEGER PRIMARY KEY,
     revisit_key TEXT NOT NULL,         -- was signal_key (opaque dedup string)
@@ -669,7 +642,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 61  # +member_outreach (V6); -editor_verdicts (V8); -recognition_ledger (V9); -elixir_improvement_suggestions (V10); -memory_log (V12); -system_signals (V13); -4 dead tables (V14); tournament_events added V11 then dropped V15; -tournament_battles (V19, folded into battle_events); -runtime_incidents (V20, the error log is the record)
+EXPECTED_TABLE_COUNT = 60  # +member_outreach (V6); -editor_verdicts (V8); -recognition_ledger (V9); -elixir_improvement_suggestions (V10); -memory_log (V12); -system_signals (V13); -4 dead tables (V14); tournament_events added V11 then dropped V15; -tournament_battles (V19, folded into battle_events); -runtime_incidents (V20, the error log is the record); -decision_cases (V21; also drops leader_action_recommendations.case_id)
 
 
 _DEAD_MEMBERS_FK = re.compile(
