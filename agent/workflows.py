@@ -7,6 +7,7 @@ from anthropic import APIConnectionError, APIError
 import db
 from agent.chat import (
     _clan_context,
+    _extract_reference_codes,
     _format_memory_context,
     _format_recent_posts,
     _parse_response,
@@ -562,6 +563,7 @@ def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None, on_ev
         f"```json\n{json.dumps(public_situation, separators=(',', ':'), default=str)}\n```\n"
     )
     allowed_tools = TOOLSETS_BY_WORKFLOW["awareness"]
+    reference_codes = _extract_reference_codes(public_situation)
 
     def _tick(user_msg, max_tokens):
         return _chat_with_tools(
@@ -582,6 +584,7 @@ def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None, on_ev
             return_errors=True,
             tool_stats=tool_stats,
             on_event=on_event,
+            reference_codes=reference_codes,
         )
 
     result = _tick(base_user_msg, 8192)
