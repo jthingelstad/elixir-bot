@@ -580,8 +580,7 @@ def _schema_is_compatible(conn: sqlite3.Connection) -> bool:
 
 
 # Pre-v5.1 migration history lives in Git and the immutable archive. The
-# clean-break baseline is scripts/migrate_v51/schema_v51.py; bounded post-cut
-# forward migrations live exclusively in db.schema.
+# clean-break baseline and bounded post-cut migrations live under db.schema.
 
 
 def _configure_connection(conn: sqlite3.Connection, path: str) -> None:
@@ -619,17 +618,14 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
             f"docs/reference/v5.1/migration.md."
         )
     _configure_connection(conn, path)
+    from db.schema import apply_schema_migrations, initialize_empty_database
+
     if not tables:
-        # Empty DB (tests, scratch work): build the complete baseline, including
-        # frozen carried-table DDL, then run the same forward migrations as prod.
-        from scripts.migrate_v51.schema_v51 import NEW_DDL, carried_ddl
-
-        for statement in carried_ddl(None):
-            conn.execute(statement)
-        conn.executescript(NEW_DDL)
-    from db.schema import apply_schema_migrations
-
-    apply_schema_migrations(conn)
+        # Empty DB (tests, scratch work): use the same complete builder as the
+        # fixture template rather than reassembling schema pieces here.
+        initialize_empty_database(conn)
+    else:
+        apply_schema_migrations(conn)
     return conn
 
 

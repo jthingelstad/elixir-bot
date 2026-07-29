@@ -7,7 +7,7 @@ deploy). memory_episodes already live in the engine DB (T12) and stay in
 place — M2 is a verify, not a copy.
 
 Usage:
-    uv run python scripts/migrate_v51/memory_migrate.py \
+    uv run python scripts/migrate_memory_v51.py \
         --db elixir-v51.db --memory-db elixir-v5-memory.db
 """
 
@@ -18,7 +18,7 @@ import os
 import sqlite3
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 KIND_MAP = {
     "leader_note": "leader_note",

@@ -76,7 +76,7 @@ threads (dormant surface). Add by ratification, per the pattern rule.
 ## 3. Build plan
 
 1. `runtime/threads.py`: create/lock helpers (bot API), best-effort
-   wrappers; `war_weeks.thread_id` + `event_threads` DDL (schema_v51 +
+   wrappers; `war_weeks.thread_id` + `event_threads` DDL (migration 0 +
    live CREATE).
 2. War emitter hook: section-start → create thread, store id; opening
    post names the week's likely fighters (last week's participants).

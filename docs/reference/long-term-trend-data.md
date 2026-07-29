@@ -113,7 +113,7 @@ Requirements:
 
 The current repo already provides useful building blocks:
 
-- `player_daily_metrics` and the other durable rollups in [the v5.1 baseline schema](../../scripts/migrate_v51/schema_v51.py)
+- `player_daily_metrics` and the other durable rollups in [the canonical schema package](../../db/schema.py)
 - battle mirroring and mode normalization in [engine/ingest.py](../../engine/ingest.py)
 - event-to-rollup materialization in [engine/projections.py](../../engine/projections.py)
 - query helpers in the [storage package](../../storage/)

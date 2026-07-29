@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from db.schema import build_database
 from engine import db as engine_db
 from engine import tick as tick_mod
 from engine.tick import HOME_CLAN
-from scripts.migrate_v51.schema_v51 import build
 
 NOW = datetime(2026, 7, 6, 15, 0, tzinfo=timezone.utc)  # a Monday = training day
 
@@ -109,7 +109,7 @@ class _ColdApi:
 
 def test_cold_start_tick_survives_empty_db(tmp_path):
     db_path = str(tmp_path / "cold.db")
-    build(db_path, None)  # frozen carried_ddl.sql — no archive, no seeding
+    build_database(db_path, None)  # frozen db baseline — no archive, no seeding
 
     conn = engine_db.connect(db_path)
     try:

@@ -27,9 +27,9 @@ HOME_CLAN = "#J2RGCRVG"
 class OfflineEngine:
     def __init__(self, db_path: str, archive_path: str = "elixir-v5-archive-2026H2.db"):
         if not os.path.exists(db_path):
-            from scripts.migrate_v51.schema_v51 import build
+            from db.schema import build_database
 
-            build(db_path, archive_path)
+            build_database(db_path, archive_path)
         self.conn = connect(db_path)
         self.clock = None
         self.counters: dict[str, int] = {}

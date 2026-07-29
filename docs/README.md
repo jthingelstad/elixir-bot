@@ -14,7 +14,7 @@
 
 1. `AGENTS.md` — current architecture and repository rules.
 2. Executable registries and schemas — for example `runtime/activities.py`,
-   `prompts/DISCORD.md`, and `scripts/migrate_v51/schema_v51.py`.
+   `prompts/DISCORD.md`, and `db/schema.py`.
 3. Living documents in `docs/reference/`.
 4. Locked build specs and archived reports for historical reasoning.
 

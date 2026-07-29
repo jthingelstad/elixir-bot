@@ -3,7 +3,7 @@
 Rebuilt 2026-07-04 (D1–D5 ratified): memories live in the ENGINE DB
 (`elixir-v51.db`) — `memories` + `memory_tags` + `memories_fts`
 replace the old two-database, twenty-object sprawl. Content was migrated
-(scripts/migrate_v51/memory_migrate.py); structure was not.
+(scripts/migrate_memory_v51.py); structure was not.
 
 Compatibility surface: the public functions keep their pre-rebuild names and
 signatures. Old source_type values (`elixir_inference`, `elixir_synthesis`)

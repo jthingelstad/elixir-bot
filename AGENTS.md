@@ -27,13 +27,12 @@ Rollback before close-out = old git ref + copy the archive back + relaunch.
 - `cr_api.py` — Clash Royale API client (clan roster, war status, river race log). The **only** API ingress; every successful response appends an `api_observation_receipts` row under its true endpoint, while identical response bodies share one `raw_api_payloads` content row
 - `engine/` — The v5.1 data engine (spec: `docs/reference/v5.1/`): `tick.py` (production orchestrator), `observations.py` (admission + canonical envelopes), `materialize.py` (the shared observation application path used by production, interactive refresh, and replay), `readiness.py` (source freshness + durable materialization generations), `event_contracts.py` (event vocabulary/routing), `clock.py`, `ingest.py`, `baselines.py` + `emitters/`, `change_sets.py`, `management.py`, `polling.py`, `projections.py`, and `offline.py`. The deterministic `recognition/` + `delivery.py` proactive stack was retired entirely in #207 — the awareness loop is the sole proactive owner. `offline.py` remains as the API-free replay harness `scripts/replay_gate.py` drives.
 - `capabilities/` — Canonical domain answers shared by agent tools, awareness, scheduled reports, memory synthesis, and admin surfaces. Consumers may compact or present these facts differently, but do not recalculate them. Versioned contracts currently cover `game_modes.py`, `war.py`, `members.py`, `management.py`, and `awards.py`; management answers are explicitly leadership-scoped, while the other contracts are audience-neutral facts.
-- `db/` — SQLite access package: connection discipline, identity helpers, and the storage facade
+- `db/` — SQLite access package: connection discipline, the canonical schema builder and ordered migration ladder (`schema.py`, with private migration-0 assets beside it), identity helpers, and the storage facade
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
 - `prompts/lanes/` — Discord destination-lane behavior prompts
 - `prompts/agents/` — Executable workflow prompts that are not tied to one Discord destination
 - `scripts/review_agent_feedback.py` — Review recent LLM/channel failures and `#ask-elixir` feedback from SQLite for debugging and prompt/tool routing analysis
-- `scripts/migrate_v51/` — The v5.1 migration toolkit: `schema_v51.py` (the baseline schema source of truth), `transforms.py` (archive→new transforms), `parity_checks.py`, `rehearsal.py`
 - `runtime/activities.py` — Canonical registry for recurring automated activities
 - `runtime/clan_chat_copy.py` — Dedicated Clash Royale in-game clan chat copy generation, validation, and fallback guardrails
 - `runtime/channel_router.py` — Discord message routing for interactive channels
@@ -117,7 +116,7 @@ uv run --locked pytest tests/ -v
 - **Always use `uv run --locked pytest`** — do not use bare `pytest` or `python3 -m pytest`.
 - `pyproject.toml` configures `pythonpath = ["."]` so all project imports resolve without install.
 - Tests use temp-file/in-memory SQLite and mocked external services (no API keys needed). The suite runs green in ~8 s.
-- `tests/conftest.py` builds the v5.1 schema from `scripts/migrate_v51/schema_v51.py` (plus the archive's DDL export for carried tables) into a session template, copied per test.
+- `tests/conftest.py` builds the current schema through `db.schema`, the same public builder used by runtime cold starts, into a session template copied per test.
 - Test fixtures handle DB connection lifecycle — use `pytest.fixture` instead of manual try/finally.
 - The pre-commit hook mirrors CI in fail-fast order: dependency lock, docs, exception policy, `ruff check`, `ruff format --check`, capability-contract mypy, then the full suite with the 80% capability-coverage floor. `git commit --no-verify` bypasses in an emergency.
 
@@ -180,9 +179,9 @@ uv run --locked python scripts/clean.py --db
 SQLite at `elixir-v51.db` (overridable via `ELIXIR_DB_PATH`; gitignored).
 Three database files exist, with distinct roles:
 
-- **`elixir-v51.db`** — the operational engine DB. The clean-break baseline source is `scripts/migrate_v51/schema_v51.py`; ordered post-cut evolution lives in `db/schema.py`. `db.get_connection()` refuses databases without the v5.1 spine, migrates compatible v5.1 databases forward, and is the sole initializer.
+- **`elixir-v51.db`** — the operational engine DB. `db/schema.py` is the canonical schema entrypoint for the private clean-break baseline and ordered post-cut evolution. `db.get_connection()` refuses databases without the v5.1 spine, migrates compatible v5.1 databases forward, and is the sole initializer.
 - Durable memory lives IN the engine DB since 2026-07-04 (the v5.1 memory pass, `docs/reference/v5.1/memory.md`): `memories` + `memory_tags` + `memories_fts`, accessed through the `memory_store` seam. `inference` rows carry a 90-day default TTL and are reclaimed by db-maintenance; curated kinds (`leader_note`, `synthesis`, `system`) never expire by default (#215). The old `elixir-v5-memory.db` is archived (`elixir-v5-memory-archive-2026H2.db`, read-only); `ELIXIR_V5_MEMORY_DB` is retired. **One database for all runtime activity.**
-- **`elixir-v5-archive-2026H2.db`** — the pre-cut cold archive. Read-only (chmod 444), never written; open with `file:…?immutable=1`. **Not present on this workstation** — `tests/conftest.py` and `schema_v51.build()` both treat it as optional and fall back to the frozen `carried_ddl.sql`, which is why nothing has failed. Do not assume it is reachable; verify before planning any recovery around it.
+- **`elixir-v5-archive-2026H2.db`** — the pre-cut cold archive. Read-only (chmod 444), never written; open with `file:…?immutable=1`. **Not present on this workstation** — `db.schema.build_database()` and the test fixture treat it as optional and fall back to the frozen private migration-0 SQL in `db/`, which is why nothing has failed. Do not assume it is reachable; verify before planning any recovery around it.
 
 **Historical recovery actually comes from the rolling backups** in `$ELIXIR_BACKUP_DIR` (see `scripts/backup_db.py`). Each nightly `.db.gz` froze the short-retention `raw_api_payloads` window as it stood on its own date, so their UNION reaches much further back than any single snapshot — the live DB holds ~2 weeks of payloads, the backups months. `scripts/backfill_battle_fields.py` is the current worked example: it reads the live database plus every backup through the current extractor.
 
@@ -206,13 +205,17 @@ All `db` module functions accept an optional `conn` parameter — pass one in te
 
 ### Schema changes
 
-The clean-break v5.1 baseline in `scripts/migrate_v51/schema_v51.py` is
-migration 0. All post-cut forward changes are ordered and versioned in
-`db/schema.py`; `db.get_connection()` applies them before returning. Runtime
+The private clean-break v5.1 baseline beside `db/schema.py` is migration 0.
+All post-cut forward changes are ordered and versioned in that same schema
+package; `db.get_connection()` applies them before returning. Runtime
 and domain modules may validate required columns but must never issue `CREATE`
 or `ALTER`. The retired pre-v5.1 migration history lives in Git and the cold
 archive rather than executable runtime code. The committed fresh-schema fingerprint test changes with every
-intentional schema change. Backups: `scripts/backup_db.py` covers the
+intentional schema change; it hashes the semantic contract (columns, checks,
+keys, indexes, foreign keys, triggers, and virtual tables), so fresh
+declarations and equivalent `ALTER TABLE` history compare equally. Schema v24 removed the
+live-only, unused `awareness_thoughts.prompt_json` column exposed by that parity
+check. Backups: `scripts/backup_db.py` covers the
 operational DB only — single database since the memory pass (the archive needs no backup — it never
 changes).
 

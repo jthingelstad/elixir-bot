@@ -14,6 +14,5 @@ For current behavior, read in this order:
 
 1. [`AGENTS.md`](../../../AGENTS.md)
 2. [`current-architecture.md`](../current-architecture.md)
-3. Executable registries and schema (`runtime/activities.py`,
-   `scripts/migrate_v51/schema_v51.py`, `db/schema.py`)
+3. Executable registries and schema (`runtime/activities.py`, `db/schema.py`)
 4. The topic document in this directory for original rationale
