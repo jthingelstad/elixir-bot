@@ -99,8 +99,7 @@ def _create_leader_action_eval_schema(conn):
             defer_days INTEGER,
             deferred_until TEXT,
             is_test INTEGER NOT NULL DEFAULT 0,
-            ui_version TEXT,
-            case_id INTEGER
+            ui_version TEXT
         )
         """
     )
@@ -185,7 +184,6 @@ def _insert_leader_action(conn, **overrides):
         "deferred_until": None,
         "is_test": 0,
         "ui_version": "leader-action-ui-v1",
-        "case_id": None,
     }
     row.update(overrides)
     columns = list(row)

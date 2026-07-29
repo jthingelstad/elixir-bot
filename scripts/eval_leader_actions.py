@@ -180,7 +180,6 @@ def _action_artifact(row: sqlite3.Row, messages: dict[str, dict[str, Any]]) -> d
         "copy_current_text": row["copy_current_text"],
         "copy_edited_at": row["copy_edited_at"],
         "ui_version": row["ui_version"],
-        "case_id": row["case_id"],
         "source_message": messages.get(source_id) if source_id else None,
         "copy_messages": [messages[item] for item in copy_ids if item in messages],
     }

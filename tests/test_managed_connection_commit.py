@@ -124,3 +124,23 @@ def test_borrowed_conn_is_not_committed_by_writer():
         )
     finally:
         conn.close()
+
+
+def test_action_writer_has_no_decision_case_schema_dependency(engine_conn):
+    """The code-only cutover must be live before the contract migration drops
+    the legacy link column."""
+    engine_conn.execute("DROP INDEX idx_leader_actions_case")
+    engine_conn.execute("ALTER TABLE leader_action_recommendations DROP COLUMN case_id")
+
+    created = create_leader_action_recommendation(
+        action_type="promotion_recommendation",
+        objective="Promote X",
+        rationale="strong",
+        target_player_tag="#X",
+        source_signal_key="test:no-case-schema",
+        source_signal_type="manual",
+        conn=engine_conn,
+    )
+
+    assert created["action_type"] == "promotion_recommendation"
+    assert "case_id" not in created

@@ -4,12 +4,12 @@ held until verified, and the leader's answer is the authoritative signal."""
 from __future__ import annotations
 
 from engine.emitters.clan import emit_verified_leave_events
-from storage.cases import (
+from storage.leader_actions import (
     _departure_was_kick,
+    classify_departure,
     expire_departure_verification_cards,
     raise_departure_verification_cards,
 )
-from storage.leader_actions import classify_departure
 
 NOW = "2026-07-12T12:00:00Z"
 
