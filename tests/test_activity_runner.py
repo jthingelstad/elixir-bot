@@ -8,6 +8,7 @@ import pytest
 from runtime.activity_runner import (
     ManualActivityNotAllowed,
     UnknownActivityError,
+    _channel_ids_for_lookup,
     run_activity_once,
     run_shell_activity,
 )
@@ -36,6 +37,15 @@ def test_run_activity_once_calls_registered_async_activity():
 def test_run_activity_once_rejects_unknown_activity():
     with pytest.raises(UnknownActivityError):
         asyncio.run(run_activity_once("not-real", runtime_module=SimpleNamespace()))
+
+
+def test_channel_lookup_includes_thinking_diagnostic_channel():
+    channel_ids = _channel_ids_for_lookup(
+        [{"id": "101"}, {"id": 202}],
+        "303",
+    )
+
+    assert channel_ids == {101, 202, 303}
 
 
 def test_retired_activities_are_unknown():
