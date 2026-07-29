@@ -28,6 +28,40 @@ def test_fresh_build_matches_committed_schema_fingerprint(tmp_path):
         conn.close()
 
 
+def test_v23_migration_adds_admin_command_telemetry_additively(tmp_path):
+    path = tmp_path / "v22.db"
+    build(str(path), None)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("DROP TABLE admin_command_invocations")
+        conn.execute("PRAGMA user_version = 22")
+        conn.commit()
+
+        apply_schema_migrations(conn)
+
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(admin_command_invocations)")}
+        assert {
+            "invocation_id",
+            "command_key",
+            "event_type",
+            "discord_user_id",
+            "channel_id",
+            "write_requested",
+            "accepted",
+            "invoked_at",
+        } == columns
+        indexes = {row[1] for row in conn.execute("PRAGMA index_list(admin_command_invocations)")}
+        assert indexes == {
+            "idx_admin_command_invocations_command_time",
+            "idx_admin_command_invocations_time",
+        }
+        apply_schema_migrations(conn)
+        assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
+    finally:
+        conn.close()
+
+
 def test_v21_migration_discards_legacy_cases_and_preserves_leader_actions(tmp_path):
     """The contract migration deletes all 39 inert cases and their nullable
     action link only after the case-free writer has shipped (#216)."""

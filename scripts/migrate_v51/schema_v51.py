@@ -642,7 +642,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 58  # +member_outreach (V6); -editor_verdicts (V8); -recognition_ledger (V9); -elixir_improvement_suggestions (V10); -memory_log (V12); -system_signals (V13); -4 dead tables (V14); tournament_events added V11 then dropped V15; -tournament_battles (V19, folded into battle_events); -runtime_incidents (V20, the error log is the record); -decision_cases (V21; also drops leader_action_recommendations.case_id); -arena_relay_screenshot_observations and discord_channels (V22; also contracts conversation metadata)
+EXPECTED_TABLE_COUNT = 59  # +member_outreach (V6); -editor_verdicts (V8); -recognition_ledger (V9); -elixir_improvement_suggestions (V10); -memory_log (V12); -system_signals (V13); -4 dead tables (V14); tournament_events added V11 then dropped V15; -tournament_battles (V19, folded into battle_events); -runtime_incidents (V20, the error log is the record); -decision_cases (V21; also drops leader_action_recommendations.case_id); -arena_relay_screenshot_observations and discord_channels (V22; also contracts conversation metadata); +admin_command_invocations (V23)
 
 
 _DEAD_MEMBERS_FK = re.compile(

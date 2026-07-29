@@ -837,6 +837,10 @@ _FACADE_EXPORT_GROUPS = {
         "update_message_summary",
         "upsert_prompt_feedback",
     ),
+    "storage.admin_commands": (
+        "list_admin_command_usage",
+        "record_admin_command_invocation",
+    ),
     "storage.events_read": (
         "list_events_after_cursors",
         "list_recent_events",

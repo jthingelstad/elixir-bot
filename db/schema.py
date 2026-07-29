@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 22
+CURRENT_SCHEMA_VERSION = 23
 
 
 _V1_STATEMENTS = (
@@ -198,6 +198,16 @@ REQUIRED_SCHEMA = {
     "card_catalog": {"card_id", "first_seen_at"},
     "api_sentinel_observations": {"observation_id", "first_entity_key"},
     "llm_calls": {"call_id", "prompt_json", "response_json"},
+    "admin_command_invocations": {
+        "invocation_id",
+        "command_key",
+        "event_type",
+        "discord_user_id",
+        "channel_id",
+        "write_requested",
+        "accepted",
+        "invoked_at",
+    },
     "game_events": {"event_id", "dedup_key", "change_key"},
     "member_outreach": {"outreach_id", "player_tag", "field", "status", "consent"},
     "evergreen_nudges": {"nudge_key", "last_sent_at"},
@@ -1114,6 +1124,32 @@ def _apply_v22(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS arena_relay_screenshot_observations")
 
 
+def _apply_v23(conn: sqlite3.Connection) -> None:
+    """Add privacy-minimal durable telemetry for Discord command use (#227)."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS admin_command_invocations (
+            invocation_id INTEGER PRIMARY KEY,
+            command_key TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            discord_user_id TEXT,
+            channel_id TEXT,
+            write_requested INTEGER NOT NULL DEFAULT 0
+                CHECK (write_requested IN (0, 1)),
+            accepted INTEGER NOT NULL DEFAULT 1
+                CHECK (accepted IN (0, 1)),
+            invoked_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_admin_command_invocations_command_time "
+        "ON admin_command_invocations(command_key, invoked_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_admin_command_invocations_time "
+        "ON admin_command_invocations(invoked_at DESC)"
+    )
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1328,6 +1364,14 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+    if version < 23:
+        try:
+            _apply_v23(conn)
+            conn.execute("PRAGMA user_version = 23")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1384,7 +1428,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "f6b4e107f70d08001b14556e23e004adf6104433a5600e3a32e3c3a85de09339"
+CURRENT_SCHEMA_FINGERPRINT = "5511b11ccdcce295aae08211243ca9417ad9e0871cab3f0f6fad20614063acd9"
 
 
 __all__ = [
