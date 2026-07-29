@@ -15,12 +15,14 @@ from runtime import status as runtime_status
 
 log = logging.getLogger("elixir_agent")
 
-# Workflows to exclude from prompt caching. Empty by default: any workflow that
-# makes several tool-calling rounds seconds apart within one turn gets cache
-# reads on rounds 2+, so the 1.25x write premium pays off inside the same turn.
+# Workflows to exclude from prompt caching. Any workflow that makes several
+# tool-calling rounds seconds apart within one turn gets cache reads on rounds
+# 2+, so the 1.25x write premium pays off inside the same turn. The feedback
+# synthesis is a single-shot, sparsely triggered call: its measured 7-day
+# read/write ratio was below the 0.28 break-even point (#237).
 # (Awareness used to live here from its v4.5 single-call-per-tick reflex days —
 # it is now a multi-round Sonnet agentic loop where caching is a large net win.)
-WORKFLOWS_WITHOUT_CACHE: set[str] = set()
+WORKFLOWS_WITHOUT_CACHE: set[str] = {"leader_action_feedback"}
 
 # Workflows whose STABLE prefix (system prompt + tool defs) should use the 1-hour
 # cache TTL instead of the 5-minute default. The 1h TTL costs a 2x write premium and

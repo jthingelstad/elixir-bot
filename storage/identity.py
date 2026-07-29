@@ -625,6 +625,8 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         SELECT COUNT(*) AS calls,
                SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures,
                ROUND(COALESCE(SUM(CASE
+                    WHEN model LIKE 'claude-sonnet-5%' OR model LIKE 'Codex-sonnet-5%'
+                    THEN COALESCE(prompt_tokens, 0)*2 + COALESCE(cache_read_tokens, 0)*0.2 + COALESCE(cache_creation_tokens, 0)*2.5 + COALESCE(completion_tokens, 0)*10
                     WHEN model LIKE 'claude-sonnet%' OR model LIKE 'Codex-sonnet%'
                     THEN COALESCE(prompt_tokens, 0)*3 + COALESCE(cache_read_tokens, 0)*0.3 + COALESCE(cache_creation_tokens, 0)*3.75 + COALESCE(completion_tokens, 0)*15
                     WHEN model LIKE 'claude-haiku%' OR model LIKE 'Codex-haiku%'
