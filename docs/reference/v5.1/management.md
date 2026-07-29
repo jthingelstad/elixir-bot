@@ -184,8 +184,8 @@ slack        = max(0, ROSTER_CAP (50) − active_members) / ROSTER_CAP
 contributes  = _passes_war_floor OR _passes_ranked_floor   # the elder floor
 ```
 
-- `watch` at **3 days** is early attention, not removal — no action fires; it's
-  visible in `get_clan_health(at_risk)`.
+- `watch` at **3 days** is early attention, not removal — no action fires; it is
+  visible in the management capability and awareness read.
 - `at_risk` at a **flat 5 days** (`KICK_AT_RISK_DAYS`). Trophies buy **no** leeway
   — the old `max(7, trophies/1000 × 1.4)` buffer is removed (a high-trophy idle
   member on a full roster still costs a slot).
@@ -202,9 +202,8 @@ contributes  = _passes_war_floor OR _passes_ranked_floor   # the elder floor
 - **Guards:** role elder+ never fires the reactive path — their inactivity
   surfaces in the weekly review instead (kicking an elder is a leadership
   conversation, not a bot escalation). **The LOA exception:** an open **`Hold:`**
-  memory (`Hold:`/`Away:`/`LOA:` title — a member who *told leaders* they'll be
-  away, written via `flag_member_watch(away_until=…)`) suppresses `recommended`
-  until it expires. A brain `Watch:` *inference* note does **not** — it only
+  memory (`Hold:`/`Away:`/`LOA:` title — a member who told leaders they'll be
+  away) suppresses `recommended` until it expires. A brain `Watch:` *inference* note does **not** — it only
   observes idleness; matching it (as the guard did pre-2026-07-11) self-defeated
   the card by shielding the very members it flagged.
 - **No newcomer shield:** short-tenure members are held to the same clock as

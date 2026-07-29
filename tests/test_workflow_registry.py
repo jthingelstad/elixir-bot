@@ -51,3 +51,28 @@ def test_empty_toolsets_stay_empty():
         "clan_chat_copy",
     ):
         assert elixir_agent.TOOLSETS_BY_WORKFLOW[workflow] == []
+
+
+def test_shared_tool_block_has_fourteen_non_overlapping_owners():
+    shared = get_workflow_spec("clanops").tools
+    names = _names(shared)
+
+    assert len(names) == len(set(names)) == 14
+    assert "get_member_cards" in names
+    assert "record_leadership_followup" in names
+    assert {
+        "get_war_season",
+        "get_clan_health",
+        "get_clan_game_modes",
+        "get_member_card_profile",
+        "lookup_member_cards",
+        "get_clan_intel_report",
+        "update_member",
+        "flag_member_watch",
+        "raise_clan_chat_relay",
+        "schedule_revisit",
+    }.isdisjoint(names)
+
+
+def test_intel_report_uses_only_narrow_cr_api_surface():
+    assert _names(get_workflow_spec("intel_report").tools) == ["cr_api"]

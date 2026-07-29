@@ -195,7 +195,7 @@ def test_execute_tool_get_member_profile_includes_current_role_summary():
 
 def test_execute_tool_get_member_cards_returns_deprecation_hint():
     """include=['cards'] is removed; calls get a structured hint pointing
-    the agent at get_member_card_profile / lookup_member_cards instead."""
+    the agent at the consolidated get_member_cards tool instead."""
     with (
         patch(
             "elixir_agent.cr_api.get_player",
@@ -211,8 +211,8 @@ def test_execute_tool_get_member_cards_returns_deprecation_hint():
         )
 
         assert result["card_collection"]["error"] == "deprecated_include"
-        assert "get_member_card_profile" in result["card_collection"]["hint"]
-        assert "lookup_member_cards" in result["card_collection"]["hint"]
+        assert "get_member_cards(view='profile')" in result["card_collection"]["hint"]
+        assert "get_member_cards(view='lookup'" in result["card_collection"]["hint"]
         # The deprecated path must NOT call the heavy collection function.
         mock_db.get_member_card_collection.assert_not_called()
 
@@ -332,11 +332,13 @@ def test_build_tool_result_envelope_under_limit_unchanged():
 def test_interactive_workflow_exposes_all_read_tools():
     interactive_names = {tool["name"] for tool in elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]}
 
-    # With consolidated tools, all read tools are visible in interactive;
-    # sensitive aspects (at_risk, promotion_candidates) are gated at execution time.
-    assert "get_clan_health" in interactive_names
+    assert len(interactive_names) == 12
     assert "get_member" in interactive_names
+    assert "get_member_cards" in interactive_names
     assert "get_elixir_state" in interactive_names
+    assert {"get_clan_health", "get_clan_game_modes", "get_war_season"}.isdisjoint(
+        interactive_names
+    )
 
 
 def test_execute_tool_get_member_resolves_handle_before_refresh():
@@ -415,6 +417,33 @@ def test_execute_tool_lookup_member_cards_passes_filter_through():
             filter={"rarity": "legendary"},
             limit=20,
         )
+
+
+def test_execute_tool_get_member_cards_owns_both_views():
+    with (
+        patch("elixir_agent.cr_api.get_player", return_value={"tag": "#20JJJ2CCRU"}),
+        patch("elixir_agent.db") as mock_db,
+    ):
+        mock_db.get_member_card_profile.return_value = {"totals": {"owned": 119}}
+        profile = json.loads(
+            elixir_agent._execute_tool(
+                "get_member_cards", {"member_tag": "#20JJJ2CCRU", "view": "profile"}
+            )
+        )
+        assert profile["totals"]["owned"] == 119
+
+        mock_db.lookup_member_cards.return_value = {"cards": [{"name": "Royal Ghost"}]}
+        lookup = json.loads(
+            elixir_agent._execute_tool(
+                "get_member_cards",
+                {
+                    "member_tag": "#20JJJ2CCRU",
+                    "view": "lookup",
+                    "filter": {"rarity": "legendary"},
+                },
+            )
+        )
+        assert lookup["cards"][0]["name"] == "Royal Ghost"
 
 
 def test_execute_tool_get_member_chests_uses_cr_api():
@@ -712,6 +741,25 @@ def test_execute_tool_get_elixir_state_blocks_leader_actions_in_interactive():
     )
 
     assert result["error"] == "leadership_state_unavailable"
+
+
+def test_execute_tool_get_elixir_state_exposes_public_war_summary():
+    with patch(
+        "agent.tool_exec.war_capability.get_war_season_view",
+        return_value={"data": {"summary": "war facts"}},
+    ) as capability:
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "get_elixir_state",
+                {"aspect": "war_season", "war_view": "summary", "limit": 8},
+                workflow="interactive",
+            )
+        )
+
+    assert result["war_season"]["summary"] == "war facts"
+    assert capability.call_count == 1
+    assert capability.call_args.kwargs["view"] == "summary"
+    assert capability.call_args.kwargs["limit"] == 8
 
 
 def test_execute_tool_get_elixir_state_reads_leader_actions_for_clanops():

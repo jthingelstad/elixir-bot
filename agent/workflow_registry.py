@@ -37,20 +37,13 @@ class WorkflowSpec:
 
 
 _WRITE_TOOL_NAMES = {
-    "update_member",
     "save_clan_memory",
-    "flag_member_watch",
-    "raise_clan_chat_relay",
     "record_leadership_followup",
-    "schedule_revisit",
 }
 
 AWARENESS_WRITE_TOOL_NAMES = {
     "save_clan_memory",
-    "flag_member_watch",
-    "raise_clan_chat_relay",
     "record_leadership_followup",
-    "schedule_revisit",
 }
 
 AWARENESS_WRITE_BUDGET_PER_TICK = 3
@@ -76,7 +69,7 @@ WRITE_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "write
 ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
 READ_TOOLS_NO_EXTERNAL = [t for t in READ_TOOLS if t["name"] not in EXTERNAL_LOOKUP_TOOL_NAMES]
 
-_INTEL_REPORT_TOOL_NAMES = {"cr_api", "get_clan_intel_report"}
+_INTEL_REPORT_TOOL_NAMES = {"cr_api"}
 INTEL_REPORT_TOOLS = [t for t in READ_TOOLS if t["name"] in _INTEL_REPORT_TOOL_NAMES]
 
 _TOURNAMENT_RECAP_TOOL_NAMES = {"cr_api"}

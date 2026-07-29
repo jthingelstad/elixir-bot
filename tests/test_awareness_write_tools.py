@@ -61,45 +61,37 @@ def memdb(tmp_path, monkeypatch):
 
 
 def test_every_awareness_intended_write_tool_is_reachable():
-    intended = {
-        "save_clan_memory",
-        "flag_member_watch",
-        "raise_clan_chat_relay",
-        "record_leadership_followup",
-        "schedule_revisit",
-    }
+    intended = {"save_clan_memory", "record_leadership_followup"}
     tool_names = {t["name"] for t in TOOLSETS_BY_WORKFLOW["awareness"]}
     assert AWARENESS_WRITE_TOOL_NAMES == intended
     assert intended <= _WRITE_TOOL_NAMES
     assert intended <= tool_names
 
 
-def test_member_state_decision_and_relay_tools_have_distinct_contracts():
+def test_followup_owns_actions_and_revisits():
     tools = {tool["name"]: tool for tool in TOOLSETS_BY_WORKFLOW["awareness"]}
-    watch_properties = tools["flag_member_watch"]["input_schema"]["properties"]
     followup_properties = tools["record_leadership_followup"]["input_schema"]["properties"]
 
-    assert "away_until" in watch_properties
-    assert "case_type" not in watch_properties
     assert "action_type" in followup_properties
-    assert tools["raise_clan_chat_relay"]["input_schema"]["required"] == ["copy"]
+    assert "revisit_at" in followup_properties
+    assert "signal_key" in followup_properties
+    assert {"flag_member_watch", "raise_clan_chat_relay", "schedule_revisit"}.isdisjoint(tools)
 
 
-def test_update_member_is_not_exposed_to_awareness():
+def test_retired_write_tools_are_not_exposed_to_awareness():
     tool_names = {t["name"] for t in TOOLSETS_BY_WORKFLOW["awareness"]}
-    # update_member stays clanops-only — mutating stored member metadata is a
-    # leadership action, not an awareness observation.
-    assert "update_member" not in tool_names
+    assert {
+        "update_member",
+        "flag_member_watch",
+        "raise_clan_chat_relay",
+        "schedule_revisit",
+    }.isdisjoint(tool_names)
 
 
-def test_write_tool_names_include_new_tools():
-    assert "flag_member_watch" in _WRITE_TOOL_NAMES
-    assert "raise_clan_chat_relay" in _WRITE_TOOL_NAMES
-    assert "record_leadership_followup" in _WRITE_TOOL_NAMES
-    assert "save_clan_memory" in _WRITE_TOOL_NAMES
-    assert "flag_member_watch" in AWARENESS_WRITE_TOOL_NAMES
-    assert "raise_clan_chat_relay" in AWARENESS_WRITE_TOOL_NAMES
-    assert "record_leadership_followup" in AWARENESS_WRITE_TOOL_NAMES
+def test_write_tool_names_match_two_tool_surface():
+    expected = {"save_clan_memory", "record_leadership_followup"}
+    assert _WRITE_TOOL_NAMES == expected
+    assert AWARENESS_WRITE_TOOL_NAMES == expected
 
 
 # ---------------------------------------------------------------------------
@@ -382,15 +374,15 @@ def test_awareness_write_budget_rejects_fourth_call(memdb):
         [{"tag": f"#M{i}", "name": f"Member{i}", "role": "member"} for i in range(5)],
     )
 
-    # Script the LLM responses: first turn makes 4 flag_member_watch calls;
+    # Script the LLM responses: first turn makes 4 memory writes;
     # second turn emits the final plan as JSON.
     tool_uses_round1 = [
         _fake_tool_use(
             f"t{i}",
-            "flag_member_watch",
+            "save_clan_memory",
             {
-                "member_tag": f"#M{i}",
-                "reason": f"Observation {i}",
+                "title": f"Observation {i}",
+                "body": f"Member {i} trend",
             },
         )
         for i in range(4)

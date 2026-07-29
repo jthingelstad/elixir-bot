@@ -50,11 +50,15 @@ def _iso(*, minutes: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_schedule_revisit_is_in_awareness_toolset_and_write_names():
+def test_revisit_is_folded_into_followup_tool():
     tool_names = {t["name"] for t in TOOLSETS_BY_WORKFLOW["awareness"]}
-    assert "schedule_revisit" in tool_names
-    assert "schedule_revisit" in _WRITE_TOOL_NAMES
-    assert "schedule_revisit" in AWARENESS_WRITE_TOOL_NAMES
+    assert "schedule_revisit" not in tool_names
+    assert "schedule_revisit" not in _WRITE_TOOL_NAMES
+    assert "schedule_revisit" not in AWARENESS_WRITE_TOOL_NAMES
+    followup = next(
+        t for t in TOOLSETS_BY_WORKFLOW["awareness"] if t["name"] == "record_leadership_followup"
+    )
+    assert "revisit_at" in followup["input_schema"]["properties"]
 
 
 # ---------------------------------------------------------------------------
@@ -130,34 +134,39 @@ def test_schedule_revisit_rejects_bad_due_at(memdb):
 # ---------------------------------------------------------------------------
 
 
-def test_schedule_revisit_tool_persists_to_db(memdb):
+def test_followup_tool_can_schedule_revisit(memdb):
     raw = tool_exec._execute_tool(
-        "schedule_revisit",
+        "record_leadership_followup",
         {
+            "topic": "Battle hot streak",
+            "recommendation": "Check if streak survives battle day.",
             "signal_key": "battle_hot_streak::#ABC",
-            "at": _iso(minutes=180),
-            "rationale": "Check if streak survives battle day.",
+            "revisit_at": _iso(minutes=180),
         },
         workflow="awareness",
     )
     result = json.loads(raw)
     assert result["success"] is True
-    assert result["signal_key"] == "battle_hot_streak::#ABC"
-    assert result["revisit_id"]
+    assert result["revisit"]["signal_key"] == "battle_hot_streak::#ABC"
+    assert result["revisit"]["revisit_id"]
 
     pending = list_pending_revisits()
     assert len(pending) == 1
     assert pending[0]["signal_key"] == "battle_hot_streak::#ABC"
 
 
-def test_schedule_revisit_tool_rejects_missing_args(memdb):
+def test_followup_revisit_rejects_missing_signal(memdb):
     raw = tool_exec._execute_tool(
-        "schedule_revisit",
-        {"signal_key": "", "at": _iso(minutes=10), "rationale": ""},
+        "record_leadership_followup",
+        {
+            "topic": "Later check",
+            "recommendation": "Check this later.",
+            "revisit_at": _iso(minutes=10),
+        },
         workflow="awareness",
     )
     result = json.loads(raw)
-    assert "error" in result
+    assert result["error"] == "revisit_requires_time_and_signal"
 
 
 # ---------------------------------------------------------------------------

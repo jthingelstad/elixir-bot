@@ -1,5 +1,6 @@
 import json
 import re
+import sqlite3
 
 import cr_api
 from agent.core import log
@@ -407,8 +408,8 @@ def _execute_get_member(arguments, workflow=None):
             "error": "deprecated_include",
             "hint": (
                 "include=['cards'] was removed because the full collection routinely "
-                "overflowed context. Use get_member_card_profile for a compact digest, "
-                "or lookup_member_cards(filter=...) for a targeted slice."
+                "overflowed context. Use get_member_cards(view='profile') for a compact "
+                "digest or get_member_cards(view='lookup', filter=...) for a targeted slice."
             ),
         }
 
@@ -491,6 +492,53 @@ def _execute_get_deck_intelligence(arguments, workflow=None):
     )
     if view == "member" and isinstance(result, dict) and member_tag:
         _annotate_roster_status(result, member_tag)
+    return result
+
+
+def _execute_get_member_cards(arguments):
+    """Execute the single card-collection tool.
+
+    ``profile`` owns broad collection questions; ``lookup`` owns targeted
+    slices. The former public names remain dispatcher aliases for compatibility
+    but are no longer advertised to any workflow.
+    """
+    view = arguments.get("view") or "profile"
+    if view not in {"profile", "lookup"}:
+        return {"error": "unknown_member_cards_view", "view": view}
+
+    member_tag = _resolve_member_tag(arguments["member_tag"])
+    if view == "lookup":
+        card_filter = arguments.get("filter")
+        if not isinstance(card_filter, dict) or not card_filter:
+            return {
+                "error": "member_cards_filter_required",
+                "hint": "view='lookup' requires a non-empty filter",
+            }
+        include_battles = bool(card_filter.get("mode") == "war" or card_filter.get("deck"))
+        _refresh_member_cache(member_tag, include_battles=include_battles)
+        result = db.lookup_member_cards(
+            member_tag,
+            filter=card_filter,
+            limit=arguments.get("limit", 20),
+        )
+        _annotate_roster_status(result, member_tag)
+        return result
+
+    _refresh_member_cache(member_tag, include_battles=False)
+    result = db.get_member_card_profile(member_tag)
+    if result is None:
+        return {
+            "error": "no_collection_snapshot",
+            "member_tag": member_tag,
+            "hint": "No card collection snapshot exists yet for this member.",
+        }
+    _annotate_roster_status(result, member_tag)
+    if isinstance(result, dict):
+        result["upgrade_cost_note"] = (
+            "cards_required / ready-to-upgrade counts come from a static "
+            "card-cost table, not live game state; treat them as close "
+            "estimates, and gold to actually upgrade is unknown."
+        )
     return result
 
 
@@ -982,7 +1030,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
             result["coverage_note"] = (
                 "signal-event counts cover only the recent event stream (~7d); "
                 "battles_mirrored spans the full battle history — different coverage. "
-                "event_class does not filter this view; use get_clan_game_modes for battles."
+                "event_class does not filter this view; use aspect='game_modes' for battles."
             )
         return result
 
@@ -1012,14 +1060,16 @@ def _execute_get_elixir_state(arguments, workflow=None):
     if aspect == "season_window":
         return db.get_season_window()
 
+    if aspect == "war_season":
+        view = arguments.get("war_view") or "snapshot"
+        kwargs = {"view": view, "source": db}
+        if view in {"summary", "history"}:
+            kwargs["limit"] = limit
+        return {"war_season": war_capability.get_war_season_view(**kwargs)["data"]}
+
     leadership_error = _require_leadership_state(workflow)
     if leadership_error:
         return leadership_error
-
-    if aspect == "war_season":
-        return {
-            "war_season": war_capability.get_war_season_view(view="snapshot", source=db)["data"]
-        }
 
     if aspect == "awareness_activity":
         return db.get_awareness_activity(limit=limit)
@@ -1385,9 +1435,23 @@ def _execute_record_leadership_followup(arguments):
     recommendation = (arguments.get("recommendation") or "").strip()
     member_tag_input = arguments.get("member_tag")
     action_type = (arguments.get("action_type") or "").strip()
+    revisit_at = (arguments.get("revisit_at") or "").strip()
+    signal_key = (arguments.get("signal_key") or "").strip()
 
     if not topic or not recommendation:
         return {"error": "record_leadership_followup requires topic and recommendation"}
+    if bool(revisit_at) != bool(signal_key):
+        return {
+            "error": "revisit_requires_time_and_signal",
+            "detail": "revisit_at and signal_key must be supplied together",
+        }
+    if revisit_at:
+        from storage.revisits import _normalize_due_at
+
+        try:
+            _normalize_due_at(revisit_at)
+        except ValueError as exc:
+            return {"error": "invalid_revisit", "detail": str(exc)}
     if action_type and action_type not in {
         "kick_recommendation",
         "promotion_recommendation",
@@ -1458,6 +1522,24 @@ def _execute_record_leadership_followup(arguments):
             "If this needs a human to act, post it to the leader-lounge lane (#leaders), "
             "or call again with action_type + member_tag to raise a #actions card."
         )
+    if revisit_at:
+        from storage.revisits import schedule_revisit
+
+        try:
+            revisit = schedule_revisit(
+                signal_key=signal_key,
+                due_at=revisit_at,
+                rationale=recommendation,
+                created_by_workflow="awareness",
+            )
+            result["revisit"] = {
+                "revisit_id": revisit.get("revisit_id"),
+                "signal_key": revisit.get("signal_key"),
+                "due_at": revisit.get("due_at"),
+            }
+        except sqlite3.Error as exc:
+            log.warning("record_leadership_followup revisit failed: %s", exc)
+            result["revisit_error"] = str(exc)
     return result
 
 
@@ -1576,33 +1658,42 @@ def _execute_lookup_reference(arguments, workflow=None):
 
 # ── Main dispatch ─────────────────────────────────────────────────────────
 
-TOOL_EXECUTOR_NAMES = frozenset(
+ADVERTISED_TOOL_EXECUTOR_NAMES = frozenset(
     {
         "resolve_member",
         "get_member",
         "get_member_war_detail",
         "get_river_race",
-        "get_war_season",
         "get_clan_roster",
-        "get_clan_health",
-        "get_clan_game_modes",
         "get_elixir_state",
         "get_deck_intelligence",
         "lookup_cards",
-        "get_member_card_profile",
-        "lookup_member_cards",
-        "get_clan_intel_report",
+        "get_member_cards",
         "cr_api",
-        "update_member",
         "save_clan_memory",
-        "flag_member_watch",
-        "raise_clan_chat_relay",
         "record_leadership_followup",
-        "schedule_revisit",
         "get_awards",
         "lookup_reference",
     }
 )
+
+# Old names remain executable for persisted traces and direct compatibility
+# tests, but no workflow advertises them to the model.
+LEGACY_TOOL_EXECUTOR_NAMES = frozenset(
+    {
+        "get_war_season",
+        "get_clan_health",
+        "get_clan_game_modes",
+        "get_member_card_profile",
+        "lookup_member_cards",
+        "get_clan_intel_report",
+        "update_member",
+        "flag_member_watch",
+        "raise_clan_chat_relay",
+        "schedule_revisit",
+    }
+)
+TOOL_EXECUTOR_NAMES = ADVERTISED_TOOL_EXECUTOR_NAMES | LEGACY_TOOL_EXECUTOR_NAMES
 
 
 def _execute_tool(name, arguments, workflow=None):
@@ -1651,40 +1742,12 @@ def _execute_tool(name, arguments, workflow=None):
                 has_evolution=arguments.get("has_evolution"),
                 limit=arguments.get("limit", 25),
             )
+        elif name == "get_member_cards":
+            result = _execute_get_member_cards(arguments)
         elif name == "get_member_card_profile":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            _refresh_member_cache(member_tag, include_battles=False)
-            result = db.get_member_card_profile(member_tag)
-            if result is None:
-                result = {
-                    "error": "no_collection_snapshot",
-                    "member_tag": member_tag,
-                    "hint": "No card collection snapshot exists yet for this member.",
-                }
-            else:
-                _annotate_roster_status(result, member_tag)
-                # QA M21: upgrade costs / cards-required come from a static offline
-                # cost table (card levels are live; the per-level card counts are
-                # not) — flag the precision so "N to next level" isn't overstated.
-                if isinstance(result, dict):
-                    result["upgrade_cost_note"] = (
-                        "cards_required / ready-to-upgrade counts come from a static "
-                        "card-cost table, not live game state; treat them as close "
-                        "estimates, and gold to actually upgrade is unknown."
-                    )
+            result = _execute_get_member_cards({**arguments, "view": "profile"})
         elif name == "lookup_member_cards":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            include_battles = bool(
-                ((arguments.get("filter") or {}).get("mode")) == "war"
-                or (arguments.get("filter") or {}).get("deck")
-            )
-            _refresh_member_cache(member_tag, include_battles=include_battles)
-            result = db.lookup_member_cards(
-                member_tag,
-                filter=arguments.get("filter"),
-                limit=arguments.get("limit", 20),
-            )
-            _annotate_roster_status(result, member_tag)
+            result = _execute_get_member_cards({**arguments, "view": "lookup"})
         elif name == "cr_api":
             result = _execute_cr_api(arguments)
         elif name == "get_clan_intel_report":
@@ -1790,4 +1853,9 @@ def _execute_tool(name, arguments, workflow=None):
 
 execute_tool = _execute_tool
 
-__all__ = ["TOOL_EXECUTOR_NAMES", "execute_tool"]
+__all__ = [
+    "ADVERTISED_TOOL_EXECUTOR_NAMES",
+    "LEGACY_TOOL_EXECUTOR_NAMES",
+    "TOOL_EXECUTOR_NAMES",
+    "execute_tool",
+]

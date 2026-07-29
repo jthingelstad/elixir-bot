@@ -1,13 +1,13 @@
 # ── Tool definitions for Anthropic Claude function calling ─────────────────
 #
-# Consolidated domain-aligned tools:
+# Shared, non-overlapping tool block (14 tools):
 #   Member domain:  resolve_member, get_member, get_member_war_detail
-#   River Race:     get_river_race, get_war_season
-#   Clan domain:    get_clan_roster, get_clan_health, get_clan_game_modes,
-#   Cards:          lookup_cards (catalog), get_member_card_profile (digest),
-#                   lookup_member_cards (filtered slice)
+#   River Race:     get_river_race
+#   Clan domain:    get_clan_roster
+#   Cards:          lookup_cards (catalog), get_member_cards (member collection)
 #   Elixir state:   get_elixir_state
-#   Utility:        update_member, save_clan_memory
+#   Utility:        cr_api, save_clan_memory, record_leadership_followup,
+#                   get_awards, lookup_reference
 
 TOOLS = [
     # ── MEMBER DOMAIN ──────────────────────────────────────────────────────
@@ -77,10 +77,10 @@ TOOLS = [
             "For 'tell me about X', use default includes. "
             "For 'tell me about my last N battles' / 'what happened in my recent matches', include=['battles']. "
             "For 'what deck does X use', include=['deck']. "
-            "For deck-review work, include=['deck','losses'] — for card collection data, use get_member_card_profile or lookup_member_cards. "
+            "For deck-review work, include=['deck','losses'] — for card collection data, use get_member_cards. "
             "For leadership evaluation, include=['profile', 'war', 'history', 'memories']. "
             "For 'has X won anything' / 'what has X earned', include=['profile', 'awards']. "
-            "For card-collection questions ('what should I upgrade', 'review my cards', 'do I have X'), do NOT use this tool — use get_member_card_profile or lookup_member_cards instead."
+            "For card-collection questions ('what should I upgrade', 'review my cards', 'do I have X'), do NOT use this tool — use get_member_cards instead."
         ),
         "input_schema": {
             "type": "object",
@@ -112,7 +112,7 @@ TOOLS = [
                     },
                     "description": (
                         "Which aspects to include. Default: ['profile', 'form']. "
-                        "For card-collection data, use get_member_card_profile or lookup_member_cards."
+                        "For card-collection data, use get_member_cards."
                     ),
                     "default": ["profile", "form"],
                 },
@@ -530,6 +530,12 @@ TOOLS = [
                     "enum": ["proposed", "done", "rejected", "deferred", "all"],
                     "description": "Optional leader-action status filter; defaults to proposed.",
                 },
+                "war_view": {
+                    "type": "string",
+                    "enum": ["snapshot", "summary", "history"],
+                    "default": "snapshot",
+                    "description": "For aspect='war_season': current snapshot, compact summary, or recent history.",
+                },
                 "limit": {
                     "type": "integer",
                     "description": "Maximum rows to return. Default 25, max 100.",
@@ -662,12 +668,11 @@ TOOLS = [
         },
     },
     {
-        "name": "get_member_card_profile",
+        "name": "get_member_cards",
         "description": (
-            "Get a compact card-collection digest for a clan member. Always small "
-            "(~3KB) — use this as the FIRST call for any broad card question: "
-            "'how am I doing on cards', 'what should I upgrade', 'review my collection', "
-            "'do I have legendaries'. Returns:\n"
+            "Get a clan member's card collection. Use view='profile' (default) for "
+            "broad questions such as 'how am I doing on cards', 'what should I upgrade', "
+            "or 'review my collection'. The compact profile returns:\n"
             "- king_tower_level: the player's King Tower Level (1-16, capped at "
             "king_tower_max), computed from their card collection — use THIS when "
             "comparing card levels to the player's tower.\n"
@@ -679,8 +684,10 @@ TOOLS = [
             "- biggest_king_tower_gaps_top: top 5 cards furthest below the player's King "
             "Tower level. Each entry's `king_tower_gap` is computed against king_tower_level "
             "(capped), not experience_level.\n\n"
-            "After reading this digest, only call lookup_member_cards if the user "
-            "wants specific cards or a specific slice the digest doesn't cover."
+            "Use view='lookup' with a required filter for a focused list: deck=true, "
+            "mode=war, rarity, name, ready_to_upgrade, near_ready, near_max, maxed, "
+            "evo_unlocked, hero_unlocked, or has_special_mode. Ask a clarifying "
+            "question if the intended slice is ambiguous."
         ),
         "input_schema": {
             "type": "object",
@@ -688,6 +695,34 @@ TOOLS = [
                 "member_tag": {
                     "type": "string",
                     "description": "Player tag, in-game name, alias, or Discord handle.",
+                },
+                "view": {
+                    "type": "string",
+                    "enum": ["profile", "lookup"],
+                    "default": "profile",
+                    "description": "Compact collection profile or filtered card lookup.",
+                },
+                "filter": {
+                    "type": "object",
+                    "description": "Required for view='lookup'. Combine supported filters as needed.",
+                    "properties": {
+                        "deck": {"type": "boolean"},
+                        "mode": {"type": "string", "enum": ["war"]},
+                        "rarity": {"type": "string"},
+                        "name": {"type": "string"},
+                        "ready_to_upgrade": {"type": "boolean"},
+                        "near_ready": {"type": "boolean"},
+                        "near_max": {"type": "boolean"},
+                        "maxed": {"type": "boolean"},
+                        "evo_unlocked": {"type": "boolean"},
+                        "hero_unlocked": {"type": "boolean"},
+                        "has_special_mode": {"type": "boolean"},
+                    },
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum cards for view='lookup'. Default 20, max 50.",
+                    "default": 20,
                 },
             },
             "required": ["member_tag"],
@@ -773,32 +808,12 @@ TOOLS = [
     {
         "name": "cr_api",
         "description": (
-            "Bridge to the live Clash Royale public API. Use when the user asks about ANY "
-            "player, clan, or tournament by CR tag — e.g. 'tell me about player #ABC', "
-            "'how is clan #XYZ', 'scout the clan I just lost to'.\n\n"
-            "For OUR clan and OUR members, prefer local tools (get_member, get_clan_roster, "
-            "get_clan_health, get_clan_game_modes, get_river_race) — local data is deeper and covers longer history. "
-            "For CARD data, use lookup_cards, NOT this tool.\n\n"
-            "Aspects:\n"
-            "- player: profile, trophies, clan, current deck, favourite card\n"
-            "- player_battles: recent battle log with opponent tags preserved (chain into "
-            "aspect='player' or 'clan' to scout opponents). Optional mode filter: "
-            "ladder / ranked / war / tournament / event / two_v_two / friendly. "
-            "For OUR clan members, prefer get_member include=['battles'] — deeper history, "
-            "no live API call, and opponent tags cross-reference our roster.\n"
-            "- player_chests: upcoming chest cycle\n"
-            "- clan: profile + member summary (counts, averages). Rejects OUR clan.\n"
-            "- clan_members: top-N members with tags, roles, trophies, donations\n"
-            "- clan_war: current river race for ANY clan (standings, top participants)\n"
-            "- clan_war_log: historical river race results\n"
-            "- tournament: profile + top members by score\n"
-            "- events: current live game modes/events from /events; no tag required\n"
-            "- pathoflegend_location_rankings: current Ranked / Path of Legend rankings for a location; no tag required\n"
-            "- pathoflegend_season_rankings: global Ranked / Path of Legend rankings for a season id; no tag required\n"
-            "- leaderboards: game-mode / side-mode leaderboard metadata; no tag required\n"
-            "- leaderboard: one game-mode / side-mode leaderboard by integer leaderboard_id; no tag required\n\n"
-            "If the user asks about something the CR API does not expose — battle IDs, match IDs, "
-            "historical clan rosters, deck tags — say so plainly. Do not improvise a workaround."
+            "Fetch live Clash Royale API data for an external player, clan, river race, "
+            "tournament, event, or Ranked leaderboard. Prefer local tools for POAP KINGS "
+            "and its members; use lookup_cards for card facts. player_battles can be "
+            "filtered by mode. List views accept limit. Tagless views are events and "
+            "leaderboards/rankings. If the API does not expose a requested fact, say so "
+            "plainly instead of improvising."
         ),
         "input_schema": {
             "type": "object",
@@ -1022,8 +1037,6 @@ TOOLS = [
             "'followup'. Use when you detect a pattern worth remembering — a rank swing, a "
             "recurring no-show, a compliance gap. "
             "This is the ONLY awareness write tool that can open a member-review action card. "
-            "Do not use it for a leave hold or paste-ready clan-chat copy: use flag_member_watch "
-            "with away_until and raise_clan_chat_relay for those distinct outcomes. "
             "IMPORTANT — this is a NOTE, not an escalation. On its own it reaches no human: "
             "it does not post anywhere and does not raise a card. To actually ask leadership "
             "for something, either post to the leader-lounge lane (#leaders), or pass "
@@ -1034,7 +1047,8 @@ TOOLS = [
             "ATOMIC — each call is ONE decision a leader can act on or decline on its own. Never "
             "bundle multiple members or multiple actions into one followup: three kick reviews are "
             "three calls, a kick and a promotion are two calls. If you catch yourself writing 'and' "
-            "or a list of members into a single recommendation, split it."
+            "or a list of members into a single recommendation, split it. "
+            "Set revisit_at plus signal_key when future awareness should reconsider the same signal."
         ),
         "input_schema": {
             "type": "object",
@@ -1059,6 +1073,14 @@ TOOLS = [
                         "demotion_recommendation",
                     ],
                     "description": "Set this (WITH member_tag) for a member kick/promotion/demotion review, and it becomes a #actions card a leader can decide — the only way this tool reaches a human. Omit it and the followup is recorded as a memory only; nothing is posted and no leader is asked anything.",
+                },
+                "revisit_at": {
+                    "type": "string",
+                    "description": "Optional ISO-8601 time when awareness should reconsider this followup.",
+                },
+                "signal_key": {
+                    "type": "string",
+                    "description": "Required with revisit_at; copy the source signal_key verbatim.",
                 },
             },
             "required": ["topic", "recommendation"],
@@ -1212,5 +1234,27 @@ TOOLS = [
         },
     },
 ]
+
+# Definitions kept above the export preserve direct-executor compatibility while
+# the LLM sees one canonical owner per question. Only this 14-tool block is ever
+# offered to shared workflows.
+_SHARED_TOOL_NAMES = (
+    "resolve_member",
+    "get_member",
+    "get_member_war_detail",
+    "get_river_race",
+    "get_clan_roster",
+    "get_elixir_state",
+    "get_deck_intelligence",
+    "lookup_cards",
+    "get_member_cards",
+    "cr_api",
+    "save_clan_memory",
+    "record_leadership_followup",
+    "get_awards",
+    "lookup_reference",
+)
+_TOOLS_BY_NAME = {tool["name"]: tool for tool in TOOLS}
+TOOLS = [_TOOLS_BY_NAME[name] for name in _SHARED_TOOL_NAMES]
 
 __all__ = ["TOOLS"]

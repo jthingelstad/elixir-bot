@@ -642,9 +642,8 @@ same (no listed name exists post-cut), but only the transforms carry data.
 
 Every query tool and aspect, mapped from its current tables (traced through
 `agent/tool_defs.py` → `agent/tool_exec.py` → `storage/` on 2026-07-02) to its v5.1
-source. `get_clan_voyage` is removed (C6). Live-API tools (`cr_api`,
-`get_member(chests)`, `get_clan_intel_report`) are unaffected by the schema and
-omitted.
+source. `get_clan_voyage` is removed (C6). Live-API paths (`cr_api`,
+`get_member(chests)`) are unaffected by the schema and omitted.
 
 | Tool | Aspect | Reads today | Reads in v5.1 |
 |---|---|---|---|
@@ -663,35 +662,21 @@ omitted.
 | | battles / war_decks | member_battle_facts (raw_json inference) | battle_events (war keys + deck_json — a join, per §14.5) |
 | | vs_clan_avg | war_participation (+ snapshots) | war_participation |
 | `get_river_race` | standings / engagement | war_current_state, war_day_status, war_races, war_participation | state_baselines('riverrace') via war clock, war_week_clans, war_participation |
-| `get_war_season` | summary / score_trend / season_comparison / perfect_attendance / no_participation | war_races, war_participation, members | war_seasons, war_weeks, war_participation, war_attendance_days, players |
-| | standings | war_participation, awards | war_participation (standings query, §7.4), awards |
-| | win_rates / boat_battles | member_battle_facts, war_participation | battle_events (war keys), war_participation |
-| | trending | war_participation, member_state_snapshots | war_participation, player_daily_metrics |
 | `get_clan_roster` | list / summary | members, member_state_snapshots, member_metadata | players + player_current_state + player_metadata + open memberships |
 | | recent_joins / longest_tenure | clan_memberships (+ members) | clan_memberships (tag-keyed) |
 | | role_changes | member_state_snapshots (snapshot diffing) | clan_events(role_change) — first-class (§14.5) |
 | | max_cards | member_card_collection_snapshots | player_card_collection |
 | | trends | member_daily_metrics | player_daily_metrics + clan_daily_metrics |
-| `get_clan_health` | at_risk | members, member_state_snapshots, war_participation | member_management (kick_state + evidence cols) |
-| | hot_streaks / losing_streaks | member_battle_facts | player_recent_form (streak cols) |
-| | trophy_drops | member_daily_metrics | player_daily_metrics |
-| | promotion_candidates | members, war_participation, member_daily_metrics | member_management (promote_state) |
-| `get_clan_game_modes` | — | member_battle_facts | player_daily_battle_rollups (+ battle_events for recent) |
-| `lookup_cards` / card tools | — | card_catalog, member_card_collection_snapshots | card_catalog, player_card_collection |
+| `lookup_cards` / `get_member_cards` | — | card_catalog, member_card_collection_snapshots | card_catalog, player_card_collection |
 | `get_awards` | list / leaderboard / current_standings | awards, war_participation | awards, war_participation standings query |
 | `get_elixir_state` | event_summary / recent_events / game_modes | detections + event_core tables | player_events / clan_events / battle_events / war_events + game_mode_contexts |
 | | leader_actions / communication_* | decision cases, communication intents (+ Gen A/B links) | leader_action_recommendations, awareness_delivery_intents |
 | | season_window / war_season | war_races | war_seasons, war_weeks |
-| write: `update_member` | 4 fields | member_metadata | player_metadata |
 | write: `save_clan_memory` | — | clan_memories (+ satellites) | unchanged (deferred pass) |
-| write: `flag_member_watch` / `record_leadership_followup` | — | decision cases, clan memories | `flag_member_watch`: memories only; `record_leadership_followup`: memories always, leader_action_recommendations only with an action_type + member (#216) |
-| write: `raise_clan_chat_relay` | — | — | leader_action_recommendations (`in_game_relay`) |
-| write: `schedule_revisit` | — | revisits | revisits |
+| write: `record_leadership_followup` | optional action / revisit | decision cases, clan memories, revisits | memories always; leader_action_recommendations with an action_type + member; revisits with revisit_at + signal_key |
 
-**Notable upgrades over today:** `at_risk` and `promotion_candidates` stop
-recomputing eligibility per call and read the §13.3 projection — the tool output and
-the leader-action pipeline can no longer disagree. `hot_streaks`/`losing_streaks`
-read pre-materialized form instead of scanning battles. `role_changes` and `history`
+**Notable upgrades over today:** management reads the §13.3 projection, so
+the capability and leader-action pipeline cannot disagree. `role_changes` and `history`
 stop diffing snapshot pairs.
 
 ## 10. What this doc leaves to the next docs
