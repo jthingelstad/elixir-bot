@@ -12,7 +12,7 @@ import json
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 21
+CURRENT_SCHEMA_VERSION = 22
 
 
 _V1_STATEMENTS = (
@@ -1005,6 +1005,115 @@ def _apply_v21(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE leader_action_recommendations DROP COLUMN case_id")
 
 
+def _apply_v22(conn: sqlite3.Connection) -> None:
+    """Contract two dead tables and eight write-only conversation columns.
+
+    The code-only cutover shipped first and was exercised in production on v21.
+    Rebuild the three tables that referenced ``discord_channels`` so foreign-key
+    enforcement stays enabled while the obsolete parent table is removed. All
+    transcript rows, summaries, identifiers, and active indexes are preserved.
+    """
+    tables = _tables(conn)
+    required = {"conversation_threads", "messages", "channel_state"}
+    missing = required - tables
+    if missing:
+        raise RuntimeError(f"v22 contract migration missing tables: {sorted(missing)}")
+
+    dead_thread_columns = {
+        "channel_id",
+        "discord_user_id",
+        "member_id",
+        "created_at",
+        "last_active_at",
+    }
+    dead_state_columns = {
+        "last_elixir_post_at",
+        "last_topics_json",
+        "recent_style_notes_json",
+    }
+    rebuild_conversations = bool(
+        dead_thread_columns & _columns(conn, "conversation_threads")
+        or dead_state_columns & _columns(conn, "channel_state")
+        or "discord_channels" in tables
+    )
+
+    if rebuild_conversations:
+        conn.execute(
+            """CREATE TABLE conversation_threads_v22 (
+                thread_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope_type TEXT NOT NULL,
+                scope_key TEXT NOT NULL,
+                UNIQUE(scope_type, scope_key)
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO conversation_threads_v22 (thread_id, scope_type, scope_key) "
+            "SELECT thread_id, scope_type, scope_key FROM conversation_threads"
+        )
+        conn.execute(
+            """CREATE TABLE messages_v22 (
+                message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                discord_message_id TEXT UNIQUE,
+                thread_id INTEGER NOT NULL
+                    REFERENCES conversation_threads_v22(thread_id) ON DELETE CASCADE,
+                channel_id TEXT,
+                discord_user_id TEXT
+                    REFERENCES discord_users(discord_user_id) ON DELETE SET NULL,
+                member_id INTEGER,
+                author_type TEXT NOT NULL,
+                workflow TEXT,
+                event_type TEXT,
+                content TEXT NOT NULL,
+                summary TEXT,
+                created_at TEXT NOT NULL,
+                raw_json TEXT,
+                intent_id INTEGER
+            )"""
+        )
+        conn.execute(
+            """INSERT INTO messages_v22 (
+                message_id, discord_message_id, thread_id, channel_id,
+                discord_user_id, member_id, author_type, workflow, event_type,
+                content, summary, created_at, raw_json, intent_id
+            )
+            SELECT
+                message_id, discord_message_id, thread_id, channel_id,
+                discord_user_id, member_id, author_type, workflow, event_type,
+                content, summary, created_at, raw_json, intent_id
+            FROM messages"""
+        )
+        conn.execute(
+            """CREATE TABLE channel_state_v22 (
+                channel_id TEXT PRIMARY KEY,
+                last_summary TEXT
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO channel_state_v22 (channel_id, last_summary) "
+            "SELECT channel_id, last_summary FROM channel_state"
+        )
+
+        # Children go first so DROP never invokes an FK action against retained
+        # rows. Renaming the new parent updates messages_v22's FK target.
+        conn.execute("DROP TABLE messages")
+        conn.execute("DROP TABLE channel_state")
+        conn.execute("DROP TABLE conversation_threads")
+        conn.execute("DROP TABLE IF EXISTS discord_channels")
+
+        conn.execute("ALTER TABLE conversation_threads_v22 RENAME TO conversation_threads")
+        conn.execute("ALTER TABLE messages_v22 RENAME TO messages")
+        conn.execute("ALTER TABLE channel_state_v22 RENAME TO channel_state")
+        conn.execute(
+            "CREATE INDEX idx_threads_scope ON conversation_threads(scope_type, scope_key)"
+        )
+        conn.execute(
+            "CREATE INDEX idx_messages_thread_time ON messages(thread_id, created_at DESC)"
+        )
+        conn.execute("CREATE INDEX idx_messages_intent ON messages(intent_id, created_at DESC)")
+
+    conn.execute("DROP TABLE IF EXISTS arena_relay_screenshot_observations")
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1207,6 +1316,18 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 21
+    if version < 22:
+        try:
+            # sqlite3 does not implicitly open a transaction for DDL. Start one
+            # explicitly so the multi-table contract is all-or-nothing.
+            conn.execute("BEGIN IMMEDIATE")
+            _apply_v22(conn)
+            conn.execute("PRAGMA user_version = 22")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1263,7 +1384,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "4bc29bb6c17daf0fcdef027d7a6ae32ed75e8e28247d786c822753ca620c9e97"
+CURRENT_SCHEMA_FINGERPRINT = "f6b4e107f70d08001b14556e23e004adf6104433a5600e3a32e3c3a85de09339"
 
 
 __all__ = [

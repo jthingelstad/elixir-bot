@@ -29,78 +29,6 @@ def _memory_conn():
     return conn
 
 
-def _contract_dead_conversation_schema(conn) -> None:
-    """Model #224's future contract migration without touching the live DB."""
-    conn.commit()
-    conn.execute("PRAGMA foreign_keys = OFF")
-    conn.executescript(
-        """
-        CREATE TABLE conversation_threads_contract (
-            thread_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            scope_type TEXT NOT NULL,
-            scope_key TEXT NOT NULL,
-            UNIQUE(scope_type, scope_key)
-        );
-        INSERT INTO conversation_threads_contract (thread_id, scope_type, scope_key)
-        SELECT thread_id, scope_type, scope_key FROM conversation_threads;
-
-        CREATE TABLE messages_contract (
-            message_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            discord_message_id TEXT UNIQUE,
-            thread_id INTEGER NOT NULL
-                REFERENCES conversation_threads_contract(thread_id) ON DELETE CASCADE,
-            channel_id TEXT,
-            discord_user_id TEXT REFERENCES discord_users(discord_user_id) ON DELETE SET NULL,
-            member_id INTEGER,
-            author_type TEXT NOT NULL,
-            workflow TEXT,
-            event_type TEXT,
-            content TEXT NOT NULL,
-            summary TEXT,
-            created_at TEXT NOT NULL,
-            raw_json TEXT,
-            intent_id INTEGER
-        );
-        INSERT INTO messages_contract (
-            message_id, discord_message_id, thread_id, channel_id,
-            discord_user_id, member_id, author_type, workflow, event_type,
-            content, summary, created_at, raw_json, intent_id
-        )
-        SELECT
-            message_id, discord_message_id, thread_id, channel_id,
-            discord_user_id, member_id, author_type, workflow, event_type,
-            content, summary, created_at, raw_json, intent_id
-        FROM messages;
-
-        CREATE TABLE channel_state_contract (
-            channel_id TEXT PRIMARY KEY,
-            last_summary TEXT
-        );
-        INSERT INTO channel_state_contract (channel_id, last_summary)
-        SELECT channel_id, last_summary FROM channel_state;
-
-        DROP TABLE messages;
-        DROP TABLE conversation_threads;
-        DROP TABLE channel_state;
-        DROP TABLE arena_relay_screenshot_observations;
-        DROP TABLE discord_channels;
-
-        ALTER TABLE conversation_threads_contract RENAME TO conversation_threads;
-        ALTER TABLE messages_contract RENAME TO messages;
-        ALTER TABLE channel_state_contract RENAME TO channel_state;
-
-        CREATE INDEX idx_threads_scope
-            ON conversation_threads(scope_type, scope_key);
-        CREATE INDEX idx_messages_thread_time
-            ON messages(thread_id, created_at DESC);
-        CREATE INDEX idx_messages_intent
-            ON messages(intent_id, created_at DESC);
-        """
-    )
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.commit()
-
-
 def test_provenance_rules_and_retrieval_payload():
     conn = _memory_conn()
     try:
@@ -206,8 +134,6 @@ def test_message_summary_updates_current_channel_and_user_paths():
 def test_message_paths_work_after_dead_schema_contract():
     conn = _memory_conn()
     try:
-        _contract_dead_conversation_schema(conn)
-
         message_id = db.save_message(
             "channel:ch-contract",
             "assistant",
