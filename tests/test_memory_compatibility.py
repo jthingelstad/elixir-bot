@@ -14,7 +14,6 @@ from memory_store import (
     create_memory,
     list_memories,
 )
-from runtime.admin import _build_memory_report
 from storage.contextual_memory import (
     archive_member_note_memory,
     upsert_member_note_memory,
@@ -88,42 +87,6 @@ def test_member_note_memory_is_upserted_and_archived():
         archived = archive_member_note_memory(member_tag="#ABC123", conn=conn)
         assert archived["status"] == "archived"
         assert list_memories(viewer_scope="leadership", conn=conn) == []
-    finally:
-        conn.close()
-
-
-def test_memory_report_includes_internal_search_and_conversation_counts():
-    conn = _memory_conn()
-    try:
-        create_memory(
-            body="Internal tuning note for memory index degradation.",
-            summary="Memory index degradation",
-            source_type="system",
-            is_inference=False,
-            confidence=1.0,
-            created_by="system",
-            scope="system_internal",
-            conn=conn,
-        )
-        db.save_message(
-            "leader:user123",
-            "user",
-            "Who should we promote?",
-            discord_user_id="user123",
-            username="jamie",
-            display_name="Jamie",
-            conn=conn,
-        )
-
-        report = _build_memory_report(
-            query="index degradation",
-            include_system_internal=True,
-            limit=3,
-            conn=conn,
-        )
-        assert "- View: `system_internal`" in report
-        assert "Memory index degradation" in report
-        assert "Conversation store:" in report
     finally:
         conn.close()
 

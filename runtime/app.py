@@ -669,17 +669,6 @@ async def _engine_tick():
         cards = await _post_pending_leader_action_cards()
         if cards:
             counters["leader_action_cards"] = cards
-        # Bounded-event thread lifecycle (channels.md §2) — best-effort by
-        # contract; a room failure never touches the ceremony.
-        from engine import db as _engine_db
-        from runtime import threads as _threads
-
-        lanes = engine_compose.channels()
-        rr = lanes.get("river-race") or {}
-        if rr.get("channel_id"):
-            born = await _threads.ensure_war_week_thread(bot, _engine_db.connect, rr["channel_id"])
-            if born:
-                counters["war_week_thread_born"] = born
         # A tournament the clan is already playing should not need a human to
         # type `/tournament watch`. Elixir ingests these battles anyway --
         # `type: "tournament"` with a `tournamentTag` -- so it can start the
@@ -1504,13 +1493,6 @@ async def on_ready():
                 )
         except Exception as exc:
             log.warning("Tournament watch resume check failed: %s", exc)
-        # Recover any deferred recap that didn't post before this restart.
-        try:
-            from runtime.jobs._tournament import resume_pending_tournament_recaps
-
-            await resume_pending_tournament_recaps()
-        except Exception as exc:
-            log.warning("Pending tournament recap resume failed: %s", exc)
         # Best-effort startup card catalog sync
         try:
             from runtime.jobs import _card_catalog_sync

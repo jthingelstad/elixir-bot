@@ -18,7 +18,6 @@ __all__ = [
     "summarize_event_windows",
     "list_recent_events",
     "list_events_after_cursors",
-    "summarize_battle_modes",
 ]
 
 DETECTION_WINDOWS = (1, 7, 28)
@@ -231,62 +230,3 @@ def list_recent_events(
             events.append(item)
     events.sort(key=lambda e: str(e.get("observed_at") or ""), reverse=True)
     return events[: max(1, int(limit))]
-
-
-@managed_connection
-def summarize_battle_modes(
-    *,
-    windows: tuple[int, ...] = (7, 28),
-    now: str | None = None,
-    top_members: int = 3,
-    min_battles: int = 3,
-    subject_key: str | None = None,
-    conn: Optional[sqlite3.Connection] = None,
-) -> dict:
-    """Per-mode battle activity from battle_events."""
-    out: dict = {"windows": {}}
-    for days in windows:
-        cutoff = _cutoff_compact(days, now)  # battle_time is CR-compact, not ISO
-        where = ["b.battle_time >= ?"]
-        params: list = [cutoff]
-        if subject_key:
-            where.append("b.player_tag = ?")
-            params.append(subject_key)
-        mode_rows = conn.execute(
-            "SELECT b.mode_group, b.game_mode_name, COUNT(*) AS battles, "
-            "SUM(CASE WHEN b.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
-            "COUNT(DISTINCT b.player_tag) AS members_active "
-            "FROM battle_events b "
-            f"WHERE {' AND '.join(where)} "
-            "GROUP BY b.mode_group, b.game_mode_name "
-            "ORDER BY battles DESC",
-            tuple(params),
-        ).fetchall()
-        modes = []
-        for row in mode_rows:
-            if (row["battles"] or 0) < min_battles:
-                continue
-            top = conn.execute(
-                "SELECT b.player_tag AS tag, COALESCE(p.display_name, p.current_name) AS name, COUNT(*) AS battles "
-                "FROM battle_events b LEFT JOIN players p ON p.player_tag = b.player_tag "
-                f"WHERE {' AND '.join(where)} AND b.mode_group IS ? AND b.game_mode_name IS ? "
-                "GROUP BY b.player_tag ORDER BY battles DESC LIMIT ?",
-                (
-                    *params,
-                    row["mode_group"],
-                    row["game_mode_name"],
-                    max(1, int(top_members)),
-                ),
-            ).fetchall()
-            modes.append(
-                {
-                    "mode_group": row["mode_group"],
-                    "game_mode_name": row["game_mode_name"],
-                    "battles": row["battles"],
-                    "wins": row["wins"],
-                    "members_active": row["members_active"],
-                    "top_members": [dict(t) for t in top],
-                }
-            )
-        out["windows"][f"{days}d"] = {"modes": modes}
-    return out

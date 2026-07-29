@@ -7,7 +7,6 @@ import pytest
 from storage.opponent_intel import (
     analyze_clan_roster,
     analyze_war_participants,
-    build_intel_report,
     compute_threat_rating,
     war_day_context,
 )
@@ -258,52 +257,3 @@ class TestComputeThreatRating:
         assert bd["rating"] == compute_threat_rating(roster, {"engagement_pct": 90})
         assert "war_trophies" in bd["components_0_10"]
         assert "fame" in bd["note"]
-
-
-# ---------------------------------------------------------------------------
-# build_intel_report
-# ---------------------------------------------------------------------------
-
-
-class TestBuildIntelReport:
-    def test_sorts_by_threat_our_clan_last(self):
-        our_tag = "OUR"
-        war_data = {
-            "clan": _make_war_clan_entry("OUR", "POAP KINGS"),
-            "clans": [
-                _make_war_clan_entry("AAA", "Strong Clan"),
-                _make_war_clan_entry("BBB", "Weak Clan"),
-            ],
-        }
-        profiles = {
-            "OUR": _make_clan_profile("OUR", "POAP KINGS", war_trophies=4000),
-            "AAA": _make_clan_profile("AAA", "Strong Clan", war_trophies=4500),
-            "BBB": _make_clan_profile(
-                "BBB",
-                "Weak Clan",
-                war_trophies=500,
-                members=[_make_member("Solo", trophies=2000)],
-            ),
-        }
-        analyses = build_intel_report(war_data, profiles, our_tag)
-
-        # Our clan should be last
-        assert analyses[-1]["is_us"] is True
-        assert analyses[-1]["name"] == "POAP KINGS"
-
-        # Opponents sorted by threat (descending)
-        opponent_names = [a["name"] for a in analyses if not a["is_us"]]
-        assert opponent_names[0] == "Strong Clan"
-
-    def test_missing_profile_graceful(self):
-        war_data = {
-            "clan": _make_war_clan_entry("OUR", "POAP KINGS"),
-            "clans": [_make_war_clan_entry("AAA", "Mystery Clan")],
-        }
-        profiles = {"OUR": _make_clan_profile("OUR", "POAP KINGS"), "AAA": None}
-        analyses = build_intel_report(war_data, profiles, "OUR")
-
-        mystery = [a for a in analyses if a["name"] == "Mystery Clan"][0]
-        assert mystery["profile_available"] is False
-        assert mystery["roster"] is None
-        assert mystery["war"] is not None

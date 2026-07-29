@@ -296,55 +296,10 @@ def build_clan_intel_entry(
     }
 
 
-def build_intel_report(
-    war_data: dict,
-    clan_profiles: dict[str, dict | None],
-    our_tag: str,
-    *,
-    now: datetime | None = None,
-) -> list[dict]:
-    """Build the full intel report for all competing clans.
-
-    Args:
-        war_data: Response from get_current_war()
-        clan_profiles: tag (uppercase, no #) -> clan profile dict (or None if fetch failed)
-        our_tag: Our clan's tag (no #)
-
-    Returns a list of clan analysis dicts sorted by threat rating (highest first).
-    Each dict has keys: tag, name, is_us, roster, war, threat_rating, profile_available.
-    """
-    our_tag_clean = our_tag.lstrip("#").upper()
-
-    war_clans = war_data.get("clans") or []
-    our_war_entry = war_data.get("clan")
-    if our_war_entry:
-        war_clans_all = [our_war_entry] + [
-            c for c in war_clans if c.get("tag", "").lstrip("#").upper() != our_tag_clean
-        ]
-    else:
-        war_clans_all = war_clans
-
-    analyses = [
-        build_clan_intel_entry(
-            clan_entry,
-            clan_profiles.get((clan_entry.get("tag") or "").lstrip("#").upper()),
-            is_us=((clan_entry.get("tag") or "").lstrip("#").upper() == our_tag_clean),
-            now=now,
-        )
-        for clan_entry in war_clans_all
-    ]
-
-    # Sort: our clan last, then by threat rating descending
-    analyses.sort(key=lambda a: (a["is_us"], -a["threat_rating"]))
-
-    return analyses
-
-
 __all__ = [
     "analyze_clan_roster",
     "analyze_war_participants",
     "build_clan_intel_entry",
-    "build_intel_report",
     "compute_threat_rating",
     "threat_rating_breakdown",
     "war_day_context",
