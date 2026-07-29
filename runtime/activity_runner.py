@@ -59,6 +59,20 @@ class _ChannelLookup:
             return None
 
 
+def _channel_ids_for_lookup(channel_configs: list[dict], thinking_channel_id: object) -> set[int]:
+    """Return every Discord channel a shell-triggered activity may need.
+
+    ``#thinking`` is intentionally outside ``prompts/DISCORD.md`` because it is
+    an operator diagnostic surface, but the awareness loop posts to it through
+    the same runtime bot lookup. Omitting it makes a manual awareness run look
+    healthy while silently dropping its diagnostic stream.
+    """
+    channel_ids = {int(config["id"]) for config in channel_configs}
+    if thinking_channel_id is not None:
+        channel_ids.add(int(thinking_channel_id))
+    return channel_ids
+
+
 def _validate_manual_activity(activity_key: str):
     activity = get_activity(activity_key)
     if activity is None:
@@ -98,8 +112,11 @@ async def _build_rest_channel_lookup(
         await client.login(token)
 
         channels: dict[int, Any] = {}
-        for channel_config in prompts.discord_channel_configs():
-            channel_id = int(channel_config["id"])
+        channel_ids = _channel_ids_for_lookup(
+            prompts.discord_channel_configs(),
+            getattr(runtime_module, "THINKING_CHANNEL_ID", None),
+        )
+        for channel_id in channel_ids:
             # A deleted/unreachable channel must not crash the whole shell runner
             # — skip it (the startup audit already reports reachability).
             try:
