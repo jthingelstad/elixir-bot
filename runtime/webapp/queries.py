@@ -19,7 +19,7 @@ from capabilities import management as management_capability
 from capabilities import war as war_capability
 from engine.clock import war_clock
 from engine.tick import HOME_CLAN
-from storage import cases, events_read, leader_actions, revisits, runtime_status
+from storage import events_read, leader_actions, revisits, runtime_status
 
 log = logging.getLogger("elixir.webapp.queries")
 
@@ -789,21 +789,6 @@ def command_page() -> dict:
     conn = db.get_connection()
     try:
         open_actions = leader_actions.list_leader_actions(status="proposed", limit=25, conn=conn)
-        # A case that BACKS an open card is not a second thing to decide -- it is
-        # the card's internal record. Counting both double-counted one item
-        # ("Needs your decision: 2" for a single kick review); 26 of 39 cases
-        # ever created carry a linked card. Only surface cases with nothing on
-        # the board behind them, and label them as tracking rather than asks.
-        carded = {
-            r["case_id"]
-            for r in conn.execute(
-                "SELECT DISTINCT case_id FROM leader_action_recommendations "
-                "WHERE case_id IS NOT NULL AND status = 'proposed'"
-            ).fetchall()
-        }
-        open_cases = [
-            c for c in cases.list_decision_cases(limit=25, conn=conn) if c["case_id"] not in carded
-        ]
         pending_revisits = revisits.list_pending_revisits(limit=15, conn=conn)
 
         attention = _rows(
@@ -876,7 +861,6 @@ def command_page() -> dict:
 
         return {
             "open_actions": open_actions,
-            "open_cases": open_cases,
             "pending_revisits": pending_revisits,
             "attention": attention,
             "war_state": war_state,
@@ -910,18 +894,12 @@ def management_page() -> dict:
             r.pop("state_json", None)
         actions = leader_actions.list_leader_actions(status="proposed", limit=25, conn=conn)
         recent = leader_actions.list_leader_actions(limit=15, conn=conn)
-        open_cases = cases.list_decision_cases(limit=25, conn=conn)  # open + deferred
-        resolved_cases = cases.list_decision_cases(
-            statuses=(cases.CASE_RESOLVED, cases.CASE_DISMISSED), limit=10, conn=conn
-        )
         pending_revisits = revisits.list_pending_revisits(limit=25, conn=conn)
         decision_contract = management_capability.get_management_decisions(view="board", conn=conn)
         return {
             "rows": rows,
             "open_actions": actions,
             "recent_actions": recent,
-            "open_cases": open_cases,
-            "resolved_cases": resolved_cases,
             "pending_revisits": pending_revisits,
             "decision_contract": decision_contract,
         }

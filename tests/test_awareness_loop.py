@@ -25,7 +25,6 @@ _EXPECTED_KEYS = {
     "war_season",
     "signals_by_lane",
     "hard_post_signals",
-    "decision_cases",
     "channel_memory",
     "recent_agent_writes",
     "leader_action_board",
@@ -104,7 +103,6 @@ def test_build_read_returns_expected_keys_on_empty_db():
     assert isinstance(read["hard_post_signals"], list)
     # Empty DB → no active war.
     assert read["time"] is None
-    assert read["decision_cases"] == {"due": [], "open": []}
 
 
 # ---------------------------------------------------------------------------

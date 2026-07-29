@@ -49,7 +49,4 @@ def test_operational_summary_stays_under_envelope_cap():
     assert len(envelope) <= TOOL_RESULT_MAX_CHARS
     assert len(result["awareness"]["posts"]) <= 15
 
-    cases = result["decision_cases"]
-    due_keys = {case.get("case_key") for case in cases.get("due", [])}
-    open_keys = {case.get("case_key") for case in cases.get("open", [])}
-    assert due_keys.isdisjoint(open_keys)
+    assert len(result["leader_actions"]) <= 10

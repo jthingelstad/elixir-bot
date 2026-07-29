@@ -36,9 +36,6 @@ class _ManagementSource:
             }
         ]
 
-    def decision_case_snapshot(self, **kwargs):
-        return {"due": [{"case_id": 2}], "open": [], "query": kwargs}
-
     def list_pending_revisits(self, **kwargs):
         return [{"revisit_id": 3, "query": kwargs}]
 
@@ -55,7 +52,7 @@ def test_management_contract_declares_engine_policy_authority():
         result = get_management_decisions(view="summary", source=_ManagementSource())
 
     assert result["capability"] == "management_decisions"
-    assert result["contract_version"] == 2
+    assert result["contract_version"] == 3
     assert result["audience"] == "leadership"
     assert result["policy"]["rescored"] is False
     assert result["policy"]["fail_closed_on_stale_evidence"] is True
@@ -74,7 +71,6 @@ def test_management_board_packages_verdicts_and_workflow_state():
     assert data["verdicts"]["kick"]["members"][0]["kick_state"] == "recommended"
     assert data["verdicts"]["promote"]["members"][0]["promote_state"] == "eligible"
     assert data["workflow"]["open_actions"][0]["action_id"] == 1
-    assert data["workflow"]["decision_cases"]["due"][0]["case_id"] == 2
     assert data["workflow"]["pending_revisits"][0]["revisit_id"] == 3
 
 

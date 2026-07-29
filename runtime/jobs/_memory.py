@@ -88,8 +88,8 @@ MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT = int(
 MEMORY_SYNTHESIS_RETRY_AWARENESS_LIMIT = int(
     os.getenv("MEMORY_SYNTHESIS_RETRY_AWARENESS_LIMIT", "10")
 )
-MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT = int(
-    os.getenv("MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT", "8")
+MEMORY_SYNTHESIS_RETRY_LEADER_ACTION_LIMIT = int(
+    os.getenv("MEMORY_SYNTHESIS_RETRY_LEADER_ACTION_LIMIT", "8")
 )
 MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS = int(
     os.getenv("MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS", "280")
@@ -223,20 +223,18 @@ def _compact_retry_post_row(row: dict) -> dict:
     return compact
 
 
-def _compact_retry_decision_case(row: dict) -> dict:
+def _compact_retry_leader_action(row: dict) -> dict:
     fields = (
-        "case_id",
-        "case_type",
+        "action_id",
+        "action_type",
         "status",
-        "subject_type",
-        "subject_key",
-        "subject_tag",
-        "subject_name",
         "objective",
-        "reason",
-        "summary",
-        "next_action",
-        "due_at",
+        "target_player_tag",
+        "target_player_name",
+        "rationale",
+        "decision_note",
+        "proposed_at",
+        "decided_at",
         "updated_at",
     )
     compact = {}
@@ -244,26 +242,18 @@ def _compact_retry_decision_case(row: dict) -> dict:
         if key not in row:
             continue
         value = row.get(key)
-        if key in {"objective", "reason", "summary", "next_action"}:
+        if key in {"objective", "rationale", "decision_note"}:
             value = _clip_text(value, 180)
         compact[key] = value
     return compact
 
 
-def _compact_retry_decision_cases(snapshot) -> dict:
-    if not isinstance(snapshot, dict):
-        return {}
-    compact = {}
-    for key, value in snapshot.items():
-        if isinstance(value, list):
-            compact[key] = [
-                _compact_retry_decision_case(item)
-                for item in value[:MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT]
-                if isinstance(item, dict)
-            ]
-        else:
-            compact[key] = value
-    return compact
+def _compact_retry_leader_actions(rows) -> list[dict]:
+    return [
+        _compact_retry_leader_action(item)
+        for item in (rows or [])[:MEMORY_SYNTHESIS_RETRY_LEADER_ACTION_LIMIT]
+        if isinstance(item, dict)
+    ]
 
 
 def _compact_retry_standings(rows) -> list[dict]:
@@ -444,9 +434,9 @@ def _compact_retry_operations_context(operations_context) -> dict:
         compact["game_modes"] = _compact_retry_game_modes(operations_context.get("game_modes"))
     if "season_window" in operations_context:
         compact["season_window"] = operations_context.get("season_window")
-    if "decision_cases" in operations_context:
-        compact["decision_cases"] = _compact_retry_decision_cases(
-            operations_context.get("decision_cases")
+    if "leader_actions" in operations_context:
+        compact["leader_actions"] = _compact_retry_leader_actions(
+            operations_context.get("leader_actions")
         )
     if "awareness_activity" in operations_context:
         activity = operations_context.get("awareness_activity") or {}
@@ -683,12 +673,9 @@ def _build_memory_synthesis_context():
     except Exception:
         log.warning("memory synthesis: season window context load failed", exc_info=True)
     try:
-        operations_context["decision_cases"] = db.decision_case_snapshot(
-            open_limit=20,
-            due_limit=20,
-        )
+        operations_context["leader_actions"] = db.list_leader_actions(status="proposed", limit=20)
     except Exception:
-        log.warning("memory synthesis: decision case context load failed", exc_info=True)
+        log.warning("memory synthesis: leader action context load failed", exc_info=True)
     try:
         operations_context["awareness_activity"] = db.get_awareness_activity(limit=25)
     except Exception:
@@ -803,7 +790,7 @@ async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
     """Post one #actions card per leader-judgment contradiction.
 
     Metric and current-state contradictions are handled automatically by
-    expiring the stale memory. Cards are reserved for cases Elixir cannot
+    expiring the stale memory. Cards are reserved for judgments Elixir cannot
     recompute, such as policy, leader preference, or human context.
     """
     review_items = _leader_review_contradictions(contradictions)

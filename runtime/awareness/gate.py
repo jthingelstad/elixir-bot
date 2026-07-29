@@ -13,13 +13,13 @@ brain and classifies each read into one of three tiers:
     an explicit due revisit. The full brain MUST run to compose + deliver.
     Never gated away.
   - ``triage`` — soft signals are present (routine milestones, cake days,
-    standing decision cases / management candidates) but nothing mandatory. A
+    standing management candidates) but nothing mandatory. A
     cheap lightweight-model (Haiku) triage makes the post-vs-silence call; only
     a ``post`` verdict escalates to the full brain to compose.
   - ``skip`` — nothing actionable at all. Deterministic silence, no LLM.
 
-Persistent full-state fields (``cake_days_today``, ``decision_cases.due``,
-``management.actionable``) are NOT independent *deliberate* triggers: they are
+Persistent full-state fields (``cake_days_today``, ``management.actionable``)
+are NOT independent *deliberate* triggers: they are
 populated on every tick and would defeat the gate. They route to ``triage`` so
 a genuinely new/actionable one is still caught cheaply, while stale standing
 state costs at most a Haiku call, never Sonnet.
@@ -173,10 +173,9 @@ def _soft_context(read: dict) -> dict:
     """Standing, non-mandatory context that can justify a triage look but never
     an unconditional Sonnet run (each is populated on ~every tick)."""
     cake = _fresh_cake_days(read)
-    cases = ((read.get("decision_cases") or {}).get("due")) or []
     mgmt = (read.get("management") or {}).get("actionable") or {}
     mgmt_n = sum(len(mgmt.get(k) or []) for k in ("kick", "promote", "demote"))
-    return {"cake_days": cake, "due_cases": cases, "management_actionable": mgmt_n}
+    return {"cake_days": cake, "management_actionable": mgmt_n}
 
 
 def classify(read: dict) -> dict:
@@ -233,20 +232,13 @@ def classify(read: dict) -> dict:
             "triggers": triggers,
         }
 
-    has_soft = (
-        bool(soft_lanes)
-        or bool(ctx["cake_days"])
-        or bool(ctx["due_cases"])
-        or ctx["management_actionable"]
-    )
+    has_soft = bool(soft_lanes) or bool(ctx["cake_days"]) or ctx["management_actionable"]
     if has_soft:
         bits = []
         if soft_lanes:
             bits.append(f"{len(soft_lanes)} soft signal(s)")
         if ctx["cake_days"]:
             bits.append(f"{len(ctx['cake_days'])} cake day(s)")
-        if ctx["due_cases"]:
-            bits.append(f"{len(ctx['due_cases'])} due case(s)")
         if ctx["management_actionable"]:
             bits.append(f"{ctx['management_actionable']} mgmt candidate(s)")
         return {"tier": "triage", "reason": "; ".join(bits), "triggers": triggers}
@@ -271,7 +263,7 @@ Decide SILENT when the signals are routine or already handled:
 - a member's milestone that falls inside their ~72h spotlight cooldown (they were already spotlighted recently)
 - anything already posted/covered today (check recent posts and spotlights)
 - a lone minor card-level or small trophy bump with nothing to group it with
-- standing leadership state (decision cases, promote/demote/kick candidates) that is not newly actionable — leadership has its own review cadence
+- standing leadership state (promote/demote/kick candidates) that is not newly actionable — leadership has its own review cadence
 - an anniversary/cake day that was already posted earlier today
 
 Decide POST only when something is genuinely fresh and worth a member seeing it now:
@@ -316,14 +308,6 @@ def _compact_read_for_triage(read: dict) -> str:
         # only cake days not yet celebrated today — an already-posted anniversary
         # must not tempt the triage into a re-post/escalation (over-escalation leak).
         "cake_days_today": _fresh_cake_days(read),
-        "due_decision_cases": [
-            {
-                k: c.get(k)
-                for k in ("case_id", "kind", "subject", "member_ref")
-                if isinstance(c, dict) and c.get(k)
-            }
-            for c in ((read.get("decision_cases") or {}).get("due") or [])
-        ],
         "recent_member_spotlights": (read.get("recent_member_spotlights") or [])[:12],
         "recent_agent_writes": (read.get("recent_agent_writes") or [])[:10],
         "channel_memory": read.get("channel_memory") or {},

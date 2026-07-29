@@ -702,11 +702,11 @@ def test_execute_tool_get_elixir_state_blocks_leadership_scope_in_interactive():
     assert result["error"] == "leadership_state_unavailable"
 
 
-def test_execute_tool_get_elixir_state_blocks_decision_cases_in_interactive():
+def test_execute_tool_get_elixir_state_blocks_leader_actions_in_interactive():
     result = json.loads(
         elixir_agent._execute_tool(
             "get_elixir_state",
-            {"aspect": "decision_cases"},
+            {"aspect": "leader_actions"},
             workflow="interactive",
         )
     )
@@ -714,14 +714,14 @@ def test_execute_tool_get_elixir_state_blocks_decision_cases_in_interactive():
     assert result["error"] == "leadership_state_unavailable"
 
 
-def test_execute_tool_get_elixir_state_reads_due_cases_for_clanops():
+def test_execute_tool_get_elixir_state_reads_leader_actions_for_clanops():
     with patch("elixir_agent.db") as mock_db:
-        mock_db.list_due_decision_cases.return_value = [
+        mock_db.list_leader_actions.return_value = [
             {
-                "case_id": 9,
-                "case_type": "inactivity_review",
+                "action_id": 9,
+                "action_type": "kick_recommendation",
                 "target_player_name": "xian",
-                "is_due": True,
+                "status": "proposed",
             }
         ]
 
@@ -729,19 +729,15 @@ def test_execute_tool_get_elixir_state_reads_due_cases_for_clanops():
             elixir_agent._execute_tool(
                 "get_elixir_state",
                 {
-                    "aspect": "decision_cases",
-                    "status": "due",
-                    "case_type": "inactivity_review",
+                    "aspect": "leader_actions",
+                    "status": "proposed",
                 },
                 workflow="clanops",
             )
         )
 
-    assert result["due"][0]["case_id"] == 9
-    mock_db.list_due_decision_cases.assert_called_once_with(
-        case_type="inactivity_review",
-        limit=25,
-    )
+    assert result["actions"][0]["action_id"] == 9
+    mock_db.list_leader_actions.assert_called_once_with(status="proposed", limit=25)
 
 
 def test_execute_tool_get_elixir_state_reads_awareness_for_leadership_workflow():

@@ -455,7 +455,7 @@ def auto_withdraw_leader_actions(
     if not clean_type or not clean_tag:
         return 0
     rows = conn.execute(
-        """SELECT action_id, case_id
+        """SELECT action_id
            FROM leader_action_recommendations
            WHERE action_type = ? AND target_player_tag = ?
              AND status = ? AND COALESCE(is_test, 0) = 0""",
@@ -485,17 +485,6 @@ def auto_withdraw_leader_actions(
             *action_ids,
         ),
     )
-    case_ids = sorted({int(row["case_id"]) for row in rows if row["case_id"] is not None})
-    if case_ids:
-        case_placeholders = ",".join("?" for _ in case_ids)
-        conn.execute(
-            f"""UPDATE decision_cases
-                SET status = 'dismissed', resolved_at = ?, resolution = ?,
-                    due_at = NULL, updated_at = ?
-                WHERE case_id IN ({case_placeholders})
-                  AND status NOT IN ('resolved', 'dismissed')""",
-            (now, clean_reason, now, *case_ids),
-        )
     # No conn.commit(): see create_leader_action_recommendation — the decorator
     # commits when it owns the conn; a mid-tick commit would break step atomicity.
     return len(action_ids)
@@ -1226,42 +1215,7 @@ def decide_leader_action(
     if status == ACTION_REJECTED:
         _mark_note_pending(conn, action["action_id"], clean_note)
     _reconcile_management_state(conn, action, status)
-    updated = get_leader_action_by_id(action["action_id"], conn=conn)
-    if updated and updated.get("case_id"):
-        try:
-            # Inlined at the v5.1 cut (storage.decision_cases retired with Gen B):
-            # the decision_cases table is carried, so the case-sync is two UPDATEs.
-            case_now = _db._utcnow()
-            case_status = "resolved" if status == ACTION_DONE else "dismissed"
-            default_note = (
-                "Leader accepted the recommended action."
-                if status == ACTION_DONE
-                else "Leader declined the recommended action."
-            )
-            conn.execute(
-                """UPDATE decision_cases
-                   SET status = ?, resolved_at = ?, resolution = ?,
-                       due_at = NULL, updated_at = ?
-                   WHERE case_id = ?""",
-                (
-                    case_status,
-                    case_now,
-                    clean_note or default_note,
-                    case_now,
-                    int(updated["case_id"]),
-                ),
-            )
-        except Exception:
-            # The card decision is the user action of record; case sync should
-            # not make the Discord reaction handler fail, but the split state
-            # must be visible for repair.
-            log.exception(
-                "leader_actions.case_sync failed: action_id=%s case_id=%s status=%s",
-                updated.get("action_id"),
-                updated.get("case_id"),
-                status,
-            )
-    return updated
+    return get_leader_action_by_id(action["action_id"], conn=conn)
 
 
 # Authoritative leave_source values written when a leader verifies a departure

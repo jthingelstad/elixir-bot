@@ -26,7 +26,6 @@ def _empty_read(**over):
         },
         "hard_post_signals": [],
         "cake_days_today": [],
-        "decision_cases": {"due": [], "open": []},
         "management": {"actionable": {"kick": [], "promote": [], "demote": []}},
         "due_revisits": [],
     }
@@ -189,11 +188,10 @@ def test_classify_triage_on_soft_milestone():
 
 
 def test_classify_triage_on_standing_context_only():
-    """Cake days / due cases / mgmt candidates are persistent standing state —
+    """Cake days / management candidates are persistent standing state —
     they route to (cheap) triage, never an unconditional deliberate."""
     for over in (
         {"cake_days_today": [{"member_ref": "Fullboat"}]},
-        {"decision_cases": {"due": [{"case_id": 366}], "open": []}},
         {"management": {"actionable": {"kick": ["#Z"], "promote": [], "demote": []}}},
     ):
         cls = gate.classify(_empty_read(**over))

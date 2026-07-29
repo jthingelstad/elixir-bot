@@ -57,14 +57,6 @@ def _bot():
     return _runtime_app().bot
 
 
-# How many due decision cases to *consider* per case type. This is the candidate
-# pool, NOT the post cap (that stays LEADERSHIP_ACTION_SCAN_MAX_ACTIONS): the scan
-# must be able to skip stale/ineligible cases (old deferred rows, departed members)
-# and still reach fresh eligible ones. When this equalled max_actions, a backlog of
-# old cases permanently occupied the window and starved newer eligible cases.
-LEADERSHIP_ACTION_DUE_CASE_SCAN_LIMIT = int(
-    os.getenv("LEADERSHIP_ACTION_DUE_CASE_SCAN_LIMIT", "50")
-)
 KICK_RECOMMENDATION_FRESH_JOIN_GRACE_DAYS = int(
     os.getenv("KICK_RECOMMENDATION_FRESH_JOIN_GRACE_DAYS", "7")
 )

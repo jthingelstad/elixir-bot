@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect Elixir's current event, awareness, war, and case state."""
+"""Inspect Elixir's current event, awareness, war, and leader-action state."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def _line_items(title: str, rows: list[dict], *, empty: str) -> list[str]:
             or row.get("summary")
             or row.get("event_type")
             or (f"L{row['loop_number']}" if row.get("loop_number") is not None else None)
-            or row.get("case_key")
+            or row.get("action_key")
             or row.get("rollup_key")
             or row.get("event_key")
         )
@@ -62,7 +62,7 @@ def _summary_payload(args) -> dict:
             days=args.days, scope=args.scope, limit=limit
         ),
         "war_season": db.get_war_season_snapshot(),
-        "decision_cases": db.decision_case_snapshot(open_limit=limit, due_limit=limit),
+        "leader_actions": db.list_leader_actions(status="proposed", limit=limit),
         "awareness": db.get_awareness_activity(limit=limit),
     }
 
@@ -90,15 +90,8 @@ def _print_summary(data: dict) -> None:
         print("- none")
     print("")
     for line in _line_items(
-        "Due Decision Cases",
-        data.get("decision_cases", {}).get("due") or [],
-        empty="none",
-    ):
-        print(line)
-    print("")
-    for line in _line_items(
-        "Open Decision Cases",
-        data.get("decision_cases", {}).get("open") or [],
+        "Open Leader Actions",
+        data.get("leader_actions") or [],
         empty="none",
     ):
         print(line)
@@ -139,18 +132,13 @@ def _war_payload(args) -> dict:
     return {"war_season": db.get_war_season_snapshot()}
 
 
-def _cases_payload(args) -> dict:
-    if args.status == "due":
-        return {"due": db.list_due_decision_cases(case_type=args.case_type, limit=args.limit)}
-    if args.status and args.status != "all":
-        return {
-            "cases": db.list_decision_cases(
-                statuses=(args.status,),
-                case_type=args.case_type,
-                limit=args.limit,
-            )
-        }
-    return db.decision_case_snapshot(open_limit=args.limit, due_limit=args.limit)
+def _actions_payload(args) -> dict:
+    return {
+        "actions": db.list_leader_actions(
+            status=None if args.status == "all" else args.status,
+            limit=args.limit,
+        )
+    }
 
 
 def _awareness_payload(args) -> dict:
@@ -178,7 +166,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command")
 
-    summary = sub.add_parser("summary", help="Show events, war, cases, and awareness activity.")
+    summary = sub.add_parser(
+        "summary", help="Show events, war, leader actions, and awareness activity."
+    )
     _add_common(summary)
     summary.add_argument("--days", type=int, default=7)
     summary.add_argument("--scope", choices=("public", "leadership"), default=None)
@@ -193,14 +183,13 @@ def build_parser() -> argparse.ArgumentParser:
     war = sub.add_parser("war", help="Show the current war-season projection.")
     _add_common(war)
 
-    cases = sub.add_parser("cases", help="Show open, due, or filtered decision cases.")
-    _add_common(cases)
-    cases.add_argument(
+    actions = sub.add_parser("actions", help="Show open or historical leader actions.")
+    _add_common(actions)
+    actions.add_argument(
         "--status",
-        choices=("all", "due", "open", "deferred", "resolved", "dismissed"),
-        default="all",
+        choices=("all", "proposed", "done", "rejected", "deferred"),
+        default="proposed",
     )
-    cases.add_argument("--case-type")
 
     awareness = sub.add_parser("awareness", help="Show current proactive decisions and posts.")
     _add_common(awareness)
@@ -225,8 +214,8 @@ def main(argv: list[str] | None = None) -> int:
         data = _events_payload(args)
     elif args.command == "war":
         data = _war_payload(args)
-    elif args.command == "cases":
-        data = _cases_payload(args)
+    elif args.command == "actions":
+        data = _actions_payload(args)
     elif args.command == "awareness":
         data = _awareness_payload(args)
     else:

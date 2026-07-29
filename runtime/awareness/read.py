@@ -24,7 +24,7 @@ from capabilities import game_modes as game_mode_capability
 from capabilities import management as management_capability
 from capabilities import war as war_capability
 from engine.event_contracts import hard_post_event_types, lane_by_event_type
-from storage import cases, events_read, leader_actions, revisits
+from storage import events_read, leader_actions, revisits
 
 log = logging.getLogger("elixir")
 
@@ -730,13 +730,6 @@ def _leader_action_board(conn) -> dict:
     }
 
 
-def _decision_cases(conn) -> dict:
-    """Compact due/open cases with no overlap — ``decision_case_snapshot``
-    strips the internal ``state`` blob and dedupes ``open`` against ``due``
-    ("due = needs attention now; open = already being monitored")."""
-    return cases.decision_case_snapshot(open_limit=25, due_limit=25, dedupe=True, conn=conn)
-
-
 def _management(conn) -> dict:
     """The engine's current promote/demote/kick verdicts — the authoritative
     source for management recommendations (see engine.management). Imported
@@ -867,9 +860,6 @@ def build_read(conn=None) -> dict:
                 {"mode_mix": [], "top_by_mode": {}, "window_days": _MODE_PULSE_DAYS},
             ),
             "cake_days_today": _load("cake_days_today", lambda: _cake_days_today(conn), []),
-            "decision_cases": _load(
-                "decision_cases", lambda: _decision_cases(conn), {"due": [], "open": []}
-            ),
             "channel_memory": _load("channel_memory", lambda: _channel_memory(conn), {}),
             "recent_member_spotlights": _load(
                 "recent_member_spotlights", lambda: _recent_member_spotlights(conn), []

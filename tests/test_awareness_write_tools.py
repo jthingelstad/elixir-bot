@@ -81,7 +81,7 @@ def test_member_state_decision_and_relay_tools_have_distinct_contracts():
 
     assert "away_until" in watch_properties
     assert "case_type" not in watch_properties
-    assert "case_type" in followup_properties
+    assert "action_type" in followup_properties
     assert tools["raise_clan_chat_relay"]["input_schema"]["required"] == ["copy"]
 
 
@@ -216,15 +216,8 @@ def test_loa_flow_records_engine_hold_and_clan_chat_relay(memdb):
     assert action["copy_current_text"] == relay["clan_chat_copy"]
 
 
-def test_followup_write_does_not_reopen_a_leader_closed_case(memdb):
-    """QA H21: an awareness write must not silently reopen a decision case
-    a leader deliberately resolved/dismissed.
-
-    Uses `inactivity_review` — the real type behind a removal review. This test
-    previously used an invented `kick_review`, which appears nowhere in
-    production code or data and is not in CASE_TYPES, so it exercised a case type
-    no reconciler owns — the exact defect class #208 closed.
-    """
+def test_followup_write_does_not_reopen_a_leader_closed_action(memdb):
+    """An awareness write must not reopen a leader-declined action."""
     db.snapshot_members([{"tag": "#ZZZ9", "name": "Rook", "role": "member"}])
     first = json.loads(
         tool_exec._execute_tool(
@@ -233,15 +226,20 @@ def test_followup_write_does_not_reopen_a_leader_closed_case(memdb):
                 "member_tag": "Rook",
                 "topic": "Removal review",
                 "recommendation": "Silent; review removal.",
-                "case_type": "inactivity_review",
+                "action_type": "kick_recommendation",
             },
             workflow="awareness",
         )
     )
-    case_id = first["case_id"]
-    # Leader dismisses the case.
-    db.resolve_decision_case(case_id, status="dismissed", resolution="Leader kept them.")
-    assert db.get_decision_case_by_id(case_id)["status"] == "dismissed"
+    action_id = first["action_id"]
+    db.decide_leader_action(
+        action_id,
+        status="rejected",
+        discord_user_id=1,
+        emoji="❌",
+        decision_note="Leader kept them.",
+    )
+    assert db.get_leader_action_by_id(action_id)["status"] == "rejected"
 
     # A later awareness write must NOT reopen it.
     json.loads(
@@ -251,20 +249,12 @@ def test_followup_write_does_not_reopen_a_leader_closed_case(memdb):
                 "member_tag": "Rook",
                 "topic": "Removal review",
                 "recommendation": "Still silent.",
-                "case_type": "inactivity_review",
+                "action_type": "kick_recommendation",
             },
             workflow="awareness",
         )
     )
-    assert db.get_decision_case_by_id(case_id)["status"] == "dismissed"
-
-    # The controlled re-nomination path (allow_reopen=True) still may.
-    db.upsert_member_review_case(
-        case_type="inactivity_review",
-        member={"tag": "#ZZZ9", "name": "Rook"},
-        allow_reopen=True,
-    )
-    assert db.get_decision_case_by_id(case_id)["status"] == "open"
+    assert db.get_leader_action_by_id(action_id)["status"] == "rejected"
 
 
 # ---------------------------------------------------------------------------

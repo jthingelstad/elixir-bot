@@ -17,7 +17,7 @@ from engine.management import management_read_summary
 from engine.readiness import generation_snapshot
 
 CAPABILITY_ID = "management_decisions"
-CONTRACT_VERSION = 2
+CONTRACT_VERSION = 3
 
 
 def _source(source):
@@ -83,14 +83,6 @@ def _board(source, *, conn=None) -> dict:
     ]
     open_actions = [action for action in open_actions if action not in held_actions]
     recent_actions = _invoke(source, "list_leader_actions", limit=15, conn=conn)
-    cases = _invoke(
-        source,
-        "decision_case_snapshot",
-        open_limit=25,
-        due_limit=25,
-        dedupe=True,
-        conn=conn,
-    )
     revisits = _invoke(source, "list_pending_revisits", limit=25, conn=conn)
     return {
         "verdicts": {
@@ -103,7 +95,6 @@ def _board(source, *, conn=None) -> dict:
             "open_actions": open_actions,
             "held_actions": held_actions,
             "recent_actions": recent_actions,
-            "decision_cases": cases,
             "pending_revisits": revisits,
         },
     }
@@ -158,7 +149,6 @@ def get_management_decisions(
         "sources": [
             "member_management",
             "leader_action_recommendations",
-            "decision_cases",
             "revisits",
         ],
         "data_generation": (generation_snapshot(conn) if conn is not None else None),
