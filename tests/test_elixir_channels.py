@@ -753,10 +753,6 @@ def test_arena_relay_leader_screenshot_is_observed():
         patch("runtime.channel_router.db.build_memory_context", return_value={}),
         patch("runtime.channel_router.db.save_message", return_value=111) as mock_save,
         patch(
-            "runtime.channel_router.db.save_arena_relay_screenshot_observation",
-            return_value={"screenshot_type": "boat_defense", "image_count": 1},
-        ) as mock_observation,
-        patch(
             "runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot",
             return_value={
                 "event_type": "arena_relay_screenshot_observation",
@@ -786,9 +782,6 @@ def test_arena_relay_leader_screenshot_is_observed():
         "arena_relay_screenshot_observation_input",
         "arena_relay_screenshot_observation",
     ]
-    mock_observation.assert_called_once()
-    assert mock_observation.call_args.kwargs["screenshot_type"] == "boat_defense"
-    assert mock_observation.call_args.kwargs["players"] == ["dez42"]
     message.reply.assert_awaited_once_with(
         "**👁️ Screenshot Read**\nVisible open boat-defense slots: at least 3."
     )
@@ -852,10 +845,6 @@ def test_arena_relay_screenshot_persists_structured_memories():
         patch(
             "runtime.channel_router._persist_screenshot_memories", return_value=1
         ) as mock_persist,
-        patch(
-            "runtime.channel_router.db.save_arena_relay_screenshot_observation",
-            return_value={"screenshot_type": "clan_chat", "image_count": 1},
-        ),
     ):
         asyncio.run(elixir.on_message(message))
 
@@ -953,10 +942,6 @@ def test_arena_relay_leader_multi_screenshot_corrects_media_types():
         patch("runtime.channel_router.db.upsert_discord_user"),
         patch("runtime.channel_router.db.build_memory_context", return_value={}),
         patch("runtime.channel_router.db.save_message", return_value=111),
-        patch(
-            "runtime.channel_router.db.save_arena_relay_screenshot_observation",
-            return_value={"screenshot_type": "unknown", "image_count": 3},
-        ),
         patch(
             "runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot",
             return_value={

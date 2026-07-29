@@ -318,28 +318,61 @@ _ensure_player = _ensure_member  # v5.1 name; same function
 def _ensure_thread(
     conn: sqlite3.Connection,
     scope: str,
-    channel_id=None,
-    discord_user_id=None,
-    member_id=None,
 ) -> int:
     scope_type, scope_key = _normalize_scope(scope)
     row = conn.execute(
         "SELECT thread_id FROM conversation_threads WHERE scope_type = ? AND scope_key = ?",
         (scope_type, scope_key),
     ).fetchone()
-    now = _utcnow()
     if row:
-        conn.execute(
-            "UPDATE conversation_threads SET channel_id = COALESCE(?, channel_id), discord_user_id = COALESCE(?, discord_user_id), member_id = COALESCE(?, member_id), last_active_at = ? WHERE thread_id = ?",
-            (channel_id, discord_user_id, member_id, now, row["thread_id"]),
-        )
         return row["thread_id"]
 
+    # #224 cutover seam: v21 still requires the two timestamp columns. The
+    # contract migration removes them after this build is live; the same code
+    # must operate on both sides of that deploy boundary.
+    thread_columns = {
+        column["name"]
+        for column in conn.execute("PRAGMA table_info(conversation_threads)").fetchall()
+    }
+    if {"created_at", "last_active_at"}.issubset(thread_columns):
+        now = _utcnow()
+        cur = conn.execute(
+            "INSERT INTO conversation_threads "
+            "(scope_type, scope_key, created_at, last_active_at) VALUES (?, ?, ?, ?)",
+            (scope_type, scope_key, now, now),
+        )
+        return cur.lastrowid
+
     cur = conn.execute(
-        "INSERT INTO conversation_threads (scope_type, scope_key, channel_id, discord_user_id, member_id, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (scope_type, scope_key, channel_id, discord_user_id, member_id, now, now),
+        "INSERT INTO conversation_threads (scope_type, scope_key) VALUES (?, ?)",
+        (scope_type, scope_key),
     )
     return cur.lastrowid
+
+
+def _ensure_channel(
+    conn: sqlite3.Connection, channel_id, channel_name=None, channel_kind=None
+) -> None:
+    """Satisfy the v21 channel FK until #224's contract migration lands."""
+    if channel_id is None:
+        return
+    table_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'discord_channels'"
+    ).fetchone()
+    if not table_exists:
+        return
+    channel_id = str(channel_id)
+    now = _utcnow()
+    conn.execute(
+        "INSERT INTO discord_channels "
+        "(channel_id, channel_name, channel_kind, first_seen_at, last_seen_at) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(channel_id) DO UPDATE SET "
+        "channel_name = COALESCE(excluded.channel_name, discord_channels.channel_name), "
+        "channel_kind = COALESCE(excluded.channel_kind, discord_channels.channel_kind), "
+        "last_seen_at = excluded.last_seen_at",
+        (channel_id, channel_name, channel_kind, now, now),
+    )
 
 
 def _get_current_membership(conn: sqlite3.Connection, player_tag: str):
@@ -511,28 +544,6 @@ def _parse_optional_int(
     if not (minimum <= parsed <= maximum):
         raise ValueError(f"{field_name} must be between {minimum} and {maximum}")
     return parsed
-
-
-def _ensure_channel(
-    conn: sqlite3.Connection, channel_id, channel_name=None, channel_kind=None
-) -> None:
-    if channel_id is None:
-        return
-    channel_id = str(channel_id)
-    now = _utcnow()
-    row = conn.execute(
-        "SELECT channel_id FROM discord_channels WHERE channel_id = ?", (channel_id,)
-    ).fetchone()
-    if row:
-        conn.execute(
-            "UPDATE discord_channels SET channel_name = COALESCE(?, channel_name), channel_kind = COALESCE(?, channel_kind), last_seen_at = ? WHERE channel_id = ?",
-            (channel_name, channel_kind, now, channel_id),
-        )
-    else:
-        conn.execute(
-            "INSERT INTO discord_channels (channel_id, channel_name, channel_kind, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
-            (channel_id, channel_name, channel_kind, now, now),
-        )
 
 
 def _store_raw_payload(
@@ -982,7 +993,6 @@ _FACADE_EXPORT_GROUPS = {
         "list_runtime_job_status",
         "save_runtime_job_status",
     ),
-    "storage.screenshot_observations": ("save_arena_relay_screenshot_observation",),
 }
 
 

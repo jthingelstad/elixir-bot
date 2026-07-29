@@ -57,13 +57,7 @@ def save_message(
             if link:
                 member_id = link["member_id"]
     _ensure_channel(conn, channel_id, channel_name=channel_name, channel_kind=channel_kind)
-    thread_id = _ensure_thread(
-        conn,
-        scope,
-        channel_id=str(channel_id) if channel_id is not None else None,
-        discord_user_id=str(discord_user_id) if discord_user_id is not None else None,
-        member_id=member_id,
-    )
+    thread_id = _ensure_thread(conn, scope)
     now = _utcnow()
     summary = summary if summary is not None else (content[:200] if content else "")
     conn.execute(
@@ -86,15 +80,11 @@ def save_message(
         ),
     )
     message_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
-    conn.execute(
-        "UPDATE conversation_threads SET last_active_at = ? WHERE thread_id = ?",
-        (now, thread_id),
-    )
     if channel_id is not None and author_type == "assistant":
         conn.execute(
-            "INSERT INTO channel_state (channel_id, last_elixir_post_at, last_summary) VALUES (?, ?, ?) "
-            "ON CONFLICT(channel_id) DO UPDATE SET last_elixir_post_at = excluded.last_elixir_post_at, last_summary = excluded.last_summary",
-            (str(channel_id), now, summary),
+            "INSERT INTO channel_state (channel_id, last_summary) VALUES (?, ?) "
+            "ON CONFLICT(channel_id) DO UPDATE SET last_summary = excluded.last_summary",
+            (str(channel_id), summary),
         )
     if discord_user_id is not None:
         importance = 2 if workflow in {"clanops", "reception"} else 1

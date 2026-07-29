@@ -498,72 +498,6 @@ def _persist_screenshot_memories(memories, channel_id, workflow, source_message_
     return saved
 
 
-def _coerce_observation_list(value) -> list:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    return [value]
-
-
-def _screenshot_observation_payload(result: dict, content: str, image_count: int) -> dict:
-    observation = result.get("observation") if isinstance(result.get("observation"), dict) else {}
-    screenshot_type = (
-        observation.get("screenshot_type")
-        or observation.get("type")
-        or result.get("screenshot_type")
-        or "unknown"
-    )
-    players = (
-        observation.get("players")
-        or observation.get("visible_players")
-        or result.get("players")
-        or result.get("visible_players")
-        or []
-    )
-    actionable_facts = (
-        observation.get("actionable_facts")
-        or observation.get("facts")
-        or result.get("actionable_facts")
-        or []
-    )
-    uncertainty = (
-        observation.get("uncertainty")
-        or observation.get("unclear")
-        or result.get("uncertainty")
-        or ""
-    )
-    return {
-        "screenshot_type": screenshot_type,
-        "summary": result.get("summary") or content[:220],
-        "content": content,
-        "players": _coerce_observation_list(players),
-        "actionable_facts": _coerce_observation_list(actionable_facts),
-        "uncertainty": str(uncertainty) if uncertainty else None,
-        "image_count": image_count,
-    }
-
-
-def _persist_arena_relay_screenshot_observation(
-    result: dict,
-    content: str,
-    *,
-    message,
-    image_metadata: list[dict],
-):
-    payload = _screenshot_observation_payload(result, content, len(image_metadata))
-    return db.save_arena_relay_screenshot_observation(
-        source_message_id=message.id,
-        channel_id=message.channel.id,
-        channel_name=getattr(message.channel, "name", None),
-        author_discord_user_id=message.author.id,
-        author_display_name=getattr(message.author, "display_name", None),
-        **payload,
-        image_metadata=image_metadata,
-        result=result,
-    )
-
-
 def _message_observed_at(message) -> str | None:
     created_at = getattr(message, "created_at", None)
     if created_at is None:
@@ -783,23 +717,6 @@ async def _handle_arena_relay_screenshot_observation(
                 discord_message_id=_primary_discord_message_id(sent),
                 raw_json={"input_message_id": user_msg_id, "image_blocks_read": 0},
             )
-            await asyncio.to_thread(
-                db.save_arena_relay_screenshot_observation,
-                source_message_id=message.id,
-                channel_id=message.channel.id,
-                channel_name=getattr(message.channel, "name", None),
-                author_discord_user_id=message.author.id,
-                author_display_name=getattr(message.author, "display_name", None),
-                screenshot_type="unreadable",
-                summary="Elixir could not read the screenshot bytes.",
-                content=content,
-                image_count=0,
-                image_metadata=image_metadata,
-                result={
-                    "event_type": "arena_relay_screenshot_observation",
-                    "content": content,
-                },
-            )
             return True
 
         memory_context = await asyncio.to_thread(
@@ -873,23 +790,6 @@ async def _handle_arena_relay_screenshot_observation(
                 )
             except Exception:
                 _log.error("arena relay screenshot memory persistence failed", exc_info=True)
-
-        try:
-            observation = await asyncio.to_thread(
-                _persist_arena_relay_screenshot_observation,
-                result,
-                content,
-                message=message,
-                image_metadata=image_metadata,
-            )
-            _log.info(
-                "arena_relay_screenshot_observation_saved source_message_id=%s type=%s images=%s",
-                message.id,
-                observation.get("screenshot_type"),
-                observation.get("image_count"),
-            )
-        except Exception:
-            _log.error("arena relay screenshot observation persistence failed", exc_info=True)
 
         sent = await app._reply_text(message, content)
         await asyncio.to_thread(
