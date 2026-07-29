@@ -57,7 +57,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/awareness/loop.py": 8,
     "runtime/awareness/read.py": 1,
     "runtime/awareness/store.py": 1,
-    "runtime/channel_router.py": 21,
+    "runtime/channel_router.py": 20,
     "runtime/discord_commands.py": 7,
     "runtime/discord_posting.py": 2,
     "runtime/elder_standing.py": 1,

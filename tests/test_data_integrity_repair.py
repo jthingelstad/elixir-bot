@@ -85,24 +85,8 @@ def test_integrity_repair_dry_run_apply_and_idempotence(engine_conn):
     )
     c.commit()
 
-    # Recreate the retired-channel residue: FK enforcement was disabled during
-    # the historical reshape, which is exactly how live reached this state.
-    c.execute("PRAGMA foreign_keys=OFF")
-    c.execute(
-        "INSERT INTO conversation_threads "
-        "(thread_id,scope_type,scope_key,channel_id,created_at,last_active_at) "
-        "VALUES (9001,'channel','retired','missing-channel','2026-07-01','2026-07-02')"
-    )
-    c.execute(
-        "INSERT INTO messages "
-        "(message_id,thread_id,channel_id,author_type,content,created_at) "
-        "VALUES (9001,9001,'missing-channel','assistant','old','2026-07-02')"
-    )
-    c.commit()
-    c.execute("PRAGMA foreign_keys=ON")
-
     before = audit(c)
-    assert before["foreign_key_violations"] == 2
+    assert before["foreign_key_violations"] == 0
     assert before["membership_overlaps"] == 1
     assert before["profile_best_projection_mismatches"] == 1
     assert before["daily_best_drops_to_null"] == 1
@@ -137,10 +121,6 @@ def test_integrity_repair_dry_run_apply_and_idempotence(engine_conn):
     assert (
         c.execute("SELECT created_date FROM war_weeks WHERE season_id=190").fetchone()[0]
         == "2026-07-01T09:37:00Z"
-    )
-    assert (
-        c.execute("SELECT channel_id FROM conversation_threads WHERE thread_id=9001").fetchone()[0]
-        is None
     )
     assert (
         c.execute("SELECT COUNT(*) FROM clan_memberships WHERE player_tag='#OVER'").fetchone()[0]

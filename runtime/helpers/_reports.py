@@ -212,7 +212,6 @@ _DB_STATUS_MEMORY_TABLES = {
     "memories_fts",
     "conversation_threads",
     "memory_episodes",
-    "memory_facts",
     "messages",
 }
 

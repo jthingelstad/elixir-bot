@@ -277,21 +277,6 @@ def normalize_war_timestamps(conn) -> int:
     return changed
 
 
-def repair_retired_channel_references(conn) -> int:
-    changed = 0
-    for table in ("conversation_threads", "messages"):
-        cursor = conn.execute(
-            f"""UPDATE {table} SET channel_id = NULL
-                  WHERE channel_id IS NOT NULL
-                    AND NOT EXISTS (
-                        SELECT 1 FROM discord_channels dc
-                         WHERE dc.channel_id = {table}.channel_id
-                    )"""
-        )
-        changed += cursor.rowcount
-    return changed
-
-
 def repair_membership_overlaps(conn) -> int:
     # Fourteen synthetic cutover rows overlap a better historical/manual row.
     # The fifteenth overlap is the inverse: a broad manual-clear bootstrap row
@@ -330,7 +315,6 @@ def run_repair(conn, *, apply: bool) -> dict:
             "player_current_state_rows": repair_current_player_projection(conn),
             "player_daily_metrics_rows": repair_player_daily_metrics(conn),
             "war_timestamp_values": normalize_war_timestamps(conn),
-            "retired_channel_references": repair_retired_channel_references(conn),
             "membership_rows_removed": repair_membership_overlaps(conn),
         }
         after = audit(conn)

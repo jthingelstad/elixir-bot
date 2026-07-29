@@ -536,8 +536,7 @@ def get_channel_state(
     channel_id: str | int, conn: Optional[sqlite3.Connection] = None
 ) -> Optional[dict]:
     row = conn.execute(
-        "SELECT channel_id, last_elixir_post_at, last_topics_json, recent_style_notes_json, last_summary "
-        "FROM channel_state WHERE channel_id = ?",
+        "SELECT channel_id, last_summary FROM channel_state WHERE channel_id = ?",
         (str(channel_id),),
     ).fetchone()
     return dict(row) if row else None
