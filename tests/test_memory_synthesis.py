@@ -554,6 +554,60 @@ def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
     assert "contradiction_cards=1" in mock_success.call_args.args[1]
 
 
+def test_memory_synthesis_cycle_keeps_success_when_arena_relay_is_unconfigured():
+    """An optional contradiction card must not discard a completed synthesis."""
+    plan = {
+        "digest": "This week the clan pushed hard.",
+        "arc_memories": [],
+        "stale_memory_ids": [],
+        "contradictions": [
+            {
+                "memory_id": 42,
+                "stored": "Leader context says a member is away.",
+                "live": "The current roster cannot verify that context.",
+                "category": "human_context",
+                "needs_leader_review": True,
+            }
+        ],
+    }
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._memory.asyncio.to_thread", side_effect=fake_to_thread),
+        patch(
+            "runtime.jobs._memory._build_memory_synthesis_context",
+            return_value={"week_window": {"war_week_id": "131:2"}},
+        ),
+        patch("runtime.jobs._memory.elixir_agent.run_memory_synthesis", return_value=plan),
+        patch(
+            "runtime.jobs._memory._apply_memory_synthesis_plan",
+            return_value={
+                "arcs_written": 0,
+                "stale_expired": 0,
+                "contradictions_flagged": 1,
+                "contradictions_auto_expired": 0,
+                "contradictions_leader_review": 1,
+                "arcs_requested": 0,
+                "stale_requested": 0,
+                "dry_run": False,
+            },
+        ),
+        patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
+        patch("runtime.jobs._memory.upsert_weekly_summary_memory") as mock_memory,
+        patch("runtime.jobs._memory.prompts.discord_singleton_lane", return_value=None),
+        patch("runtime.jobs._memory.bot.get_channel") as mock_channel,
+        patch("runtime.jobs._memory.runtime_status.mark_job_start"),
+        patch("runtime.jobs._memory.runtime_status.mark_job_success") as mock_success,
+    ):
+        asyncio.run(_memory_synthesis_cycle())
+
+    mock_memory.assert_called_once()
+    mock_channel.assert_not_called()
+    assert "contradiction_cards=0" in mock_success.call_args.args[1]
+
+
 def test_memory_synthesis_cycle_quiet_week_posts_nothing():
     """No contradictions → no Discord output at all."""
     plan = {

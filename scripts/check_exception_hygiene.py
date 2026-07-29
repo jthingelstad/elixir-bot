@@ -70,7 +70,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/jobs/_core.py": 15,
     "runtime/jobs/_intel.py": 4,
     "runtime/jobs/_maintenance.py": 4,
-    "runtime/jobs/_memory.py": 22,
+    "runtime/jobs/_memory.py": 23,  # +1: optional contradiction-card channel lookup fails soft (#229)
     "runtime/jobs/_promotion.py": 3,
     "runtime/jobs/_tournament.py": 9,  # autowatch scan + clan-chat relay; -1 with the retired tournament_events emitter
     "runtime/leader_action_feedback.py": 1,
