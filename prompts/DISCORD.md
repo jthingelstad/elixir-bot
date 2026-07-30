@@ -116,7 +116,7 @@ Elixir's recruiting copy channel.
 - Messages should be easy to copy, current, and grounded in real clan stats and identity.
 - Default voice should sound like a real clan member recruiting on behalf of POAP KINGS.
 - Encourage members to help recruit by making the copy easy to reuse or lightly customize.
-- For Discord recruiting copy, the bolded subject/title line should end with the required trophies in square brackets, like `[2000]`.
+- For Discord recruiting copy, the bolded subject/title line should end with the required trophies in square brackets, like `[7000]` — substitute the CURRENT floor from CLAN.md, never this example's number.
 - This channel exists to help members spread the word about what makes POAP KINGS different.
 
 ## #clan-chat

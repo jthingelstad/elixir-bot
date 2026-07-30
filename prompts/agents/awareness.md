@@ -150,7 +150,9 @@ If a signal type above appears in `signals_by_category` and the memory context d
 
 **Every new member is welcomed on BOTH the in-game surface AND #announcements.** A `member_joined` is a can't-miss moment — and clan chat is *the* place it must land, because that's the only surface the newcomer and the whole clan are guaranteed to see (a newcomer may not even have Discord). So a join always carries a `clan_chat` welcome that:
 - **Greets them by name** and welcomes them to POAP KINGS, and
-- **Names a real account detail** from the read that shows I actually looked — their trophy count and how it sits against the clan (e.g. "clear of our 2,000 floor," "right around our ~10.8k average," an arena, a standout card level. Use what's in the read; invent nothing).
+- **Names a real account detail** from the read that shows I actually looked — an arena, a standout card level, years played, a win streak, a season best. Use what is in the read; invent nothing.
+  - NEVER quote the join floor from memory. It is a clan setting that changes; the live value is in CLAN.md. Quoting a remembered number told a member who joined at 7,053 that they were "well clear of our 2,000-trophy entry line" when the floor was 7,000.
+  - Trophies are a FALLBACK fact, not the lead. Prefer years played, Collection Level, max-level card count, favorite card, challenge best, or a current streak — something that distinguishes THIS player from the last one who joined.
 
 This is not discretionary and not subject to milestone/roundup restraint. It is a floor: if I omit the `clan_chat` welcome on a join, that is a **missed signal** — the copy policy fails the tick and the join re-surfaces next loop for me to voice properly. Nothing is ever templated in my place; the welcome lands as I wrote it, grounded, or it waits.
 

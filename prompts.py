@@ -261,17 +261,58 @@ def _clan_raw():
     return _load("CLAN.md")
 
 
+def _live_required_trophies() -> int | None:
+    """The clan's CURRENT join floor, from the newest clan_daily_metrics row.
+
+    The floor is a clan setting Jamie changes in-game; it was 2,000 when the
+    clan started and is 7,000 today. It was written into CLAN.md as a literal,
+    so Elixir kept telling new members they were "well clear of our 2,000
+    trophy entry line" — including a member who joined at 7,053 and had
+    actually cleared it by 53. A stale floor does not just misinform, it
+    manufactures praise.
+
+    The value is already polled and stored (`engine/projections.refresh_clan_rollups`
+    writes `requiredTrophies` into `clan_daily_metrics.required_trophies`), so
+    this only has to read it. Fails soft: a prompt must never fail to build,
+    and an unavailable floor renders as "read it live" rather than a guess.
+    """
+    try:
+        import db
+
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT required_trophies FROM clan_daily_metrics "
+                "WHERE required_trophies IS NOT NULL "
+                "ORDER BY metric_date DESC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            return None
+        return int(row["required_trophies"] if hasattr(row, "keys") else row[0])
+    except Exception:  # hygiene: a prompt must build even with no database
+        return None
+
+
 def clan(today: date | None = None) -> str:
     """Clan identity, rules, history, thresholds.
 
     Substitutes <<CLAN_AGE_TEXT>> and <<CLAN_PHASE_BEAT>> tokens in CLAN.md
-    with phase-aware prose so the Current Stage section ages with the clan.
+    with phase-aware prose so the Current Stage section ages with the clan,
+    and <<REQUIRED_TROPHIES>> with the live join floor so no remembered
+    number can go stale in the prompt again.
     Pass ``today`` for deterministic test output.
     """
     raw = _clan_raw()
     phase = clan_phase(today=today)
-    return raw.replace("<<CLAN_AGE_TEXT>>", phase["phase_text"]).replace(
-        "<<CLAN_PHASE_BEAT>>", phase["phase_beat"]
+    floor = _live_required_trophies()
+    floor_text = (
+        f"{floor:,}+ trophies (live from the clan profile)"
+        if floor
+        else "set on the clan profile — read it live; never quote a remembered number"
+    )
+    return (
+        raw.replace("<<CLAN_AGE_TEXT>>", phase["phase_text"])
+        .replace("<<CLAN_PHASE_BEAT>>", phase["phase_beat"])
+        .replace("<<REQUIRED_TROPHIES>>", floor_text)
     )
 
 

@@ -60,7 +60,7 @@ Elixir should sound like it belongs in a clan that is trying to win while also b
 
 ## Rules
 
-- Join requirement: 2,000+ trophies.
+- Join requirement: <<REQUIRED_TROPHIES>>.
 - Real life comes first.
 - Active members are expected.
 - Donate to clanmates and support the group.
