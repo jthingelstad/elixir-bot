@@ -13,7 +13,7 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 25
+CURRENT_SCHEMA_VERSION = 26
 EXPECTED_TABLE_COUNT = 59
 
 
@@ -1315,6 +1315,45 @@ def _apply_v25(conn: sqlite3.Connection) -> None:
         )
 
 
+def _apply_v26(conn: sqlite3.Connection) -> None:
+    """Repair battle dedup keys broken by the v25 timestamp normalization.
+
+    `engine/ingest.py` builds the key as
+    `{player_tag}:{battle_time}:{opponent_tag}`, so the key is only stable while
+    battle_time's FORMAT is stable. v25 converted that column from CR-compact to
+    ISO-Z and rewrote the column but not the key, so the same battle re-polled
+    afterwards produced a DIFFERENT key:
+
+        #20JJJ2CCRU:20260730T031613.000Z:#UQQ20UJU2   (stored before v25)
+        #20JJJ2CCRU:2026-07-30T03:16:13Z:#UQQ20UJU2   (built after v25)
+
+    INSERT OR IGNORE saw no collision and inserted a second row. The battlelog
+    re-serves a player's last 25 battles every poll, so this duplicated a real
+    battle exactly once each — 1,348 rows before it was caught, inflating every
+    count over battle_events (card plays, activity windows, war participation).
+    Kick logic was spared only because it reads MAX(battle_time), not COUNT(*).
+
+    Keeps the earliest row per real battle so original observed_at survives,
+    then REBUILDS every key from the columns rather than string-patching the old
+    format — that way the key is derived from the same values it claims to
+    describe, and cannot drift from them again.
+    """
+    conn.execute(
+        """DELETE FROM battle_events
+            WHERE rowid NOT IN (
+                SELECT MIN(rowid) FROM battle_events
+                 GROUP BY player_tag, battle_time, COALESCE(opponent_tag, '')
+            )"""
+    )
+    conn.execute(
+        """UPDATE battle_events
+              SET dedup_key = player_tag || ':' || battle_time || ':'
+                              || COALESCE(opponent_tag, '')
+            WHERE dedup_key <> player_tag || ':' || battle_time || ':'
+                               || COALESCE(opponent_tag, '')"""
+    )
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1549,6 +1588,14 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         try:
             _apply_v25(conn)
             conn.execute("PRAGMA user_version = 25")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    if version < 26:
+        try:
+            _apply_v26(conn)
+            conn.execute("PRAGMA user_version = 26")
             conn.commit()
         except Exception:
             conn.rollback()
