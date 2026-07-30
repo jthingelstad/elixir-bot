@@ -923,6 +923,7 @@ _FACADE_EXPORT_GROUPS = {
         "decide_leader_action_by_message",
         "expire_departure_verification_cards",
         "get_leader_action_by_id",
+        "get_leader_action_by_message",
         "has_recent_leader_action",
         "leader_action_decision_stats",
         "list_interpreted_leader_actions",

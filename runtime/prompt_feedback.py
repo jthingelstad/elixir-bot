@@ -156,6 +156,32 @@ async def handle_raw_reaction_add(payload) -> None:
                         await app._member_outreach_decision(action, action_status)
                     except Exception:
                         log.exception("member outreach decision handling failed")
+            else:
+                # None now covers three cases, and two of them mean the card on
+                # screen is stale: it was already decided (the open-card guard
+                # refused), or it is a classification card that resolves only
+                # via its own buttons. Reactions have no interaction token, so
+                # the only correction available is to re-render the card from
+                # the current row — otherwise the reaction just sits there and
+                # the leader believes it landed.
+                stale = await asyncio.to_thread(db.get_leader_action_by_message, payload.message_id)
+                if stale:
+                    log.info(
+                        "leader_action_reaction_ignored action_id=%s status=%s "
+                        "decided_by=%s message_id=%s reactor=%s",
+                        stale.get("action_id"),
+                        stale.get("status"),
+                        stale.get("decided_by_discord_user_id"),
+                        payload.message_id,
+                        payload.user_id,
+                    )
+                    await refresh_leader_action_card(app.bot, stale)
+                else:
+                    log.info(
+                        "leader_action_reaction_unmatched message_id=%s reactor=%s",
+                        payload.message_id,
+                        payload.user_id,
+                    )
             return
     feedback_value = feedback_value_for_emoji(getattr(payload, "emoji", None))
     if not feedback_value:
