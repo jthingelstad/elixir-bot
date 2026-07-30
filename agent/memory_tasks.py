@@ -422,66 +422,8 @@ _SIGNAL_FACT_MAP = {
 }
 
 
-def store_observation_facts(
-    signals: list[dict], channel_id: str | int | None = None, conn=None
-) -> int:
-    """Store structured observation facts from signals. Returns count stored."""
-    from db import get_connection
-    from storage.contextual_memory import upsert_summary_memory
-
-    saved = 0
-    # members read uses an operational conn; the memory write uses the caller's
-    # conn (None -> memory DB).
-    mem_conn = conn
-    close = conn is None
-    op_conn = conn or get_connection()
-    try:
-        for signal in signals or []:
-            tag = signal.get("tag")
-            if not tag:
-                continue
-            signal_type = signal.get("type")
-            mapper = _SIGNAL_FACT_MAP.get(signal_type)
-            if not mapper:
-                continue
-            fact = mapper(signal)
-            if not fact:
-                continue
-            # v5.1: members/member_id are gone from the engine DB; the memory
-            # DB's legacy member_id link column is the deferred pass's to
-            # reconcile — member_tag on the link is the durable key.
-            member_id = None
-            try:
-                result = upsert_summary_memory(
-                    event_type=fact["event_type"],
-                    event_id=fact["event_id"],
-                    title=fact["title"],
-                    body=fact["body"],
-                    scope=fact["scope"],
-                    created_by="elixir:observation",
-                    tags=fact.get("tags"),
-                    member_tag=tag,
-                    member_id=member_id,
-                    metadata={"channel_id": str(channel_id)} if channel_id else None,
-                    conn=mem_conn,
-                )
-                if result:
-                    saved += 1
-            except sqlite3.Error, KeyError, TypeError:
-                log.warning(
-                    "store_observation_facts: failed for signal %s",
-                    signal_type,
-                    exc_info=True,
-                )
-        return saved
-    finally:
-        if close:
-            op_conn.close()
-
-
 __all__ = [
     "distill_summary",
     "extract_inference_facts",
     "save_inference_facts",
-    "store_observation_facts",
 ]

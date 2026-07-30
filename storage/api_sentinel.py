@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from db import _json_or_none, _rowdicts, _utcnow, managed_connection
+from db import _json_or_none, _utcnow, managed_connection
 
 
 def _json_kind(value) -> str:
@@ -308,37 +308,3 @@ def bootstrap_api_sentinel_baseline(conn=None) -> dict:
         "payloads": len(rows),
         "observations": observation_count,
     }
-
-
-@managed_connection
-def list_api_sentinel_observations(
-    *,
-    sentinel_type: str | None = None,
-    limit: int = 50,
-    conn=None,
-) -> list[dict]:
-    params: list[object] = []
-    where = ""
-    if sentinel_type:
-        where = "WHERE sentinel_type = ?"
-        params.append(sentinel_type)
-    params.append(max(1, min(int(limit or 50), 500)))
-    rows = conn.execute(
-        f"""
-        SELECT observation_id, sentinel_type, scope, name, endpoint, entity_key,
-               first_seen_at, last_seen_at, sample_json, announced_signal_key,
-               created_at, updated_at
-        FROM api_sentinel_observations
-        {where}
-        ORDER BY first_seen_at DESC, observation_id DESC
-        LIMIT ?
-        """,
-        tuple(params),
-    ).fetchall()
-    result = _rowdicts(rows)
-    for item in result:
-        try:
-            item["sample"] = json.loads(item.pop("sample_json") or "{}")
-        except TypeError, ValueError, json.JSONDecodeError:
-            item["sample"] = {}
-    return result

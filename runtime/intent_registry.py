@@ -266,10 +266,6 @@ def get_route(key: str) -> dict | None:
     return None
 
 
-def routes_for_workflow(workflow: str) -> list[dict]:
-    return [r for r in ROUTES if workflow in r["workflows"]]
-
-
 def help_routes_for_workflow(workflow: str) -> list[dict]:
     """Routes worth showing in a user-facing help report for this workflow."""
     excluded = {"not_for_bot", "llm_chat"}

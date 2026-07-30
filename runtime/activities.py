@@ -503,10 +503,6 @@ def schedule_specs_from_registry(runtime_module: Any) -> list[dict[str, Any]]:
     return specs
 
 
-def manual_activity_commands() -> list[str]:
-    return [activity.activity_key for activity in _ACTIVITIES if activity.manual_trigger_allowed]
-
-
 def manual_activity_choices() -> list[tuple[str, str]]:
     labels: list[tuple[str, str]] = []
     for activity in _ACTIVITIES:
@@ -547,7 +543,6 @@ __all__ = [
     "get_activity",
     "list_registered_activities",
     "manual_activity_choices",
-    "manual_activity_commands",
     "normalize_activity_key",
     "register_scheduled_activities",
     "resolve_activity",

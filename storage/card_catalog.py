@@ -265,13 +265,6 @@ def get_card_by_name(name: str, conn=None) -> dict | None:
 
 
 @managed_connection
-def get_all_cards(conn=None) -> list[dict]:
-    """Return the full card catalog."""
-    rows = conn.execute("SELECT * FROM card_catalog ORDER BY name").fetchall()
-    return [_row_to_dict(r) for r in rows]
-
-
-@managed_connection
 def catalog_count(conn=None) -> int:
     """Return the number of cards in the catalog."""
     row = conn.execute("SELECT COUNT(*) AS cnt FROM card_catalog").fetchone()

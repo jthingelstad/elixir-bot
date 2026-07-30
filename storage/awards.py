@@ -40,16 +40,13 @@ def _fold_award_names(rows: list[dict]) -> list[dict]:
 __all__ = [
     "insert_award",
     "get_member_trophy_case",
-    "get_awards_by_season",
     "get_iron_king_candidates",
     "get_season_donation_leaderboard",
     "get_rookie_mvp_candidates",
     "get_season_awards_standings",
     "get_award_races",
-    "get_war_participant_candidates",
     "list_awards",
     "award_leaderboard",
-    "season_final_section_index",
     "season_is_complete",
 ]
 
@@ -185,20 +182,6 @@ def award_leaderboard(
     return _fold_award_names(_rowdicts(rows))
 
 
-@managed_connection
-def get_awards_by_season(season_id: int, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    rows = conn.execute(
-        "SELECT a.award_id, a.award_type, a.season_id, a.section_index, "
-        "a.player_tag AS member_id, a.player_tag, a.rank, a.metric_value, a.metric_unit, "
-        "a.metadata_json, a.awarded_at, COALESCE(p.display_name, p.current_name) AS player_name "
-        "FROM awards a LEFT JOIN players p ON p.player_tag = a.player_tag "
-        "WHERE a.season_id = ? "
-        "ORDER BY a.award_type ASC, a.rank ASC",
-        (int(season_id),),
-    ).fetchall()
-    return _fold_award_names(_rowdicts(rows))
-
-
 # -- season helpers ----------------------------------------------------------
 
 
@@ -222,17 +205,6 @@ def _season_bounds(conn, season_id: int) -> tuple[Optional[str], Optional[str]]:
     if not first:
         return None, None
     return first["created_date"], last["end_date"] if last else None
-
-
-@managed_connection
-def season_final_section_index(
-    season_id: int, conn: Optional[sqlite3.Connection] = None
-) -> Optional[int]:
-    row = conn.execute(
-        "SELECT MAX(section_index) AS final FROM war_weeks WHERE season_id = ?",
-        (int(season_id),),
-    ).fetchone()
-    return row["final"] if row and row["final"] is not None else None
 
 
 @managed_connection
@@ -397,40 +369,6 @@ def get_rookie_mvp_candidates(
         for entry in compute_season_award_outcome(conn, season_id)["rookie_mvps"][
             : max(1, int(limit))
         ]
-    ]
-
-
-@managed_connection
-def get_war_participant_candidates(
-    season_id: Optional[int] = None,
-    conn: Optional[sqlite3.Connection] = None,
-) -> list[dict]:
-    """Every member with any season fame — the silent war_participant accrual
-    (Q5: no post, rows only)."""
-    season_id = season_id if season_id is not None else get_current_season_id(conn=conn)
-    if season_id is None:
-        return []
-    rows = conn.execute(
-        f"""
-        SELECT wp.player_tag AS tag, MAX(m.current_name) AS name,
-               SUM(COALESCE(wp.fame, 0)) AS total_points
-        FROM war_participation wp
-        JOIN players m ON m.player_tag = wp.player_tag
-        WHERE wp.season_id = ? AND {_ACTIVE}
-        GROUP BY wp.player_tag
-        HAVING total_points > 0
-        ORDER BY total_points DESC
-        """,
-        (int(season_id),),
-    ).fetchall()
-    return [
-        {
-            "tag": _canon_tag(r["tag"]),
-            "name": r["name"],
-            "member_id": _canon_tag(r["tag"]),
-            "total_points": r["total_points"] or 0,
-        }
-        for r in rows
     ]
 
 

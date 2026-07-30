@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from db import (
     CONVERSATION_MAX_PER_SCOPE,
-    CONVERSATION_RETENTION_DAYS,
     _ensure_member,
     _ensure_thread,
     _json_or_none,
@@ -629,37 +627,3 @@ def get_llm_call(call_id: int, conn: Optional[sqlite3.Connection] = None) -> Opt
         except TypeError, ValueError:
             out[key] = None
     return out
-
-
-@managed_connection
-def list_llm_calls(
-    limit: int = 100,
-    workflow: Optional[str] = None,
-    model: Optional[str] = None,
-    conn: Optional[sqlite3.Connection] = None,
-) -> list[dict]:
-    clauses = []
-    params = []
-    if workflow:
-        clauses.append("workflow = ?")
-        params.append(workflow)
-    if model:
-        clauses.append("model = ?")
-        params.append(model)
-    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-    params.append(limit)
-    rows = conn.execute(
-        f"SELECT * FROM llm_calls{where} ORDER BY recorded_at DESC LIMIT ?",
-        params,
-    ).fetchall()
-    return _rowdicts(rows)
-
-
-@managed_connection
-def purge_old_conversations(conn: Optional[sqlite3.Connection] = None) -> None:
-    cutoff = (
-        datetime.now(timezone.utc).replace(tzinfo=None)
-        - timedelta(days=CONVERSATION_RETENTION_DAYS)
-    ).strftime("%Y-%m-%dT%H:%M:%S")
-    conn.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
-    conn.commit()
