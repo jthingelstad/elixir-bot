@@ -187,25 +187,26 @@ def _populate_war_points_rank_current_race(conn, ranks, war_race_id):
 def _populate_war_points_rank_season(conn, ranks, season_id):
     """1-indexed rank by season-to-date war points.
 
-    Mirrors ``get_war_champ_standings`` ordering so mid-season standings
-    align with the season-end War Champ result.
+    This was a THIRD implementation of the season race. Its docstring said it
+    "mirrors get_war_champ_standings ordering so mid-season standings align with
+    the season-end War Champ result" — it mirrored the wrong one, and both
+    disagreed with `engine.award_outcomes.compute_season_award_outcome`. A
+    member could therefore see one rank on the member board and place
+    differently in the award race the board was supposed to predict.
+
+    It now reads the same authority, so "aligns with the season-end result" is
+    true by construction rather than by a comment asking someone to keep two
+    SQL statements in sync.
     """
     if season_id is None:
         return
-    rows = conn.execute(
-        "SELECT wp.player_tag AS member_id, SUM(COALESCE(wp.fame, 0)) AS total_points, "
-        "       COUNT(*) AS races_participated, m.current_name "
-        "FROM war_participation wp "
-        "JOIN players m ON m.player_tag = wp.player_tag "
-        "WHERE wp.season_id = ? AND EXISTS (SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL) "
-        "AND COALESCE(wp.fame, 0) > 0 "
-        "GROUP BY wp.player_tag "
-        "ORDER BY total_points DESC, races_participated DESC, m.current_name COLLATE NOCASE",
-        (season_id,),
-    ).fetchall()
-    for i, row in enumerate(rows):
-        if row["member_id"] in ranks:
-            ranks[row["member_id"]]["war_points_rank_season"] = i + 1
+    from engine.award_outcomes import compute_season_award_outcome
+
+    outcome = compute_season_award_outcome(conn, season_id)
+    for index, entry in enumerate(outcome.get("standings") or []):
+        member_id = entry.get("tag")
+        if member_id in ranks:
+            ranks[member_id]["war_points_rank_season"] = index + 1
 
 
 def _populate_elder_eligibility(conn, ranks, today, season_id):
