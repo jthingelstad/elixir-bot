@@ -385,17 +385,40 @@ def create_leader_action_recommendation(
             expires_at, copy_original_text, copy_current_text, is_test, ui_version,
             created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        -- Re-proposing an existing action_key refreshes the card in place. Two
+        -- rules govern what may move.
+        --
+        -- 1. A DECIDED card is frozen. `rationale` used to refresh
+        --    unconditionally, so a re-proposal rewrote the "Why" on a card a
+        --    leader had already answered — and on an OPEN card it rewrote the
+        --    Why while leaving the "Decision" line untouched, because
+        --    prompt_text was not in this list at all. The leader read a fresh
+        --    rationale under stale instructions. 30 of the action_ids in
+        --    production are re-proposals, so this was not hypothetical.
+        -- 2. A leader's own edits win. copy_current_text stays COALESCEd so a
+        --    manual Edit Copy is never overwritten by a regenerated one.
         ON CONFLICT(action_key) DO UPDATE SET
             target_channel_key = excluded.target_channel_key,
             target_channel_id = excluded.target_channel_id,
             source_message_id = COALESCE(excluded.source_message_id, leader_action_recommendations.source_message_id),
-            rationale = excluded.rationale,
+            prompt_text = CASE WHEN leader_action_recommendations.status = 'proposed'
+                               THEN excluded.prompt_text
+                               ELSE leader_action_recommendations.prompt_text END,
+            rationale = CASE WHEN leader_action_recommendations.status = 'proposed'
+                             THEN excluded.rationale
+                             ELSE leader_action_recommendations.rationale END,
             baseline_json = COALESCE(leader_action_recommendations.baseline_json, excluded.baseline_json),
-            copy_original_text = COALESCE(leader_action_recommendations.copy_original_text, excluded.copy_original_text),
+            copy_original_text = CASE WHEN leader_action_recommendations.status = 'proposed'
+                                      THEN COALESCE(excluded.copy_original_text, leader_action_recommendations.copy_original_text)
+                                      ELSE leader_action_recommendations.copy_original_text END,
             copy_current_text = COALESCE(leader_action_recommendations.copy_current_text, excluded.copy_current_text),
             is_test = excluded.is_test,
             ui_version = COALESCE(excluded.ui_version, leader_action_recommendations.ui_version),
-            expires_at = excluded.expires_at,
+            -- Never wipe a suppression window. No producer passes expires_at, so
+            -- `excluded.expires_at` is always NULL here: the old unconditional
+            -- assignment silently cleared a note-derived re-nomination hold
+            -- (`timing_hold`, "revisit in a month") on every re-proposal.
+            expires_at = COALESCE(excluded.expires_at, leader_action_recommendations.expires_at),
             updated_at = excluded.updated_at
         """,
         (
@@ -1634,15 +1657,47 @@ def refresh_leader_action_outcome(
     return get_leader_action_by_key(action["action_key"], conn=conn)
 
 
+# `evaluate_leader_action` measures an action by diffing the baseline captured
+# at proposal time against state read RIGHT NOW. That comparison only means
+# something close to the decision: an in_game_relay decided in June, evaluated
+# today, would report the delta between June's war day and today's. Past this
+# much time beyond its due point, an outcome is recorded as not-evaluated
+# rather than given a fabricated measurement.
+OUTCOME_EVALUATION_GRACE_HOURS = 168
+
+
+def _unevaluated_outcome(action: dict, *, reason: str, now: str) -> dict:
+    return {
+        "evaluated_at": now,
+        "action_type": action.get("action_type"),
+        "status": action.get("status"),
+        "pending_evaluation": False,
+        "not_evaluated": reason,
+    }
+
+
 @managed_connection
 def refresh_due_leader_action_outcomes(
     *,
     limit: int = 20,
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
+    """Evaluate decided cards whose outcome is still pending and now due.
+
+    The pending filter belongs in SQL. It used to run in Python AFTER
+    `ORDER BY decided_at ASC LIMIT 20`, so the window was permanently pinned to
+    the twenty oldest decided cards — all of them long since evaluated. Every
+    run fetched the same twenty rows, skipped all twenty, and returned nothing.
+    Measured on the live database when this was found: 132 decided cards, 105
+    still carrying `pending_evaluation`, and zero pending among the oldest
+    twenty. The job had never once evaluated an outcome on its own; the only
+    thing that ever moved one was the manual `/relay status` admin path.
+    """
     rows = conn.execute(
         "SELECT * FROM leader_action_recommendations "
         "WHERE status = ? AND decided_at IS NOT NULL "
+        "AND (outcome_json IS NULL "
+        "     OR json_extract(outcome_json, '$.pending_evaluation') = 1) "
         "ORDER BY decided_at ASC LIMIT ?",
         (ACTION_DONE, max(1, min(int(limit or 20), 100))),
     ).fetchall()
@@ -1653,11 +1708,25 @@ def refresh_due_leader_action_outcomes(
         decided_at = _parse_utc(action.get("decided_at"))
         if decided_at is None:
             continue
-        outcome = action.get("outcome") or {}
-        if outcome and not outcome.get("pending_evaluation"):
-            continue
+        # Due-time stays in Python: `_parse_utc` tolerates both the Z-suffixed
+        # and naive stamps this column carries, which a SQL string compare
+        # would not.
         delay = _outcome_delay_hours(action.get("action_type"))
-        if now < decided_at + timedelta(hours=delay):
+        due_at = decided_at + timedelta(hours=delay)
+        if now < due_at:
+            continue
+        if now > due_at + timedelta(hours=OUTCOME_EVALUATION_GRACE_HOURS):
+            conn.execute(
+                "UPDATE leader_action_recommendations SET outcome_json = ?, updated_at = ? "
+                "WHERE action_id = ?",
+                (
+                    _json_dumps(
+                        _unevaluated_outcome(action, reason="window_passed", now=_db._utcnow())
+                    ),
+                    _db._utcnow(),
+                    action["action_id"],
+                ),
+            )
             continue
         refreshed_action = refresh_leader_action_outcome(action["action_id"], conn=conn)
         if refreshed_action:
