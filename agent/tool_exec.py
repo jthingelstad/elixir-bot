@@ -1437,9 +1437,15 @@ def _execute_record_leadership_followup(arguments):
     action_type = (arguments.get("action_type") or "").strip()
     revisit_at = (arguments.get("revisit_at") or "").strip()
     signal_key = (arguments.get("signal_key") or "").strip()
+    away_until = (arguments.get("away_until") or "").strip()
 
     if not topic or not recommendation:
         return {"error": "record_leadership_followup requires topic and recommendation"}
+    if away_until and not member_tag_input:
+        return {
+            "error": "away_until_requires_member",
+            "detail": "A leave of absence pauses one member's kick clock — name the member.",
+        }
     if bool(revisit_at) != bool(signal_key):
         return {
             "error": "revisit_requires_time_and_signal",
@@ -1460,7 +1466,29 @@ def _execute_record_leadership_followup(arguments):
         return {"error": "unsupported_action_type", "action_type": action_type}
 
     resolved_tag = _resolve_member_tag(member_tag_input) if member_tag_input else None
-    title = f"Followup: {topic}"
+
+    # A leave of absence is a `Hold: <tag>` memory with an expiry. That exact
+    # title prefix is what engine.management._has_leadership_hold matches to
+    # pause a member's kick clock — `Followup:` is not, and neither is `Watch:`.
+    # This capability used to live on flag_member_watch, which the trim to 14
+    # tools moved out of the advertised set, leaving CLAN.md promising a hold
+    # that nothing could record. Folded in here rather than re-adding a
+    # near-duplicate write tool: the model reached for this one every time
+    # anyway (12 uses to flag_member_watch's 0 in 464 offers).
+    expires_at = None
+    if away_until:
+        expires_at = _normalize_away_until(away_until)
+        if expires_at is None:
+            # Refuse rather than write a hold that silently protects nobody.
+            return {
+                "error": "invalid_away_until",
+                "detail": (
+                    f"Could not read {away_until!r} as a date. Use an ISO date or "
+                    "datetime, e.g. '2026-08-03' or '2026-08-03T12:00:00Z'."
+                ),
+            }
+
+    title = f"Hold: {resolved_tag}" if away_until else f"Followup: {topic}"
     body = recommendation
     try:
         memory = create_memory(
@@ -1473,12 +1501,14 @@ def _execute_record_leadership_followup(arguments):
             created_by="elixir:awareness-tool",
             scope="leadership",
             member_tag=resolved_tag,
+            expires_at=expires_at,
         )
     except Exception as exc:
         log.warning("record_leadership_followup failed: %s", exc)
         return {"error": "record_leadership_followup_failed", "detail": str(exc)}
 
-    attach_tags(memory["memory_id"], ["followup"], actor="elixir:awareness-tool")
+    tags = ["followup", "leave-hold"] if away_until else ["followup"]
+    attach_tags(memory["memory_id"], tags, actor="elixir:awareness-tool")
     # #216: the action board is the only active decision store. The previous
     # path wrote a decision case and merely described it as a card; no runtime
     # consumer actually turned that case into an R card. Create the human-visible
@@ -1504,12 +1534,20 @@ def _execute_record_leadership_followup(arguments):
         "success": True,
         "memory_id": memory["memory_id"],
         "member_tag": resolved_tag,
-        "type": "followup",
+        "type": "leave_hold" if away_until else "followup",
         # Say plainly whether this reached leadership. Without it the tool reads
         # as an escalation in every case, which is how observations went
         # unanswered for weeks while the brain believed it had reported them.
         "escalated": escalated,
     }
+    if away_until:
+        # Report the parsed value, not the input — the model should confirm the
+        # date the kick clock will actually resume on, not the one it guessed.
+        result["hold_until"] = expires_at
+        result["note"] = (
+            f"Kick clock paused for {resolved_tag} until {expires_at}. "
+            "The hold expires on its own; no card was raised."
+        )
     if action:
         result["action_id"] = action.get("action_id")
         result["action_key"] = action.get("action_key")
