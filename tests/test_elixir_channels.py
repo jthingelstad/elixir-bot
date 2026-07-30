@@ -614,7 +614,7 @@ def test_on_message_does_not_save_unsent_interactive_reply():
     mock_process.assert_not_awaited()
 
 
-def test_on_raw_reaction_add_marks_arena_relay_action_done():
+def test_on_raw_reaction_add_marks_actions_action_done():
     payload = SimpleNamespace(
         channel_id=1513758211206025227,
         message_id=987,
@@ -633,7 +633,7 @@ def test_on_raw_reaction_add_marks_arena_relay_action_done():
             return_value={
                 "id": 1513758211206025227,
                 "name": "#leader-actions",
-                "lane": "arena-relay",
+                "lane": "actions",
             },
         ),
         patch(
@@ -664,10 +664,10 @@ def test_on_raw_reaction_add_marks_arena_relay_action_done():
     assert mock_refresh_card.await_args.args[1]["status"] == "done"
 
 
-def test_arena_relay_reply_records_action_note():
+def test_actions_reply_records_action_note():
     message = _make_message(
         1513758211206025227,
-        "arena-relay",
+        "actions",
         "boat defenses full already",
         roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
     )
@@ -684,7 +684,7 @@ def test_arena_relay_reply_records_action_note():
             return_value={
                 "id": 1513758211206025227,
                 "name": "#leader-actions",
-                "lane": "arena-relay",
+                "lane": "actions",
                 "workflow": "channel_update",
                 "reply_policy": "disabled",
                 "memory_scope": "leadership",
@@ -717,7 +717,7 @@ def test_arena_relay_reply_records_action_note():
     mock_process.assert_not_awaited()
 
 
-def test_arena_relay_leader_screenshot_is_observed():
+def test_actions_leader_screenshot_is_observed():
     attachment = SimpleNamespace(
         filename="boat-defense.jpg",
         content_type="image/jpeg",
@@ -726,7 +726,7 @@ def test_arena_relay_leader_screenshot_is_observed():
     )
     message = _make_message(
         1513758211206025227,
-        "arena-relay",
+        "actions",
         "",
         roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
         attachments=[attachment],
@@ -744,7 +744,7 @@ def test_arena_relay_leader_screenshot_is_observed():
             return_value={
                 "id": 1513758211206025227,
                 "name": "#leader-actions",
-                "lane": "arena-relay",
+                "lane": "actions",
                 "workflow": "channel_update",
                 "reply_policy": "disabled",
                 "memory_scope": "leadership",
@@ -754,9 +754,9 @@ def test_arena_relay_leader_screenshot_is_observed():
         patch("runtime.channel_router.db.build_memory_context", return_value={}),
         patch("runtime.channel_router.db.save_message", return_value=111) as mock_save,
         patch(
-            "runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot",
+            "runtime.channel_router.elixir_agent.analyze_leader_screenshot",
             return_value={
-                "event_type": "arena_relay_screenshot_observation",
+                "event_type": "leader_screenshot_observation",
                 "summary": "Boat defenses still have visible open slots.",
                 "content": "**👁️ Screenshot Read**\nVisible open boat-defense slots: at least 3.",
                 "observation": {
@@ -780,8 +780,8 @@ def test_arena_relay_leader_screenshot_is_observed():
     assert kwargs["image_blocks"][0]["source"]["data"] == "Ym9hdHN0YXRl"
     event_types = [call.kwargs.get("event_type") for call in mock_save.call_args_list]
     assert event_types == [
-        "arena_relay_screenshot_observation_input",
-        "arena_relay_screenshot_observation",
+        "leader_screenshot_observation_input",
+        "leader_screenshot_observation",
     ]
     message.reply.assert_awaited_once_with(
         "**👁️ Screenshot Read**\nVisible open boat-defense slots: at least 3."
@@ -789,7 +789,7 @@ def test_arena_relay_leader_screenshot_is_observed():
     mock_process.assert_not_awaited()
 
 
-def test_arena_relay_screenshot_persists_structured_memories():
+def test_leader_screenshot_persists_structured_memories():
     attachment = SimpleNamespace(
         filename="clan-chat.png",
         content_type="image/png",
@@ -798,7 +798,7 @@ def test_arena_relay_screenshot_persists_structured_memories():
     )
     message = _make_message(
         1513758211206025227,
-        "arena-relay",
+        "actions",
         "",
         roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
         attachments=[attachment],
@@ -825,7 +825,7 @@ def test_arena_relay_screenshot_persists_structured_memories():
             return_value={
                 "id": 1513758211206025227,
                 "name": "#leader-actions",
-                "lane": "arena-relay",
+                "lane": "actions",
                 "workflow": "channel_update",
                 "reply_policy": "disabled",
                 "memory_scope": "leadership",
@@ -835,9 +835,9 @@ def test_arena_relay_screenshot_persists_structured_memories():
         patch("runtime.channel_router.db.build_memory_context", return_value={}),
         patch("runtime.channel_router.db.save_message", return_value=111),
         patch(
-            "runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot",
+            "runtime.channel_router.elixir_agent.analyze_leader_screenshot",
             return_value={
-                "event_type": "arena_relay_screenshot_observation",
+                "event_type": "leader_screenshot_observation",
                 "summary": "Fullboat has limited availability.",
                 "content": "**Read:** Fullboat is camping with limited signal.",
                 "memories": memories,
@@ -852,7 +852,7 @@ def test_arena_relay_screenshot_persists_structured_memories():
     mock_persist.assert_called_once_with(
         memories,
         1513758211206025227,
-        "arena-relay",
+        "actions",
         555,
     )
     message.reply.assert_awaited_once_with("**Read:** Fullboat is camping with limited signal.")
@@ -879,7 +879,7 @@ def test_persist_screenshot_memories_saves_elixir_inference_with_evidence():
         saved = channel_router._persist_screenshot_memories(
             memories,
             channel_id=1513758211206025227,
-            workflow="arena-relay",
+            workflow="actions",
             source_message_id=555,
         )
 
@@ -892,19 +892,19 @@ def test_persist_screenshot_memories_saves_elixir_inference_with_evidence():
     assert kwargs["scope"] == "leadership"
     assert kwargs["member_tag"] == "#ABC123"
     assert kwargs["channel_id"] == "1513758211206025227"
-    assert kwargs["event_type"] == "arena_relay_screenshot_fact"
+    assert kwargs["event_type"] == "leader_screenshot_fact"
     assert kwargs["event_id"] == "555"
-    assert kwargs["metadata"]["source"] == "arena_relay_screenshot"
+    assert kwargs["metadata"]["source"] == "leader_screenshot"
     mock_tags.assert_called_once_with(
         42,
-        ["screenshot", "arena-relay", "availability"],
-        actor="elixir:arena-relay-screenshot",
+        ["screenshot", "actions", "availability"],
+        actor="elixir:actions-screenshot",
     )
     mock_evidence.assert_called_once()
     assert mock_evidence.call_args.kwargs["evidence_ref"] == "555"
 
 
-def test_arena_relay_leader_multi_screenshot_corrects_media_types():
+def test_actions_leader_multi_screenshot_corrects_media_types():
     attachments = [
         SimpleNamespace(
             filename=f"IMG_333{idx}.png",
@@ -916,7 +916,7 @@ def test_arena_relay_leader_multi_screenshot_corrects_media_types():
     ]
     message = _make_message(
         1513758211206025227,
-        "arena-relay",
+        "actions",
         "",
         roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
         attachments=attachments,
@@ -934,7 +934,7 @@ def test_arena_relay_leader_multi_screenshot_corrects_media_types():
             return_value={
                 "id": 1513758211206025227,
                 "name": "#leader-actions",
-                "lane": "arena-relay",
+                "lane": "actions",
                 "workflow": "channel_update",
                 "reply_policy": "disabled",
                 "memory_scope": "leadership",
@@ -944,9 +944,9 @@ def test_arena_relay_leader_multi_screenshot_corrects_media_types():
         patch("runtime.channel_router.db.build_memory_context", return_value={}),
         patch("runtime.channel_router.db.save_message", return_value=111),
         patch(
-            "runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot",
+            "runtime.channel_router.elixir_agent.analyze_leader_screenshot",
             return_value={
-                "event_type": "arena_relay_screenshot_observation",
+                "event_type": "leader_screenshot_observation",
                 "summary": "Read multiple screenshots.",
                 "content": "**👁️ Screenshot Read**\nI read all three.",
             },
@@ -976,7 +976,7 @@ def test_collect_screenshot_payload_resizes_large_images():
     )
     message = _make_message(
         1513758211206025227,
-        "arena-relay",
+        "actions",
         "",
         roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
         attachments=[attachment],
@@ -1774,7 +1774,7 @@ def test_startup_channel_audit_flags_missing_soft_perms():
 def test_startup_channel_audit_checks_thinking_embed_and_thread_perms():
     # #thinking is env-configured (not in discord_channel_configs) and posts an
     # embed then opens a thread — the audit must include it and flag embed_links /
-    # thread perms, and flag embed_links on the arena-relay (#actions) lane.
+    # thread perms, and flag embed_links on the actions (#actions) lane.
     guild = SimpleNamespace(id=1, me=object())
     actions_perms = SimpleNamespace(
         view_channel=True,
@@ -1827,7 +1827,7 @@ def test_startup_channel_audit_checks_thinking_embed_and_thread_perms():
         patch(
             "elixir.prompts.discord_channel_configs",
             return_value=[
-                {"id": 400, "name": "#actions", "workflow": "channel_update", "lane": "arena-relay"}
+                {"id": 400, "name": "#actions", "workflow": "channel_update", "lane": "actions"}
             ],
         ),
     ):
@@ -2395,7 +2395,7 @@ def test_register_elixir_app_commands_includes_relay_status():
     assert relay_group.get_command("status") is not None
 
 
-def test_slash_relay_status_allowed_in_arena_relay():
+def test_slash_relay_status_allowed_in_actions():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
     root = _root(bot, "clanops")
@@ -2421,7 +2421,7 @@ def test_slash_relay_status_allowed_in_arena_relay():
         patch("runtime.app._is_clanops_channel", return_value=False),
         patch(
             "runtime.app._get_channel_behavior",
-            return_value={"name": "#leader-actions", "lane": "arena-relay"},
+            return_value={"name": "#leader-actions", "lane": "actions"},
         ),
         patch("runtime.app._has_leader_role", return_value=True),
         patch(
@@ -2442,7 +2442,7 @@ def test_slash_relay_status_allowed_in_arena_relay():
     followup.send.assert_not_awaited()
 
 
-def test_slash_non_relay_command_still_rejected_in_arena_relay():
+def test_slash_non_relay_command_still_rejected_in_actions():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
     root = _root(bot, "clanops")
@@ -2468,7 +2468,7 @@ def test_slash_non_relay_command_still_rejected_in_arena_relay():
         patch("runtime.app._is_clanops_channel", return_value=False),
         patch(
             "runtime.app._get_channel_behavior",
-            return_value={"name": "#leader-actions", "lane": "arena-relay"},
+            return_value={"name": "#leader-actions", "lane": "actions"},
         ),
         patch(
             "runtime.discord_commands.dispatch_admin_command",
@@ -3427,10 +3427,10 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert "Discord: #ask-elixir" in specs["daily-clan-insight"]["delivery_targets"]
     assert specs["daily-clan-insight"]["schedule"] == "Daily at 12:00 CT."
     assert "weekly-leadership-review" in specs
-    assert specs["weekly-leadership-review"]["owner_lane"] == "arena-relay"
+    assert specs["weekly-leadership-review"]["owner_lane"] == "actions"
     assert specs["weekly-leadership-review"]["activity_role"] == "observer+communicator"
     assert "weekly-discord-invite-relay" in specs
-    assert specs["weekly-discord-invite-relay"]["owner_lane"] == "arena-relay"
+    assert specs["weekly-discord-invite-relay"]["owner_lane"] == "actions"
     assert specs["weekly-discord-invite-relay"]["activity_role"] == "communicator"
     assert specs["weekly-discord-invite-relay"]["schedule"] == "Daily at 13:00 CT."
     assert (

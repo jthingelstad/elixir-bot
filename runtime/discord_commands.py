@@ -18,11 +18,11 @@ from runtime.admin import (
 )
 
 
-def _is_arena_relay_command_channel(app, channel, command_name: str) -> bool:
+def _is_actions_command_channel(app, channel, command_name: str) -> bool:
     if not str(command_name or "").startswith("relay."):
         return False
     channel_config = app._get_channel_behavior(getattr(channel, "id", 0))
-    return bool(channel_config and channel_config.get("lane") == "arena-relay")
+    return bool(channel_config and channel_config.get("lane") == "actions")
 
 
 def register_elixir_app_commands(bot) -> None:
@@ -79,7 +79,7 @@ def register_elixir_app_commands(bot) -> None:
     ) -> bool:
         channel_allowed = bool(
             app._is_clanops_channel(interaction.channel)
-            or _is_arena_relay_command_channel(app, interaction.channel, command_name)
+            or _is_actions_command_channel(app, interaction.channel, command_name)
         )
         role_allowed = not admin_command_requires_leader(command_name) or app._has_leader_role(
             interaction.user
@@ -227,7 +227,7 @@ def register_elixir_app_commands(bot) -> None:
                     note = (
                         "📋 Clan-chat card posted to #actions."
                         if ok
-                        else "Clan-chat card not posted (arena-relay unavailable)."
+                        else "Clan-chat card not posted (actions unavailable)."
                     )
                 except Exception:
                     app.log.exception("release relay card failed")
@@ -380,11 +380,11 @@ def register_elixir_app_commands(bot) -> None:
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            target_config = app.prompts.discord_singleton_lane("arena-relay")
+            target_config = app.prompts.discord_singleton_lane("actions")
             channel = app.bot.get_channel(target_config["id"])
         except Exception as exc:
             app.log.warning(
-                "relay test card failed: arena-relay unavailable: %s",
+                "relay test card failed: actions unavailable: %s",
                 exc,
                 exc_info=True,
             )

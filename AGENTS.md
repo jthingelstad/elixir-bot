@@ -237,7 +237,7 @@ Current primary lanes:
 - `general` — mention-driven general Q&A (`#clan-chat`)
 - `ask-elixir` — open-channel clan conversation and Clash Royale screenshot help
 - `leader-lounge` — private leadership and clan operations (`#leaders`)
-- `arena-relay` — crisp leader action cards and leader-posted Clash Royale screenshot observation readouts (`#actions`; also the fail-closed destination for unknown intent prefixes)
+- `actions` — crisp leader action cards and leader-posted Clash Royale screenshot observation readouts (`#actions`; also the fail-closed destination for unknown intent prefixes)
 - `river-race` — River Race scoreboard, recap, and major war-momentum updates
 - `member-highlights` — curated player milestones and non-war battle pushes (`#player-highlights`)
 - `clan-events` — joins, promotions, anniversaries, and clan recognitions (`#clan-events`)
@@ -310,7 +310,7 @@ Important rules:
 ## Agent Loop Guardrails (Current)
 
 - Tool policy is enforced in code per workflow (not prompt-only):
-  - `arena_relay_observation` -> read tools only
+  - `screenshot_readout` -> read tools only
   - `channel_update` -> read tools only
   - `channel_update_leadership` -> read tools only
   - `interactive` -> read tools only
@@ -326,7 +326,7 @@ Important rules:
 - Tool outputs are wrapped in a compact envelope (`ok`, `error`, `truncated`, `meta`, `data`) and truncated for context budget safety.
 - Leader/member factual answers should prefer structured query tools over clipped roster context. Resolve members by name/Discord handle before using tag-based tools when needed.
 - Strict JSON workflow contracts are validated in code with one repair retry:
-  - `arena_relay_observation`: requires `event_type`, `summary`, `content` (or `null`)
+  - `screenshot_readout`: requires `event_type`, `summary`, `content` (or `null`)
   - `channel_update` / `channel_update_leadership` / `interactive` / `clanops`: require `event_type`, `summary`, `content`
   - `clanops` `channel_share` responses also require `share_content`
   - `reception`: requires `event_type=reception_response` and `content`
@@ -337,7 +337,7 @@ Important rules:
   - `mention_only` for channels like `#clan-chat` and `#leaders`
   - `open_channel` for `#ask-elixir`
   - `disabled` for notification-only channels like `#website-updates`, `#river-race`, and `#announcements`
-- `#actions` is normally action-board style with disabled general replies, but `runtime/channel_router.py` special-cases leader-posted Clash Royale screenshots as observation evidence and replies with a concise `arena_relay_screenshot_observation` readout.
+- `#actions` is normally action-board style with disabled general replies, but `runtime/channel_router.py` special-cases leader-posted Clash Royale screenshots as observation evidence and replies with a concise `leader_screenshot_observation` readout.
 
 ### Agent Feedback Review
 

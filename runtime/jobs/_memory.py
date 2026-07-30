@@ -785,25 +785,25 @@ async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
     if not review_items:
         return 0
     try:
-        channel_config = prompts.discord_singleton_lane("arena-relay")
+        channel_config = prompts.discord_singleton_lane("actions")
     except Exception:
-        log.info("memory contradiction cards skipped: arena-relay unavailable", exc_info=True)
+        log.info("memory contradiction cards skipped: actions unavailable", exc_info=True)
         return 0
     if not isinstance(channel_config, dict) or not channel_config.get("id"):
-        log.warning("memory contradiction cards skipped: arena-relay channel is unconfigured")
+        log.warning("memory contradiction cards skipped: actions channel is unconfigured")
         return 0
     channel_id = channel_config["id"]
     try:
         channel = bot.get_channel(channel_id)
     except Exception:
-        log.warning("memory contradiction cards skipped: arena-relay lookup failed", exc_info=True)
+        log.warning("memory contradiction cards skipped: actions lookup failed", exc_info=True)
         return 0
     if not channel:
-        log.warning("memory contradiction cards skipped: arena-relay channel not found")
+        log.warning("memory contradiction cards skipped: actions channel not found")
         return 0
 
     posted = 0
-    channel_name = getattr(channel, "name", "arena-relay")
+    channel_name = getattr(channel, "name", "actions")
     channel_kind = getattr(channel, "type", "text")
     if channel_kind is not None:
         channel_kind = str(channel_kind)
@@ -822,7 +822,7 @@ async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
             objective="memory_hygiene",
             prompt_text=prompt_text,
             rationale=rationale,
-            target_channel_key="arena-relay",
+            target_channel_key="actions",
             target_channel_id=channel_id,
             source_signal_key=f"memory_contradiction:{memory_id}",
             source_signal_type="memory_contradiction",
@@ -843,7 +843,7 @@ async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
             channel_id=channel_id,
             channel_name=channel_name,
             channel_kind=channel_kind,
-            workflow="arena-relay",
+            workflow="actions",
             event_type="memory_contradiction",
             discord_message_id=getattr(first_message, "id", None),
             raw_json={"leader_action": action},

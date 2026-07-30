@@ -37,7 +37,7 @@ from agent.tool_policy import (
     TOOLSETS_BY_WORKFLOW,
 )
 from agent.workflows import (
-    analyze_arena_relay_screenshot,
+    analyze_leader_screenshot,
     generate_ask_elixir_daily,
     generate_channel_update,
     generate_clan_chat_copy,
@@ -69,7 +69,7 @@ __all__ = [
     "_create_chat_completion",
     "_execute_tool",
     "_model_for_workflow",
-    "analyze_arena_relay_screenshot",
+    "analyze_leader_screenshot",
     "cr_api",
     "db",
     "generate_ask_elixir_daily",

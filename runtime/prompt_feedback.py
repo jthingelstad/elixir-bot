@@ -130,7 +130,7 @@ async def handle_raw_reaction_add(payload) -> None:
     action_status = leader_action_value_for_emoji(getattr(payload, "emoji", None))
     if action_status:
         channel_config = app._get_channel_behavior(payload.channel_id)
-        if channel_config and channel_config.get("lane") == "arena-relay":
+        if channel_config and channel_config.get("lane") == "actions":
             if not app._has_leader_role(getattr(payload, "member", None)):
                 return
             action = await asyncio.to_thread(
@@ -216,7 +216,7 @@ async def handle_raw_reaction_remove(payload) -> None:
     action_status = leader_action_value_for_emoji(getattr(payload, "emoji", None))
     if action_status:
         channel_config = app._get_channel_behavior(payload.channel_id)
-        if channel_config and channel_config.get("lane") == "arena-relay":
+        if channel_config and channel_config.get("lane") == "actions":
             action = await asyncio.to_thread(
                 db.clear_leader_action_decision_by_message,
                 payload.message_id,

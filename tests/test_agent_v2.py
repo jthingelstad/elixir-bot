@@ -1331,7 +1331,7 @@ def test_respond_in_deck_review_passes_screenshot_blocks_to_chat():
     assert user_msg[1] == image_block
 
 
-def test_analyze_arena_relay_screenshot_passes_image_and_action_context():
+def test_analyze_leader_screenshot_passes_image_and_action_context():
     image_block = {
         "type": "image",
         "source": {
@@ -1344,7 +1344,7 @@ def test_analyze_arena_relay_screenshot_passes_image_and_action_context():
         patch(
             "elixir_agent._chat_with_tools",
             return_value={
-                "event_type": "arena_relay_screenshot_observation",
+                "event_type": "leader_screenshot_observation",
                 "content": "ok",
             },
         ) as mock_chat,
@@ -1381,7 +1381,7 @@ def test_analyze_arena_relay_screenshot_passes_image_and_action_context():
             ],
         ),
     ):
-        elixir_agent.analyze_arena_relay_screenshot(
+        elixir_agent.analyze_leader_screenshot(
             "Shared Clash Royale screenshot image(s).",
             author_name="Jamie",
             channel_name="#leader-actions",
@@ -1398,7 +1398,7 @@ def test_analyze_arena_relay_screenshot_passes_image_and_action_context():
     assert "Training Day 1" in user_msg[0]["text"]
     assert "boat_defense_setup" in user_msg[0]["text"]
     assert user_msg[1] == image_block
-    assert mock_chat.call_args.kwargs["workflow"] == "arena_relay_observation"
+    assert mock_chat.call_args.kwargs["workflow"] == "screenshot_readout"
 
 
 def _mock_anthropic_response(text="ok", input_tokens=10, output_tokens=20):

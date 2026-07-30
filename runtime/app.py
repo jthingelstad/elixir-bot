@@ -435,12 +435,12 @@ async def _post_pending_leader_action_cards(limit: int = 4) -> int:
         log.info("engine leader-action cards deferred by policy: %s", reason)
         return 0
     try:
-        channel_config = _channel_config_by_key("arena-relay")
+        channel_config = _channel_config_by_key("actions")
     except Exception:
         # ERROR, not warning: this returns 0 having posted nothing, so a card a
         # leader is owed never reaches #actions. That is the 2026-07-18 outage
         # class — the bot looked healthy while leadership silently got nothing.
-        log.error("engine leader-action cards skipped: arena-relay unavailable", exc_info=True)
+        log.error("engine leader-action cards skipped: actions unavailable", exc_info=True)
         return 0
     relay_channel = bot.get_channel(int(channel_config["id"]))
     if relay_channel is None:
@@ -994,15 +994,15 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
         log.info("awareness relay skipped by policy: %s", reason)
         return False
     try:
-        channel_config = _channel_config_by_key("arena-relay")
+        channel_config = _channel_config_by_key("actions")
     except Exception:
         # ERROR: returns False having delivered nothing. A relay the brain
         # decided to send is dropped, and only the log can say so.
-        log.error("awareness relay skipped: arena-relay unavailable", exc_info=True)
+        log.error("awareness relay skipped: actions unavailable", exc_info=True)
         return False
     relay_channel = bot.get_channel(int(channel_config["id"]))
     if relay_channel is None:
-        log.warning("awareness relay skipped: arena-relay channel not found")
+        log.warning("awareness relay skipped: actions channel not found")
         return False
 
     from runtime.clan_chat_copy import signed_valid_messages
@@ -1041,7 +1041,7 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
         rationale=(
             post.get("relay_reason") or post.get("summary") or "Brain-flagged for clan chat"
         ),
-        target_channel_key="arena-relay",
+        target_channel_key="actions",
         target_channel_id=channel_config["id"],
         target_player_tag=None,
         target_player_name=None,
@@ -1113,13 +1113,13 @@ async def _raise_outreach_card(target: dict, copy: str):
     """Create and post one leader-gated 'Profile Outreach' card to #actions.
     Returns the action dict (or None). Never raises into the proposal loop."""
     try:
-        channel_config = _channel_config_by_key("arena-relay")
+        channel_config = _channel_config_by_key("actions")
     except Exception:
-        log.warning("member outreach: arena-relay unavailable")
+        log.warning("member outreach: actions unavailable")
         return None
     relay_channel = bot.get_channel(int(channel_config["id"]))
     if relay_channel is None:
-        log.warning("member outreach: arena-relay channel not found")
+        log.warning("member outreach: actions channel not found")
         return None
     tag = target.get("player_tag")
     name = target.get("member_name") or tag
@@ -1138,7 +1138,7 @@ async def _raise_outreach_card(target: dict, copy: str):
                 f"{name} is a current member with no email on file; a DM builds a "
                 "fuller profile. Leader-gated — nothing sends until you approve."
             ),
-            target_channel_key="arena-relay",
+            target_channel_key="actions",
             target_channel_id=channel_config["id"],
             target_player_tag=tag,
             target_player_name=name,

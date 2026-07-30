@@ -853,7 +853,7 @@ def upsert_leader_action_feedback_profile(
         )
     attach_tags(
         memory["memory_id"],
-        ["arena-relay", "leader-action-feedback", clean_type],
+        ["actions", "leader-action-feedback", clean_type],
         actor="elixir:leader-action-feedback",
         conn=conn,
     )

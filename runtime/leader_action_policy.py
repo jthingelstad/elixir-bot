@@ -1,4 +1,4 @@
-"""Posting policy for arena-relay leader actions.
+"""Posting policy for actions leader actions.
 
 Clash runs 24 hours and so does the action board — there are no quiet
 hours and no posts-per-day quota. The board self-regulates on two

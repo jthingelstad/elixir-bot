@@ -434,13 +434,13 @@ async def _emit_evergreen_nudge_card(item: dict) -> bool:
     from storage import evergreen_nudges as nudges
 
     try:
-        channel_config = _channel_config_by_key("arena-relay")
+        channel_config = _channel_config_by_key("actions")
     except Exception:
-        log.info("evergreen nudge skipped: arena-relay unavailable")
+        log.info("evergreen nudge skipped: actions unavailable")
         return False
     relay_channel = _bot().get_channel(channel_config["id"])
     if not relay_channel:
-        log.info("evergreen nudge skipped: arena-relay channel not found")
+        log.info("evergreen nudge skipped: actions channel not found")
         return False
     allowed, reason = await asyncio.to_thread(can_post_leader_action, action_type="in_game_relay")
     if not allowed:
@@ -485,7 +485,7 @@ async def _emit_evergreen_nudge_card(item: dict) -> bool:
         objective="clan_nudge",
         prompt_text=f"Relay into clan chat ({item['topic']}): {copy}",
         rationale=f"Evergreen {item['topic']} nudge, surfaced during a quiet stretch so it fills a lull.",
-        target_channel_key="arena-relay",
+        target_channel_key="actions",
         target_channel_id=channel_config["id"],
         source_signal_key=f"evergreen_nudge:{item['nudge_key']}:{day_key}",
         source_signal_type="evergreen_nudge",
@@ -518,9 +518,9 @@ async def _emit_evergreen_nudge_card(item: dict) -> bool:
         copy,
         summary=f"Leader action R{action.get('action_id')}: evergreen {item['nudge_key']}",
         channel_id=channel_config["id"],
-        channel_name=getattr(relay_channel, "name", "arena-relay"),
+        channel_name=getattr(relay_channel, "name", "actions"),
         channel_kind=str(getattr(relay_channel, "type", "text")),
-        workflow="arena-relay",
+        workflow="actions",
         event_type="evergreen_nudge",
         discord_message_id=getattr(first_message, "id", None),
     )
@@ -538,13 +538,13 @@ async def post_release_relay_card(clanchat_text: str, *, tag: str) -> bool:
     if not text:
         return False
     try:
-        channel_config = _channel_config_by_key("arena-relay")
+        channel_config = _channel_config_by_key("actions")
     except Exception:
-        log.info("release relay skipped: arena-relay unavailable")
+        log.info("release relay skipped: actions unavailable")
         return False
     relay_channel = _bot().get_channel(channel_config["id"])
     if not relay_channel:
-        log.info("release relay skipped: arena-relay channel not found")
+        log.info("release relay skipped: actions channel not found")
         return False
 
     copy = sign_clan_chat_text(text, limit=CLAN_CHAT_ACTION_COPY_LIMIT)
@@ -559,7 +559,7 @@ async def post_release_relay_card(clanchat_text: str, *, tag: str) -> bool:
         objective="release_relay",
         prompt_text=f"Relay the new release into clan chat: {copy}",
         rationale="New Elixir release — short blurb for the in-game clan chat.",
-        target_channel_key="arena-relay",
+        target_channel_key="actions",
         target_channel_id=channel_config["id"],
         source_signal_key=f"release_relay:{tag}",
         source_signal_type="release_relay",
@@ -799,13 +799,13 @@ async def _weekly_story_relay_card(recap_text: str) -> bool:
     per week, leader-decided; earned frequency learns if these are unwanted.
     """
     try:
-        channel_config = _channel_config_by_key("arena-relay")
+        channel_config = _channel_config_by_key("actions")
     except Exception:
-        log.info("weekly story relay skipped: arena-relay unavailable")
+        log.info("weekly story relay skipped: actions unavailable")
         return False
     relay_channel = _bot().get_channel(channel_config["id"])
     if not relay_channel:
-        log.info("weekly story relay skipped: arena-relay channel not found")
+        log.info("weekly story relay skipped: actions channel not found")
         return False
     allowed, reason = await asyncio.to_thread(can_post_leader_action, action_type="in_game_relay")
     if not allowed:
@@ -829,7 +829,7 @@ async def _weekly_story_relay_card(recap_text: str) -> bool:
         forbidden_terms=("http://", "https://", "www.", "Discord"),
         metadata={
             "channel": channel_config["name"],
-            "lane": channel_config.get("lane_key") or "arena-relay",
+            "lane": channel_config.get("lane_key") or "actions",
         },
     )
     copy = generated.messages[0] if generated and generated.messages else ""
@@ -849,7 +849,7 @@ async def _weekly_story_relay_card(recap_text: str) -> bool:
         objective="clan_story",
         prompt_text=f"Relay this week's story into clan chat: {copy}",
         rationale="Most members never read Discord; the recap's best story reaches them through game chat.",
-        target_channel_key="arena-relay",
+        target_channel_key="actions",
         target_channel_id=channel_config["id"],
         source_signal_key=f"weekly_story_relay:{week_key}",
         source_signal_type="weekly_story_relay",
@@ -871,9 +871,9 @@ async def _weekly_story_relay_card(recap_text: str) -> bool:
         copy,
         summary=f"Leader action R{action.get('action_id')}: weekly story relay",
         channel_id=channel_config["id"],
-        channel_name=getattr(relay_channel, "name", "arena-relay"),
+        channel_name=getattr(relay_channel, "name", "actions"),
         channel_kind=str(getattr(relay_channel, "type", "text")),
-        workflow="arena-relay",
+        workflow="actions",
         event_type="weekly_story_relay",
         discord_message_id=getattr(first_message, "id", None),
         raw_json={"leader_action": action},

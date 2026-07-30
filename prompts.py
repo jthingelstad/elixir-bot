@@ -42,7 +42,7 @@ CHANNEL_LANE_CONFIG = {
         "memory_scope": "public",
         "durable_memory_enabled": True,
     },
-    "arena-relay": {
+    "actions": {
         "workflow": "channel_update",
         "tool_policy": "read_only",
         "reply_policy": "disabled",
@@ -96,10 +96,14 @@ LANE_ALIASES = {
     "recruiting": "promote-the-clan",
     "recruiting_camp": "promote-the-clan",
     "recruiting-camp": "promote-the-clan",
-    "arena_relay": "arena-relay",
-    "actions": "arena-relay",  # channel renamed #leader-actions → #actions (2026-07-12)
-    "leader_actions": "arena-relay",  # kept: back-compat aliases for the old name
-    "leader-actions": "arena-relay",
+    # The lane is `actions`, matching the channel. It was `arena-relay` until
+    # 2026-07-30 — a name for a concept that no longer existed, since the board
+    # carries kicks and promotions, not just relays. These aliases resolve the
+    # older spellings, including rows already written with them.
+    "arena-relay": "actions",
+    "arena_relay": "actions",
+    "leader_actions": "actions",  # channel was #leader-actions until 2026-07-12
+    "leader-actions": "actions",
     "clanops": "leader-lounge",
     "leaders": "leader-lounge",
     "king_tower": "leader-lounge",

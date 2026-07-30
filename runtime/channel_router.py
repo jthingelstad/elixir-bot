@@ -413,7 +413,7 @@ def _persist_screenshot_memories(memories, channel_id, workflow, source_message_
 
         action = (mem.get("action") or "save").strip().lower()
         member_tag_input = mem.get("member_tag")
-        tags = ["screenshot", "arena-relay"]
+        tags = ["screenshot", "actions"]
         tags.extend(str(t).strip().lower() for t in (mem.get("tags") or []) if t)
         tags = list(dict.fromkeys(tag for tag in tags if tag))
         confidence = mem.get("confidence", 0.85)
@@ -454,7 +454,7 @@ def _persist_screenshot_memories(memories, channel_id, workflow, source_message_
                     resolved_tag = None
 
             metadata = {
-                "source": "arena_relay_screenshot",
+                "source": "leader_screenshot",
                 "member_label": member_tag_input,
             }
             if source_message_id is not None:
@@ -471,7 +471,7 @@ def _persist_screenshot_memories(memories, channel_id, workflow, source_message_
                 scope="leadership",
                 member_tag=resolved_tag,
                 channel_id=str(channel_id) if channel_id else None,
-                event_type="arena_relay_screenshot_fact",
+                event_type="leader_screenshot_fact",
                 event_id=str(source_message_id) if source_message_id is not None else None,
                 metadata=metadata,
             )
@@ -607,8 +607,8 @@ def _stored_assistant_content(content) -> str:
     return (content or "").strip()
 
 
-async def _handle_arena_relay_action_note(app, message, channel_config, raw_question: str) -> bool:
-    if channel_config.get("lane") != "arena-relay":
+async def _handle_action_note(app, message, channel_config, raw_question: str) -> bool:
+    if channel_config.get("lane") != "actions":
         return False
     reference = getattr(message, "reference", None)
     referenced_message_id = getattr(reference, "message_id", None)
@@ -635,7 +635,7 @@ async def _handle_arena_relay_action_note(app, message, channel_config, raw_ques
         raw_question,
         **ch,
         **author,
-        workflow="arena-relay",
+        workflow="actions",
         event_type="leader_action_note",
         discord_message_id=message.id,
         raw_json={
@@ -657,14 +657,14 @@ async def _handle_arena_relay_action_note(app, message, channel_config, raw_ques
     return True
 
 
-async def _handle_arena_relay_screenshot_observation(
+async def _handle_leader_screenshot_observation(
     app,
     message,
     channel_config,
     raw_question: str,
     image_attachments: list,
 ) -> bool:
-    if channel_config.get("lane") != "arena-relay":
+    if channel_config.get("lane") != "actions":
         return False
     if not image_attachments:
         return False
@@ -688,8 +688,8 @@ async def _handle_arena_relay_screenshot_observation(
             question,
             **ch,
             **author,
-            workflow="arena-relay",
-            event_type="arena_relay_screenshot_observation_input",
+            workflow="actions",
+            event_type="leader_screenshot_observation_input",
             discord_message_id=message.id,
             raw_json={
                 "attachment_summary": _attachment_summary(image_attachments),
@@ -712,8 +712,8 @@ async def _handle_arena_relay_screenshot_observation(
                 content,
                 **ch,
                 **author,
-                workflow="arena-relay",
-                event_type="arena_relay_screenshot_observation",
+                workflow="actions",
+                event_type="leader_screenshot_observation",
                 discord_message_id=_primary_discord_message_id(sent),
                 raw_json={"input_message_id": user_msg_id, "image_blocks_read": 0},
             )
@@ -727,7 +727,7 @@ async def _handle_arena_relay_screenshot_observation(
             query=question,
         )
         result = await asyncio.to_thread(
-            elixir_agent.analyze_arena_relay_screenshot,
+            elixir_agent.analyze_leader_screenshot,
             question,
             author_name=message.author.display_name,
             channel_name=app._channel_reply_target_name(channel_config),
@@ -739,9 +739,9 @@ async def _handle_arena_relay_screenshot_observation(
             failure_kind, agent_error = failure
             app._log_prompt_failure(
                 question=question,
-                workflow="arena-relay",
+                workflow="actions",
                 failure_type=failure_kind,
-                failure_stage="analyze_arena_relay_screenshot",
+                failure_stage="analyze_leader_screenshot",
                 channel=message.channel,
                 author=message.author,
                 discord_message_id=message.id,
@@ -758,9 +758,9 @@ async def _handle_arena_relay_screenshot_observation(
         if not content:
             app._log_prompt_failure(
                 question=question,
-                workflow="arena-relay",
+                workflow="actions",
                 failure_type="empty_result",
-                failure_stage="analyze_arena_relay_screenshot",
+                failure_stage="analyze_leader_screenshot",
                 channel=message.channel,
                 author=message.author,
                 discord_message_id=message.id,
@@ -779,11 +779,11 @@ async def _handle_arena_relay_screenshot_observation(
                     _persist_screenshot_memories,
                     screenshot_memories,
                     message.channel.id,
-                    "arena-relay",
+                    "actions",
                     message.id,
                 )
                 app.log.info(
-                    "arena_relay_screenshot_memories input_message_id=%s saved=%s requested=%s",
+                    "leader_screenshot_memories input_message_id=%s saved=%s requested=%s",
                     message.id,
                     saved,
                     len(screenshot_memories),
@@ -799,8 +799,8 @@ async def _handle_arena_relay_screenshot_observation(
             _stored_assistant_content(content),
             **ch,
             **author,
-            workflow="arena-relay",
-            event_type=result.get("event_type") or "arena_relay_screenshot_observation",
+            workflow="actions",
+            event_type=result.get("event_type") or "leader_screenshot_observation",
             summary=result.get("summary"),
             discord_message_id=_primary_discord_message_id(sent),
             raw_json={
@@ -1722,9 +1722,9 @@ async def route_message(message):
         "allows_open_channel_reply": allows_open_channel_reply,
     }
 
-    if await _handle_arena_relay_action_note(app, message, channel_config, raw_question):
+    if await _handle_action_note(app, message, channel_config, raw_question):
         return
-    if await _handle_arena_relay_screenshot_observation(
+    if await _handle_leader_screenshot_observation(
         app,
         message,
         channel_config,

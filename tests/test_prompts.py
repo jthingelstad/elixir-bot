@@ -59,8 +59,8 @@ def test_reception_channel_is_open_channel():
     assert channel["reply_policy"] == "open_channel"
 
 
-def test_arena_relay_channel_is_configured():
-    channel = prompts.discord_singleton_lane("arena-relay")
+def test_actions_channel_is_configured():
+    channel = prompts.discord_singleton_lane("actions")
     assert channel["id"] == 1513758211206025227
     assert channel["name"] == "#actions"  # renamed from #leader-actions 2026-07-12
     assert channel["reply_policy"] == "disabled"
@@ -68,10 +68,10 @@ def test_arena_relay_channel_is_configured():
     section = prompts.channel_section("#actions")
     assert "leader action board" in section.lower()
     assert "✅/☑️" in section
-    # the new name and the retained back-compat alias both resolve to arena-relay
-    assert prompts.resolve_channel_reference("actions")["lane"] == "arena-relay"
-    assert prompts.resolve_channel_reference("leader-actions")["lane"] == "arena-relay"
-    assert prompts.resolve_channel_reference("arena-relay")["name"] == "#actions"
+    # the new name and the retained back-compat alias both resolve to actions
+    assert prompts.resolve_channel_reference("actions")["lane"] == "actions"
+    assert prompts.resolve_channel_reference("leader-actions")["lane"] == "actions"
+    assert prompts.resolve_channel_reference("actions")["name"] == "#actions"
 
 
 def test_retired_topic_channels_are_gone():

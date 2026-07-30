@@ -192,7 +192,7 @@ def _leader_action_feedback_system():
         prompts.identity_block(),
         prompts.knowledge_block(),
         prompts.policy(),
-        prompts.channel_section("arena-relay"),
+        prompts.channel_section("actions"),
         "You are updating Elixir's operating memory for #leader-actions leader action cards.\n\n"
         "The user gives you recent action cards, leader decisions, leader reply notes, and any measured outcomes. "
         "Your job is not to grade leaders. Your job is to learn how future action cards should change.\n\n"
@@ -279,7 +279,7 @@ def _clan_chat_copy_system():
         prompts.identity_block(),
         prompts.knowledge_block(),
         prompts.policy(),
-        prompts.channel_section("arena-relay"),
+        prompts.channel_section("actions"),
         "You are Elixir writing text that a human POAP KINGS leader will copy/paste into Clash Royale's in-game clan chat.\n\n"
         "This is not a Discord message. It must feel native to Clash Royale clan chat: short, plain, direct, and human. "
         "Write as Elixir's in-game relay persona: observant, warm, specific, and clan-minded, but compact enough for a phone chat box. "
@@ -615,7 +615,7 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
     )
 
 
-def _arena_relay_observation_system(channel_name: str):
+def _screenshot_readout_system(channel_name: str):
     lane_key = prompts.lane_key_for_channel(channel_name, "clanops")
     purpose, knowledge, channel_context = _lane_base(channel_name, lane_key)
     guidance = (
@@ -646,7 +646,7 @@ def _arena_relay_observation_system(channel_name: str):
         f"{_discord_formatting_guidance()}"
         f"{_discord_emoji_guidance(allow_in_sensitive=True)}"
         "Respond with JSON only (no markdown wrapper):\n"
-        '{"event_type": "arena_relay_screenshot_observation", '
+        '{"event_type": "leader_screenshot_observation", '
         '"summary": "one sentence observation summary", '
         '"content": "Discord-ready concise readout", '
         '"observation": {"screenshot_type": "boat_defense", "players": [], "actionable_facts": [], "uncertainty": null}, '
@@ -979,7 +979,7 @@ def _channel_lane_system(channel_name: str, *, leadership: bool = False):
 __all__ = [
     "_interactive_system",
     "_clanops_system",
-    "_arena_relay_observation_system",
+    "_screenshot_readout_system",
     "_reception_system",
     "_channel_lane_system",
     "_promote_system",

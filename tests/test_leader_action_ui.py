@@ -1,4 +1,4 @@
-"""Tests for arena-relay leader action Discord UI composition."""
+"""Tests for actions leader action Discord UI composition."""
 
 import asyncio
 from types import SimpleNamespace
