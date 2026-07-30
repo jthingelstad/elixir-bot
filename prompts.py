@@ -16,8 +16,8 @@ _AGENT_PROMPTS_DIR = os.path.join(_PROMPTS_DIR, "agents")
 _LANE_PROMPTS_DIR = os.path.join(_PROMPTS_DIR, "lanes")
 
 CHANNEL_LANE_CONFIG = {
-    "promote-the-clan": {
-        "workflow": "site_promote_content",
+    "recruiting": {
+        "workflow": "recruiting_copy",
         "tool_policy": "none",
         "reply_policy": "disabled",
         "singleton": True,
@@ -25,7 +25,7 @@ CHANNEL_LANE_CONFIG = {
         "durable_memory_enabled": False,
     },
     "announcements": {
-        "workflow": "weekly_digest",
+        "workflow": "weekly_recap",
         "tool_policy": "read_only",
         "reply_policy": "disabled",
         "singleton": True,
@@ -66,7 +66,7 @@ CHANNEL_LANE_CONFIG = {
         "memory_scope": "public",
         "durable_memory_enabled": False,
     },
-    "general": {
+    "clan-chat": {
         "workflow": "interactive",
         "tool_policy": "read_only",
         "reply_policy": "mention_only",
@@ -89,13 +89,18 @@ LANE_ALIASES = {
     "welcome": "reception",
     "join_gate": "reception",
     "join-gate": "reception",
-    "weekly_digest": "announcements",
+    "weekly_recap": "announcements",
+    "weekly_digest": "announcements",  # workflow renamed 2026-07-30
     "royal_decrees": "announcements",
     "royal-decrees": "announcements",
-    "promotion": "promote-the-clan",
-    "recruiting": "promote-the-clan",
-    "recruiting_camp": "promote-the-clan",
-    "recruiting-camp": "promote-the-clan",
+    # NOT `"promotion"`. Everywhere else in this codebase "promotion" means
+    # Elder rank — promotion_recommendation, promote_state, promotion_candidates
+    # — and aliasing it to the recruiting lane made one word mean two opposite
+    # things inside the management domain. The lane is `recruiting`; the older
+    # spellings still resolve.
+    "promote-the-clan": "recruiting",
+    "recruiting_camp": "recruiting",
+    "recruiting-camp": "recruiting",
     # The lane is `actions`, matching the channel. It was `arena-relay` until
     # 2026-07-30 — a name for a concept that no longer existed, since the board
     # carries kicks and promotions, not just relays. These aliases resolve the
@@ -108,8 +113,8 @@ LANE_ALIASES = {
     "leaders": "leader-lounge",
     "king_tower": "leader-lounge",
     "king-tower": "leader-lounge",
-    "clan_chat": "general",
-    "clan-chat": "general",
+    "general": "clan-chat",  # Discord-convention name; the channel is #clan-chat
+    "clan_chat": "clan-chat",
     "ask_elixir": "ask-elixir",
 }
 
@@ -134,8 +139,8 @@ VALID_CHANNEL_WORKFLOWS = {
     "interactive",
     "clanops",
     "channel_update",
-    "weekly_digest",
-    "site_promote_content",
+    "weekly_recap",
+    "recruiting_copy",
 }
 VALID_TOOL_POLICIES = {"none", "read_only", "read_write"}
 VALID_MEMORY_SCOPES = {"public", "leadership"}
@@ -317,12 +322,12 @@ def lane_key_for_channel(channel_name: str, workflow: str | None = None) -> str:
 
     workflow_key = (workflow or "").strip().lower()
     if workflow_key.startswith("interactive"):
-        return "general"
+        return "clan-chat"
     if workflow_key.startswith("clanops"):
         return "leader-lounge"
     if workflow_key == "reception":
         return "reception"
-    if workflow_key in {"weekly_digest", "announcements"}:
+    if workflow_key in {"weekly_recap", "announcements"}:
         return "announcements"
 
     return _channel_lane_key(channel_name)

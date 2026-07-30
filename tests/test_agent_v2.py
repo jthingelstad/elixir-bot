@@ -1666,7 +1666,7 @@ def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
             )
             assert create.call_args.kwargs["model"] == "claude-sonnet-5", workflow
         for workflow in (
-            "weekly_digest",
+            "weekly_recap",
             "tournament_recap",
             "intel_report",
             "memory_synthesis",
@@ -1802,7 +1802,7 @@ def test_create_chat_completion_respects_model_env_overrides():
         ),
     ):
         elixir_agent._create_chat_completion(
-            workflow="weekly_digest",
+            workflow="weekly_recap",
             messages=[{"role": "user", "content": "status"}],
         )
         assert create.call_args.kwargs["model"] == "claude-test-intensive"

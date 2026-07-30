@@ -30,12 +30,12 @@ def test_registry_generates_compatibility_maps():
 
 def test_registry_model_selection_matches_existing_defaults(monkeypatch):
     monkeypatch.setenv("ELIXIR_CHAT_MODEL", "chat-model")
-    monkeypatch.setenv("ELIXIR_PROMOTION_MODEL", "promotion-model")
+    monkeypatch.setenv("ELIXIR_CREATIVE_MODEL", "creative-model")
     monkeypatch.setenv("ELIXIR_LIGHTWEIGHT_MODEL", "light-model")
     monkeypatch.setenv("ELIXIR_INTENSIVE_MODEL", "intensive-model")
 
     assert elixir_agent._model_for_workflow("interactive") == "chat-model"
-    assert elixir_agent._model_for_workflow("site_promote_content") == "promotion-model"
+    assert elixir_agent._model_for_workflow("recruiting_copy") == "creative-model"
     assert elixir_agent._model_for_workflow("intel_report") == "intensive-model"
     # leader_action_feedback demoted intensive->chat 2026-07-23 (Sonnet at parity, ~half cost)
     assert elixir_agent._model_for_workflow("leader_action_feedback") == "chat-model"

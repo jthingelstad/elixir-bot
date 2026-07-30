@@ -242,7 +242,7 @@ Current primary lanes:
 - `member-highlights` — curated player milestones and non-war battle pushes (`#player-highlights`)
 - `clan-events` — joins, promotions, anniversaries, and clan recognitions (`#clan-events`)
 - `announcements` — weekly recap and clan-wide Elixir system updates (`#announcements`)
-- `promote-the-clan` — recruiting copy (`#recruiting`)
+- `recruiting` — recruiting copy (`#recruiting`)
 - `poapkings-com` — legacy website-visibility lane (see Website Note)
 
 Current executable agents/workflows:

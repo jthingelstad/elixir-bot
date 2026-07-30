@@ -770,7 +770,7 @@ def get_members_on_hot_streak(
 
 
 @managed_connection
-def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] = None) -> dict:
+def get_weekly_recap_summary(days: int = 7, conn: Optional[sqlite3.Connection] = None) -> dict:
     from storage.war import get_current_season_id
     from storage.war_analytics import get_trending_war_contributors, get_war_score_trend
     from storage.war_status import get_trophy_changes, get_war_season_summary

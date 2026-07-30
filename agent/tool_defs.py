@@ -507,10 +507,10 @@ TOOLS = [
                 "scope": {
                     "type": "string",
                     "description": (
-                        "Event-stream scope: public, leadership, system_internal, or all. "
+                        "Event-stream scope: public, leadership, or all. "
                         "Non-leadership workflows are forced to public."
                     ),
-                    "enum": ["public", "leadership", "system_internal", "all"],
+                    "enum": ["public", "leadership", "all"],
                 },
                 "days": {
                     "type": "integer",

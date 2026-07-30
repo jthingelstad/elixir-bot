@@ -3337,7 +3337,7 @@ def test_build_schedule_report_includes_promotion_content_sync():
     ):
         report = elixir._build_schedule_report()
 
-    assert "promote-the-clan" in report
+    assert "recruiting" in report
     assert "promotion-content" in report
     assert "Discord: #recruiting" in report
     assert "Every Fri at 09:00 CT." in report
@@ -4564,7 +4564,7 @@ def test_recap_context_leads_with_public_story_arcs():
 
     with (
         patch("memory_store.list_memories", side_effect=fake_list_memories),
-        patch("elixir.db.get_weekly_digest_summary", return_value={"window_days": 7}),
+        patch("elixir.db.get_weekly_recap_summary", return_value={"window_days": 7}),
         patch("elixir.db.build_clan_trend_summary_context", return_value=""),
     ):
         context = elixir._build_weekly_clan_recap_context({"name": "POAP KINGS"}, {})
@@ -4580,7 +4580,7 @@ def test_recap_context_leads_with_public_story_arcs():
 def test_recap_context_omits_arc_block_when_no_public_memories():
     with (
         patch("memory_store.list_memories", return_value=[]),
-        patch("elixir.db.get_weekly_digest_summary", return_value={"window_days": 7}),
+        patch("elixir.db.get_weekly_recap_summary", return_value={"window_days": 7}),
         patch("elixir.db.build_clan_trend_summary_context", return_value=""),
     ):
         context = elixir._build_weekly_clan_recap_context({"name": "POAP KINGS"}, {})
@@ -4610,7 +4610,7 @@ def test_recap_context_uses_shared_game_mode_capability():
     }
     with (
         patch("memory_store.list_memories", return_value=[]),
-        patch("elixir.db.get_weekly_digest_summary", return_value={"window_days": 7}),
+        patch("elixir.db.get_weekly_recap_summary", return_value={"window_days": 7}),
         patch("elixir.db.build_clan_trend_summary_context", return_value=""),
         patch(
             "runtime.helpers._reports.game_mode_capability.get_clan_game_mode_windows",
@@ -4628,7 +4628,7 @@ def test_build_weekly_clan_recap_context_summarizes_week():
     with (
         patch("memory_store.list_memories", return_value=[]),
         patch(
-            "elixir.db.get_weekly_digest_summary",
+            "elixir.db.get_weekly_recap_summary",
             return_value={
                 "window_days": 7,
                 "roster": {

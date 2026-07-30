@@ -21,7 +21,7 @@ def _awareness_max_rounds() -> int:
         return 6
 
 
-ModelFamily = Literal["chat", "promotion", "lightweight", "intensive"]
+ModelFamily = Literal["chat", "creative", "lightweight", "intensive"]
 
 
 @dataclass(frozen=True)
@@ -232,11 +232,11 @@ _WORKFLOW_SPECS = (
         model_family="chat",
         tools_allowed=False,
     ),
-    # weekly_digest: brain-powered Weekly Clan Recap (rebuilt 2026-07-11 to
+    # weekly_recap: brain-powered Weekly Clan Recap (rebuilt 2026-07-11 to
     # compose from the awareness read via tools, like ask_elixir_daily). The
-    # workflow key stays "weekly_digest" for lane-routing stability.
+    # workflow key stays "weekly_recap" for lane-routing stability.
     WorkflowSpec(
-        "weekly_digest",
+        "weekly_recap",
         response_schema={"required": ["recap"]},
         tools=INTERACTIVE_READ_TOOLS,
         max_tool_rounds=6,
@@ -273,7 +273,7 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=1,
         model_family="lightweight",
     ),
-    WorkflowSpec("site_promote_content", model_family="promotion"),
+    WorkflowSpec("recruiting_copy", model_family="creative"),
     # Release-notes announcement (agent/release_notes.py, ported from Oliver):
     # Elixir's first-person "what I can do now" post — chat-tier, no tools.
     WorkflowSpec(

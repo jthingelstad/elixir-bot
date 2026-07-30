@@ -577,7 +577,7 @@ async def post_release_relay_card(clanchat_text: str, *, tag: str) -> bool:
 async def _weekly_clan_recap():
     runtime_status.mark_job_start("weekly_clan_recap")
     try:
-        recap_channel_id = _get_singleton_channel_id("weekly_digest")
+        recap_channel_id = _get_singleton_channel_id("weekly_recap")
     except Exception as exc:
         runtime_status.mark_job_failure(
             "weekly_clan_recap", f"weekly digest channel config error: {exc}"
@@ -670,7 +670,7 @@ async def _weekly_elder_standing():
     deterministic render if the LLM output ever names someone not in the data."""
     runtime_status.mark_job_start("weekly_elder_standing")
     try:
-        channel_id = _get_singleton_channel_id("weekly_digest")  # = #announcements
+        channel_id = _get_singleton_channel_id("weekly_recap")  # = #announcements
     except Exception as exc:
         runtime_status.mark_job_failure(
             "weekly_elder_standing", f"announcements channel config error: {exc}"

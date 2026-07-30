@@ -153,7 +153,7 @@ When recommending next levers, prefer them in this order:
 
 1. **Signal-side cuts** — reduce how often a workflow is *triggered* in the first place. Tighter signal filters, longer dedup windows, per-channel cooldowns. This is the user's stated preference.
 2. **Model swap to Haiku** — fair game for any workflow that isn't long-form written content.
-   - **Keep Sonnet** on: `weekly_digest`, `site_promote_content`, `tournament_recap`, `intel_report`, `memory_synthesis`.
+   - **Keep Sonnet** on: `weekly_recap`, `recruiting_copy`, `tournament_recap`, `intel_report`, `memory_synthesis`.
    - Everything else can default to Haiku.
 3. **Prompt trim** — remove stale or unused fields from Situation JSON. Don't add new rules or restrictions; *removing bloat* is fine.
 4. **Cadence** — lower cron frequency (e.g. `HEARTBEAT_INTERVAL_MINUTES` 30 → 60).

@@ -27,7 +27,10 @@ def test_db_facade_public_surface_is_reviewed():
         *(f"{name}:{module}" for name, module in db._FACADE_EXPORTS.items()),
     ]
     assert len(entries) == 243
-    assert _digest(entries) == "bc5bcdeb4925c99a9d3cdae83abce38e6ae1e9e10ffc7fac082774b8896100c5"
+    # Updated 2026-07-30 for one rename, get_weekly_digest_summary ->
+    # get_weekly_recap_summary. Count is unchanged at 243, so nothing was
+    # added or dropped from the public surface.
+    assert _digest(entries) == "a2dc7b745731aa63cc6be98dfe9dddd5fde603f410a6091d982c54f7cc02c1b5"
     assert db._CORE_EXPORTS.isdisjoint(db._FACADE_EXPORTS)
     assert db.__all__ == sorted(db._CORE_EXPORTS | set(db._FACADE_EXPORTS))
 

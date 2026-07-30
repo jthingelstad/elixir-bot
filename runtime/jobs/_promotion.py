@@ -100,7 +100,7 @@ def _validate_promote_content_or_raise(promote, required_trophies=2000) -> None:
 async def _promotion_content_cycle():
     runtime_status.mark_job_start("promotion_content_cycle")
     try:
-        promotion_channel_id = _get_singleton_channel_id("promotion")
+        promotion_channel_id = _get_singleton_channel_id("recruiting")
     except Exception as exc:
         runtime_status.mark_job_failure(
             "promotion_content_cycle", f"promotion channel config error: {exc}"
@@ -157,7 +157,7 @@ async def _promotion_content_cycle():
             "assistant",
             post,
             **ch,
-            workflow="promotion",
+            workflow="recruiting_copy",
             event_type="promotion_content_cycle" if index == 0 else "promotion_content_cycle_part",
         )
     runtime_status.mark_job_success(

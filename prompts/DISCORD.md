@@ -47,7 +47,7 @@ Elixir's onboarding and verification channel.
 
 ID: 1474760975851982959
 Lane: announcements
-Workflow: weekly_digest
+Workflow: weekly_recap
 ToolPolicy: read_only
 MemoryScope: public
 DurableMemory: true
@@ -104,8 +104,8 @@ Elixir's leader action board.
 ## #recruiting
 
 ID: 1475138086957613197
-Lane: promote-the-clan
-Workflow: site_promote_content
+Lane: recruiting
+Workflow: recruiting_copy
 ToolPolicy: none
 MemoryScope: public
 DurableMemory: false
@@ -122,7 +122,7 @@ Elixir's recruiting copy channel.
 ## #clan-chat
 
 ID: 1474760693491433585
-Lane: general
+Lane: clan-chat
 Workflow: interactive
 ToolPolicy: read_only
 ReplyPolicy: mention_only

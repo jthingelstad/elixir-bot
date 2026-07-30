@@ -768,7 +768,7 @@ _FACADE_EXPORT_GROUPS = {
         "get_member_recent_form",
         "get_members_on_hot_streak",
         "get_members_on_losing_streak",
-        "get_weekly_digest_summary",
+        "get_weekly_recap_summary",
         "list_longest_tenure_members",
         "list_members",
         "list_recent_joins",

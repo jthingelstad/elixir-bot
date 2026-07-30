@@ -235,7 +235,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     # — the website has its own standalone update script now.
     ActivityDefinition(
         activity_key="promotion-content",
-        owner_lane="promote-the-clan",
+        owner_lane="recruiting",
         purpose="Generate reusable recruiting content for the #recruiting channel.",
         job_id="promotion-content",
         job_function="_promotion_content_cycle",

@@ -101,8 +101,8 @@ def _chat_model_name():
     return os.getenv("ELIXIR_CHAT_MODEL", "claude-sonnet-5")
 
 
-def _promotion_model_name():
-    return os.getenv("ELIXIR_PROMOTION_MODEL", "claude-opus-4-8")
+def _creative_model_name():
+    return os.getenv("ELIXIR_CREATIVE_MODEL", "claude-opus-4-8")
 
 
 def _intensive_model_name():
@@ -118,8 +118,8 @@ def _model_for_workflow(workflow, model=None):
     if model:
         return model
     model_family = workflow_model_family(workflow)
-    if model_family == "promotion":
-        return _promotion_model_name()
+    if model_family == "creative":
+        return _creative_model_name()
     if model_family == "chat":
         return _chat_model_name()
     if model_family == "intensive":
