@@ -572,13 +572,20 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         SELECT
             (SELECT COUNT(*) FROM awareness_thoughts
              WHERE at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')) AS ticks,
-            (SELECT COALESCE(SUM(json_array_length(lane.value)), 0)
+            -- Reads both key names: the field was `signals_by_lane` until the
+            -- rename, and ~393 stored thoughts still carry that spelling. New
+            -- rows use `signals_by_category`; drop the fallback once the old
+            -- rows age out of every window that reads them.
+            (SELECT COALESCE(SUM(json_array_length(category.value)), 0)
              FROM awareness_thoughts AS thought,
                   json_each(CASE
                       WHEN json_valid(thought.read_json)
-                      THEN COALESCE(json_extract(thought.read_json, '$.signals_by_lane'), '{}')
+                      THEN COALESCE(
+                               json_extract(thought.read_json, '$.signals_by_category'),
+                               json_extract(thought.read_json, '$.signals_by_lane'),
+                               '{}')
                       ELSE '{}'
-                  END) AS lane
+                  END) AS category
              WHERE thought.at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')) AS signals_in,
             (SELECT COUNT(*) FROM awareness_posts
              WHERE posted_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')) AS posts_delivered,

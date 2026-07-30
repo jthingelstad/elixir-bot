@@ -173,7 +173,7 @@ def test_editorial_admission_suppresses_only_routine_solo_repeat():
         "subject_tag": "#GEM",
     }
     read = {
-        "signals_by_lane": {"milestone": [signal]},
+        "signals_by_category": {"milestone": [signal]},
         "hard_post_signals": [],
         "recent_member_spotlights": [
             {
@@ -214,7 +214,7 @@ def test_editorial_admission_keeps_notable_repeat_and_roundup():
         "badge_tier": "legendary",
     }
     read = {
-        "signals_by_lane": {"milestone": [notable]},
+        "signals_by_category": {"milestone": [notable]},
         "hard_post_signals": [],
         "recent_member_spotlights": [
             {

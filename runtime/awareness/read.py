@@ -45,7 +45,7 @@ _LANE_BY_STREAM: dict[str, str] = {
     "player": "milestone",
 }
 
-_LANE_KEYS = ("war", "battle_mode", "milestone", "clan_event", "leadership", "system")
+_CATEGORY_KEYS = ("war", "battle_mode", "milestone", "clan_event", "leadership", "system")
 
 # Channels whose recent traffic we surface as channel_memory. The brain posts
 # only here; each delivered post is recorded in awareness_posts.
@@ -329,7 +329,7 @@ def _signal_key(event: dict) -> str:
     )
 
 
-def _lane_for(event: dict) -> str:
+def _category_for(event: dict) -> str:
     event_type = event.get("event_type") or ""
     lane = _LANE_BY_EVENT_TYPE.get(event_type)
     if lane:
@@ -802,12 +802,12 @@ def build_read(conn=None) -> dict:
             },
         )
         events = _signals(conn, pending.get("events") or [])
-        signals_by_lane: dict[str, list[dict]] = {key: [] for key in _LANE_KEYS}
+        signals_by_category: dict[str, list[dict]] = {key: [] for key in _CATEGORY_KEYS}
         hard_post_signals: list[dict] = []
         for event in events:
-            lane = _lane_for(event)
+            lane = _category_for(event)
             compact = _compact_signal(event)
-            signals_by_lane.setdefault(lane, []).append(compact)
+            signals_by_category.setdefault(lane, []).append(compact)
             if (event.get("event_type") or "") in HARD_POST_EVENT_TYPES:
                 hard_post_signals.append(compact)
 
@@ -844,7 +844,7 @@ def build_read(conn=None) -> dict:
                 ],
                 None,
             ),
-            "signals_by_lane": signals_by_lane,
+            "signals_by_category": signals_by_category,
             "hard_post_signals": hard_post_signals,
             "game_context": _load(
                 "game_context",

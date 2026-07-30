@@ -23,7 +23,7 @@ _EXPECTED_KEYS = {
     "time",
     "standing",
     "war_season",
-    "signals_by_lane",
+    "signals_by_category",
     "hard_post_signals",
     "channel_memory",
     "recent_agent_writes",
@@ -99,7 +99,7 @@ def test_build_read_returns_expected_keys_on_empty_db():
     # Every block degrades independently — nothing raised.
     assert isinstance(read.get("_degraded"), list)
     # Grouped signal lanes always present as a dict.
-    assert isinstance(read["signals_by_lane"], dict)
+    assert isinstance(read["signals_by_category"], dict)
     assert isinstance(read["hard_post_signals"], list)
     # Empty DB → no active war.
     assert read["time"] is None

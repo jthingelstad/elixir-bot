@@ -16,7 +16,7 @@ from runtime.awareness import gate
 def _empty_read(**over):
     read = {
         "generated_at": "2026-07-12T22:00:00Z",
-        "signals_by_lane": {
+        "signals_by_category": {
             "war": [],
             "battle_mode": [],
             "milestone": [],
@@ -42,7 +42,7 @@ def test_classify_deliberate_on_hard_post():
     hp = {"signal_key": "member_joined:#X:t", "event_type": "member_joined"}
     read = _empty_read(
         hard_post_signals=[hp],
-        signals_by_lane={
+        signals_by_category={
             "clan_event": [hp],
             "war": [],
             "battle_mode": [],
@@ -71,7 +71,7 @@ def test_classify_deliberate_on_legendary_badge():
         "badge_name": "Chaos_S2",
     }
     read = _empty_read(
-        signals_by_lane={
+        signals_by_category={
             "milestone": [sig],
             "war": [],
             "battle_mode": [],
@@ -92,7 +92,7 @@ def test_classify_deliberate_on_arena_climb():
         "arena_name": "Spirit Square",
     }
     read = _empty_read(
-        signals_by_lane={
+        signals_by_category={
             "milestone": [sig],
             "war": [],
             "battle_mode": [],
@@ -113,7 +113,7 @@ def test_classify_routine_badge_still_triage_not_deliberate():
         "badge_name": "MasteryLog",
     }
     read = _empty_read(
-        signals_by_lane={
+        signals_by_category={
             "milestone": [sig],
             "war": [],
             "battle_mode": [],
@@ -133,7 +133,7 @@ def test_classify_heartbeat_quiet_stretch_deliberates():
         "event_type": "card_level_milestone",
     }
     read = _empty_read(
-        signals_by_lane={
+        signals_by_category={
             "milestone": [sig],
             "war": [],
             "battle_mode": [],
@@ -155,7 +155,7 @@ def test_classify_not_quiet_routine_soft_stays_triage():
         "event_type": "card_level_milestone",
     }
     read = _empty_read(
-        signals_by_lane={
+        signals_by_category={
             "milestone": [sig],
             "war": [],
             "battle_mode": [],
@@ -174,7 +174,7 @@ def test_classify_triage_on_soft_milestone():
         "event_type": "card_level_milestone",
     }
     read = _empty_read(
-        signals_by_lane={
+        signals_by_category={
             "milestone": [sig],
             "war": [],
             "battle_mode": [],
@@ -218,7 +218,7 @@ def _anniversary_read(*, posted: bool):
     read = _empty_read(
         generated_at="2026-07-14T11:05:00Z",
         cake_days_today=[cake],
-        signals_by_lane={
+        signals_by_category={
             "clan_event": [lane_sig],
             "war": [],
             "battle_mode": [],
@@ -273,12 +273,12 @@ def test_fresh_cake_day_still_reaches_triage():
 
 
 def test_hard_post_not_double_counted_as_soft():
-    """A hard-post is mirrored into signals_by_lane; it must not also register as
+    """A hard-post is mirrored into signals_by_category; it must not also register as
     a soft-lane signal (which would be a redundant classification)."""
     hp = {"signal_key": "member_joined:#X:t", "event_type": "member_joined"}
     read = _empty_read(
         hard_post_signals=[hp],
-        signals_by_lane={
+        signals_by_category={
             "clan_event": [hp],
             "war": [],
             "battle_mode": [],
@@ -314,7 +314,7 @@ def test_decide_hard_post_deliberates_without_triage(monkeypatch):
     hp = {"signal_key": "member_joined:#X:t", "event_type": "member_joined"}
     read = _empty_read(
         hard_post_signals=[hp],
-        signals_by_lane={
+        signals_by_category={
             "clan_event": [hp],
             "war": [],
             "battle_mode": [],
@@ -332,7 +332,7 @@ def test_decide_triage_silent_is_gated_silence(monkeypatch):
     monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "1")
     sig = {"signal_key": "m:1", "event_type": "card_level_milestone"}
     read = _empty_read(
-        signals_by_lane={
+        signals_by_category={
             "milestone": [sig],
             "war": [],
             "battle_mode": [],
@@ -351,7 +351,7 @@ def test_decide_triage_post_escalates_to_brain(monkeypatch):
     monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "1")
     sig = {"signal_key": "m:1", "event_type": "card_level_milestone"}
     read = _empty_read(
-        signals_by_lane={
+        signals_by_category={
             "milestone": [sig],
             "war": [],
             "battle_mode": [],

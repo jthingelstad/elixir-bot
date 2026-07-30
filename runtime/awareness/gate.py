@@ -76,13 +76,13 @@ _CAKE_EVENT_TYPES = {"join_anniversary", "member_birthday", "cr_account_annivers
 def _soft_lane_signals(read: dict) -> list:
     """Lane signals that are not themselves hard-post signals.
 
-    Hard-post events are also mirrored into ``signals_by_lane``; a hard-post is
+    Hard-post events are also mirrored into ``signals_by_category``; a hard-post is
     already handled by the deliberate tier, so here we count only the soft
     remainder (milestones, non-mandatory clan/battle events, etc.). An anniversary
     already celebrated in a post today is dropped too — it also lands in the
     clan_event lane, and left in it keeps re-nudging the gate (over-escalation leak).
     """
-    lanes = read.get("signals_by_lane") or {}
+    lanes = read.get("signals_by_category") or {}
     hard_keys = {s.get("signal_key") for s in _hard_post(read) if isinstance(s, dict)}
     posted_cake = _posted_cake_tags(read)
     out = []

@@ -88,7 +88,7 @@ def main() -> int:
     read = build_read(conn=conn)
     surfaced = [
         signal
-        for signals in (read.get("signals_by_lane") or {}).values()
+        for signals in (read.get("signals_by_category") or {}).values()
         for signal in (signals or [])
         if isinstance(signal, dict)
         and signal.get("event_type") == "season_closed"

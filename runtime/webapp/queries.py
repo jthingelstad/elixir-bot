@@ -386,7 +386,10 @@ def awareness_page() -> dict:
         loops = []
         for t in raw:
             read = _parse_json(t.get("read_json"), {}) or {}
-            sbl = read.get("signals_by_lane") or {}
+            # Historical thoughts stored this as `signals_by_lane`; keep reading
+            # both until those rows age out, or the loop list silently shows
+            # zero signals for every tick before the rename.
+            sbl = read.get("signals_by_category") or read.get("signals_by_lane") or {}
             hard = read.get("hard_post_signals") or []
             trace = _parse_json(t.get("tool_trace_json"), []) or []
             pulse = read.get("posting_pulse") or {}

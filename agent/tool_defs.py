@@ -1117,7 +1117,7 @@ TOOLS = [
             "properties": {
                 "signal_key": {
                     "type": "string",
-                    "description": "The `signal_key` of the signal this revisit tracks. Copy it verbatim from `signals_by_lane` or `hard_post_signals`.",
+                    "description": "The `signal_key` of the signal this revisit tracks. Copy it verbatim from `signals_by_category` or `hard_post_signals`.",
                 },
                 "at": {
                     "type": "string",
