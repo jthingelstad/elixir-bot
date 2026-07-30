@@ -19,7 +19,11 @@ def test_clan_rules_present():
     assert "Elder" in block
     assert "War Champ" in block
     assert "Pass Royale" in block
-    assert "2,000" in block
+    # NOT a literal floor. This used to assert "2,000" — a test enforcing the
+    # very staleness that told a 7,053-trophy joiner they were "well clear of
+    # our 2,000-trophy entry line". Assert the RULE is stated; its value comes
+    # from clan_daily_metrics via the <<REQUIRED_TROPHIES>> token.
+    assert "Join requirement:" in block
 
 
 def test_promotion_guidelines_present():

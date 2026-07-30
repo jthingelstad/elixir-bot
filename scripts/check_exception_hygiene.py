@@ -38,6 +38,10 @@ BROAD_EXCEPTION_BASELINE = {
     "capabilities/war.py": 1,
     "cr_api.py": 4,
     "db/__init__.py": 2,
+    # prompts.py: +1 for the fail-soft live-trophy-floor read. A prompt must build
+    # even with no database; an unavailable floor renders as "read it live"
+    # rather than a guessed number.
+    "prompts.py": 1,
     "db/schema.py": 25,  # +1: V25 migration rollback/re-raise (same pattern as v2-v24)
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
