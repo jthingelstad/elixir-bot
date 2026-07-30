@@ -127,12 +127,12 @@ def _errors(hours: int = 24) -> list[dict]:
     return sorted(grouped.values(), key=lambda e: e["last"], reverse=True)
 
 
-SILENCE_HOURS = 14  # no Discord output at all in this window → investigate
+AWARENESS_DECISION_STALE_HOURS = 14
 LEADER_ACTION_STALE_HOURS = 2  # a proposed card unposted this long → posting broken
 
 
 def _liveness() -> list[str]:
-    """Silence signals — no output, or leader-actions recommended-but-never-posted.
+    """Liveness signals — no successful awareness decision, or stuck leader actions.
     Silence is an alarm, not the absence of one (Jamie, 2026-07-05).
 
     These two queries lived in `runtime/health.py` until the daily health check
@@ -146,16 +146,27 @@ def _liveness() -> list[str]:
     conn = connect_read_only()
     try:
         problems = []
-        # (a) total output silence — the Pulse alone posts every ~8h, so 14h dark is wrong.
-        row = conn.execute("SELECT MAX(posted_at) FROM awareness_posts").fetchone()
+        # (a) Awareness owns proactive output and may deliberately stay quiet.
+        # A terminal decision (a real post or deliberate silence) proves the loop
+        # is alive; failed plans must not mask a stalled loop.
+        row = conn.execute(
+            "SELECT MAX(at) FROM awareness_thoughts "
+            "WHERE (chose_silence = 1 OR post_count > 0) "
+            "AND json_extract(plan_json, '$._error') IS NULL"
+        ).fetchone()
         last = row[0] if row else None
-        if last:
+        if last is None:
+            problems.append(
+                "no successful awareness decision recorded — awareness may be silently stuck"
+            )
+        else:
             hrs = conn.execute(
                 "SELECT ROUND((julianday('now') - julianday(?)) * 24, 1)", (last,)
             ).fetchone()[0]
-            if hrs is not None and hrs > SILENCE_HOURS:
+            if hrs is not None and hrs > AWARENESS_DECISION_STALE_HOURS:
                 problems.append(
-                    f"no Discord output in {hrs}h (last post {last}) — Elixir may be silently stuck"
+                    f"no successful awareness decision in {hrs}h (last decision {last}) "
+                    "— awareness may be silently stuck"
                 )
         # (b) the can_post_leader_action signature: proposed but never posted.
         stuck = conn.execute(
