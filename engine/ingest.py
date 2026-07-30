@@ -356,7 +356,15 @@ def mirror_battles(
             season_id, section_index, war_day_index = resolve_war_keys(
                 bt["battle_time"], clock, now
             )
-        dedup_key = f"{bt['player_tag']}:{bt['battle_time']}:{bt['opponent_tag']}"
+        # The key embeds battle_time, so it is only stable while battle_time's
+        # FORMAT is stable. Normalizing that column to ISO-Z (schema v25) silently
+        # changed every key: the same battle re-polled after the change hashed to
+        # a new key, INSERT OR IGNORE saw no collision, and 1,348 duplicate rows
+        # landed before anyone noticed. Derive it from the same canonical value
+        # that gets stored, so the key and the column can never disagree again.
+        dedup_key = (
+            f"{bt['player_tag']}:{canonical_utc_timestamp(bt['battle_time'])}:{bt['opponent_tag']}"
+        )
         row = {
             **bt,
             "dedup_key": dedup_key,
