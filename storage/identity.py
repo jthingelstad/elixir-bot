@@ -170,62 +170,6 @@ def upsert_discord_user(
 
 
 @managed_connection
-def set_member_discord_identity(
-    member_tag: str, discord_name: str, conn: Optional[sqlite3.Connection] = None
-) -> int:
-    identity_text = (discord_name or "").strip()
-    if not identity_text:
-        raise ValueError("discord name is required")
-    mention_match = _DISCORD_MENTION_RE.match(identity_text)
-    if mention_match:
-        discord_user_id = mention_match.group(1)
-        existing_user = conn.execute(
-            "SELECT username, display_name FROM discord_users WHERE discord_user_id = ?",
-            (discord_user_id,),
-        ).fetchone()
-        _upsert_discord_user_record(
-            conn,
-            discord_user_id,
-            username=(existing_user["username"] if existing_user else None),
-            display_name=(existing_user["display_name"] if existing_user else None),
-        )
-        member_id = _apply_discord_link(
-            conn,
-            discord_user_id,
-            member_tag,
-            username=(existing_user["username"] if existing_user else None),
-            display_name=(existing_user["display_name"] if existing_user else None),
-            source="manual_user_id_assignment",
-            confidence=1.0,
-            is_primary=True,
-        )
-        conn.commit()
-        return member_id
-    normalized_name = identity_text.lstrip("@").strip()
-    if not normalized_name:
-        raise ValueError("discord name is required")
-    manual_user_id = f"manual:{normalized_name.casefold()}"
-    _upsert_discord_user_record(
-        conn,
-        manual_user_id,
-        username=normalized_name,
-        display_name=normalized_name,
-    )
-    member_id = _apply_discord_link(
-        conn,
-        manual_user_id,
-        member_tag,
-        username=normalized_name,
-        display_name=normalized_name,
-        source="manual_name_assignment",
-        confidence=1.0,
-        is_primary=True,
-    )
-    conn.commit()
-    return member_id
-
-
-@managed_connection
 def link_discord_user_to_member(
     discord_user_id: str | int,
     member_tag: str,
@@ -257,19 +201,6 @@ def clear_member_discord_link(member_tag: str, conn: Optional[sqlite3.Connection
     conn.execute("UPDATE discord_links SET is_primary = 0 WHERE player_tag = ?", (player_tag,))
     conn.commit()
     return player_tag
-
-
-@managed_connection
-def get_discord_link(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
-    row = conn.execute(
-        "SELECT m.player_tag, m.current_name, du.discord_user_id, du.username AS discord_username, du.display_name AS discord_display_name "
-        "FROM players m "
-        "LEFT JOIN discord_links dl ON dl.player_tag = m.player_tag AND dl.is_primary = 1 "
-        "LEFT JOIN discord_users du ON du.discord_user_id = dl.discord_user_id "
-        "WHERE m.player_tag = ?",
-        (_canon_tag(member_tag),),
-    ).fetchone()
-    return dict(row) if row else None
 
 
 @managed_connection

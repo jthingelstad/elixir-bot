@@ -99,27 +99,6 @@ def get_outreach(
 
 
 @managed_connection
-def list_outreach(
-    *,
-    status: Optional[str] = None,
-    limit: int = 200,
-    conn: Optional[sqlite3.Connection] = None,
-) -> list[dict]:
-    ensure_schema(conn)
-    if status:
-        rows = conn.execute(
-            "SELECT * FROM member_outreach WHERE status = ? ORDER BY updated_at DESC LIMIT ?",
-            (status, int(limit)),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM member_outreach ORDER BY updated_at DESC LIMIT ?",
-            (int(limit),),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-@managed_connection
 def upsert_outreach(
     member_tag: str,
     *,

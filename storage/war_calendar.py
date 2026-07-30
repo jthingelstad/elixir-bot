@@ -86,17 +86,6 @@ def phase_day_number(phase: Optional[str], period_index: Optional[int]) -> Optio
     return wd.day_in_week + 1
 
 
-def war_week_day(period_index: Optional[int]) -> Optional[int]:
-    """1-indexed day number within the war week (1-7), combining practice and
-    battle days. Days 1-3 are practice; days 4-7 are battle. Returns None if
-    period_index is missing or out of range.
-    """
-    from engine.normalize import war_day
-
-    wd = war_day(period_index)
-    return (wd.day_in_week + 1) if wd is not None else None
-
-
 def is_colosseum_week(period_type: Optional[str] = None) -> bool:
     """True when the current war week is the colosseum (final) week.
 

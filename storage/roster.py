@@ -210,31 +210,6 @@ def snapshot_clan_daily_metrics(
 
 
 @managed_connection
-def list_clan_daily_metrics(
-    days: int = 30,
-    clan_tag: Optional[str] = None,
-    conn: Optional[sqlite3.Connection] = None,
-) -> list[dict]:
-    cutoff = (
-        (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0)))
-        .date()
-        .isoformat()
-    )
-    where = ["metric_date >= ?"]
-    params = [cutoff]
-    if clan_tag:
-        where.append("clan_tag = ?")
-        params.append(_canon_tag(clan_tag))
-    rows = conn.execute(
-        "SELECT metric_date, clan_tag, clan_name, member_count, open_slots, clan_score, clan_war_trophies, required_trophies, donations_per_week_requirement, weekly_donations_total, total_member_trophies, avg_member_trophies, top_member_trophies, joins_today, leaves_today, net_member_change, observed_at "
-        f"FROM clan_daily_metrics WHERE {' AND '.join(where)} "
-        "ORDER BY metric_date ASC, clan_tag ASC",
-        tuple(params),
-    ).fetchall()
-    return _rowdicts(rows)
-
-
-@managed_connection
 def get_active_roster_map(conn: Optional[sqlite3.Connection] = None) -> dict[str, str]:
     rows = conn.execute(
         f"SELECT m.player_tag, m.current_name FROM players m WHERE {_ACTIVE} "

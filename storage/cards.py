@@ -1035,36 +1035,6 @@ def get_clan_favourite_card_counts(
 
 
 @managed_connection
-def get_clan_most_common_maxed_cards(
-    limit: int = 10, conn: Optional[sqlite3.Connection] = None
-) -> list[dict]:
-    member_tags = [
-        r["player_tag"]
-        for r in conn.execute(
-            "SELECT m.player_tag FROM players m WHERE EXISTS ("
-            "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
-        ).fetchall()
-    ]
-    rows = []
-    for _tag in member_tags:
-        _fetched, _cards = _load_collection_cards(conn, _tag)
-        rows.append({"cards_json": json.dumps(_cards), "support_cards_json": "[]", "_tag": _tag})
-    card_counts: dict[str, int] = {}
-    for row in rows:
-        for raw in [
-            *json.loads(row["cards_json"] or "[]"),
-            *json.loads(row["support_cards_json"] or "[]"),
-        ]:
-            if not isinstance(raw, dict) or not raw.get("name"):
-                continue
-            if _card_level(raw) == 16:
-                name = raw["name"]
-                card_counts[name] = card_counts.get(name, 0) + 1
-    ranked = sorted(card_counts.items(), key=lambda item: (-item[1], item[0].lower()))
-    return [{"card_name": name, "member_count": count} for name, count in ranked[:limit]]
-
-
-@managed_connection
 def get_clan_recently_played_cards(
     days: int = 14, limit: int = 20, conn: Optional[sqlite3.Connection] = None
 ) -> list[dict]:
@@ -1086,37 +1056,6 @@ def get_clan_recently_played_cards(
                 counts[card["name"]] = counts.get(card["name"], 0) + 1
     ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))
     return [{"card_name": name, "battles": count} for name, count in ranked[:limit]]
-
-
-@managed_connection
-def get_clan_rare_maxed_cards(
-    max_owners: int = 2, limit: int = 10, conn: Optional[sqlite3.Connection] = None
-) -> list[dict]:
-    member_tags = [
-        r["player_tag"]
-        for r in conn.execute(
-            "SELECT m.player_tag FROM players m WHERE EXISTS ("
-            "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
-        ).fetchall()
-    ]
-    rows = []
-    for _tag in member_tags:
-        _fetched, _cards = _load_collection_cards(conn, _tag)
-        rows.append({"cards_json": json.dumps(_cards), "support_cards_json": "[]", "_tag": _tag})
-    card_counts: dict[str, int] = {}
-    for row in rows:
-        for raw in [
-            *json.loads(row["cards_json"] or "[]"),
-            *json.loads(row["support_cards_json"] or "[]"),
-        ]:
-            if not isinstance(raw, dict) or not raw.get("name"):
-                continue
-            if _card_level(raw) == 16:
-                name = raw["name"]
-                card_counts[name] = card_counts.get(name, 0) + 1
-    rare = [(name, count) for name, count in card_counts.items() if count <= max_owners]
-    rare.sort(key=lambda item: (item[1], item[0].lower()))
-    return [{"card_name": name, "member_count": count} for name, count in rare[:limit]]
 
 
 @managed_connection

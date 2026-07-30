@@ -310,19 +310,23 @@ Important rules:
 ## Agent Loop Guardrails (Current)
 
 - Tool policy is enforced in code per workflow (not prompt-only):
-  - `observation` -> read tools only
+  - `arena_relay_observation` -> read tools only
   - `channel_update` -> read tools only
   - `channel_update_leadership` -> read tools only
   - `interactive` -> read tools only
   - `clanops` -> read + write tools
   - `reception` -> no tools
   - `roster_bios` -> read tools only
-- Write tools are gated by workflow policy: `clanops` can use read + write tools;
-  every other interactive workflow remains read-only.
+- Write tools are gated by workflow policy: `clanops` and `awareness` can use
+  read + write tools (`save_clan_memory`, `record_leadership_followup`); every
+  other workflow remains read-only or toolless. Note the awareness set is a
+  SEPARATE constant, `AWARENESS_WRITE_TOOL_NAMES` — adding a write tool to
+  `_WRITE_TOOL_NAMES` alone reaches `clanops` and nothing else, which is how a
+  shipped tool was offered to a model zero times.
 - Tool outputs are wrapped in a compact envelope (`ok`, `error`, `truncated`, `meta`, `data`) and truncated for context budget safety.
 - Leader/member factual answers should prefer structured query tools over clipped roster context. Resolve members by name/Discord handle before using tag-based tools when needed.
 - Strict JSON workflow contracts are validated in code with one repair retry:
-  - `observation`: requires `event_type`, `summary`, `content` (or `null`)
+  - `arena_relay_observation`: requires `event_type`, `summary`, `content` (or `null`)
   - `channel_update` / `channel_update_leadership` / `interactive` / `clanops`: require `event_type`, `summary`, `content`
   - `clanops` `channel_share` responses also require `share_content`
   - `reception`: requires `event_type=reception_response` and `content`

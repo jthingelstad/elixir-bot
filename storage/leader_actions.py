@@ -521,21 +521,6 @@ def clear_leader_action_source_message(
 
 
 @managed_connection
-def update_leader_action_copy_message(
-    action_id: int,
-    *,
-    copy_message_id: str | int | None,
-    conn: Optional[sqlite3.Connection] = None,
-) -> None:
-    if not action_id or copy_message_id is None:
-        return
-    conn.execute(
-        "UPDATE leader_action_recommendations SET copy_message_id = ?, updated_at = ? WHERE action_id = ?",
-        (str(copy_message_id), _db._utcnow(), int(action_id)),
-    )
-
-
-@managed_connection
 def update_leader_action_copy_messages(
     action_id: int,
     *,
@@ -876,57 +861,6 @@ def upsert_leader_action_feedback_profile(
 
 
 @managed_connection
-def list_leader_action_feedback_profiles(
-    *,
-    action_type: str | None = None,
-    limit: int = 5,
-    conn: Optional[sqlite3.Connection] = None,
-) -> list[dict]:
-    from memory_store import list_memories
-
-    filters = {"event_type": LEADER_ACTION_FEEDBACK_EVENT_TYPE}
-    if action_type:
-        filters["event_id"] = _feedback_event_id(action_type)
-    return list_memories(
-        viewer_scope="leadership",
-        filters=filters,
-        limit=max(1, min(int(limit or 5), 10)),
-        conn=conn,
-    )
-
-
-@managed_connection
-def get_recent_leader_action_for_target(
-    *,
-    action_type: str,
-    target_player_tag: str,
-    status: str | None = None,
-    within_hours: int = 168,
-    conn: Optional[sqlite3.Connection] = None,
-) -> Optional[dict]:
-    where = [
-        "action_type = ?",
-        "target_player_tag = ?",
-        "proposed_at >= ?",
-        "COALESCE(is_test, 0) = 0",
-    ]
-    params: list = [
-        (action_type or "").strip(),
-        _db._canon_tag(target_player_tag),
-        _cutoff_hours_ago(within_hours),
-    ]
-    if status:
-        where.append("status = ?")
-        params.append((status or "").strip())
-    row = conn.execute(
-        f"SELECT * FROM leader_action_recommendations WHERE {' AND '.join(where)} "
-        "ORDER BY COALESCE(decided_at, proposed_at) DESC, action_id DESC LIMIT 1",
-        tuple(params),
-    ).fetchone()
-    return _row_to_action(row) if row else None
-
-
-@managed_connection
 def has_recent_leader_action(
     *,
     action_type: str,
@@ -968,45 +902,6 @@ def _compact_action_for_board(action: dict) -> dict:
         "proposed_at": action.get("proposed_at"),
         "decided_at": action.get("decided_at"),
         "decision_note": note,
-    }
-
-
-@managed_connection
-def leader_action_board_snapshot(
-    *,
-    open_limit: int = 10,
-    decided_limit: int = 10,
-    conn: Optional[sqlite3.Connection] = None,
-) -> dict:
-    """Compact view of the arena-relay action board.
-
-    Built for the awareness Situation: ``open`` is what the leader has not
-    decided yet (so the agent doesn't post about a member with a pending
-    card), ``recent_decisions`` is what the leader recently did/declined
-    (so the agent doesn't contradict or re-litigate it).
-    """
-    open_rows = conn.execute(
-        "SELECT * FROM leader_action_recommendations "
-        "WHERE status = ? AND COALESCE(is_test, 0) = 0 "
-        "ORDER BY proposed_at DESC, action_id DESC LIMIT ?",
-        (ACTION_PROPOSED, max(1, min(int(open_limit or 10), 25))),
-    ).fetchall()
-    decided_rows = conn.execute(
-        "SELECT * FROM leader_action_recommendations "
-        "WHERE status IN (?, ?, ?) AND decided_at IS NOT NULL AND COALESCE(is_test, 0) = 0 "
-        "ORDER BY decided_at DESC, action_id DESC LIMIT ?",
-        (
-            ACTION_DONE,
-            ACTION_REJECTED,
-            ACTION_DEFERRED,
-            max(1, min(int(decided_limit or 10), 25)),
-        ),
-    ).fetchall()
-    return {
-        "open": [_compact_action_for_board(_row_to_action(row)) for row in open_rows],
-        "recent_decisions": [
-            _compact_action_for_board(_row_to_action(row)) for row in decided_rows
-        ],
     }
 
 
@@ -1762,11 +1657,8 @@ __all__ = [
     "get_leader_action_by_id",
     "get_leader_action_by_key",
     "get_leader_action_by_message",
-    "get_recent_leader_action_for_target",
     "has_recent_leader_action",
-    "leader_action_board_snapshot",
     "leader_action_decision_stats",
-    "list_leader_action_feedback_profiles",
     "list_leader_actions",
     "record_leader_action_note_by_message",
     "refresh_due_leader_action_outcomes",
@@ -1775,7 +1667,6 @@ __all__ = [
     "update_leader_action_message",
     "clear_leader_action_source_message",
     "POSTING_SENTINEL",
-    "update_leader_action_copy_message",
     "update_leader_action_copy_text",
     "upsert_leader_action_feedback_profile",
 ]
