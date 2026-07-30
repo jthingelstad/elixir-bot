@@ -26,13 +26,15 @@ def test_db_facade_public_surface_is_reviewed():
         *(f"{name}:db" for name in db._CORE_EXPORTS),
         *(f"{name}:{module}" for name, module in db._FACADE_EXPORTS.items()),
     ]
-    assert len(entries) == 245
-    # Updated 2026-07-30: +2, DECIDED_VIA_BUTTON / DECIDED_VIA_REACTION. The UI
-    # needs to tell decide_leader_action how a decision was entered so that
-    # removing a ✅ reaction can no longer take back a ✅ BUTTON press.
+    assert len(entries) == 246
+    # Updated 2026-07-30: +3. DECIDED_VIA_BUTTON / DECIDED_VIA_REACTION so the UI
+    # can tell decide_leader_action how a decision was entered (so removing a ✅
+    # reaction can no longer take back a ✅ BUTTON press), and
+    # get_leader_action_by_message so the reaction handler can re-render a card
+    # whose decision was refused instead of ignoring the reaction in silence.
     # (Earlier that day: one rename, get_weekly_digest_summary ->
     # get_weekly_recap_summary, count unchanged at 243.)
-    assert _digest(entries) == "b0c9a1b78eadb3575769f8b07950996f8bf8113f9e599958ec494915bd7d2f4e"
+    assert _digest(entries) == "8554bc6835b9c9cf339ea999a9ad8827589bb736933a85b8000f68a29a9cd8e8"
     assert db._CORE_EXPORTS.isdisjoint(db._FACADE_EXPORTS)
     assert db.__all__ == sorted(db._CORE_EXPORTS | set(db._FACADE_EXPORTS))
 
