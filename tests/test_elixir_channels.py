@@ -13,6 +13,7 @@ from PIL import Image
 
 import elixir
 import runtime.channel_router as channel_router
+from engine.management import KICK_AT_RISK_DAYS
 from runtime.activities import (
     list_registered_activities,
     manual_activity_choices,
@@ -4216,14 +4217,9 @@ def test_build_clan_status_report_uses_non_war_risk_watchlist():
     ):
         elixir._build_clan_status_report({"name": "POAP KINGS", "members": 21}, {})
 
-        mock_risk.assert_called_once_with(
-            inactivity_days=7,
-            min_donations_week=20,
-            require_war_participation=False,
-            min_war_races=1,
-            season_id=None,
-            conn=ANY,
-        )
+        # No threshold knobs: get_members_at_risk deletes them on arrival and
+        # engine.management owns the real values.
+        mock_risk.assert_called_once_with(season_id=None, conn=ANY)
 
 
 def test_build_clan_status_report_formats_recent_joins_as_relative_days():
@@ -4400,15 +4396,19 @@ def test_build_kick_risk_report_uses_inactivity_only():
     ) as mock_risk:
         report = elixir._build_kick_risk_report()
 
-        mock_risk.assert_called_once_with(
-            inactivity_days=7,
-            min_donations_week=0,
-            require_war_participation=False,
-            min_war_races=1,
-            season_id=None,
-            conn=ANY,
-        )
-    assert report == "**Kick Risk (Inactive 7+ Days)**\n- Vijay — last seen 8 days ago"
+        # The report no longer passes threshold knobs. It used to send
+        # inactivity_days=7 — which storage.war_analytics deletes on arrival —
+        # and then print "Inactive 7+ Days", so the header contradicted the
+        # members listed beneath it, who are at_risk from KICK_AT_RISK_DAYS.
+        # Asserting those arguments was asserting a no-op.
+        mock_risk.assert_called_once()
+        assert "inactivity_days" not in mock_risk.call_args.kwargs
+        assert "min_donations_week" not in mock_risk.call_args.kwargs
+
+    # The header states the engine's threshold, whatever it currently is.
+    assert report == (
+        f"**Kick Risk (Inactive {KICK_AT_RISK_DAYS}+ Days)**\n- Vijay — last seen 8 days ago"
+    )
 
 
 def test_build_top_war_contributors_report_formats_season_leaders():
@@ -4528,14 +4528,9 @@ def test_build_clan_status_short_report_uses_non_war_risk_watchlist():
     ):
         elixir._build_clan_status_short_report({"name": "POAP KINGS", "members": 21}, {})
 
-        mock_risk.assert_called_once_with(
-            inactivity_days=7,
-            min_donations_week=20,
-            require_war_participation=False,
-            min_war_races=1,
-            season_id=None,
-            conn=ANY,
-        )
+        # No threshold knobs: get_members_at_risk deletes them on arrival and
+        # engine.management owns the real values.
+        mock_risk.assert_called_once_with(season_id=None, conn=ANY)
 
 
 def test_recap_context_leads_with_public_story_arcs():

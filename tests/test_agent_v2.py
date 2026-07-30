@@ -664,13 +664,9 @@ def test_execute_tool_get_clan_health_at_risk_uses_db():
             )
         )
         assert result == {"members": []}
-        mock_db.get_members_at_risk.assert_called_once_with(
-            inactivity_days=7,
-            min_donations_week=20,
-            require_war_participation=False,
-            min_war_races=1,
-            season_id=129,
-        )
+        # Threshold knobs are not passed: get_members_at_risk deletes them and
+        # the engine owns the thresholds. Asserting them asserted a no-op.
+        mock_db.get_members_at_risk.assert_called_once_with(season_id=129)
 
 
 def test_execute_tool_get_clan_game_modes_events_exposes_event_participation():

@@ -76,19 +76,21 @@ def _build_roster_join_dates_report():
 
 
 def _build_kick_risk_report():
-    risk = management_capability.get_management_decisions(
-        view="at_risk",
-        arguments={
-            "inactivity_days": 7,
-            "min_donations_week": 0,
-            "require_war_participation": False,
-        },
-        source=db,
-    )["data"]
+    # The engine owns the threshold; these knobs are accepted and ignored
+    # downstream (storage.war_analytics deletes them). Passing 7 and then
+    # printing "Inactive 7+ Days" described a rule that had already been
+    # replaced by the flat KICK_AT_RISK_DAYS, so the header contradicted the
+    # members listed under it — they are at_risk from day 5.
+    from engine.management import KICK_AT_RISK_DAYS
+
+    risk = management_capability.get_management_decisions(view="at_risk", source=db)["data"]
     members = (risk or {}).get("members") or []
-    lines = ["**Kick Risk (Inactive 7+ Days)**"]
+    lines = [f"**Kick Risk (Inactive {KICK_AT_RISK_DAYS}+ Days)**"]
     if not members:
-        lines.append("No active members are currently over the 7-day inactivity threshold.")
+        lines.append(
+            f"No active members are currently over the {KICK_AT_RISK_DAYS}-day "
+            "inactivity threshold."
+        )
         return "\n".join(lines)
 
     for member in members:

@@ -384,19 +384,24 @@ TOOLS = [
                         "promotion_candidates",
                     ],
                 },
+                # ACCEPTED AND IGNORED. The trophy-scaled formula that used to be
+                # documented here — max(floor, trophies/1000 * 1.4), with worked
+                # examples — was deleted in the July kick redesign; the engine now
+                # uses a flat KICK_AT_RISK_DAYS and storage.war_analytics deletes
+                # these arguments on arrival. Describing a retired rule to the
+                # model is worse than omitting it: it would repeat the numbers to
+                # members as fact. This tool is not currently advertised, which is
+                # the only reason that did not happen.
                 "inactivity_days": {
                     "type": "integer",
                     "description": (
-                        "Floor (in days) for the inactivity flag (at_risk). Per-member threshold is "
-                        "max(this floor, trophies/1000 * 1.4) — a 5k-trophy player keeps the floor, a "
-                        "10k-trophy player gets 14d, a 12.5k-trophy player gets 17.5d. Default 7."
+                        "Deprecated and ignored — the engine owns the inactivity "
+                        "threshold and it is flat, not trophy-scaled."
                     ),
-                    "default": 7,
                 },
                 "min_donations_week": {
                     "type": "integer",
-                    "description": "Flag members below this weekly donation count (at_risk). Default 20.",
-                    "default": 20,
+                    "description": "Deprecated and ignored — the engine owns this threshold.",
                 },
                 "min_streak": {
                     "type": "integer",
