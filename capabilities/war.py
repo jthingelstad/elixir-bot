@@ -8,6 +8,7 @@ never presented as real standings, and every live answer carries freshness.
 
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -16,6 +17,8 @@ from capabilities.contracts import WarIntelligenceResult, WarSeasonViewResult
 from capabilities.game_truth import get_game_truth
 from engine.readiness import generation_snapshot
 from storage import war as war_storage
+
+log = logging.getLogger("elixir.capabilities.war")
 
 CAPABILITY_ID = "war_intelligence"
 CONTRACT_VERSION = 2
@@ -319,6 +322,7 @@ def _current_week_top(source, limit: int, *, conn=None) -> list[dict]:
             ).fetchall()
             return [dict(item) for item in rows]
     except Exception:
+        log.warning("war contributor lookup failed — answering as if empty", exc_info=True)
         return []
 
 
