@@ -1087,6 +1087,17 @@ TOOLS = [
                     "type": "string",
                     "description": "Required with revisit_at; copy the source signal_key verbatim.",
                 },
+                "away_until": {
+                    "type": "string",
+                    "description": (
+                        "Set this (WITH member_tag) when a leader says a member is AWAY — a "
+                        "leave of absence. It records a hold that PAUSES that member's "
+                        "inactivity/kick clock until the given date, so they are not flagged "
+                        "for being idle while they are away. ISO date or datetime, e.g. "
+                        "'2026-08-03'. Use it only for a member who told leaders they would "
+                        "be gone; someone merely quiet is not on hold."
+                    ),
+                },
             },
             "required": ["topic", "recommendation"],
         },
