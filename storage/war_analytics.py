@@ -402,34 +402,54 @@ def get_trending_war_contributors(
 def get_war_champ_standings(
     season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None
 ) -> list[dict]:
-    """THE standings query (schema.md §7.4): cumulative season fame per player
-    over war_participation — which the engine upserts live, so the in-progress
-    week is already included."""
+    """Season-to-date War Champ standings, in the shape member-facing surfaces
+    read (`total_points`, `avg_points`, member reference fields).
+
+    The ORDERING AND FILTERING are not computed here. This used to be a second
+    implementation of the season race and it disagreed with
+    `engine.award_outcomes.compute_season_award_outcome` — the module whose
+    docstring claims to be the single authority — in two ways that changed who
+    ranked first:
+
+    - Tiebreak. This sorted `points DESC, races_participated DESC`; the
+      authority sorts `points DESC, donations DESC, tag`. Two members tied on
+      points, one with more races and one with more donations, came out in
+      opposite orders.
+    - Filter placement. This filtered `WHERE fame > 0` per row, dropping a
+      zero-fame week before aggregating; the authority filters `HAVING
+      points > 0` over the season sum. For a member with weeks [0, 500] that is
+      races_participated 1 vs 2 — which then fed the tiebreak above.
+
+    Both feed members: this one reaches the `war` capability's standings and
+    `top_contributors`, while the authority reaches award races and season-close
+    grants. Elixir could name one War Champ leader in an announcement and rank a
+    different member first in a tool answer, in the same session. So the race is
+    computed once, in the authority, and reshaped here.
+    """
+    from engine.award_outcomes import compute_season_award_outcome
     from storage.war_status import get_current_season_id
 
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     if season_id is None:
         return []
-    rows = conn.execute(
-        "SELECT wp.player_tag AS tag, MAX(COALESCE(m.display_name, m.current_name)) AS name, "
-        "SUM(COALESCE(wp.fame, 0)) AS total_points, COUNT(*) AS races_participated, "
-        "ROUND(AVG(COALESCE(wp.fame, 0)), 0) AS avg_points, "
-        "SUM(COALESCE(wp.decks_used, 0)) AS decks_used "
-        "FROM war_participation wp "
-        "JOIN players m ON m.player_tag = wp.player_tag "
-        "WHERE wp.season_id = ? AND COALESCE(wp.fame, 0) > 0 "
-        "AND EXISTS (SELECT 1 FROM clan_memberships cm "
-        "  WHERE cm.player_tag = wp.player_tag AND cm.left_at IS NULL) "
-        "GROUP BY wp.player_tag ORDER BY total_points DESC, races_participated DESC",
-        (season_id,),
-    ).fetchall()
+    outcome = compute_season_award_outcome(conn, season_id)
     result = []
-    for row in rows:
-        item = dict(row)
-        item["tag"] = _canon_tag(item["tag"])
-        item["finalized_points"] = item["total_points"] or 0
-        item["in_progress_points"] = 0  # participation is live-updated; split retired
+    for entry in outcome.get("standings") or []:
+        races = int(entry.get("races_participated") or 0)
+        points = int(entry.get("points") or 0)
+        item = {
+            "tag": _canon_tag(entry.get("tag")),
+            "name": entry.get("name"),
+            "total_points": points,
+            "races_participated": races,
+            "avg_points": round(points / races) if races else 0,
+            "decks_used": int(entry.get("decks_used") or 0),
+            "donations": int(entry.get("donations") or 0),
+            "official_rank": entry.get("official_rank"),
+            "finalized_points": points,
+            "in_progress_points": 0,  # participation is live-updated; split retired
+        }
         result.append(_member_reference_fields(conn, item["tag"], item))
     return result
 
