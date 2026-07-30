@@ -327,6 +327,58 @@ def test_storage_refuses_to_resurrect_a_withdrawn_card(action_db, kick_card):
     assert str(after["decided_by_discord_user_id"]) == "system:auto-withdraw"
 
 
+def test_removing_a_reaction_cannot_take_back_a_button_press(action_db, kick_card):
+    """Both paths store "✅". Removing a ✅ reaction is meant to take back a ✅
+    REACTION; before this guard it also took back a ✅ BUTTON press, so a leader
+    who clicked Done and later added-then-removed a reaction silently reopened
+    their own decided card. The reopen is only a partial inverse — it leaves
+    decision_note, expires_at, premise_rejected and the cleared management
+    state behind — so the card came back in a state nothing else agreed with.
+    """
+    from storage.leader_actions import clear_leader_action_decision_by_message
+
+    db.update_leader_action_message(kick_card["action_id"], source_message_id=777, conn=action_db)
+    _decide(
+        action_db,
+        kick_card,
+        status=db.ACTION_DONE,
+        who=LEADER_ID,
+        emoji="✅",
+        decided_via=db.DECIDED_VIA_BUTTON,
+    )
+    action_db.commit()
+
+    clear_leader_action_decision_by_message(
+        777, discord_user_id=LEADER_ID, emoji="✅", conn=action_db
+    )
+
+    after = db.get_leader_action_by_id(kick_card["action_id"], conn=action_db)
+    assert after["status"] == db.ACTION_DONE, "a reaction removal reopened a button decision"
+
+
+def test_removing_a_reaction_still_takes_back_a_reaction_decision(action_db, kick_card):
+    """The guard must not break the path it is protecting."""
+    from storage.leader_actions import clear_leader_action_decision_by_message
+
+    db.update_leader_action_message(kick_card["action_id"], source_message_id=778, conn=action_db)
+    _decide(
+        action_db,
+        kick_card,
+        status=db.ACTION_DONE,
+        who=LEADER_ID,
+        emoji="✅",
+        decided_via=db.DECIDED_VIA_REACTION,
+    )
+    action_db.commit()
+
+    clear_leader_action_decision_by_message(
+        778, discord_user_id=LEADER_ID, emoji="✅", conn=action_db
+    )
+
+    after = db.get_leader_action_by_id(kick_card["action_id"], conn=action_db)
+    assert after["status"] == db.ACTION_PROPOSED, "a leader could not take back their reaction"
+
+
 def test_a_reopened_card_can_be_decided_again(action_db, kick_card):
     """The guard must not trap a card. Reopening is the supported escape hatch
     for a misclick, so decide → reopen → decide has to work end to end."""

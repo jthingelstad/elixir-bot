@@ -25,6 +25,14 @@ ACTION_REJECTED = "rejected"
 # Discord yet — treat it as unposted (see count_open_leader_actions, and the
 # Forbidden-clear path in runtime.app._post_pending_leader_action_cards).
 POSTING_SENTINEL = "posting"
+
+# How a decision was entered. A ✅/❌ REACTION can be taken back by removing it
+# (clear_leader_action_decision_by_message); a BUTTON press cannot, because the
+# button path stores the very same "✅" and a leader who clicked Done, then
+# added and removed a ✅ reaction, silently reopened their own decided card.
+# Recorded in outcome_json so this needs no schema change.
+DECIDED_VIA_REACTION = "reaction"
+DECIDED_VIA_BUTTON = "button"
 # Action types resolved by a two-way classification (not done/decline). Their
 # cards ignore the ✅/❌ reaction path and resolve only via their own buttons.
 _CLASSIFICATION_ACTION_TYPES = {"departure_verification"}
@@ -1070,6 +1078,7 @@ def decide_leader_action(
     emoji: str | None = None,
     decision_note: str | None = None,
     decided_at: str | None = None,
+    decided_via: str = DECIDED_VIA_REACTION,
     conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
     action = get_leader_action_by_id(action_id, conn=conn)
@@ -1115,6 +1124,7 @@ def decide_leader_action(
                     "suppressed_until": feedback.get("suppressed_until"),
                 },
             }
+    outcome = {**(outcome or {}), "decided_via": decided_via}
     cursor = conn.execute(
         """
         UPDATE leader_action_recommendations
@@ -1437,6 +1447,14 @@ def clear_leader_action_decision_by_message(
     if str(action.get("decided_by_discord_user_id") or "") != str(discord_user_id):
         return action
     if str(action.get("decision_emoji") or "") != str(emoji):
+        return action
+    # Removing a reaction takes back a REACTION decision. It must not take back
+    # a button press: the button path stores the same "✅", so a leader who
+    # clicked Done and later added-then-removed a ✅ on that message silently
+    # reopened their own decided card — and the reopen is only a partial
+    # inverse (it leaves decision_note, expires_at, premise_rejected and the
+    # cleared management state behind).
+    if (action.get("outcome") or {}).get("decided_via") == DECIDED_VIA_BUTTON:
         return action
     now = _db._utcnow()
     conn.execute(

@@ -907,6 +907,8 @@ _FACADE_EXPORT_GROUPS = {
     ),
     "storage.leader_actions": (
         "ACTION_DONE",
+        "DECIDED_VIA_BUTTON",
+        "DECIDED_VIA_REACTION",
         "ACTION_PROPOSED",
         "ACTION_REJECTED",
         "POSTING_SENTINEL",

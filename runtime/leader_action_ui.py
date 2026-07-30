@@ -476,6 +476,7 @@ class DecisionReasonModal(discord.ui.Modal):
             discord_user_id=interaction.user.id,
             emoji="❌",
             decision_note=note or None,
+            decided_via=db.DECIDED_VIA_BUTTON,
         )
         if not action:
             await _send_ephemeral(interaction, "Action not found.")
@@ -640,6 +641,7 @@ class LeaderActionButton(discord.ui.Button):
                 status=db.ACTION_DONE,
                 discord_user_id=interaction.user.id,
                 emoji="✅",
+                decided_via=db.DECIDED_VIA_BUTTON,
             )
             if updated is None:
                 # Lost the race, or the engine withdrew the card between the read

@@ -26,11 +26,13 @@ def test_db_facade_public_surface_is_reviewed():
         *(f"{name}:db" for name in db._CORE_EXPORTS),
         *(f"{name}:{module}" for name, module in db._FACADE_EXPORTS.items()),
     ]
-    assert len(entries) == 243
-    # Updated 2026-07-30 for one rename, get_weekly_digest_summary ->
-    # get_weekly_recap_summary. Count is unchanged at 243, so nothing was
-    # added or dropped from the public surface.
-    assert _digest(entries) == "a2dc7b745731aa63cc6be98dfe9dddd5fde603f410a6091d982c54f7cc02c1b5"
+    assert len(entries) == 245
+    # Updated 2026-07-30: +2, DECIDED_VIA_BUTTON / DECIDED_VIA_REACTION. The UI
+    # needs to tell decide_leader_action how a decision was entered so that
+    # removing a ✅ reaction can no longer take back a ✅ BUTTON press.
+    # (Earlier that day: one rename, get_weekly_digest_summary ->
+    # get_weekly_recap_summary, count unchanged at 243.)
+    assert _digest(entries) == "b0c9a1b78eadb3575769f8b07950996f8bf8113f9e599958ec494915bd7d2f4e"
     assert db._CORE_EXPORTS.isdisjoint(db._FACADE_EXPORTS)
     assert db.__all__ == sorted(db._CORE_EXPORTS | set(db._FACADE_EXPORTS))
 
