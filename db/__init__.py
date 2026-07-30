@@ -42,8 +42,19 @@ def _resolve_db_path() -> str:
 CHICAGO_TZ = ZoneInfo("America/Chicago")
 
 # v5.1 retention (docs/reference/v5.1/schema.md §1). Names kept where semantics carried.
-RAW_PAYLOAD_RETENTION_DAYS = 14
-BATTLE_EVENT_RETENTION_DAYS = 180
+#
+# Both battle windows were widened 2026-07-30 (Jamie): storage is cheap relative
+# to the value of long history, and every trend, award and "how has this member
+# changed" question is bounded by whichever of these runs out first.
+#
+# Raw payloads are the replay/debug copy of what the CR API actually returned;
+# `player_battlelog` dominates at ~32 MB/day, so 60 days lands the table around
+# 1.9 GB. The purge runs WEEKLY, so the effective window is up to 7 days longer
+# than the number here and the table peaks just before each Sunday.
+RAW_PAYLOAD_RETENTION_DAYS = 60
+# battle_events is the distilled, queryable history — ~140 KB/day, so two years
+# is roughly 100 MB. This is the one that compounds in value.
+BATTLE_EVENT_RETENTION_DAYS = 730
 PLAYER_EVENT_RETENTION_DAYS = 180
 CLAN_EVENT_RETENTION_DAYS = 365
 WAR_RETENTION_DAYS = 365
