@@ -700,6 +700,7 @@ def elder_evidence(conn, tag: str, now: str | None = None) -> dict | None:
     try:
         scores = _elder_scores(conn, now, week_anchor)
     except Exception:
+        log.warning("elder_evidence: scoring failed for %s — no evidence text", tag, exc_info=True)
         return None
     me = scores.get(tag)
     if not me:
@@ -734,6 +735,7 @@ def member_participation_facts(conn, tag: str, now: str | None = None) -> str:
     try:
         evidence = elder_evidence(conn, tag, now)
     except Exception:
+        log.warning("member_participation_facts: evidence unavailable for %s", tag, exc_info=True)
         return ""
     if not evidence:
         return ""
@@ -1155,6 +1157,15 @@ def _has_leadership_hold(tag: str) -> bool:
         mconn.close()
         return row is not None
     except Exception:
+        # ERROR, not a shrug: this guard fails OPEN. A member with an approved
+        # leave loses their grace and can be handed a kick card because a memory
+        # read hiccupped — invisible to everyone unless it is said here.
+        log.error(
+            "leave-hold guard failed for %s — treating as NOT on hold, so the kick "
+            "clock is running on a member who may be on approved leave",
+            tag,
+            exc_info=True,
+        )
         return False
 
 
@@ -1223,6 +1234,7 @@ def compute_premise_fingerprint(tag: str, action_type: str) -> str | None:
         finally:
             conn.close()
     except Exception:
+        log.warning("premise fingerprint unavailable for %s/%s", tag, action_type, exc_info=True)
         return None
 
 
@@ -1243,6 +1255,14 @@ def _premise_still_rejected(conn, tag: str, action_type: str) -> bool:
             (tag, action_type),
         ).fetchone()
     except Exception:
+        # Fails toward "not previously rejected", so a decision leadership has
+        # already made can be raised at them again.
+        log.error(
+            "prior-decision lookup failed for %s/%s — a decided card may be reopened",
+            tag,
+            action_type,
+            exc_info=True,
+        )
         return False
     if row is None or not row["premise_rejected"]:
         return False
@@ -1276,6 +1296,8 @@ def _has_member_shield(tag: str) -> bool:
         mconn.close()
         return row is not None
     except Exception:
+        # Also fails open — the member loses their shield silently.
+        log.error("member-shield lookup failed for %s — treating as UNSHIELDED", tag, exc_info=True)
         return False
 
 

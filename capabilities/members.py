@@ -7,12 +7,15 @@ this module for one coherent view over Elixir's local projections and history.
 
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from typing import Any, Iterable, Iterator
 
 import db as db_facade
 from capabilities.contracts import MemberIntelligenceResult
 from engine import profiles as profile_engine
+
+log = logging.getLogger("elixir.capabilities.members")
 
 CAPABILITY_ID = "member_intelligence"
 CONTRACT_VERSION = 1
@@ -53,6 +56,9 @@ def _playstyle(source, player_tag: str, days: int, *, conn=None) -> dict | None:
             value = profile_engine.player_mode_profile(active, player_tag, days=days)
         return value if isinstance(value, dict) else None
     except Exception:
+        log.warning(
+            "playstyle profile failed for %s — omitted from the answer", player_tag, exc_info=True
+        )
         return None
 
 

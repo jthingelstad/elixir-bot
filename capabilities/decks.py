@@ -298,6 +298,10 @@ def _upgrade_bottlenecks(source, player_tag: str, *, conn=None) -> list[dict]:
             conn=conn,
         )
     except Exception:
+        # An empty deck list is indistinguishable from "this member has no
+        # decks" once it reaches the model, so a break here becomes Elixir
+        # confidently telling a member it found nothing.
+        log.warning("deck lookup failed for %s — answering as if empty", player_tag, exc_info=True)
         return []
     cards = result.get("cards") if isinstance(result, dict) else []
     ranked = sorted(
