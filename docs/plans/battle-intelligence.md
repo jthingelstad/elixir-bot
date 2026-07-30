@@ -43,9 +43,10 @@ Decisions taken (Jamie):
   intelligence layers (cards, decks, matchups, computed metrics) are clan-wide.
 - **Window**: enrich battles with `battle_time >= 2026-07-20` only. We will
   rebuild repeatedly; `prompt_version` makes rebuilds cheap and auditable.
-- **Consent split**: `commentary` is public-safe; `coaching_note` is visible
-  only to the member it is about, on request, in #ask-elixir. Never in a
-  public post. Enforced in the capability, not the prompt.
+- **Insights and data first** (Jamie, 2026-07-30): v1 is the intelligence
+  layers and their tool surface. Per-battle prose is `commentary` only —
+  insight-flavored, public-safe. `coaching_note` (personal critique, and the
+  identity/privacy machinery it requires) is deferred to v2.
 - **Freshness**: the model is the prior, measured data is the corrector
   (see §6).
 
@@ -143,7 +144,7 @@ CREATE TABLE battle_enrichment (
     notable          INTEGER NOT NULL DEFAULT 0,
     confidence       TEXT,
     commentary       TEXT,      -- public-safe, 1–2 sentences
-    coaching_note    TEXT,      -- PRIVATE to the subject member
+    coaching_note    TEXT,      -- v2: stays NULL in v1 (see §7)
     -- iteration machinery:
     verdict          TEXT,      -- Jamie-graded: accurate|wrong|useful (eval benchmark)
     model            TEXT,
@@ -223,7 +224,7 @@ see (no play-by-play), allow "insufficient", constrain labels to the enum:
    the consistency test; verdicts were not).
 2. **Matchup cell**: two archetypes → advantage −2..+2 + one-sentence basis.
 3. **Battle prose**: the battle record + BOTH deck profiles + the computed
-   metrics → loss_nature, notable, commentary, coaching_note. Explicit rule:
+   metrics → loss_nature, notable, commentary. Explicit rule:
    `final-state claims must reference the provided numbers` (the two
    hallucination slips both came from free-form final-state reading).
 
@@ -260,15 +261,15 @@ matchup cells report their n and calibration state; below-floor queries return
 an explicit `insufficient_sample` reason, never a weak number. A tool cannot
 be talked out of a floor; a prompt can.
 
-**Coaching privacy — structural prerequisite**: the interactive workflow
-currently passes only `author_name` (a display string) into the prompt; the
-asker's `discord_user_id` never reaches `tool_exec`, so there is no hook to
-enforce "coaching only for the member it is about." v1 threads
-`requester_discord_user_id` from `channel_router` through the workflow into
-tool execution; the capability resolves it via `discord_links` (is_primary)
-and includes `coaching_note` only when the resolved tag == subject tag and the
-workflow is interactive. Awareness/leader workflows get `commentary` only.
-Tests assert both directions.
+**Coaching deferred to v2 — and with it the identity plumbing.** The
+interactive workflow passes only `author_name` (a display string); the asker's
+`discord_user_id` never reaches `tool_exec`, so there is no hook today to
+scope output to "the member it is about." Rather than build that plumbing now,
+v1 simply does not generate personal critique: `coaching_note` stays NULL, the
+prose prompt asks for insight-flavored `commentary` only, and the tool returns
+data and insights that are safe for any asker. When coaching returns in v2,
+the requester-identity threading (channel_router → workflow → tool_exec →
+`discord_links`) is its named prerequisite.
 
 **Prompt-truth fixes shipped with the tool** (currently blocking any use of
 the opponent data):
@@ -278,6 +279,8 @@ the opponent data):
 
 ## 8. Explicitly out of scope for v1
 
+- `coaching_note` generation and the requester-identity plumbing it requires
+  (§7) — v1 is insights and data.
 - Awareness-loop proactive posting from enrichment (`notable` exists; using it
   is v2, after the revision-trap snapshot question is settled).
 - Duels: battles with `rounds_json` get computed metrics but are **excluded
@@ -307,11 +310,12 @@ call, less for profiles/cells.
 2. **LLM scoring**: three prompts, Stage-B worker, telemetry workflows,
    backfill profiles/cells/prose for enrolled members. Mutation-check the
    floors.
-3. **The tool**: capability + wiring checklist + identity threading + privacy
-   tests + prompt-truth fixes.
+3. **The tool**: capability + wiring checklist + prompt-truth fixes. All
+   views return data/insights safe for any asker.
 4. **Calibration + eval**: weekly calibration job, blend in the matchup view,
-   `verdict` grading path (Jamie grades ~20 of his own battles before any
-   prompt v2 — the benchmark that makes iteration non-vibes).
+   `verdict` grading path (Jamie grades ~20 of his own battles' commentary
+   and computed reads before any prompt v2 — the benchmark that makes
+   iteration non-vibes).
 
 ## 11. Risks
 
@@ -319,7 +323,7 @@ call, less for profiles/cells.
 |---|---|
 | model judgment instability | judgments minimized to loss_nature/notable; verdicts computed; dimensional scores |
 | model staleness after balance patches | calibration + blend; supersede eras |
-| coaching text leaking publicly | capability-level scope on requester identity; tests both directions |
+| personal critique reaching the wrong audience | v1 generates none (commentary only); coaching + identity scoping are one v2 unit |
 | weak-sample confident claims | floors in the capability |
 | silent worker death | work-set counts in job telemetry; missing rows are self-evident |
 | prompt iteration blindness | verdict column graded against Jamie's own games |
