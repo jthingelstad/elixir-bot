@@ -43,8 +43,17 @@ def _active(conn, tag: str) -> bool:
 
 
 def _name(conn, tag: str) -> str | None:
-    row = conn.execute("SELECT current_name FROM players WHERE player_tag = ?", (tag,)).fetchone()
-    return row[0] if row else None
+    """The readable, injection-safe name — NOT raw `current_name`.
+
+    This read the raw column, so a season-close payload mixed conventions: the
+    war_champ / rookie_mvp / donation_champ names came through the sanitized
+    path while free_pass and iron_king came through here. One announcement, two
+    naming rules, and the raw side leaks member-controlled text (the "²⁸" -> "28"
+    fold and the injection guard both live in preferred_display_name).
+    """
+    from storage._formatting import preferred_display_name
+
+    return preferred_display_name(conn, tag) or None
 
 
 def _grant(

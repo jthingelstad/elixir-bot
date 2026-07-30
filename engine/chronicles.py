@@ -28,8 +28,9 @@ def _rows(conn, sql, params=()):
 
 
 def _name(conn, tag):
-    row = conn.execute("SELECT current_name FROM players WHERE player_tag = ?", (tag,)).fetchone()
-    return (row[0] if row else None) or tag
+    from storage._formatting import preferred_display_name
+
+    return preferred_display_name(conn, tag) or tag
 
 
 def _war_chronicle(conn, season_id: int) -> str | None:
