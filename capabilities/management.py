@@ -48,13 +48,15 @@ def _summary(source, *, conn=None) -> dict:
 
 
 def _at_risk(source, arguments: dict, *, conn=None) -> dict:
+    # No threshold arguments. `get_members_at_risk` deletes inactivity_days,
+    # min_donations_week, require_war_participation and min_war_races on the
+    # first line — the thresholds live in engine.management. Supplying defaults
+    # of 7 and 20 here invented numbers that were never applied and then echoed
+    # them back in `criteria`, which is how a report came to print "Inactive 7+
+    # Days" over members the engine flags from day 5.
     return _invoke(
         source,
         "get_members_at_risk",
-        inactivity_days=arguments.get("inactivity_days", 7),
-        min_donations_week=arguments.get("min_donations_week", 20),
-        require_war_participation=arguments.get("require_war_participation", False),
-        min_war_races=arguments.get("min_war_races", 1),
         season_id=arguments.get("season_id"),
         conn=conn,
     )
