@@ -73,11 +73,26 @@ def count_open_leader_actions(*, conn=None, now: datetime | None = None) -> int:
     conn = conn or db.get_connection()
     try:
         row = conn.execute(
+            # Both timestamp comparisons run on the leading 19 characters.
+            # proposed_at carries two shapes in production — 'Z'-suffixed rows
+            # written through 2026-07-15 and naive ones since — and a bare
+            # string compare across them is only accidentally correct ('Z'
+            # sorts after every digit, so it happens to work for >= and not
+            # for <). Pinning the prefix makes the comparison exact for both.
+            #
+            # expires_at is a re-nomination SUPPRESSION window, not a card TTL:
+            # a future value means "still held", which is why this counts a
+            # card as on-the-board only once that hold has passed. Every other
+            # reader of the column uses `expires_at > now` for "still in
+            # effect" (storage/leader_actions.py has_recent_leader_action,
+            # engine/management._renomination_blocked_until) — the polarity
+            # here is deliberately the complement of that, and reads as
+            # inverted if you skim it.
             "SELECT COUNT(*) AS cnt FROM leader_action_recommendations "
             "WHERE status = 'proposed' AND COALESCE(is_test, 0) = 0 "
             "AND source_message_id IS NOT NULL AND source_message_id != ? "
-            "AND proposed_at >= ? "
-            "AND (expires_at IS NULL OR expires_at <= ?)",
+            "AND substr(proposed_at, 1, 19) >= ? "
+            "AND (expires_at IS NULL OR substr(expires_at, 1, 19) <= ?)",
             (db.POSTING_SENTINEL, cutoff, now_text),
         ).fetchone()
         return int(row["cnt"] if row else 0)
