@@ -1055,6 +1055,21 @@ def decide_leader_action(
     status = (status or "").strip()
     if status not in {ACTION_DONE, ACTION_REJECTED}:
         raise ValueError(f"invalid leader action status: {status}")
+    # A decision only lands on an OPEN card. Without this the UPDATE below was a
+    # blind last-writer-wins on action_id: two leaders on the same card, or one
+    # leader clicking Done on a card the engine had already auto-withdrawn,
+    # silently overwrote the first decision with no trace of it. The flip was
+    # also asymmetric — _reconcile_management_state clears promote_state /
+    # demote_state on DONE and cannot restore them on the way back out, so the
+    # card read "Declined" while member_management read "enacted".
+    #
+    # Re-deciding is not a supported workflow: a refreshed card drops its
+    # buttons once decided (LeaderActionView renders primary buttons only while
+    # open), and the reaction path reopens a card when the leader REMOVES their
+    # reaction. So the escape hatch for a misclick is reopen-then-decide, which
+    # goes through clear_leader_action_decision_by_message and leaves a trail.
+    if action.get("status") != ACTION_PROPOSED:
+        return None
     stamp = decided_at or _db._utcnow()
     outcome = None
     if status == ACTION_DONE:
@@ -1077,7 +1092,7 @@ def decide_leader_action(
                     "suppressed_until": feedback.get("suppressed_until"),
                 },
             }
-    conn.execute(
+    cursor = conn.execute(
         """
         UPDATE leader_action_recommendations
         SET status = ?, decided_at = ?, decided_by_discord_user_id = ?,
@@ -1085,7 +1100,7 @@ def decide_leader_action(
             decision_note_at = CASE WHEN ? IS NOT NULL THEN ? ELSE decision_note_at END,
             decision_note_by_discord_user_id = CASE WHEN ? IS NOT NULL THEN ? ELSE decision_note_by_discord_user_id END,
             expires_at = ?, outcome_json = ?, updated_at = ?
-        WHERE action_id = ?
+        WHERE action_id = ? AND status = ?
         """,
         (
             status,
@@ -1101,8 +1116,13 @@ def decide_leader_action(
             _json_dumps(outcome),
             stamp,
             action["action_id"],
+            ACTION_PROPOSED,
         ),
     )
+    # The status re-check above closes the read-then-write window between two
+    # connections; if another writer decided the card first, claim nothing.
+    if cursor.rowcount == 0:
+        return None
     if status == ACTION_REJECTED:
         _mark_note_pending(conn, action["action_id"], clean_note)
     _reconcile_management_state(conn, action, status)
@@ -1301,6 +1321,12 @@ def classify_departure(
         raise ValueError(f"invalid departure classification: {classification}")
     action = get_leader_action_by_id(action_id, conn=conn)
     if not action:
+        return None
+    # Same open-card rule as decide_leader_action. Classifying twice rewrote
+    # clan_memberships.leave_source (against the LATEST departure for the tag,
+    # which need not be the one this card was raised for) and created a SECOND
+    # departure memory from the same comment.
+    if action.get("status") != ACTION_PROPOSED:
         return None
     stamp = decided_at or _db._utcnow()
     clean_comment = " ".join((comment or "").split()) or None
