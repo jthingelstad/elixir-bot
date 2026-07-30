@@ -173,10 +173,11 @@ def podium(conn, season_id: str) -> list[dict]:
     """Top-3 by league then rating (ranked-and-profiles.md §2.2), active
     members only, minimum one ranked battle in the season window."""
     from engine.normalize import ranked_league_name
+    from storage._formatting import preferred_display_name
 
     rows = conn.execute(
         """SELECT r.player_tag, r.league, r.rating, r.global_rank,
-                  r.battles, r.wins, p.current_name
+                  r.battles, r.wins
            FROM pol_season_results r
            JOIN players p ON p.player_tag = r.player_tag
            JOIN clan_memberships cm ON cm.player_tag = r.player_tag
@@ -190,7 +191,10 @@ def podium(conn, season_id: str) -> list[dict]:
         {
             "rank": i + 1,
             "tag": r["player_tag"],
-            "name": r["current_name"],
+            # `pol_season_podium` is a HARD-POST event — this name is published
+            # to #announcements whether or not anything else looks at it. It
+            # read raw `current_name`, bypassing the fold and injection guard.
+            "name": preferred_display_name(conn, r["player_tag"]),
             "league": r["league"],
             "league_name": ranked_league_name(r["league"]),
             "rating": r["rating"],
