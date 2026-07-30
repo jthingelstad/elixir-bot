@@ -20,7 +20,6 @@ from agent.core import (
     response_text,
 )
 from agent.prompt_builders import (
-    _arena_relay_observation_system,
     _ask_elixir_daily_system,
     _awareness_system,
     _channel_lane_system,
@@ -39,6 +38,7 @@ from agent.prompt_builders import (
     _memory_synthesis_system,
     _promote_system,
     _reception_system,
+    _screenshot_readout_system,
     _tournament_recap_system,
     _tournament_update_system,
     _weekly_digest_system,
@@ -1073,7 +1073,7 @@ def respond_to_help_request(
         return None
 
 
-def _arena_relay_action_context(limit: int = 5) -> str:
+def _action_card_context(limit: int = 5) -> str:
     try:
         actions = db.list_leader_actions(status="proposed", limit=limit) or []
     except Exception as exc:
@@ -1094,7 +1094,7 @@ def _arena_relay_action_context(limit: int = 5) -> str:
     return "\n".join(lines)
 
 
-def analyze_arena_relay_screenshot(
+def analyze_leader_screenshot(
     question, *, author_name, channel_name, memory_context=None, image_blocks=None
 ):
     """Analyze leader-submitted Clash Royale screenshots posted to #leader-actions."""
@@ -1107,17 +1107,17 @@ def analyze_arena_relay_screenshot(
     war_ctx = _war_status_prompt_context()
     if war_ctx:
         user_msg += f"\n\n{war_ctx}"
-    action_ctx = _arena_relay_action_context()
+    action_ctx = _action_card_context()
     if action_ctx:
         user_msg += f"\n\n{action_ctx}"
     user_msg += _format_memory_context(memory_context)
     user_msg = _with_image_blocks(user_msg, image_blocks)
     return _chat_with_tools(
-        _arena_relay_observation_system(channel_name),
+        _screenshot_readout_system(channel_name),
         user_msg,
-        workflow="arena_relay_observation",
-        allowed_tools=TOOLSETS_BY_WORKFLOW["arena_relay_observation"],
-        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["arena_relay_observation"],
+        workflow="screenshot_readout",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["screenshot_readout"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["screenshot_readout"],
         strict_json=True,
         return_errors=True,
         max_tokens=9000,
@@ -1615,7 +1615,7 @@ __all__ = [
     "respond_in_channel",
     "respond_in_deck_review",
     "respond_to_help_request",
-    "analyze_arena_relay_screenshot",
+    "analyze_leader_screenshot",
     "generate_message",
     "generate_promote_content",
     "generate_tournament_recap",

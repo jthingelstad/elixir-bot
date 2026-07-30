@@ -137,7 +137,7 @@ _WORKFLOW_SPECS = (
         model_family="chat",
     ),
     WorkflowSpec(
-        "arena_relay_observation",
+        "screenshot_readout",
         response_schema=_CHANNEL_SCHEMA,
         tools=READ_TOOLS,
         max_tool_rounds=4,

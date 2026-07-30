@@ -326,7 +326,7 @@ def _memory_viewer_scope_for_workflow(workflow: str | None) -> str:
     if workflow in {
         "clanops",
         "channel_update_leadership",
-        "arena_relay_observation",
+        "screenshot_readout",
         "awareness",
         "memory_synthesis",
     }:
@@ -1361,7 +1361,7 @@ def _execute_raise_clan_chat_relay(arguments):
             objective=objective,
             prompt_text=f"Paste this clan-chat note: {copy_text}",
             rationale=reason or "Leader-requested clan-chat relay",
-            target_channel_key="arena-relay",
+            target_channel_key="actions",
             target_player_tag=resolved_tag,
             source_signal_key=action_key,
             source_signal_type="interactive_relay",

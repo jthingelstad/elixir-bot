@@ -28,8 +28,8 @@ def test_narrative_refused_to_leader_actions(monkeypatch):
         "generate_channel_update",
         lambda *a, **k: called.append(1) or "hello",
     )
-    la_id = prompts.discord_singleton_lane("arena-relay")["id"]  # #leader-actions
-    ok = asyncio.run(dp.compose_and_post(_Chan(la_id), lane="arena-relay", context="x"))
+    la_id = prompts.discord_singleton_lane("actions")["id"]  # #leader-actions
+    ok = asyncio.run(dp.compose_and_post(_Chan(la_id), lane="actions", context="x"))
     assert ok is False
     assert called == [], "guard must short-circuit before composing narrative"
 

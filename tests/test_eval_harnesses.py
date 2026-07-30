@@ -151,7 +151,7 @@ def _insert_leader_action(conn, **overrides):
         "action_type": "welcome_relay",
         "objective": "member_joined",
         "status": "done",
-        "target_channel_key": "arena-relay",
+        "target_channel_key": "actions",
         "target_channel_id": "1513758211206025227",
         "target_player_tag": "#AAA111",
         "target_player_name": "Eval Alice",
@@ -258,7 +258,7 @@ def test_eval_leader_actions_scores_exact_artifacts(tmp_path):
         conn.execute(
             """
             INSERT INTO messages VALUES (
-                '2001', '1513758211206025227', 'assistant', 'arena-relay',
+                '2001', '1513758211206025227', 'assistant', 'actions',
                 'welcome_relay', 'Leader action card body', 'Leader action R1',
                 '2026-06-24T12:00:01', '{"raw": true}', 99
             )
@@ -267,7 +267,7 @@ def test_eval_leader_actions_scores_exact_artifacts(tmp_path):
         conn.execute(
             """
             INSERT INTO messages VALUES (
-                '2002', '1513758211206025227', 'assistant', 'arena-relay',
+                '2002', '1513758211206025227', 'assistant', 'actions',
                 'welcome_relay', 'Welcome Eval Alice. - E', 'Copy body',
                 '2026-06-24T12:00:02', '{"copy": true}', 99
             )
@@ -287,7 +287,7 @@ def test_eval_leader_actions_scores_exact_artifacts(tmp_path):
     assert result["metrics"]["decision_rate"]["value"] == 1.0
     assert result["metrics"]["trace_rate"]["value"] == 1.0
     assert result["metrics"]["relay_copy_text_rate"]["value"] == 1.0
-    assert result["artifacts"][0]["source_message"]["workflow"] == "arena-relay"
+    assert result["artifacts"][0]["source_message"]["workflow"] == "actions"
     assert result["artifacts"][0]["copy_messages"][0]["content"] == "Welcome Eval Alice. - E"
 
 

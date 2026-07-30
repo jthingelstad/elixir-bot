@@ -446,7 +446,7 @@ def test_reduce_memory_synthesis_context_for_retry_bounds_large_payload():
 def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
     """The weekly synthesis keeps its memory writes but ships no digest
     report. Derived-state contradictions are auto-expired/logged; only
-    human-judgment contradictions become arena-relay action cards."""
+    human-judgment contradictions become actions action cards."""
     from types import SimpleNamespace
 
     channel = MagicMock()
@@ -536,7 +536,7 @@ def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
     assert "contradiction_cards=1" in mock_success.call_args.args[1]
 
 
-def test_memory_synthesis_cycle_keeps_success_when_arena_relay_is_unconfigured():
+def test_memory_synthesis_cycle_keeps_success_when_actions_is_unconfigured():
     """An optional contradiction card must not discard a completed synthesis."""
     plan = {
         "digest": "This week the clan pushed hard.",

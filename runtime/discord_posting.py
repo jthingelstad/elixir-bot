@@ -205,7 +205,7 @@ async def compose_and_post(channel, *, lane: str, context: str, leadership: bool
     try:
         import prompts as _prompts
 
-        _la_id = (_prompts.discord_singleton_lane("arena-relay") or {}).get("id")
+        _la_id = (_prompts.discord_singleton_lane("actions") or {}).get("id")
         if _la_id is not None and getattr(channel, "id", None) == _la_id:
             log.warning(
                 "compose_and_post: refused narrative post to #actions "

@@ -79,7 +79,7 @@ Elixir's commentary & updates channel — the awareness brain's public voice.
 ## #actions
 
 ID: 1513758211206025227
-Lane: arena-relay
+Lane: actions
 Workflow: channel_update
 ToolPolicy: read_only
 ReplyPolicy: disabled

@@ -58,7 +58,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="weekly-leadership-review",
-        owner_lane="arena-relay",
+        owner_lane="actions",
         purpose="Q1's weekly batch half: roll the management week (hysteresis "
         "counters advance ONLY here), surface promote/demote candidacies as "
         "leader actions, post one review summary. Monday 7:00 AM America/Chicago "
@@ -79,7 +79,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="war-attendance-snapshot",
-        owner_lane="arena-relay",  # #river-race retired; data-only job (no posts)
+        owner_lane="actions",  # #river-race retired; data-only job (no posts)
         purpose="Finalize war_attendance_days for the just-closed war day "
         "(evaluators read finalized days only — runtime.md §3). CR war days "
         "roll at ~09:37–10:00 UTC; this runs just before the boundary.",
@@ -99,7 +99,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="action-outcome-refresh",
-        owner_lane="arena-relay",
+        owner_lane="actions",
         purpose="Daily leader-action hygiene carried from leadership-action-scan: "
         "refresh due action outcomes and re-queue feedback synthesis. The scan/"
         "creation role is retired (the engine tick owns the Q1 reactive path).",
@@ -131,7 +131,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="weekly-discord-invite-relay",
-        owner_lane="arena-relay",
+        owner_lane="actions",
         purpose="Evergreen housekeeping nudges (Discord, POAP KINGS FAQ, website): "
         "rotate the evergreen_nudges inventory and, ONLY during a quiet period and "
         "within a strict rate cap, offer ONE as an in-game-relay leader-action card "
@@ -150,7 +150,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="member-outreach-propose",
-        owner_lane="arena-relay",
+        owner_lane="actions",
         purpose="DM-outreach (Phase 1): pick current members missing a verified "
         "email and offer up to a few leader-gated 'Profile Outreach' cards in "
         "#actions. A leader approves each card before any DM is delivered.",

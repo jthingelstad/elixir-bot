@@ -79,7 +79,7 @@ def _audit_targets(runtime_app) -> list[tuple[dict, list[str]]]:
     """(channel_config, extra-required perms) for every channel Elixir must post to.
 
     Beyond View + Send, some channels need perms the generic check used to miss:
-    embed_links wherever Elixir posts embeds (leader-action cards on the arena-relay
+    embed_links wherever Elixir posts embeds (leader-action cards on the actions
     lane), and — for #thinking — embed_links plus thread perms (it posts an embed
     then opens a per-tick thread). #thinking is env-configured, NOT in
     discord_channel_configs, so it must be added explicitly or it audits as clean
@@ -88,7 +88,7 @@ def _audit_targets(runtime_app) -> list[tuple[dict, list[str]]]:
     for cfg in prompts.discord_channel_configs():
         if not cfg.get("workflow"):
             continue
-        extra = ["embed_links"] if cfg.get("lane") == "arena-relay" else []
+        extra = ["embed_links"] if cfg.get("lane") == "actions" else []
         targets.append((cfg, extra))
     thinking_id = getattr(runtime_app, "THINKING_CHANNEL_ID", None)
     if thinking_id:

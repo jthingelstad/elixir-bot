@@ -333,7 +333,7 @@ def _raise_tournament_clan_chat_relay(
             objective=f"Tournament recap: {name}",
             prompt_text=f"Paste this clan-chat note: {copy_text}",
             rationale=f"{len(members)} played {name} ({tournament_tag}); in-game chat reaches everyone.",
-            target_channel_key="arena-relay",
+            target_channel_key="actions",
             source_signal_key=f"tournament_finished:{tournament_tag}",
             source_signal_type="tournament_recap",
             copy_original_text=copy_text,
