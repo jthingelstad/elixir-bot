@@ -130,8 +130,9 @@ groupable as-is.
 An error log only reports failures that *produced an error*. The failures that
 killed Elixir quietly did not: the `can_post_leader_action` `NameError` stopped
 all card posting and the only symptom was silence. That is what `liveness` in
-the confidence report covers — no Discord output in N hours, or leader-action
-cards proposed but never posted. **Treat a `liveness` finding as high-signal
+the confidence report covers — no successful awareness terminal decision in N
+hours (a deliberate silence or a delivered plan), or leader-action cards
+proposed but never posted. **Treat a `liveness` finding as high-signal
 even when the error log is empty.** Quiet is not calm.
 
 ## Success
