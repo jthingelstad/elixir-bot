@@ -731,3 +731,28 @@ def test_memory_synthesis_cycle_marks_structured_agent_error_as_failure():
     mock_failure.assert_called_once()
     assert mock_failure.call_args.args[0] == "memory_synthesis"
     assert "schema_error" in mock_failure.call_args.args[1]
+
+
+def test_hygiene_report_never_prints_a_zero_that_hides_a_dropped_card():
+    """The 0/0 report Jamie saw in #elixir-log.
+
+    The guard fired on `contradictions_leader_review` but the message printed
+    `cards_posted` — a different quantity. A run where three contradictions
+    needed a leader and no card posted rendered as "Auto-expired: 0 /
+    Leader-review cards: 0", which reads as "nothing happened" while actually
+    announcing that leadership judgment was dropped on the floor.
+    """
+    import re
+
+    source = open("runtime/jobs/_memory.py", encoding="utf-8").read()
+    block = source[source.index("cards_posted = await _post_memory_contradiction_cards") :][:2400]
+
+    # The count that explains WHY the post exists must appear in the post.
+    assert "Contradictions needing leader review" in block
+
+    # A shortfall must be loud, not a quiet zero.
+    assert "undelivered" in block
+    assert re.search(r"log\.error\(", block), "a dropped leader review must reach the error log"
+
+    # And the report must not fire when there is genuinely nothing to say.
+    assert "if auto_expired or needs_review:" in block
