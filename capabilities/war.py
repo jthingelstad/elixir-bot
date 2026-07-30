@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
 
 import db as db_facade
 from capabilities.contracts import WarIntelligenceResult, WarSeasonViewResult
@@ -243,7 +243,7 @@ def get_war_intelligence(*, source=None, conn=None) -> WarIntelligenceResult:
         },
     }
     result["game_truth"] = get_game_truth(topic="river_race", live_war=result)
-    return result
+    return cast(WarIntelligenceResult, result)
 
 
 def _standings_freshness(source, season_id=None, *, conn=None) -> dict:
