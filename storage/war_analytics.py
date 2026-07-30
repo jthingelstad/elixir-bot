@@ -529,8 +529,14 @@ def _name_for(conn, tag: str) -> str:
 def get_perfect_war_participants(
     season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None
 ) -> list[dict]:
-    """Members with perfect attendance: every deck used on every finalized
-    battle day (war_attendance_days; Iron King definition)."""
+    """Members perfect on every finalized battle day the CLAN has played this
+    season, excluding the live one.
+
+    This is the Iron King rule as the season-close grant applies it — see
+    ``engine.awards.perfect_attendance``, which owns it. The only difference is
+    that the live battle day is dropped here (QA H10) because it is not
+    finalized; the rule is otherwise identical, so an in-season answer and the
+    eventual grant cannot disagree about what "perfect" means."""
     from storage.war_status import get_current_season_id, get_current_war_status
 
     if season_id is None:
@@ -541,29 +547,59 @@ def get_perfect_war_participants(
     # perfect-so-far simply haven't finished today's decks yet. Counting it
     # excluded ~everyone still working through today. Drop the current live day.
     live = get_current_war_status(conn=conn) or {}
-    where = ["wad.season_id = ?"]
+    exclude_day: tuple[int, int] | None = None
+    where = ["season_id = ?"]
     params: list = [season_id]
     if (
         live.get("season_id") == season_id
         and live.get("phase") == "battle"
         and live.get("battle_day_number")
     ):
-        where.append("NOT (wad.section_index = ? AND wad.war_day_index = ?)")
-        params.extend([live.get("section_index"), int(live["battle_day_number"]) - 1])
-    rows = conn.execute(
-        "SELECT wad.player_tag AS tag, MAX(COALESCE(m.display_name, m.current_name)) AS name, "
-        "COUNT(*) AS battle_days, "
-        "SUM(CASE WHEN wad.decks_used >= wad.decks_available THEN 1 ELSE 0 END) AS perfect_days, "
-        "SUM(COALESCE(wad.decks_used, 0)) AS decks_used "
-        "FROM war_attendance_days wad "
-        "JOIN players m ON m.player_tag = wad.player_tag "
-        f"WHERE {' AND '.join(where)} "
-        "GROUP BY wad.player_tag "
-        "HAVING battle_days > 0 AND perfect_days = battle_days "
-        "ORDER BY decks_used DESC, name COLLATE NOCASE",
-        tuple(params),
-    ).fetchall()
-    return [_member_reference_fields(conn, r["tag"], dict(r)) for r in rows]
+        exclude_day = (int(live.get("section_index")), int(live["battle_day_number"]) - 1)
+        where.append("NOT (section_index = ? AND war_day_index = ?)")
+        params.extend([exclude_day[0], exclude_day[1]])
+    # The rule itself lives in engine.awards — this used to carry its own
+    # HAVING clause with a PER-PLAYER denominator (perfect_days = battle_days),
+    # so one perfect day qualified a member here while the season-close grant
+    # required every war day. Same name, two answers.
+    from engine.awards import perfect_attendance
+
+    qualified, total_days, skip_reason = perfect_attendance(
+        conn, int(season_id), exclude_day=exclude_day, require_full_season=False
+    )
+    if skip_reason or not qualified:
+        return []
+
+    decks = dict(
+        conn.execute(
+            f"SELECT player_tag, SUM(COALESCE(decks_used, 0)) FROM war_attendance_days "
+            f"WHERE {' AND '.join(where)} GROUP BY player_tag",
+            tuple(params),
+        ).fetchall()
+    )
+    out = []
+    for row in qualified:
+        tag = row["player_tag"]
+        name_row = conn.execute(
+            "SELECT COALESCE(display_name, current_name) AS name FROM players WHERE player_tag = ?",
+            (tag,),
+        ).fetchone()
+        out.append(
+            _member_reference_fields(
+                conn,
+                tag,
+                {
+                    "tag": tag,
+                    "name": name_row["name"] if name_row else None,
+                    "battle_days": row["days"],
+                    "perfect_days": row["perfect"],
+                    "total_battle_days": total_days,
+                    "decks_used": decks.get(tag, 0),
+                },
+            )
+        )
+    out.sort(key=lambda r: (-(r.get("decks_used") or 0), (r.get("name") or "").lower()))
+    return out
 
 
 @managed_connection

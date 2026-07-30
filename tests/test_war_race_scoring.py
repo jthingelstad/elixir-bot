@@ -347,6 +347,15 @@ def test_perfect_attendance_excludes_in_progress_day(engine_conn):
     engine_conn.execute(
         "INSERT INTO players (player_tag, current_name, display_name, first_seen_at, last_seen_at) VALUES ('#PERF','Perf','Perf','2026-07-01','2026-07-11')"
     )
+    # Perfect attendance is a CURRENT-roster view, so the member has to be in
+    # the clan. The old query had no active filter (the season-close grant and
+    # the award race both did); unifying on engine.awards.perfect_attendance
+    # applies it here too, which is the fix — a departed member should never
+    # appear in "who has perfect attendance".
+    engine_conn.execute(
+        "INSERT INTO clan_memberships (player_tag, clan_tag, joined_at, join_source) "
+        "VALUES ('#PERF','#J2RGCRVG','2026-07-01','roster')"
+    )
     engine_conn.execute(
         "INSERT INTO war_seasons (season_id, started_at) VALUES (555, '2026-07-01')"
     )

@@ -156,69 +156,133 @@ def _free_pass(conn, season_id: int, awarded_at: str, outcome: dict) -> list[dic
     return []
 
 
+def perfect_attendance(
+    conn,
+    season_id: int,
+    *,
+    exclude_day: tuple[int, int] | None = None,
+    require_full_season: bool = True,
+) -> tuple[list[dict], int, str | None]:
+    """THE Iron King rule. Returns (rows, total_days, skip_reason).
+
+    One definition, because there used to be three and they disagreed. The
+    season-close grant required perfection across every war day of the season;
+    an award-race query dropped the per-section check; and
+    ``get_perfect_war_participants`` used ``perfect_days = battle_days`` — a
+    PER-PLAYER denominator, so a member who played one day perfectly qualified.
+    That last one fed the ``perfect_attendance`` agent tool, so the bot told
+    members one thing while the grant did another.
+
+    The denominator is the CLAN's finalized battle days, never the player's.
+
+    Two knobs, both about WHICH DAYS COUNT — never about how the rule reads
+    them, which is the whole point of having one function:
+
+    ``exclude_day`` drops one ``(section_index, war_day_index)``, used by
+    in-season views for the live battle day, because a member who is
+    perfect-so-far simply has not finished today's decks yet (QA H10).
+
+    ``require_full_season`` is a grant-time data-sufficiency precondition, not
+    part of eligibility. At season close we refuse to judge "perfect every day"
+    unless attendance covers every section the season actually had. Mid-season
+    that check is meaningless — later weeks have not happened — so in-season
+    callers pass False and the section expectation is derived from the days in
+    scope instead.
+
+    Rows carry ``player_tag``, ``days``, ``perfect``, ``sections``. Only active
+    members are returned. ``skip_reason`` is set when the season cannot be
+    judged at all, in which case rows are empty.
+    """
+    expected_sections: int | None = None
+    if require_full_season:
+        sections = [
+            r[0]
+            for r in conn.execute(
+                "SELECT DISTINCT section_index FROM war_weeks WHERE season_id = ? ORDER BY 1",
+                (season_id,),
+            ).fetchall()
+        ]
+        att_sections = [
+            r[0]
+            for r in conn.execute(
+                "SELECT DISTINCT section_index FROM war_attendance_days "
+                "WHERE season_id = ? ORDER BY 1",
+                (season_id,),
+            ).fetchall()
+        ]
+        if not sections or set(att_sections) != set(sections):
+            # v5.1 attendance capture began mid-s133 (week 4 day 2) — a partial
+            # season cannot judge "perfect every day". Grants normally from s134.
+            return [], 0, "insufficient attendance data"
+        expected_sections = len(sections)
+
+    where = ["season_id = ?"]
+    params: list = [season_id]
+    if exclude_day is not None:
+        where.append("NOT (section_index = ? AND war_day_index = ?)")
+        params.extend([int(exclude_day[0]), int(exclude_day[1])])
+    clause = " AND ".join(where)
+
+    total_days = conn.execute(
+        f"""SELECT COUNT(DISTINCT section_index || ':' || war_day_index)
+            FROM war_attendance_days WHERE {clause}""",
+        tuple(params),
+    ).fetchone()[0]
+    rows = conn.execute(
+        f"""SELECT player_tag,
+                   COUNT(*) AS days,
+                   SUM(CASE WHEN decks_used >= decks_available THEN 1 ELSE 0 END) AS perfect,
+                   COUNT(DISTINCT section_index) AS sections
+            FROM war_attendance_days WHERE {clause}
+            GROUP BY player_tag""",
+        tuple(params),
+    ).fetchall()
+
+    if expected_sections is None:
+        expected_sections = conn.execute(
+            f"SELECT COUNT(DISTINCT section_index) FROM war_attendance_days WHERE {clause}",
+            tuple(params),
+        ).fetchone()[0]
+
+    qualified = [
+        dict(r)
+        for r in rows
+        if r["days"] == total_days
+        and r["perfect"] == r["days"]
+        and r["sections"] == expected_sections
+        and _active(conn, r["player_tag"])
+    ]
+    return qualified, total_days, None
+
+
 def _iron_king(conn, season_id: int, awarded_at: str) -> tuple[list[dict], str | None]:
     """Perfect attendance every finalized battle day of every section.
     Returns (granted, skip_reason)."""
-    sections = [
-        r[0]
-        for r in conn.execute(
-            "SELECT DISTINCT section_index FROM war_weeks WHERE season_id = ? ORDER BY 1",
-            (season_id,),
-        ).fetchall()
-    ]
-    att_sections = [
-        r[0]
-        for r in conn.execute(
-            "SELECT DISTINCT section_index FROM war_attendance_days WHERE season_id = ? ORDER BY 1",
-            (season_id,),
-        ).fetchall()
-    ]
-    if not sections or set(att_sections) != set(sections):
-        # v5.1 attendance capture began mid-s133 (week 4 day 2) — a partial
-        # season cannot judge "perfect every day". Grants normally from s134.
-        return [], "insufficient attendance data"
-    rows = conn.execute(
-        """SELECT player_tag,
-                  COUNT(*) AS days,
-                  SUM(CASE WHEN decks_used >= decks_available THEN 1 ELSE 0 END) AS perfect,
-                  COUNT(DISTINCT section_index) AS sections
-           FROM war_attendance_days WHERE season_id = ?
-           GROUP BY player_tag""",
-        (season_id,),
-    ).fetchall()
-    total_days = conn.execute(
-        """SELECT COUNT(DISTINCT section_index || ':' || war_day_index)
-           FROM war_attendance_days WHERE season_id = ?""",
-        (season_id,),
-    ).fetchone()[0]
+    rows, total_days, skip_reason = perfect_attendance(conn, season_id)
+    if skip_reason:
+        return [], skip_reason
     out = []
     for r in rows:
-        if (
-            r["days"] == total_days
-            and r["perfect"] == r["days"]
-            and r["sections"] == len(sections)
-            and _active(conn, r["player_tag"])
+        if _grant(
+            conn,
+            award_type="iron_king",
+            season_id=season_id,
+            player_tag=r["player_tag"],
+            rank=1,
+            metric_value=total_days,
+            metric_unit="battle_days",
+            metadata={"perfect_days": r["perfect"]},
+            awarded_at=awarded_at,
         ):
-            if _grant(
-                conn,
-                award_type="iron_king",
-                season_id=season_id,
-                player_tag=r["player_tag"],
-                rank=1,
-                metric_value=total_days,
-                metric_unit="battle_days",
-                metadata={"perfect_days": r["perfect"]},
-                awarded_at=awarded_at,
-            ):
-                out.append(
-                    {
-                        "rank": 1,
-                        "tag": r["player_tag"],
-                        "name": _name(conn, r["player_tag"]),
-                        "metric_value": total_days,
-                        "metric_unit": "battle_days",
-                    }
-                )
+            out.append(
+                {
+                    "rank": 1,
+                    "tag": r["player_tag"],
+                    "name": _name(conn, r["player_tag"]),
+                    "metric_value": total_days,
+                    "metric_unit": "battle_days",
+                }
+            )
     return out, None
 
 
