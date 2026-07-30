@@ -30,6 +30,7 @@ from runtime.leader_action_ui import LeaderActionButton
 
 LEADER_ID = 704062105258557511
 MEMBER_ID = 999000111222333444
+SECOND_LEADER_ID = 704062105258557512
 
 
 @pytest.fixture
@@ -145,7 +146,15 @@ def test_a_leader_can_decide_a_kick(action_db, kick_card):
 
 
 def test_deciding_is_idempotent_on_a_double_click(action_db, kick_card):
-    """Discord double-fires. The second press must not rewrite the record."""
+    """Discord double-fires. The second press must not rewrite the record.
+
+    The first version of this test compared only `decided_at` across two presses
+    by the SAME leader. `_utcnow()` has second granularity, so both presses
+    produced an identical stamp and the test passed without a guard existing at
+    all — it proved the clock was slow, not that the write was safe. It now
+    asserts every decision field, and the real damage case lives in the test
+    below.
+    """
     interaction = _interaction(LEADER_ID)
     button = _button(kick_card)
     patches = (
@@ -154,14 +163,78 @@ def test_deciding_is_idempotent_on_a_double_click(action_db, kick_card):
         patch.object(leader_action_ui, "_dispatch_member_outreach_decision", AsyncMock()),
         patch.object(leader_action_ui, "queue_leader_action_feedback_refresh"),
     )
+    fields = ("status", "decided_at", "decided_by_discord_user_id", "decision_emoji", "outcome")
     with patches[0], patches[1], patches[2], patches[3]:
         asyncio.run(button.callback(interaction))
         first = db.get_leader_action_by_id(kick_card["action_id"], conn=action_db)
         asyncio.run(button.callback(interaction))
         second = db.get_leader_action_by_id(kick_card["action_id"], conn=action_db)
 
-    assert first["status"] == second["status"] == db.ACTION_DONE
-    assert first["decided_at"] == second["decided_at"], "a second press moved the decision time"
+    assert first["status"] == db.ACTION_DONE
+    for field in fields:
+        assert first[field] == second[field], f"a second press rewrote {field}"
+
+
+def test_a_second_leader_cannot_overwrite_the_first_leaders_decision(action_db, kick_card):
+    """The case the idempotency test above could never catch.
+
+    Leader A marks the kick done. Leader B, looking at a card Discord has not
+    refreshed yet, presses Decline. Before the open-card guard this was a blind
+    last-writer-wins: A's decision vanished — status, decider and emoji all
+    became B's — and because `_reconcile_management_state` clears promote/demote
+    state on DONE and cannot restore it on the way back out, the card read
+    "Declined" while member_management read "enacted".
+    """
+    with (
+        _as_leader(True),
+        patch.object(leader_action_ui, "_apply_card_update", AsyncMock()),
+        patch.object(leader_action_ui, "_dispatch_member_outreach_decision", AsyncMock()),
+        patch.object(leader_action_ui, "queue_leader_action_feedback_refresh"),
+    ):
+        asyncio.run(_button(kick_card).callback(_interaction(LEADER_ID)))
+        after_a = db.get_leader_action_by_id(kick_card["action_id"], conn=action_db)
+        assert after_a["status"] == db.ACTION_DONE
+
+        other = _interaction(SECOND_LEADER_ID)
+        with patch.object(leader_action_ui, "_refresh_card_message", AsyncMock()):
+            asyncio.run(_button(kick_card, kind="decline", label="Didn't").callback(other))
+
+    after_b = db.get_leader_action_by_id(kick_card["action_id"], conn=action_db)
+    assert after_b["status"] == db.ACTION_DONE, "leader B overwrote leader A's decision"
+    assert str(after_b["decided_by_discord_user_id"]) == str(LEADER_ID)
+    assert after_b["decision_emoji"] == "✅"
+    # B must be told, not silently ignored — and never shown a reason modal.
+    other.response.send_modal.assert_not_awaited()
+    other.response.send_message.assert_awaited()
+    assert "no longer open" in other.response.send_message.await_args.args[0]
+
+
+def test_a_withdrawn_card_cannot_be_marked_done(action_db, kick_card):
+    """The engine withdraws stale cards by writing the row only — it never
+    refreshes the Discord message. So the card in front of a leader still says
+    Open with live buttons. Pressing Done must refuse, not resurrect it."""
+    db.decide_leader_action(
+        kick_card["action_id"],
+        status=db.ACTION_REJECTED,
+        discord_user_id="system:auto-withdraw",
+        emoji="auto-withdraw",
+        conn=action_db,
+    )
+    action_db.commit()
+
+    interaction = _interaction(LEADER_ID)
+    with (
+        _as_leader(True),
+        patch.object(leader_action_ui, "_refresh_card_message", AsyncMock()) as refreshed,
+    ):
+        asyncio.run(_button(kick_card).callback(interaction))
+
+    after = db.get_leader_action_by_id(kick_card["action_id"], conn=action_db)
+    assert after["status"] == db.ACTION_REJECTED, "a withdrawn card was resurrected"
+    assert str(after["decided_by_discord_user_id"]) == "system:auto-withdraw"
+    said = interaction.response.send_message.await_args.args[0]
+    assert "withdrawn by Elixir" in said, f"leader was not told why: {said}"
+    refreshed.assert_awaited_once()
 
 
 def test_a_missing_action_is_reported_not_crashed(action_db, kick_card):
@@ -203,6 +276,71 @@ def test_the_leader_gate_runs_before_anything_is_read(action_db, kick_card):
         asyncio.run(button.callback(interaction))
 
     read.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# The storage-layer guard
+#
+# The UI checks `action_is_open` before writing, so the tests above pass even
+# with the storage guard removed — they cover the wrong layer. These drive
+# `db.decide_leader_action` directly, which is where the compare-and-set lives
+# and where a cross-connection race actually resolves.
+# ---------------------------------------------------------------------------
+
+
+def _decide(action_db, kick_card, *, status, who, emoji, **kw):
+    return db.decide_leader_action(
+        kick_card["action_id"],
+        status=status,
+        discord_user_id=who,
+        emoji=emoji,
+        conn=action_db,
+        **kw,
+    )
+
+
+def test_storage_refuses_a_decision_on_an_already_decided_card(action_db, kick_card):
+    first = _decide(action_db, kick_card, status=db.ACTION_DONE, who=LEADER_ID, emoji="✅")
+    assert first and first["status"] == db.ACTION_DONE
+
+    second = _decide(
+        action_db, kick_card, status=db.ACTION_REJECTED, who=SECOND_LEADER_ID, emoji="❌"
+    )
+    assert second is None, "storage accepted a decision on a closed card"
+
+    after = db.get_leader_action_by_id(kick_card["action_id"], conn=action_db)
+    assert after["status"] == db.ACTION_DONE
+    assert str(after["decided_by_discord_user_id"]) == str(LEADER_ID)
+    assert after["decision_emoji"] == "✅"
+
+
+def test_storage_refuses_to_resurrect_a_withdrawn_card(action_db, kick_card):
+    _decide(
+        action_db,
+        kick_card,
+        status=db.ACTION_REJECTED,
+        who="system:auto-withdraw",
+        emoji="auto-withdraw",
+    )
+    assert _decide(action_db, kick_card, status=db.ACTION_DONE, who=LEADER_ID, emoji="✅") is None
+    after = db.get_leader_action_by_id(kick_card["action_id"], conn=action_db)
+    assert str(after["decided_by_discord_user_id"]) == "system:auto-withdraw"
+
+
+def test_a_reopened_card_can_be_decided_again(action_db, kick_card):
+    """The guard must not trap a card. Reopening is the supported escape hatch
+    for a misclick, so decide → reopen → decide has to work end to end."""
+    _decide(action_db, kick_card, status=db.ACTION_DONE, who=LEADER_ID, emoji="✅")
+    action_db.execute(
+        "UPDATE leader_action_recommendations SET status=?, decided_at=NULL, "
+        "decided_by_discord_user_id=NULL, decision_emoji=NULL WHERE action_id=?",
+        (db.ACTION_PROPOSED, kick_card["action_id"]),
+    )
+    action_db.commit()
+
+    again = _decide(action_db, kick_card, status=db.ACTION_REJECTED, who=LEADER_ID, emoji="❌")
+    assert again is not None, "a reopened card must be decidable"
+    assert again["status"] == db.ACTION_REJECTED
 
 
 # ---------------------------------------------------------------------------

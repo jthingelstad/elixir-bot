@@ -267,6 +267,46 @@ async def _ensure_leader(interaction: discord.Interaction) -> bool:
     return False
 
 
+_SYSTEM_DECIDERS = {
+    "system": "auto-settled by Elixir (no verification in time)",
+    "system:auto-withdraw": "withdrawn by Elixir — the evidence behind it no longer holds",
+}
+
+
+async def _report_already_decided(
+    interaction: discord.Interaction,
+    action: dict | None,
+    *,
+    action_id: int | None = None,
+) -> None:
+    """Tell a leader their click landed on a card that was already resolved.
+
+    This is the visible half of the open-card guard in `decide_leader_action`.
+    The card in front of them is stale — most often because the engine withdrew
+    it and nothing refreshed the message, or another leader decided it first —
+    so re-render it from the current row rather than leaving a card on screen
+    that still says Open.
+    """
+    if action is None and action_id is not None:
+        action = await asyncio.to_thread(db.get_leader_action_by_id, action_id)
+    if not action:
+        await _send_ephemeral(interaction, "Action not found.")
+        return
+    decider = str(action.get("decided_by_discord_user_id") or "")
+    if decider in _SYSTEM_DECIDERS:
+        who = _SYSTEM_DECIDERS[decider]
+    elif decider.isdigit():
+        who = f"decided by <@{decider}>"
+    else:
+        who = "already decided"
+    await _send_ephemeral(
+        interaction,
+        f"R{action.get('action_id')} is no longer open — {who}. "
+        "Nothing was changed. The card above has been refreshed.",
+    )
+    await _refresh_card_message(interaction, action)
+
+
 async def _refresh_card_message(interaction: discord.Interaction, action: dict) -> None:
     message = getattr(interaction, "message", None)
     if message is None:
@@ -590,6 +630,9 @@ class LeaderActionButton(discord.ui.Button):
         if not action:
             await _send_ephemeral(interaction, "Action not found.")
             return
+        if not action_is_open(action):
+            await _report_already_decided(interaction, action)
+            return
         if self.kind == "done":
             updated = await asyncio.to_thread(
                 db.decide_leader_action,
@@ -598,9 +641,15 @@ class LeaderActionButton(discord.ui.Button):
                 discord_user_id=interaction.user.id,
                 emoji="✅",
             )
+            if updated is None:
+                # Lost the race, or the engine withdrew the card between the read
+                # above and the write. Never fall back to the pre-write snapshot:
+                # that used to fire the member DM for a decision the DB rejected.
+                await _report_already_decided(interaction, None, action_id=self.action_id)
+                return
             queue_leader_action_feedback_refresh(action.get("action_type"))
-            await _apply_card_update(interaction, updated or action)
-            await _dispatch_member_outreach_decision(updated or action, db.ACTION_DONE)
+            await _apply_card_update(interaction, updated)
+            await _dispatch_member_outreach_decision(updated, db.ACTION_DONE)
             return
         if self.kind == "decline":
             await interaction.response.send_modal(DecisionReasonModal(action))
