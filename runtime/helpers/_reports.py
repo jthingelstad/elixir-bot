@@ -780,7 +780,7 @@ def _playstyle_identity_lines(limit: int = 10) -> list[str]:
 def _build_weekly_clan_recap_context(clan=None, war=None):
     clan = clan or {}
     war = war or {}
-    summary = db.get_weekly_digest_summary(days=7)
+    summary = db.get_weekly_recap_summary(days=7)
     try:
         clan_trend_summary = db.build_clan_trend_summary_context(days=30, window_days=7)
     except Exception as exc:

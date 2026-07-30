@@ -756,14 +756,14 @@ def _promote_system(required_trophies=2000):
     )
 
 
-def _weekly_digest_system():
+def _weekly_recap_system():
     """System prompt for the brain-powered Weekly Clan Recap (rebuilt
     2026-07-11). Loads the weekly-recap agent prompt with the same
     identity/knowledge/policy blocks as the awareness brain, so the recap
     composes in the brain's voice and grounds on real clan data — its job is the
     weekly retrospective (posted to #announcements and emailed to members).
 
-    The workflow key stays ``weekly_digest`` for lane-routing stability; only the
+    The workflow key stays ``weekly_recap`` for lane-routing stability; only the
     composition moved to the brain.
     """
     return _build_system_prompt(
@@ -983,7 +983,7 @@ __all__ = [
     "_reception_system",
     "_channel_lane_system",
     "_promote_system",
-    "_weekly_digest_system",
+    "_weekly_recap_system",
     "_event_system",
     "_awareness_system",
     "_ask_elixir_daily_system",

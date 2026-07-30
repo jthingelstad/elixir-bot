@@ -41,7 +41,7 @@ from agent.prompt_builders import (
     _screenshot_readout_system,
     _tournament_recap_system,
     _tournament_update_system,
-    _weekly_digest_system,
+    _weekly_recap_system,
 )
 from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
 from capabilities import members as member_capability
@@ -1330,7 +1330,7 @@ def generate_promote_content(clan_data, war_data=None, roster_data=None):
     ]
     try:
         resp = _create_chat_completion(
-            workflow="site_promote_content",
+            workflow="recruiting_copy",
             system=_promote_system(required_trophies=required_trophies),
             messages=messages,
             temperature=0.8,
@@ -1375,12 +1375,12 @@ def generate_weekly_recap(
         f"```json\n{json.dumps(public, indent=2, default=str)}\n```\n"
     )
     result = _chat_with_tools(
-        _weekly_digest_system(),
+        _weekly_recap_system(),
         user_msg,
-        workflow="weekly_digest",
+        workflow="weekly_recap",
         max_tokens=1600,
-        allowed_tools=TOOLSETS_BY_WORKFLOW["weekly_digest"],
-        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["weekly_digest"],
+        allowed_tools=TOOLSETS_BY_WORKFLOW["weekly_recap"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["weekly_recap"],
         strict_json=True,
         return_errors=True,
         tool_stats=tool_stats,

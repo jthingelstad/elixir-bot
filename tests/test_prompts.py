@@ -130,7 +130,10 @@ def test_discord_channel_configs_parse_lanes_and_policies(monkeypatch):
     channels = prompts.discord_channels_by_id()
 
     assert channels[100]["workflow"] == "interactive"
-    assert channels[100]["lane"] == "general"
+    # `Lane: general` in the fixture resolves through LANE_ALIASES to the real
+    # lane key `clan-chat` — the channel is #clan-chat and "general" was only
+    # ever the Discord-convention word. This asserts the alias, not a rename.
+    assert channels[100]["lane"] == "clan-chat"
     assert channels[100]["tool_policy"] == "read_only"
     assert channels[100]["reply_policy"] == "mention_only"
     assert "role" not in channels[100]
