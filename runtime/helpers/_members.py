@@ -3,10 +3,13 @@ import re
 
 import db
 from capabilities import members as member_capability
+from runtime.helpers._common import (
+    _bot,
+    _fmt_iso_short,
+)
 from storage.roster import _fold_for_search, pick_best_match
 
 log = logging.getLogger("elixir")
-
 __all__ = [
     "_match_clan_member",
     "_resolve_member_candidate",
@@ -14,11 +17,6 @@ __all__ = [
     "_build_member_deck_report",
     "_build_member_war_decks_report",
 ]
-
-from runtime.helpers._common import (
-    _bot,
-    _fmt_iso_short,
-)
 
 
 def _match_clan_member(nickname):
