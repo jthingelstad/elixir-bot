@@ -585,7 +585,7 @@ def test_system_status_reads_awareness_native_ledgers(tmp_path):
             "?, '{}', 1, 0, 'quiet'), "
             "('failed', 2, strftime('%Y-%m-%dT%H:%M:%SZ','now'), "
             "'{}', '{}', 0, 0, '⚠️ tick failed: delivery @ post: boom')",
-            (json.dumps({"signals_by_lane": {"elixir": [{"key": "a"}, {"key": "b"}]}}),),
+            (json.dumps({"signals_by_category": {"elixir": [{"key": "a"}, {"key": "b"}]}}),),
         )
         conn.execute(
             "INSERT INTO awareness_posts "

@@ -359,7 +359,7 @@ Tasks:
 - Add summarization helpers so the prompt receives compact window summaries, not
   unbounded raw event payloads. Raw 90-day event rows should remain queryable by
   tools/admin scripts, not stuffed wholesale into the awareness prompt.
-- Keep `signals_by_lane` as the current-tick trigger source.
+- Keep `signals_by_category` as the current-tick trigger source.
 - Update `prompts/agents/awareness.md` so the agent treats `recent_events` as
   history/context, not as an obligation to post.
 - Record `event_keys` in `awareness_ticks.signal_outcomes_json` or a successor

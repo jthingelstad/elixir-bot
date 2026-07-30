@@ -92,7 +92,7 @@ def live_war_claim_facts(live_war: dict | None) -> dict:
 
 def _signals(read: dict) -> Iterable[dict]:
     seen: set[str] = set()
-    for values in (read.get("signals_by_lane") or {}).values():
+    for values in (read.get("signals_by_category") or {}).values():
         for signal in values or []:
             if not isinstance(signal, dict):
                 continue

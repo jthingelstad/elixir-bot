@@ -36,7 +36,7 @@ _OUTCOME_LABEL = {"posted": "posted", "silence": "silence", "failed": "TICK FAIL
 
 def _summarize_read(read: dict) -> str:
     read = read or {}
-    lanes = read.get("signals_by_lane") or {}
+    lanes = read.get("signals_by_category") or {}
     lane_counts = (
         ", ".join(f"{lane} {len(sigs)}" for lane, sigs in lanes.items() if sigs) or "no signals"
     )

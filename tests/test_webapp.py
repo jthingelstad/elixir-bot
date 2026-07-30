@@ -207,7 +207,7 @@ def test_awareness_page_renders_loops_and_posts():
             "('t-post', 900, strftime('%Y-%m-%dT%H:%M:%SZ','now'), ?, '{}', 0, 1, '', NULL), "
             "('t-silence', 899, strftime('%Y-%m-%dT%H:%M:%SZ','now'), '{}', '{}', 1, 0, "
             "'quiet', 'gate:triage')",
-            (json.dumps({"signals_by_lane": {"milestone": [{"k": "a"}, {"k": "b"}]}}),),
+            (json.dumps({"signals_by_category": {"milestone": [{"k": "a"}, {"k": "b"}]}}),),
         )
         conn.execute(
             "INSERT INTO awareness_posts (lane, content_preview, covers_json, "
