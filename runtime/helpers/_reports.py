@@ -12,10 +12,27 @@ from capabilities import management as management_capability
 from capabilities import war as war_capability
 from memory_store import list_memories
 from runtime import status as runtime_status
+from runtime.helpers._common import (
+    _bare_tag,
+    _chicago,
+    _fmt_bytes,
+    _fmt_iso_short,
+    _fmt_num,
+    _fmt_relative,
+    _format_relative_join_age,
+    _job_next_runs,
+    _join_member_bits,
+    _log,
+    _member_label,
+    _recent_join_display_rows,
+    _runtime_app,
+    _schedule_specs,
+    _scheduler,
+    _status_badge,
+)
 from storage import events_read as event_facades
 
 _WEEKLY_RECAP_HEADER_RE = re.compile(r"^\s*[*#_`\s]*weekly recap\b", re.IGNORECASE)
-
 __all__ = [
     "_build_roster_join_dates_report",
     "_build_kick_risk_report",
@@ -37,25 +54,6 @@ __all__ = [
     "_format_weekly_recap_post",
     "build_lane_memory_context",
 ]
-
-from runtime.helpers._common import (
-    _bare_tag,
-    _chicago,
-    _fmt_bytes,
-    _fmt_iso_short,
-    _fmt_num,
-    _fmt_relative,
-    _format_relative_join_age,
-    _job_next_runs,
-    _join_member_bits,
-    _log,
-    _member_label,
-    _recent_join_display_rows,
-    _runtime_app,
-    _schedule_specs,
-    _scheduler,
-    _status_badge,
-)
 
 
 def _build_roster_join_dates_report():

@@ -3,6 +3,8 @@ import json
 import re
 import time
 
+from anthropic import APIConnectionError, APIError
+
 from agent.core import (
     MAX_CONTEXT_MEMBERS_DEFAULT,
     MAX_TOOL_ROUNDS,
@@ -13,6 +15,7 @@ from agent.core import (
     response_text,
     response_tool_uses,
 )
+from agent.tool_exec import _execute_tool
 from agent.tool_policy import (
     ALL_TOOLS,
     AWARENESS_WRITE_BUDGET_PER_TICK,
@@ -30,9 +33,6 @@ _REFERENCE_CODE_RE = re.compile(
     r"(?<![A-Za-z0-9])([RLM])([1-9][0-9]*)(?![A-Za-z0-9])",
     re.IGNORECASE,
 )
-from anthropic import APIConnectionError, APIError
-
-from agent.tool_exec import _execute_tool
 
 
 def _preview_text(value, limit=500):

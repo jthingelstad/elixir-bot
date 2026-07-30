@@ -42,13 +42,21 @@ extend-exclude = ["venv"]
 
 [tool.ruff.lint]
 select = ["B", "E4", "E7", "E9", "F", "I"]
-ignore = [
-    # E402: deferred imports are used deliberately throughout to avoid
-    # circular-import issues between runtime/, storage/, and db/.
-    "E402",
-]
+ignore = []
 
 [tool.ruff.lint.per-file-ignores]
+# E402 was ignored REPO-WIDE with a comment claiming deferred imports were
+# needed "throughout to avoid circular-import issues". Measured 2026-07-30:
+# 18 violations in 8 files, and not one was a cycle workaround — they were a
+# logger assignment, an __all__ list and a regex constant sitting above the
+# import block. All were relocated; every entrypoint still imports cleanly.
+#
+# What remains is these two one-off maintenance scripts, which genuinely must
+# extend sys.path before importing the package. A repo-wide ignore let the
+# style spread; naming the two real cases keeps it contained.
+"scripts/repair_data_integrity_20260715.py" = ["E402"]
+"scripts/review_agent_feedback.py" = ["E402"]
+
 # These runtime modules are deliberate re-export hubs. F401 stays enabled
 # everywhere else so genuine dead imports are caught.
 "runtime/app.py" = ["F401"]

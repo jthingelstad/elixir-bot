@@ -6,6 +6,26 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+# v5.1: "active member" = has an open clan_memberships row (§7); the old
+# members.status column is gone. `m` must alias players in the outer query.
+from db import (
+    _canon_tag,
+    _current_joined_at,
+    _ensure_member,
+    _get_current_membership,
+    _rowdicts,
+    _utcnow,
+    chicago_date_for_utc_timestamp,
+    chicago_today,
+    managed_connection,
+)
+from storage._enrichment import _member_reference_fields
+from storage.cards import (
+    get_member_card_collection,
+    get_member_current_deck,
+    get_member_signature_cards,
+)
+
 _NON_FOLD_CHARS = re.compile(r"[^a-z0-9 ]+")
 _FOLD_WHITESPACE = re.compile(r"\s+")
 
@@ -28,8 +48,6 @@ def _hours_since_iso(value: Optional[str]) -> Optional[float]:
     return max(0.0, (datetime.now(timezone.utc) - dt).total_seconds() / 3600)
 
 
-# v5.1: "active member" = has an open clan_memberships row (§7); the old
-# members.status column is gone. `m` must alias players in the outer query.
 _ACTIVE = (
     "EXISTS (SELECT 1 FROM clan_memberships cm "
     "WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
@@ -75,25 +93,6 @@ def pick_best_match(matches: list[dict]) -> dict | None:
     if (top.get("match_score", 0) - second.get("match_score", 0)) >= 100:
         return top
     return None
-
-
-from db import (
-    _canon_tag,
-    _current_joined_at,
-    _ensure_member,
-    _get_current_membership,
-    _rowdicts,
-    _utcnow,
-    chicago_date_for_utc_timestamp,
-    chicago_today,
-    managed_connection,
-)
-from storage._enrichment import _member_reference_fields
-from storage.cards import (
-    get_member_card_collection,
-    get_member_current_deck,
-    get_member_signature_cards,
-)
 
 
 def _ensure_last_seen_api_column(conn) -> None:

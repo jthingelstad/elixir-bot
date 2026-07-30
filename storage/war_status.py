@@ -15,8 +15,6 @@ import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-log = logging.getLogger("elixir_db")
-
 from db import (
     _canon_tag,
     _parse_cr_time,
@@ -46,6 +44,8 @@ from storage.war_calendar import (
     war_day_key,
     war_reset_window_utc,
 )
+
+log = logging.getLogger("elixir_db")
 
 HOME_CLAN = "#J2RGCRVG"
 

@@ -6,8 +6,6 @@ import re
 import sqlite3
 from typing import Optional
 
-log = logging.getLogger("storage.identity")
-
 from db import (
     _canon_tag,
     _ensure_member,
@@ -17,6 +15,8 @@ from db import (
     _utcnow,
     managed_connection,
 )
+
+log = logging.getLogger("storage.identity")
 
 # -- Discord identity and memory helpers -----------------------------------
 
