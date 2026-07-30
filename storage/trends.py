@@ -164,9 +164,9 @@ def _events_battle_window(
         "SELECT COUNT(*) AS battles, "
         "SUM(outcome = 'W') AS wins, SUM(outcome = 'L') AS losses, SUM(outcome = 'D') AS draws, "
         "SUM(COALESCE(trophy_change, 0)) AS trophy_delta, "
-        "COUNT(DISTINCT substr(battle_time, 1, 8)) AS days_with_battles "
+        "COUNT(DISTINCT substr(battle_time, 1, 10)) AS days_with_battles "
         "FROM battle_events WHERE player_tag = ? "
-        "AND substr(battle_time, 1, 8) >= ? AND substr(battle_time, 1, 8) <= ?",
+        "AND substr(battle_time, 1, 10) >= ? AND substr(battle_time, 1, 10) <= ?",
         (canon_tag, start_ymd, end_ymd),
     ).fetchone()
     battles = int(row["battles"] or 0)
@@ -237,7 +237,7 @@ def _events_clan_battle_window(conn, start_ymd: str, end_ymd: str, window_days: 
         "SUM(COALESCE(b.trophy_change, 0)) AS trophy_delta, "
         "COUNT(DISTINCT b.player_tag) AS active_members "
         "FROM battle_events b "
-        "WHERE substr(b.battle_time, 1, 8) >= ? AND substr(b.battle_time, 1, 8) <= ? "
+        "WHERE substr(b.battle_time, 1, 10) >= ? AND substr(b.battle_time, 1, 10) <= ? "
         "AND EXISTS (SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = b.player_tag AND cm.left_at IS NULL)",
         (start_ymd, end_ymd),
     ).fetchone()

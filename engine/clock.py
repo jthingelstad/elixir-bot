@@ -187,37 +187,12 @@ def _effective_war_date(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc) - timedelta(hours=PERIOD_BOUNDARY_HOUR_UTC)
 
 
-# `battle_events.battle_time` stores CR-compact strings ("20260418T153949.000Z"),
-# never ISO. That matters because SQLite compares them as TEXT, and:
-#
-#     '20260418T153949.000Z' >= '2026-04-18T15:39:49'   ->  True
-#
-# Char 4 is '0' (48) against '-' (45), so an ISO cutoff is >= every row. A wrong
-# window does not raise and does not return nothing — it silently returns the
-# ENTIRE history as if it were your 7-day window, and the numbers look plausible.
-#
-# All 13,208 rows are compact. Build every battle-time bound through here, or
-# through BATTLE_CUTOFF_SQL in SQL, so the format can only be stated once.
-BATTLE_TIME_FORMAT = "%Y%m%dT%H%M%S.000Z"
-
-# The SQL equivalent, for bounds computed inside a query. Takes a SQLite
-# modifier such as '-7 days': strftime(BATTLE_CUTOFF_SQL, 'now', ?).
-BATTLE_CUTOFF_SQL = "%Y%m%dT%H%M%S.000Z"
-
-
-def battle_cutoff(days: int, *, now: datetime | None = None) -> str:
-    """A `battle_time` lower bound `days` back, in CR-compact form.
-
-    Use this instead of hand-rolling a cutoff. `.isoformat()` and any
-    `%Y-%m-%d` format are silently wrong here, not loudly wrong.
-    """
-    moment = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    return (moment - timedelta(days=days)).strftime(BATTLE_TIME_FORMAT)
-
-
 def parse_battle_time(value: str) -> datetime | None:
-    """Parse CR compact battle time — delegates to the normalizer's single
-    parser (engine/normalize.py); name kept for its importers."""
+    """Parse a stored battle_time — delegates to the normalizer's single parser.
+
+    battle_time is ISO-Z in the database as of schema v25; the parser also still
+    accepts CR-compact, which is what the API sends before ingest converts it.
+    """
     return parse_cr_time(value)
 
 

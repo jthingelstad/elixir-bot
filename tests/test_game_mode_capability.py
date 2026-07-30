@@ -8,7 +8,7 @@ from capabilities.game_modes import get_clan_game_mode_windows, get_clan_game_mo
 
 
 def _cr_time(delta: timedelta = timedelta()) -> str:
-    return (datetime.now(timezone.utc) - delta).strftime("%Y%m%dT%H%M%S.000Z")
+    return (datetime.now(timezone.utc) - delta).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _seed_player(conn, tag: str, name: str, league: int, rating: int) -> None:

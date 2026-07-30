@@ -483,7 +483,7 @@ def _ranked_battles(conn, tag, now: str, window: int) -> int:
             -- fixed-width, so a compact-string compare is exact and needs no
             -- parsing. The stored '.000Z' tail sorts after the bare cutoff, so
             -- a battle exactly on the boundary is included.
-             AND battle_time >= strftime('%Y%m%dT%H%M%S', ?, ?)""",
+             AND battle_time >= strftime('%Y-%m-%dT%H:%M:%SZ', ?, ?)""",
             (tag, now, f"-{window} days"),
         ).fetchone()[0]
         or 0

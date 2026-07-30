@@ -245,15 +245,16 @@ def refresh_rollups(conn, player_tag, date_chicago, expected_battle_delta=None):
     """
     tag = canon_tag(player_tag)
     start_utc, end_utc = chicago_day_bounds_utc(date_chicago)
-    compact = lambda s: s.replace("-", "").replace(":", "")  # noqa: E731  (CR compact time)
+    # One format on both sides, so this is a plain range scan. It used to strip
+    # '.000Z'/'Z' off every row and de-punctuate the bounds to meet CR-compact
+    # in the middle — which also made the comparison non-sargable, so it could
+    # never use an index on battle_time.
     rows = conn.execute(
         """SELECT battle_time, mode_group, game_mode_id, game_mode_name, outcome,
                   crowns_for, crowns_against, trophy_change
            FROM battle_events
-           WHERE player_tag = ?
-             AND REPLACE(REPLACE(battle_time, '.000Z', ''), 'Z', '') >= ?
-             AND REPLACE(REPLACE(battle_time, '.000Z', ''), 'Z', '') < ?""",
-        (tag, compact(start_utc), compact(end_utc)),
+           WHERE player_tag = ? AND battle_time >= ? AND battle_time < ?""",
+        (tag, start_utc, end_utc),
     ).fetchall()
     conn.execute(
         "DELETE FROM player_daily_battle_rollups WHERE player_tag = ? AND battle_date = ?",
@@ -505,7 +506,7 @@ def refresh_management_inputs(conn, player_tag, now=None):
         # stamped 1,227 rows with one observed_at. battle_time is uniformly
         # CR-compact and fixed-width, so the compact-string compare is exact.
         "SELECT battle_time FROM battle_events WHERE player_tag = ? "
-        "AND battle_time >= strftime('%Y%m%dT%H%M%S', ?, '-28 days')",
+        "AND battle_time >= strftime('%Y-%m-%dT%H:%M:%SZ', ?, '-28 days')",
         (tag, now),
     ).fetchall()
     days = {

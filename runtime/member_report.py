@@ -24,7 +24,7 @@ from storage._formatting import preferred_display_name
 from storage.game_modes import mode_group_label
 from storage.player import NEAR_MISS_TOWER_HP
 
-_ISO_CUTOFF = "%Y-%m-%dT%H:%M:%S"
+_ISO_CUTOFF = "%Y-%m-%dT%H:%M:%SZ"
 
 _CARD_EVENT_TYPES = (
     "card_unlocked",
@@ -44,13 +44,6 @@ def _anchor(now: str | None) -> datetime:
 def _cutoff(days: int, now: str | None = None) -> str:
     """ISO cutoff for *_events.observed_at columns (stored ISO)."""
     return (_anchor(now) - timedelta(days=days)).strftime(_ISO_CUTOFF)
-
-
-def _cutoff_compact(days: int, now: str | None = None) -> str:
-    """Compact cutoff for battle_events.battle_time, which is CR-compact
-    (`20260701T135733.000Z`) — comparing it against an ISO cutoff silently matches
-    everything, so battle windows MUST use this form."""
-    return (_anchor(now) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S")
 
 
 def _window_battles(conn, tag: str, cutoff: str, until: str | None = None) -> list[dict]:
@@ -440,8 +433,8 @@ def build_member_report_context(
     try:
         display = preferred_display_name(conn, tag, name)
         cutoff = _cutoff(days, now)  # ISO — for *_events.observed_at
-        cutoff_c = _cutoff_compact(days, now)  # compact — for battle_events.battle_time
-        prev_c = _cutoff_compact(days * 2, now)
+        cutoff_c = _cutoff(days, now)
+        prev_c = _cutoff(days * 2, now)
 
         member_read = member_capability.get_member_intelligence(
             tag,

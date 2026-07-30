@@ -181,7 +181,7 @@ def _cr_cutoff(days):
     # timestamp compare greater than an ISO cutoff, so an ISO comparison never
     # deletes anything. This cutoff matches the stored format.
     return (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
-        "%Y%m%dT%H%M%S.000Z"
+        "%Y-%m-%dT%H:%M:%SZ"
     )
 
 

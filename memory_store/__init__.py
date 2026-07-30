@@ -90,6 +90,58 @@ def _canon_tag(tag: Optional[str]) -> str:
     return canon(tag)
 
 
+def _member_key(conn, value: Optional[str]) -> Optional[str]:
+    """Key a member-scoped memory by the member's REAL player tag.
+
+    `canon_tag` only uppercases and prefixes '#', so a caller passing a display
+    name produced a valid-looking key nothing would reject: '#KING_THING',
+    '#VIJAY', '#28'. 1,868 of 3,203 member-scoped memories were keyed that way,
+    and members ended up split across both spellings — King Thing had 15
+    memories under his real tag and 88 under '#KING_THING', so a lookup by tag
+    reached 15% of what Elixir actually knew about him.
+
+    The test is "does this resolve to a player NAME", not "does this look like a
+    tag". Shape alone cannot separate them ('#VIJAY' is name-shaped and
+    tag-shaped), and a strict CR-alphabet check would also reject a tag for a
+    player whose row has not landed yet — a joiner mid-tick, an opponent.
+
+    So: a value matching exactly one player's name is rewritten to that player's
+    tag. An ambiguous name resolves to nobody and is left alone, because
+    attaching a memory to the WRONG member is worse than leaving it orphaned.
+    A value matching no name is passed through as the tag it claims to be.
+    """
+    tag = _canon_tag(value) if value else None
+    if not tag:
+        return None
+    name = tag.lstrip("#").replace("_", " ").strip()
+    if not name:
+        return tag
+    matches = conn.execute(
+        """SELECT DISTINCT player_tag FROM players
+            WHERE UPPER(COALESCE(display_name, current_name)) = UPPER(?)
+               OR UPPER(current_name) = UPPER(?)
+               OR UPPER(REPLACE(COALESCE(display_name, current_name), ' ', '')) = UPPER(?)""",
+        (name, name, name.replace(" ", "")),
+    ).fetchall()
+    if len(matches) == 1:
+        resolved = matches[0]["player_tag"] if hasattr(matches[0], "keys") else matches[0][0]
+        if resolved != tag:
+            log.warning(
+                "memory member_tag %r is a NAME, not a tag; keyed to %s instead",
+                value,
+                resolved,
+            )
+        return resolved
+    if len(matches) > 1:
+        log.warning(
+            "memory member_tag %r matches %d players; leaving it unresolved rather "
+            "than attaching the memory to the wrong member",
+            value,
+            len(matches),
+        )
+    return tag
+
+
 def _json_or_none(data) -> Optional[str]:
     if data is None:
         return None
@@ -327,7 +379,7 @@ def create_memory(
             summary,
             _norm_scope(scope),
             float(confidence),
-            _canon_tag(member_tag) if member_tag else None,
+            _member_key(conn, member_tag),
             str(channel_id) if channel_id else None,
             ek,
             created_by,

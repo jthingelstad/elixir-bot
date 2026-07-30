@@ -18,6 +18,7 @@ from db import (
     managed_connection,
 )
 from engine.ingest import mirror_battles
+from engine.normalize import canonical_utc_timestamp
 from storage.player import _normalize_cards_for_storage
 
 # ---------------------------------------------------------------------------
@@ -38,7 +39,7 @@ def _compute_ends_time(started_time: Optional[str], duration_seconds) -> Optiona
     if started_dt is None:
         return None
     ends_dt = started_dt + timedelta(seconds=duration_seconds)
-    return ends_dt.strftime("%Y%m%dT%H%M%S.000Z")
+    return ends_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 _DECK_SELECTION_LABELS = {
@@ -606,7 +607,7 @@ def store_tournament_battle(
               AND ((player_tag = ? AND opponent_tag = ?)
                 OR (player_tag = ? AND opponent_tag = ?))
             LIMIT 1""",
-        (battle.get("battleTime"), p1_tag, p2_tag, p2_tag, p1_tag),
+        (canonical_utc_timestamp(battle.get("battleTime")), p1_tag, p2_tag, p2_tag, p1_tag),
     ).fetchone()
     if seen:
         return None
@@ -638,7 +639,10 @@ def store_tournament_battle(
     shared_card_names = sorted(set(p1_card_names) & set(p2_card_names))
 
     return {
-        "battle_time": battle.get("battleTime"),
+        # Second write path into battle_time — the tournament store, alongside
+        # engine.ingest. Both convert at the boundary so the column cannot hold
+        # two formats again.
+        "battle_time": canonical_utc_timestamp(battle.get("battleTime")),
         "player1_tag": p1_tag,
         "player1_name": p1_name,
         "player1_is_clan_member": p1_is_clan_member,

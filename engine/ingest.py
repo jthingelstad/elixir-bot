@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 
 from engine.clock import WarClock, resolve_war_keys
 from engine.db import canon_tag
+from engine.normalize import canonical_utc_timestamp
 from storage.game_modes import classify_battle_mode
 
 _COMPETITIVE = {"ladder", "ranked", "war", "special_event", "tournament", "two_v_two"}
@@ -174,7 +175,7 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
         out.append(
             {
                 "player_tag": tag,
-                "battle_time": b.get("battleTime"),
+                "battle_time": canonical_utc_timestamp(b.get("battleTime")),
                 "battle_type": b.get("type") or "unknown",
                 "opponent_tag": o0.get("tag") or "",
                 "crowns_for": t0.get("crowns") if t0.get("crowns") is not None else -1,

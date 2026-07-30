@@ -992,7 +992,7 @@ def _season_bounds(conn: sqlite3.Connection, season_id: int) -> tuple[Optional[s
     if not start_dt or not end_dt:
         return None, None
     end_dt = end_dt + timedelta(days=7)
-    return start_dt.strftime("%Y%m%dT%H%M%S.000Z"), end_dt.strftime("%Y%m%dT%H%M%S.000Z")
+    return start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"), end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @managed_connection

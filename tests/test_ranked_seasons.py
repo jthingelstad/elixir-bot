@@ -208,7 +208,7 @@ def _seed_rollups(
                 (
                     f"{tag}-{ymd}-{mode}-{j}",
                     tag,
-                    f"{ymd}T12{j:02d}00.000Z",
+                    f"{d}T12:{j:02d}:00Z",
                     "2026-07-01T00:00:00Z",
                     "W" if j < w else "L",
                     mode,
