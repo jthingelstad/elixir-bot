@@ -35,8 +35,9 @@ class ClanGameModesResult(SourcedCapabilityEnvelope):
     duos: list[dict[str, Any]]
 
 
-class ClanGameModeWindowsResult(CapabilityEnvelope):
+class ClanGameModeWindowsResult(CapabilityEnvelope, total=False):
     windows: dict[str, dict[str, Any]]
+    data_generation: Any
 
 
 class WarIntelligenceEnvelope(SourcedCapabilityEnvelope):
@@ -63,9 +64,20 @@ class WarSeasonViewResult(SourcedCapabilityEnvelope):
 
 
 class MemberIntelligenceResult(SourcedCapabilityEnvelope, total=False):
+    """One key per facet `get_member_intelligence` can return.
+
+    These fell out of sync because the gate only typechecked this file in
+    isolation — `mypy capabilities/contracts.py` proves the definitions parse,
+    never that an implementation matches them. Seven facets shipped without a
+    key here (`loadout`, `losses`, `wins`, `history`, `ranked`,
+    `mode_activity`, `awards`); the contract described a smaller capability
+    than the one consumers were already calling.
+    """
+
     player_tag: str
     requested_facets: list[str]
     freshness: dict[str, Any]
+    data_generation: Any
     profile: Any
     form: Any
     playstyle: Any
@@ -73,6 +85,13 @@ class MemberIntelligenceResult(SourcedCapabilityEnvelope, total=False):
     trend: Any
     battles: Any
     events: Any
+    loadout: Any
+    losses: Any
+    wins: Any
+    history: Any
+    ranked: Any
+    mode_activity: Any
+    awards: Any
 
 
 class ManagementDecisionResult(SourcedCapabilityEnvelope):
@@ -92,11 +111,44 @@ class AwardsRecognitionResult(SourcedCapabilityEnvelope):
 
 
 class DeckIntelligenceResult(CapabilityEnvelope, total=False):
+    """Member view, clan view and card-impact view share this envelope.
+
+    Under-declared for the same reason as `MemberIntelligenceResult`: the gate
+    only parsed this file, so ten member-view keys and six clan-view keys were
+    returned by code that no checker ever compared against the contract.
+    """
+
     available: bool
     error: str
     view: str
+    scope: str
     player_tag: str
+    player_name: str | None
     sources: list[str]
+    window: dict[str, Any]
+    evidence_limits: Any
+    # member view
+    current_deck: Any
+    current_deck_note: Any
+    primary_deck: Any
+    variants: Any
+    recent_change: Any
+    stability: Any
+    upgrade_bottlenecks: Any
+    # clan view
+    coverage: Any
+    archetype_spread: Any
+    win_condition_spread: Any
+    common_primary_deck_cards: Any
+    members: Any
+    # card-impact view
+    cards: Any
+    battles_considered: Any
+    changes: Any
+    affected_members: Any
+    affected_member_count: Any
+    changes_without_member_evidence: Any
+    interpretation: Any
 
 
 class GameTruthResult(CapabilityEnvelope, total=False):

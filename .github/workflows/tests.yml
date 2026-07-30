@@ -37,6 +37,8 @@ jobs:
       - name: Format
         run: uv run --locked ruff format --check .
       - name: Capability contracts
-        run: uv run --locked mypy capabilities/contracts.py
+        run: uv run --locked mypy capabilities/
       - name: Tests
         run: uv run --locked pytest tests/ -q --cov=capabilities --cov-report=term-missing --cov-fail-under=80
+      - name: War-week simulation
+        run: uv run --locked python scripts/simulate.py

@@ -40,7 +40,9 @@ def _ranked_standings(profiles: list[dict]) -> list[dict]:
     return standings
 
 
-def _duo_pairs(conn: sqlite3.Connection, *, days: int, limit: int) -> list[dict]:
+def _duo_pairs(conn: sqlite3.Connection | None, *, days: int, limit: int) -> list[dict]:
+    if conn is None:
+        return []
     rows = conn.execute(
         """SELECT COALESCE(p1.display_name, p1.current_name) AS player,
                   COALESCE(p2.display_name, p2.current_name) AS teammate,

@@ -7,7 +7,8 @@ evidence contract.  LLMs may choose wording; they may not change this truth.
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Mapping
+from typing import Any, Iterable
 
 from capabilities.contracts import GameTruthResult
 from engine.game_rules import river_race_mechanics
@@ -16,11 +17,24 @@ CAPABILITY_ID = "game_truth"
 CONTRACT_VERSION = 1
 
 
+def _dict_at(source: Mapping[str, Any] | None, key: str) -> dict:
+    """The nested dict at `key`, or {} — one lookup, and narrowable.
+
+    Every caller used to write `x.get(k) if isinstance(x.get(k), dict) else {}`,
+    which looks up twice and defeats narrowing: mypy sees the guarded call and
+    the used call as unrelated expressions, so `.get()` on the result was an
+    error at nine sites. Safe at runtime, unprovable to a checker, and the
+    double lookup was real.
+    """
+    value = (source or {}).get(key)
+    return value if isinstance(value, dict) else {}
+
+
 def _live_period_type(live_war: dict | None) -> str | None:
     live = live_war or {}
-    period = live.get("period") if isinstance(live.get("period"), dict) else {}
-    state = live.get("current_state") if isinstance(live.get("current_state"), dict) else {}
-    clock = live.get("clock") if isinstance(live.get("clock"), dict) else {}
+    period = _dict_at(live, "period")
+    state = _dict_at(live, "current_state")
+    clock = _dict_at(live, "clock")
     if (
         period.get("is_colosseum_week")
         or state.get("colosseum_week")
@@ -34,7 +48,7 @@ def _live_phase(live_war: dict | None) -> str | None:
     """Practice-vs-battle for the day, across the several `phase` vocabularies."""
     live = live_war or {}
     for key in ("clock", "period", "current_state"):
-        block = live.get(key) if isinstance(live.get(key), dict) else {}
+        block = _dict_at(live, key)
         phase = block.get("phase")
         if phase:
             return str(phase)
@@ -114,10 +128,10 @@ def _signals(read: dict) -> Iterable[dict]:
 
 
 def _war_from_awareness_read(read: dict) -> dict:
-    time = read.get("time") if isinstance(read.get("time"), dict) else {}
-    standing = read.get("standing") if isinstance(read.get("standing"), dict) else {}
-    season = read.get("war_season") if isinstance(read.get("war_season"), dict) else {}
-    race = ((season.get("state") or {}).get("race") or {}) if isinstance(season, dict) else {}
+    time = _dict_at(read, "time")
+    standing = _dict_at(read, "standing")
+    season = _dict_at(read, "war_season")
+    race = _dict_at(_dict_at(season, "state"), "race")
     colosseum = bool(
         time.get("is_colosseum_week")
         or race.get("colosseum_week")
@@ -141,7 +155,7 @@ def awareness_post_facts(read: dict, post: dict) -> dict:
         signal for signal in _signals(read or {}) if signal.get("signal_key") in covered
     ]
     for signal in covered_signals:
-        payload = signal.get("payload") if isinstance(signal.get("payload"), dict) else {}
+        payload = _dict_at(signal, "payload")
         for key, value in {**payload, **signal}.items():
             if key not in facts and value is not None:
                 facts[key] = value

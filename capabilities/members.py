@@ -8,6 +8,7 @@ this module for one coherent view over Elixir's local projections and history.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from contextlib import contextmanager
 from typing import Any, Iterable, Iterator
 
@@ -62,7 +63,7 @@ def _playstyle(source, player_tag: str, days: int, *, conn=None) -> dict | None:
         return None
 
 
-def _freshness(result: dict) -> dict:
+def _freshness(result: Mapping[str, Any]) -> dict:
     profile = result.get("profile") or {}
     form = result.get("form") or {}
     war = result.get("war") or {}

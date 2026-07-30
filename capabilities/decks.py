@@ -89,22 +89,29 @@ def _fingerprint(cards: Iterable[dict]) -> tuple[str, ...]:
 
 
 def _names(cards: Iterable[dict]) -> list[str]:
-    return sorted({_card_name(card) for card in cards or [] if _card_name(card)})
+    named = (_card_name(card) for card in cards or [])
+    return sorted({name for name in named if name})
+
+
+def _elixir_cost(card: dict) -> float | None:
+    """Either spelling the CR API uses, or None."""
+    value = card.get("elixir_cost")
+    if value is None:
+        value = card.get("elixirCost")
+    return float(value) if isinstance(value, (int, float)) else None
 
 
 def _average_elixir(cards: Iterable[dict]) -> float | None:
+    """Mean deck cost, or None unless EVERY card has a readable cost.
+
+    All-or-nothing on purpose: averaging the subset that happens to carry a
+    cost silently reports a cheaper deck than the member is playing.
+    """
     playable = [card for card in cards or [] if isinstance(card, dict)]
-    costs = [
-        card.get("elixir_cost") if card.get("elixir_cost") is not None else card.get("elixirCost")
-        for card in playable
-        if isinstance(
-            card.get("elixir_cost")
-            if card.get("elixir_cost") is not None
-            else card.get("elixirCost"),
-            (int, float),
-        )
-    ]
-    return round(sum(costs) / len(costs), 2) if playable and len(costs) == len(playable) else None
+    costs = [cost for cost in (_elixir_cost(card) for card in playable) if cost is not None]
+    if not playable or len(costs) != len(playable):
+        return None
+    return round(sum(costs) / len(costs), 2)
 
 
 def _battle_count(rows: list[dict]) -> int:
@@ -332,7 +339,7 @@ def _upgrade_bottlenecks(source, player_tag: str, *, conn=None) -> list[dict]:
 
 def _member_view(
     player_tag: str, rows: list[dict], source, *, days: int, scope: str, conn=None
-) -> dict:
+) -> DeckIntelligenceResult:
     groups = _sorted_groups(rows)
     primary = groups[0] if groups else None
     total = len(rows)
@@ -421,7 +428,7 @@ def _member_view(
     }
 
 
-def _clan_view(rows: list[dict], *, days: int, scope: str) -> dict:
+def _clan_view(rows: list[dict], *, days: int, scope: str) -> DeckIntelligenceResult:
     by_player: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
         by_player[row["player_tag"]].append(row)
@@ -567,7 +574,7 @@ def _card_impact(
     *,
     days: int,
     scope: str,
-) -> dict:
+) -> DeckIntelligenceResult:
     targets = {change["card"].lower(): change for change in changes}
     by_player: dict[str, dict] = {}
     for row in rows:
