@@ -7,6 +7,20 @@
 - member_role: 1474762690692911104
 - leader_role: 1474762111287824584
 - bot_role: 1477050812789293117
+- thinking_channel: 1524983821852872896
+
+## #thinking (not a lane)
+
+**Leader-only. Elixir's train of thought, written by the runtime — not composed
+copy.** Each awareness tick opens an embed here with the read, then streams tool
+calls, truncations and retries into a thread, and finalizes with the outcome and
+the verbatim decision. It replaced the old `#elixir-log` webhook on 2026-07-09.
+
+This is deliberately **not** a lane: nothing composes for it, Elixir never
+replies in it, and it has no voice file. It is listed here because it is a real
+channel and this file is the channel map — a live channel the map does not
+mention is a channel nobody can reason about. Its ID lives in `## Config` above
+rather than in code.
 
 ## #welcome
 

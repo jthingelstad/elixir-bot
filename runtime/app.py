@@ -789,7 +789,12 @@ async def _weekly_leadership_review():
 # The leader-only #thinking channel — Elixir's train of thought lands here as a
 # bot-native embed per loop, with the full read/tool-trace/decision in a thread.
 # Replaced the old #elixir-log webhook (2026-07-09).
-THINKING_CHANNEL_ID = int(os.getenv("ELIXIR_THINKING_CHANNEL_ID", "1524983821852872896"))
+# The ID lives in prompts/DISCORD.md `## Config` with every other channel ID —
+# AGENTS.md puts channel config there, and a hardcoded snowflake in code meant
+# the channel map did not mention a channel that exists. Env still overrides.
+THINKING_CHANNEL_ID = int(
+    os.getenv("ELIXIR_THINKING_CHANNEL_ID") or _dc.get("thinking_channel", 0) or 0
+)
 
 
 # Live #thinking session for the in-flight tick. Awareness runs one-at-a-time
