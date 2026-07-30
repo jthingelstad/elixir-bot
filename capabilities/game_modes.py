@@ -51,7 +51,7 @@ def _duo_pairs(conn: sqlite3.Connection | None, *, days: int, limit: int) -> lis
            JOIN players p1 ON p1.player_tag = b.player_tag
            JOIN players p2 ON p2.player_tag = b.teammate_tag
            WHERE b.teammate_tag IS NOT NULL
-             AND b.battle_time >= strftime('%Y%m%dT%H%M%S', 'now', ?)
+             AND b.battle_time >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
            GROUP BY b.player_tag, b.teammate_tag
            HAVING battles >= 2
            ORDER BY battles DESC LIMIT ?""",

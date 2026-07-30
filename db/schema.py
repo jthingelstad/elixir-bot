@@ -13,7 +13,7 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 24
+CURRENT_SCHEMA_VERSION = 25
 EXPECTED_TABLE_COUNT = 59
 
 
@@ -1206,6 +1206,115 @@ def _apply_v24(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE awareness_thoughts DROP COLUMN prompt_json")
 
 
+def _apply_v25(conn: sqlite3.Connection) -> None:
+    """Normalize battle timestamps to the project's ISO form, and key member
+    memories by real player tags.
+
+    **battle_time was CR-compact.** The Clash Royale API returns
+    '20260418T153949.000Z' and the ingest path stored it verbatim, so a column
+    compared as TEXT held a format that sorts against ISO in a way that is
+    silently wrong: char 4 is '0' (48) against '-' (45), so a compact value is
+    GREATER than any ISO value from the same year. An ISO "last 7 days" bound
+    therefore matched every row and returned the whole history with plausible
+    looking numbers. The repo had learned this four times in four local
+    workarounds and centralized it zero times; converting at ingest
+    (engine.normalize.canonical_utc_timestamp) removes the format, and this
+    converts the rows already stored so no reader needs to straddle both.
+
+    The target keeps the trailing 'Z'. A naive '2026-07-30T17:30:30' is UTC by
+    convention only, which is how engine/profiles.py came to compare a LOCAL
+    date.today() against UTC battle times and silently drop every battle after
+    ~19:00 Chicago (Jamie, 2026-07-30: "the naive timestamp would just allow
+    timezone bugs"). observed_at in this same table already carries the Z.
+
+    battle_events.observed_at had the same contamination in 7 rows written
+    2026-04-18, which is why `SELECT MAX(observed_at)` returned April against a
+    table whose newest row was July.
+
+    **memories.member_tag held names, not tags.** `canon_tag` only uppercases
+    and prefixes '#', so a caller passing a display name produced a
+    valid-looking key: '#KING_THING', '#VIJAY', '#28'. 1,868 of 3,203 non-null
+    values were names, and members ended up split across both spellings — King
+    Thing had 15 memories under his real tag and 88 under '#KING_THING', so a
+    lookup by tag reached 15% of what Elixir actually knew about him. Rows are
+    re-keyed onto the real tag by matching the name against players.
+    """
+    # 1. battle_time -> ISO-Z. The compact body is 'YYYYMMDDTHHMMSS'; any
+    #    fractional/zone suffix is dropped, matching canonical_utc_timestamp().
+    conn.execute(
+        """UPDATE battle_events
+              SET battle_time =
+                  substr(battle_time, 1, 4) || '-' || substr(battle_time, 5, 2) || '-' ||
+                  substr(battle_time, 7, 2) || 'T' || substr(battle_time, 10, 2) || ':' ||
+                  substr(battle_time, 12, 2) || ':' || substr(battle_time, 14, 2) || 'Z'
+            WHERE battle_time IS NOT NULL AND battle_time NOT LIKE '____-__-__T%'"""
+    )
+    # 2. The 7 poisoned observed_at rows, same shape.
+    conn.execute(
+        """UPDATE battle_events
+              SET observed_at =
+                  substr(observed_at, 1, 4) || '-' || substr(observed_at, 5, 2) || '-' ||
+                  substr(observed_at, 7, 2) || 'T' || substr(observed_at, 10, 2) || ':' ||
+                  substr(observed_at, 12, 2) || ':' || substr(observed_at, 14, 2) || 'Z'
+            WHERE observed_at IS NOT NULL AND observed_at NOT LIKE '____-__-__T%'"""
+    )
+    # 2b. observed_at also holds 49 NAIVE rows from before the Z-convention
+    #     settled. Same ambiguity as the compact ones — UTC only if you already
+    #     know — so the column ends this migration with exactly one shape.
+    conn.execute(
+        """UPDATE battle_events
+              SET observed_at = observed_at || 'Z'
+            WHERE observed_at IS NOT NULL
+              AND observed_at LIKE '____-__-__T%'
+              AND observed_at NOT LIKE '%Z'"""
+    )
+    # 3. Re-key name-keyed memories onto the real player tag, in three passes
+    #    from strictest to loosest. Each requires EXACTLY ONE matching player,
+    #    so an ambiguous name is left alone rather than attached to the wrong
+    #    member. The passes exist because the bogus keys were built from
+    #    whatever name string the caller happened to hold:
+    #      1. the materialized display_name ("King Thing" -> '#KING_THING')
+    #      2. the raw current_name, which is where the un-folded forms live
+    #         ('#²⁸' when display_name is already "28", '#SEBASTIÁN')
+    #      3. either name with separators stripped ('#KINGTHING')
+    for expr in (
+        "COALESCE(p.display_name, p.current_name)",
+        "p.current_name",
+    ):
+        conn.execute(
+            f"""UPDATE memories
+                   SET member_tag = (
+                       SELECT p.player_tag FROM players p
+                        WHERE '#' || UPPER(REPLACE({expr}, ' ', '_'))
+                              = UPPER(REPLACE(memories.member_tag, ' ', '_'))
+                   )
+                 WHERE member_tag IS NOT NULL
+                   AND member_tag NOT IN (SELECT player_tag FROM players)
+                   AND (
+                       SELECT COUNT(*) FROM players p
+                        WHERE '#' || UPPER(REPLACE({expr}, ' ', '_'))
+                              = UPPER(REPLACE(memories.member_tag, ' ', '_'))
+                   ) = 1"""
+        )
+    strip = "REPLACE(REPLACE(REPLACE({0}, ' ', ''), '_', ''), '-', '')"
+    for expr in ("COALESCE(p.display_name, p.current_name)", "p.current_name"):
+        conn.execute(
+            f"""UPDATE memories
+                   SET member_tag = (
+                       SELECT p.player_tag FROM players p
+                        WHERE '#' || UPPER({strip.format(expr)})
+                              = UPPER({strip.format("memories.member_tag")})
+                   )
+                 WHERE member_tag IS NOT NULL
+                   AND member_tag NOT IN (SELECT player_tag FROM players)
+                   AND (
+                       SELECT COUNT(*) FROM players p
+                        WHERE '#' || UPPER({strip.format(expr)})
+                              = UPPER({strip.format("memories.member_tag")})
+                   ) = 1"""
+        )
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1432,6 +1541,14 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         try:
             _apply_v24(conn)
             conn.execute("PRAGMA user_version = 24")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    if version < 25:
+        try:
+            _apply_v25(conn)
+            conn.execute("PRAGMA user_version = 25")
             conn.commit()
         except Exception:
             conn.rollback()

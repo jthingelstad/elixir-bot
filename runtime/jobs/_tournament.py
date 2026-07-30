@@ -201,7 +201,7 @@ def find_unwatched_clan_tournament(conn, *, now: datetime | None = None) -> dict
     """
     now = now or datetime.now(timezone.utc)
     cutoff = (now - timedelta(minutes=TOURNAMENT_AUTOWATCH_LOOKBACK_MINUTES)).strftime(
-        "%Y%m%dT%H%M%S"
+        "%Y-%m-%dT%H:%M:%SZ"
     )
     rows = conn.execute(
         """SELECT be.tournament_tag AS tag,

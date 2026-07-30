@@ -195,7 +195,7 @@ def list_deck_battle_history(
     days = max(1, min(int(days or 30), 180))
     limit = max(1, min(int(limit or 1200), 5000))
     predicate = _DECK_HISTORY_SCOPES.get(scope, _DECK_HISTORY_SCOPES["competitive"])
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     where = ["b.deck_json IS NOT NULL", "b.battle_time >= ?", predicate]
     params: list = [cutoff]
     if tag:
@@ -1040,7 +1040,7 @@ def get_clan_recently_played_cards(
 ) -> list[dict]:
     """Cards that appeared most often in clan members' recent battle decks."""
     cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
-        "%Y%m%dT%H%M%S.000Z"
+        "%Y-%m-%dT%H:%M:%SZ"
     )
     rows = conn.execute(
         "SELECT bf.deck_json "
@@ -1088,7 +1088,7 @@ def get_clan_overlooked_cards(
     # Step 2: cards actually played in recent battles
     cutoff = (
         datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=battle_days)
-    ).strftime("%Y%m%dT%H%M%S.000Z")
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
     battle_rows = conn.execute(
         "SELECT bf.deck_json "
         "FROM battle_events bf "

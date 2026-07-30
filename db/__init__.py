@@ -130,9 +130,11 @@ def chicago_day_bounds_utc(metric_date: str) -> tuple[str, str]:
     local_start = datetime.strptime(metric_date, "%Y-%m-%d").replace(tzinfo=CHICAGO_TZ)
     utc_start = local_start.astimezone(timezone.utc).replace(tzinfo=None)
     utc_end = (local_start + timedelta(days=1)).astimezone(timezone.utc).replace(tzinfo=None)
+    # ISO-Z, matching battle_time (schema v25). Its only consumer compares
+    # these against that column directly.
     return (
-        utc_start.strftime("%Y-%m-%dT%H:%M:%S"),
-        utc_end.strftime("%Y-%m-%dT%H:%M:%S"),
+        utc_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        utc_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
     )
 
 

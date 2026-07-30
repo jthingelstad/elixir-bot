@@ -1,10 +1,13 @@
 """battle_events retention must actually purge (C3 regression).
 
-battle_events.battle_time is CR-compact (YYYYMMDDTHHMMSS.000Z). The purge
-must compare it against a compact cutoff, not an ISO one — an ISO cutoff sorts
-below every compact timestamp, so nothing is ever deleted and the table grows
-unbounded. This test seeds one ancient and one recent battle and asserts only
-the ancient one is purged.
+The original failure: battle_time was stored CR-compact while the purge built
+an ISO cutoff, and an ISO bound sorts BELOW every compact timestamp — so
+nothing was ever deleted and the table grew unbounded.
+
+Schema v25 removed the format rather than the mismatch: battle_time is now
+ISO-Z, converted at ingest, so cutoff and column are the same shape by
+construction. This still seeds one ancient and one recent battle and asserts
+only the ancient one is purged.
 """
 
 from __future__ import annotations
@@ -15,8 +18,8 @@ import db
 from storage import metadata
 
 
-def _cr(dt: datetime) -> str:
-    return dt.strftime("%Y%m%dT%H%M%S.000Z")
+def _iso(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def test_purge_removes_old_battle_events_keeps_recent():
@@ -33,7 +36,7 @@ def test_purge_removes_old_battle_events_keeps_recent():
             conn.execute(
                 "INSERT INTO battle_events (dedup_key, player_tag, battle_time, observed_at) "
                 "VALUES (?, '#T1', ?, ?)",
-                (key, _cr(when), when.strftime("%Y-%m-%dT%H:%M:%S")),
+                (key, _iso(when), _iso(when)),
             )
         conn.commit()
 

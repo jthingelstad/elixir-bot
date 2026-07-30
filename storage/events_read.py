@@ -120,17 +120,10 @@ def _anchor(now: Optional[str] = None) -> datetime:
 
 
 def _cutoff(days: int, now: Optional[str] = None) -> str:
-    """ISO cutoff — for the observed_at columns (player/clan/war events)."""
-    return (_anchor(now) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
-
-
-def _cutoff_compact(days: int, now: Optional[str] = None) -> str:
-    """CR-compact cutoff (YYYYMMDDTHHMMSS) — for battle_events.battle_time, which
-    is stored in Clash Royale's compact form (20260507T144643.000Z), NOT ISO.
-    Comparing that column against the ISO _cutoff sorts below every real value,
-    so the window filter matches ALL of history (7d and 28d return identical,
-    inflated counts). Same fix as runtime/member_report._cutoff_compact."""
-    return (_anchor(now) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S")
+    """ISO-Z cutoff. One helper for every timestamp column here: since schema
+    v25 battle_time carries the same ISO-Z shape as the observed_at columns, so
+    the separate CR-compact cutoff this module used to keep is gone."""
+    return (_anchor(now) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @managed_connection
@@ -167,7 +160,7 @@ def summarize_event_windows(
                 key = row["event_type"]
                 counts[key] = counts.get(key, 0) + row["cnt"]
                 total += row["cnt"]
-        battle_cutoff = _cutoff_compact(days, now)  # battle_time is CR-compact, not ISO
+        battle_cutoff = _cutoff(days, now)
         battles = conn.execute(
             "SELECT COUNT(*) AS cnt FROM battle_events WHERE battle_time >= ?"
             + (" AND player_tag = ?" if subject_key else ""),

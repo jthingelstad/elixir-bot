@@ -867,7 +867,7 @@ def get_member_special_event_activity(
     if not member_row:
         return None
     days = max(1, int(days or 14))
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     where = ["bf.player_tag = ?", "bf.is_special_event = 1", "bf.battle_time >= ?"]
     params: list = [member_row["member_id"], cutoff]
     if game_mode_id is not None:
@@ -1001,7 +1001,7 @@ def _enrich_special_event_item(item: dict, context_index: dict[str, dict]) -> di
 
 def _special_event_activity(days: int, limit: int, conn) -> list[dict]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).strftime(
-        "%Y%m%dT%H%M%S.000Z"
+        "%Y-%m-%dT%H:%M:%SZ"
     )
     event_contexts = _special_event_context_index(conn)
     rows = conn.execute(
@@ -1046,7 +1046,7 @@ def _special_event_participation(
     conn,
 ) -> list[dict]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).strftime(
-        "%Y%m%dT%H%M%S.000Z"
+        "%Y-%m-%dT%H:%M:%SZ"
     )
     event_contexts = _special_event_context_index(conn)
     rows = conn.execute(
@@ -1102,7 +1102,7 @@ def get_clan_mode_top_members(
           FROM battle_events b
           LEFT JOIN players p ON p.player_tag = b.player_tag
           LEFT JOIN player_current_state pcs ON pcs.player_tag = b.player_tag
-          WHERE b.battle_time >= strftime('%Y%m%dT%H%M%S.000Z', 'now', ?)
+          WHERE b.battle_time >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
             AND b.mode_group IS NOT NULL
           GROUP BY b.mode_group, b.player_tag
         )
@@ -1142,7 +1142,7 @@ def get_clan_game_mode_summary(
     # (by_group) contradicted the battle_events-sourced ranked_activity in the
     # SAME payload (e.g. ranked 1152 vs 451). Same rolling window as
     # ranked_activity below so the two counts reconcile.
-    where = ["b.battle_time >= strftime('%Y%m%dT%H%M%S.000Z', 'now', ?)"]
+    where = ["b.battle_time >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"]
     params: list = [f"-{days} day"]
     if mode_group:
         where.append("b.mode_group = ?")
@@ -1220,7 +1220,7 @@ def get_clan_game_mode_summary(
         "MAX(bf.battle_time) AS latest_ranked_battle "
         "FROM battle_events bf "
         "JOIN players m ON m.player_tag = bf.player_tag "
-        "WHERE bf.is_ranked = 1 AND bf.battle_time >= strftime('%Y%m%dT%H%M%S.000Z', 'now', ?) "
+        "WHERE bf.is_ranked = 1 AND bf.battle_time >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?) "
         "GROUP BY bf.player_tag "
         "ORDER BY ranked_battles DESC, trophy_delta DESC, m.current_name COLLATE NOCASE "
         "LIMIT ?",

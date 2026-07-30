@@ -1,6 +1,6 @@
 """battle_events window filters must honor the lookback window (C2 regression).
 
-battle_time is CR-compact (20260507T144643.000Z). Comparing it against an ISO
+battle_time is ISO-Z (2026-05-07T14:46:43Z) since schema v25. Comparing it against a mismatched
 cutoff matched all of history, so summarize_event_windows returned identical
 inflated counts for every window. This seeds battles inside and outside a 7d
 window and asserts 7d < 28d.
@@ -14,8 +14,8 @@ import db
 from storage import events_read
 
 
-def _cr(dt: datetime) -> str:
-    return dt.strftime("%Y%m%dT%H%M%S.000Z")
+def _iso(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _seed(conn, n, when, *, start=0):
@@ -26,8 +26,8 @@ def _seed(conn, n, when, *, start=0):
             (
                 f"b{start + i}",
                 "#T1",
-                _cr(when),
-                when.strftime("%Y-%m-%dT%H:%M:%S"),
+                _iso(when),
+                _iso(when),
                 "ladder",
                 "Ladder",
                 "W",

@@ -67,7 +67,24 @@ def parse_cr_time(value) -> datetime | None:
 
 
 def canonical_utc_timestamp(value) -> str | None:
-    """Normalize any accepted CR/ISO representation to sortable ISO-Z text."""
+    """Normalize any accepted CR/ISO representation to sortable ISO-Z text.
+
+    THE timestamp converter for data crossing the boundary from the Clash
+    Royale API, whose `battleTime` is CR-compact ('20260418T153949.000Z').
+    Storing that raw put a second format in a column compared as TEXT, and the
+    two sort against each other in a way that is silently wrong rather than
+    loudly wrong: char 4 is '0' (48) against '-' (45), so a compact value
+    compares GREATER than any ISO value from the same year. A "last 7 days"
+    bound written in ISO therefore matched the whole table and the resulting
+    numbers looked plausible.
+
+    The trailing 'Z' is load-bearing, not decoration. A naive
+    '2026-07-30T17:30:30' is UTC only by convention, and every reader has to
+    know that — which is how `engine/profiles.py` came to compare a LOCAL
+    `date.today()` against UTC battle times and silently drop every battle
+    after ~19:00 Chicago. Stating the zone in the data makes that mismatch
+    visible. It is also what `observed_at` in the same table already carries.
+    """
     dt = parse_cr_time(value)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ") if dt else None
 

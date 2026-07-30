@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from db import chicago_today
+
 PRIMARY_SHARE = 0.35  # spec §2.3: largest mode share must reach 35%…
 PRIMARY_MIN_BATTLES = 12  # …with at least 12 battles in the window
 QUIET_BELOW = 8  # under 8 total battles → 'quiet'
@@ -44,14 +46,18 @@ def player_mode_profile(conn, tag: str, days: int = 28, today: str | None = None
     battle_events store (QA M2: the daily rollups it replaced undercounted
     new/backfilled members, e.g. 57 vs the real 80 battles). `today` (ISO date)
     pins the window end for determinism in tests."""
-    end = date.fromisoformat(today) if today else date.today()
-    start = (end - timedelta(days=days)).isoformat()
-    start_ymd = start.replace("-", "")
-    end_ymd = end.isoformat().replace("-", "")
+    # `date.today()` is the SYSTEM-LOCAL date, compared against UTC battle
+    # times: on a Chicago host every battle after ~19:00 local carries
+    # tomorrow's UTC date and silently fell out of "today". Anchor on the
+    # clan's own day instead. battle_time is ISO now, so the day key is the
+    # first 10 characters and needs no de-punctuation.
+    end = date.fromisoformat(today or chicago_today())
+    start_ymd = (end - timedelta(days=days)).isoformat()
+    end_ymd = end.isoformat()
     rows = conn.execute(
         """SELECT mode_group, COUNT(*) AS battles, SUM(outcome = 'W') AS wins
            FROM battle_events
-           WHERE player_tag = ? AND substr(battle_time, 1, 8) >= ? AND substr(battle_time, 1, 8) <= ?
+           WHERE player_tag = ? AND substr(battle_time, 1, 10) >= ? AND substr(battle_time, 1, 10) <= ?
            GROUP BY mode_group ORDER BY battles DESC""",
         (tag, start_ymd, end_ymd),
     ).fetchall()
@@ -72,7 +78,7 @@ def player_mode_profile(conn, tag: str, days: int = 28, today: str | None = None
         "modes": modes,
         "identity": identity,
         "secondary": secondary,
-        "duo_partners": duo_partners(conn, tag, start, end.isoformat()),
+        "duo_partners": duo_partners(conn, tag, start_ymd, end_ymd),
     }
 
 
@@ -111,7 +117,7 @@ def duo_partners(conn, tag: str, start: str, end: str, limit: int = 3) -> list[d
            LEFT JOIN players p ON p.player_tag = b.teammate_tag
            WHERE b.player_tag = ? AND b.mode_group = 'two_v_two'
              AND b.teammate_tag IS NOT NULL
-             AND substr(b.battle_time, 1, 8) >= ?
+             AND substr(b.battle_time, 1, 10) >= ?
            GROUP BY b.teammate_tag ORDER BY games DESC LIMIT ?""",
         (tag, start.replace("-", ""), limit),
     ).fetchall()

@@ -289,7 +289,7 @@ def test_generate_tournament_update_uses_dedicated_prompt_and_tools():
     signals = [
         {
             "type": "tournament_battle_played",
-            "signal_key": "tournament_battle_played|#2QG9Y9UR|20260418T141500.000Z|#ABC|#DEF",
+            "signal_key": "tournament_battle_played|#2QG9Y9UR|2026-04-18T14:15:00Z|#ABC|#DEF",
             "tournament_tag": "#2QG9Y9UR",
             "audience": "clan_internal",
         }
@@ -465,7 +465,7 @@ def test_game_mode_label_translates_known_ids_and_falls_back():
 
 def test_build_battle_played_signal_match_shape():
     base = {
-        "battle_time": "20260418T141500.000Z",
+        "battle_time": "2026-04-18T14:15:00Z",
         "player1_tag": "#ABC",
         "player1_name": "A",
         "player1_is_clan_member": True,
@@ -516,7 +516,7 @@ def test_build_battle_played_signal_match_shape():
 
 def test_build_battle_played_signal_audience_classification():
     base_info = {
-        "battle_time": "20260418T141500.000Z",
+        "battle_time": "2026-04-18T14:15:00Z",
         "player1_tag": "#ABC123",
         "player1_name": "King Thing",
         "player1_crowns": 3,
@@ -541,7 +541,7 @@ def test_build_battle_played_signal_audience_classification():
     assert both["loser_name"] == "Rival"
     assert (
         both["signal_key"]
-        == "tournament_battle_played|#2QG9Y9UR|20260418T141500.000Z|#ABC123|#DEF456"
+        == "tournament_battle_played|#2QG9Y9UR|2026-04-18T14:15:00Z|#ABC123|#DEF456"
     )
 
     one = _build_battle_played_signal(

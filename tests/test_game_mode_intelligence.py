@@ -10,7 +10,7 @@ def _battle_ts(time_part: str) -> str:
     # 00:00-05:00 UTC window, when UTC has ticked to tomorrow's date but Chicago
     # (UTC-5/6) is still on today's — the battle then landed outside the
     # `days=1` Chicago window. See elixir-game-mode-tests-flake-nightly.
-    return db.chicago_today().replace("-", "") + f"T{time_part}.000Z"
+    return f"{db.chicago_today()}T{time_part}Z"
 
 
 def _battle(
