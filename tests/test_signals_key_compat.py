@@ -16,6 +16,7 @@ it is removed on purpose rather than tidied away.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 
@@ -33,24 +34,28 @@ FROM awareness_thoughts AS thought,
 """
 
 
+@contextlib.contextmanager
 def _db(*reads):
     conn = sqlite3.connect(":memory:")
-    conn.execute("CREATE TABLE awareness_thoughts (thought_id TEXT, at TEXT, read_json TEXT)")
-    for i, read in enumerate(reads):
-        conn.execute(
-            "INSERT INTO awareness_thoughts VALUES (?,?,?)",
-            (f"t{i}", "2026-07-29T00:00:00Z", json.dumps(read)),
-        )
-    return conn
+    try:
+        conn.execute("CREATE TABLE awareness_thoughts (thought_id TEXT, at TEXT, read_json TEXT)")
+        for i, read in enumerate(reads):
+            conn.execute(
+                "INSERT INTO awareness_thoughts VALUES (?,?,?)",
+                (f"t{i}", "2026-07-29T00:00:00Z", json.dumps(read)),
+            )
+        yield conn
+    finally:
+        conn.close()
 
 
 def test_counts_signals_under_either_key():
     """A pre-rename row and a post-rename row must both be counted."""
-    conn = _db(
+    with _db(
         {"signals_by_lane": {"war": [1, 2], "milestone": [3]}},  # old spelling
         {"signals_by_category": {"war": [1], "clan_event": [2]}},  # new spelling
-    )
-    assert conn.execute(SQL).fetchone()[0] == 5
+    ) as conn:
+        assert conn.execute(SQL).fetchone()[0] == 5
 
 
 def test_dropping_the_fallback_would_silently_zero_history():
@@ -59,21 +64,23 @@ def test_dropping_the_fallback_would_silently_zero_history():
     Not a hypothetical — this is exactly what the live status page would have
     reported for the week spanning the rename.
     """
-    conn = _db({"signals_by_lane": {"war": [1, 2, 3]}})
-    assert conn.execute(SQL).fetchone()[0] == 3
+    with _db({"signals_by_lane": {"war": [1, 2, 3]}}) as conn:
+        assert conn.execute(SQL).fetchone()[0] == 3
 
-    new_key_only = SQL.replace(
-        "COALESCE(\n                  json_extract(thought.read_json, '$.signals_by_category'),\n"
-        "                  json_extract(thought.read_json, '$.signals_by_lane'),\n"
-        "                  '{}')",
-        "COALESCE(json_extract(thought.read_json, '$.signals_by_category'), '{}')",
-    )
-    assert conn.execute(new_key_only).fetchone()[0] == 0
+        new_key_only = SQL.replace(
+            "COALESCE(\n                  json_extract(thought.read_json, '$.signals_by_category'),\n"
+            "                  json_extract(thought.read_json, '$.signals_by_lane'),\n"
+            "                  '{}')",
+            "COALESCE(json_extract(thought.read_json, '$.signals_by_category'), '{}')",
+        )
+        assert conn.execute(new_key_only).fetchone()[0] == 0
 
 
 def test_the_new_key_is_preferred_when_both_are_present():
-    conn = _db({"signals_by_category": {"war": [1]}, "signals_by_lane": {"war": [1, 2, 3, 4]}})
-    assert conn.execute(SQL).fetchone()[0] == 1
+    with _db(
+        {"signals_by_category": {"war": [1]}, "signals_by_lane": {"war": [1, 2, 3, 4]}}
+    ) as conn:
+        assert conn.execute(SQL).fetchone()[0] == 1
 
 
 def test_the_producer_writes_only_the_new_key():
