@@ -948,12 +948,37 @@ async def _memory_synthesis_cycle():
         )
 
     cards_posted = await _post_memory_contradiction_cards(contradictions)
-    if stats.get("contradictions_auto_expired") or stats.get("contradictions_leader_review"):
-        lines = [
-            "🧠 Memory synthesis hygiene",
-            f"Auto-expired metric/current-state memories: {stats.get('contradictions_auto_expired', 0)}",
-            f"Leader-review cards: {cards_posted}",
-        ]
+    auto_expired = int(stats.get("contradictions_auto_expired") or 0)
+    needs_review = int(stats.get("contradictions_leader_review") or 0)
+    undelivered = needs_review - cards_posted
+
+    # The report used to gate on `contradictions_leader_review` but print
+    # `cards_posted` — different quantities. A run where three contradictions
+    # needed a leader and no card posted rendered as "0 / 0", which reads as
+    # "nothing happened" while actually announcing that leadership work was
+    # dropped. Report the numbers that explain the post, and never print a
+    # zero that is standing in for a failure.
+    if undelivered > 0:
+        log.error(
+            "memory synthesis: %s contradiction(s) needed leader review but %s card(s) posted "
+            "— that judgment reaches nobody",
+            needs_review,
+            cards_posted,
+            exc_info=False,
+        )
+
+    if auto_expired or needs_review:
+        lines = ["🧠 Memory synthesis hygiene"]
+        if auto_expired:
+            lines.append(f"Auto-expired metric/current-state memories: {auto_expired}")
+        if needs_review:
+            lines.append(f"Contradictions needing leader review: {needs_review}")
+            lines.append(f"Leader-review cards posted: {cards_posted}")
+            if undelivered > 0:
+                lines.append(
+                    f"⚠️ {undelivered} not delivered — those contradictions reach nobody. "
+                    "See logs/elixir-error.log."
+                )
         auto_ids = _auto_expire_contradiction_ids(contradictions)
         if auto_ids:
             lines.append(
