@@ -40,6 +40,13 @@ TOOLS = [
             "- matchup: measured advantage (-2..+2) for a deck FAMILY vs family "
             "(beatdown/control/cycle/bait/bridge spam/siege), from clan outcomes. Pass "
             "our_family and/or their_family, or omit for the whole 6x6 matrix.\n\n"
+            "Time: pass 'days' for a window ('this week' = 7); every view reports the "
+            "window it used. To answer 'am I improving?', call twice with different windows "
+            "and compare. member_summary also returns clan_standing (percentile vs active "
+            "members with 20+ battles) for 'am I above average?'.\n"
+            "Routing: card LEVELS and upgrade questions belong to get_member_cards; war-week "
+            "participation belongs to get_member_war_detail; this tool has no 2v2 data at all "
+            "(1v1 only) — say so plainly rather than answering from 1v1.\n\n"
             "Statistical floor: win-rate claims need n>=30; below that the view returns "
             "insufficient_sample with the real n, never a weak number. Ranked (Path of "
             "Legends) suppresses level_gap (levels are normalized)."
@@ -82,9 +89,17 @@ TOOLS = [
                 },
                 "scope": {
                     "type": "string",
-                    "enum": ["all", "competitive"],
+                    "enum": ["all", "competitive", "war", "ranked", "ladder"],
                     "default": "all",
-                    "description": "'competitive' limits to war + ranked battles.",
+                    "description": "Filter by battle type. 'war' and 'ranked' isolate those "
+                    "modes; 'competitive' is broad (includes ladder) so prefer the specific "
+                    "value when the member names a mode.",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "Only battles from the last N days (1-365). Omit for "
+                    "all-time. Use it for 'this week', 'lately', or to compare two windows "
+                    "when someone asks whether they are improving.",
                 },
                 "limit": {
                     "type": "integer",
