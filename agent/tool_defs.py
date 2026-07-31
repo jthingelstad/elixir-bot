@@ -10,6 +10,58 @@
 #                   get_awards, lookup_reference
 
 TOOLS = [
+    # ── BATTLE INTELLIGENCE (computed, no model) ───────────────────────────
+    {
+        "name": "get_battle_intelligence",
+        "description": (
+            "Computed battle intelligence from BOTH sides of Elixir's observed 1v1 "
+            "battles — opponent card data IS available here (unlike get_deck_intelligence, "
+            "which is own-deck only). Form-aware: 'Evo Knight' and 'Knight' are distinct.\n\n"
+            "Views:\n"
+            "- card: a card's win rate when a member PLAYS it and when they FACE it. "
+            "Requires 'card'; optional 'member_tag' (omit for clan-wide). Use for "
+            "'how do I do against X' / 'is X worth it' questions.\n"
+            "- nemesis: the opponent card-forms a member (or the clan) does worst against.\n"
+            "- battle: a member's recent battles with their computed read (margin, how "
+            "close, elixir discipline, deck-level gap). Requires 'member_tag'.\n"
+            "- member_summary: a member's computed rollup (record, stomps/squeakers, "
+            "discipline, best/worst cards). Requires 'member_tag'.\n\n"
+            "Statistical floor: win-rate claims need n>=30; below that the view returns "
+            "insufficient_sample with the real n, never a weak number. Ranked (Path of "
+            "Legends) suppresses level_gap (levels are normalized)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "view": {
+                    "type": "string",
+                    "enum": ["card", "nemesis", "battle", "member_summary"],
+                    "default": "battle",
+                },
+                "member_tag": {
+                    "type": "string",
+                    "description": "Player tag, name, alias, or Discord handle. Required for "
+                    "battle/member_summary; optional for card/nemesis (omit for clan-wide).",
+                },
+                "card": {
+                    "type": "string",
+                    "description": "Card name for the 'card' view (e.g. 'Bats', 'Royal Hogs').",
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["all", "competitive"],
+                    "default": "all",
+                    "description": "'competitive' limits to war + ranked battles.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max battles for the 'battle' view (default 20).",
+                    "default": 20,
+                },
+            },
+            "required": [],
+        },
+    },
     # ── MEMBER DOMAIN ──────────────────────────────────────────────────────
     {
         "name": "resolve_member",
@@ -1262,6 +1314,7 @@ _SHARED_TOOL_NAMES = (
     "get_clan_roster",
     "get_elixir_state",
     "get_deck_intelligence",
+    "get_battle_intelligence",
     "lookup_cards",
     "get_member_cards",
     "cr_api",

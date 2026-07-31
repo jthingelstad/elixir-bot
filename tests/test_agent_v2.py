@@ -332,9 +332,10 @@ def test_build_tool_result_envelope_under_limit_unchanged():
 def test_interactive_workflow_exposes_all_read_tools():
     interactive_names = {tool["name"] for tool in elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]}
 
-    assert len(interactive_names) == 12
+    assert len(interactive_names) == 13
     assert "get_member" in interactive_names
     assert "get_member_cards" in interactive_names
+    assert "get_battle_intelligence" in interactive_names
     assert "get_elixir_state" in interactive_names
     assert {"get_clan_health", "get_clan_game_modes", "get_war_season"}.isdisjoint(
         interactive_names

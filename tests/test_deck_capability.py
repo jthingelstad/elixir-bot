@@ -140,7 +140,7 @@ def test_member_deck_intelligence_explains_primary_variant_and_limits():
     assert result["variants"][0]["removed"] == ["Fireball"]
     assert result["recent_change"]["interpretation"].startswith("observed association")
     assert result["upgrade_bottlenecks"][0]["name"] == "Cannon"
-    assert result["evidence_limits"]["opponent_decks_captured"] is False
+    assert result["evidence_limits"]["opponent_decks_captured"] is True
 
 
 def test_war_view_does_not_mislabel_profile_deck_as_current_war_deck():
@@ -168,7 +168,7 @@ def test_clan_and_card_impact_views_are_explicitly_local():
         "cycle",
         "beatdown",
     }
-    assert clan["evidence_limits"]["opponent_decks_captured"] is False
+    assert clan["evidence_limits"]["opponent_decks_captured"] is True
     assert impact["affected_member_count"] == 1
     assert impact["affected_members"][0]["player_tag"] == "#GEM"
     assert impact["changes"][0]["source_state"] == "unknown"
