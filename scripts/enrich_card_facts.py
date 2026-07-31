@@ -256,6 +256,8 @@ def main() -> int:
             else:
                 _write(conn, card, fact)
             written += 1
+        if not args.dry_run:
+            conn.commit()  # per-batch: a long run must not lose work if interrupted
         print(f"      ({time.time() - started:.0f}s)")
     if not args.dry_run:
         conn.commit()

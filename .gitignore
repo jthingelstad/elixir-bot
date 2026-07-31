@@ -30,3 +30,5 @@ AGENT-TEAM/notes/
 
 # Pre-v5.1 .env backup (secrets — never commit)
 .env.pre-v51
+run_enrich_live.sh
+enrich_live.log
