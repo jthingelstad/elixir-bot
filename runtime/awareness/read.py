@@ -731,11 +731,53 @@ def _leader_action_board(conn) -> dict:
     }
 
 
+def _compact_source_freshness(freshness: dict) -> dict:
+    """Collapse per-member data-freshness telemetry to a count plus the exceptions.
+
+    This was the single largest field in the whole awareness read: ~3,700 tokens a
+    tick, 30% of the read, spent listing battlelog/profile ages for all ~46 members.
+    Across 20 sampled ticks, 907 of 907 rows said ``status: ready`` with no reasons —
+    every token of it was telling the brain that nothing was wrong, once per member.
+
+    What the brain actually needs is whether ANY member's evidence is too stale to
+    judge on, so members that are not plain-ready are kept in FULL and the rest
+    become a number. Only the awareness read is compacted; the management capability
+    still returns the per-member detail for Observatory and leader views.
+    """
+    members = (freshness or {}).get("members")
+    if not isinstance(members, dict) or not members:
+        return freshness or {}
+    stale = {
+        tag: row
+        for tag, row in members.items()
+        if not isinstance(row, dict) or row.get("status") != "ready" or row.get("reasons")
+    }
+    return {
+        **{k: v for k, v in freshness.items() if k != "members"},
+        "members": {
+            "ready_count": len(members) - len(stale),
+            "not_ready": stale,
+            "note": "Members with fresh evidence are counted, not listed. Anything "
+            "needing attention appears in full under not_ready.",
+        },
+    }
+
+
 def _management(conn) -> dict:
     """The engine's current promote/demote/kick verdicts — the authoritative
     source for management recommendations (see engine.management). Imported
     lazily to avoid a runtime->engine import at module load."""
-    return management_capability.get_management_decisions(view="summary", conn=conn)["data"]
+    data = management_capability.get_management_decisions(view="summary", conn=conn)["data"]
+    mat = data.get("materialization")
+    if isinstance(mat, dict) and mat.get("source_freshness"):
+        data = {
+            **data,
+            "materialization": {
+                **mat,
+                "source_freshness": _compact_source_freshness(mat["source_freshness"]),
+            },
+        }
+    return data
 
 
 def _due_revisits(conn, limit: int = 20) -> list[dict]:
