@@ -339,7 +339,7 @@ def get_battle_intelligence(
     ``member_tag`` else clan-wide), ``nemesis`` (optional ``member_tag``),
     ``battle``/``member_summary``/``deck`` (need ``member_tag``), ``matchup``
     (optional ``our_family``/``their_family`` else the full matrix). Read-only."""
-    if view not in {"card", "nemesis", "battle", "member_summary", "matchup", "deck"}:
+    if view not in {"card", "nemesis", "battle", "member_summary", "matchup", "deck", "coaching"}:
         return _envelope(view, available=False, error="unsupported_view")
     tag = _tag(member_tag) if member_tag else None
     own = conn is None
@@ -357,7 +357,78 @@ def get_battle_intelligence(
             return _matchup_view(conn, our_family, their_family)
         if view == "deck":
             return _deck_view(conn, tag)
+        if view == "coaching":
+            return _coaching_view(conn, tag, limit)
         return _member_summary_view(conn, tag)
     finally:
         if own:
             conn.close()
+
+
+def _coaching_view(conn, tag, limit) -> dict[str, Any]:
+    """Aggregated structural read of a member's recent play — the input the Layer-4
+    summarizer reasons over. All computed; no per-battle model call."""
+    if not tag:
+        return _envelope("coaching", available=False, error="member_tag_required")
+    n = max(5, min(int(limit or 40), 200))
+    rows = conn.execute(
+        "SELECT e.battle_time, b.outcome, e.closeness, e.performance, e.level_gap, "
+        "e.level_validity, e.air_matchup, e.wincon_pressure, e.spell_bait_exposed, "
+        "e.decisive_factor, op.archetype our_archetype, op.family our_family, "
+        "op.air_answer_count, op.tank_answer_count, op.splash_answer_count, "
+        "tp.archetype their_archetype, tp.family their_family "
+        "FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
+        "LEFT JOIN deck_profile op ON op.deck_hash = e.our_deck_hash "
+        "LEFT JOIN deck_profile tp ON tp.deck_hash = e.their_deck_hash "
+        "WHERE e.player_tag = ? ORDER BY e.battle_time DESC LIMIT ?",
+        (tag, n),
+    ).fetchall()
+    if not rows:
+        return _envelope("coaching", available=False, subject=tag, error="no_battles")
+
+    def tally(key):
+        out: dict = {}
+        for r in rows:
+            v = r[key]
+            if v is not None:
+                out[str(v)] = out.get(str(v), 0) + 1
+        return dict(sorted(out.items(), key=lambda kv: -kv[1]))
+
+    wins = sum(1 for r in rows if r["outcome"] == "W")
+    losses = sum(1 for r in rows if r["outcome"] == "L")
+    # What they lose TO — the pattern a player can act on.
+    lost_to: dict = {}
+    for r in rows:
+        if r["outcome"] == "L" and r["their_archetype"]:
+            lost_to[r["their_archetype"]] = lost_to.get(r["their_archetype"], 0) + 1
+    # Their own decks' structural gaps (from the most-played deck).
+    primary = next((r for r in rows if r["our_archetype"]), None)
+    deck_shape = (
+        {
+            "archetype": primary["our_archetype"],
+            "air_answers": primary["air_answer_count"],
+            "tank_answers": primary["tank_answer_count"],
+            "splash_answers": primary["splash_answer_count"],
+        }
+        if primary
+        else None
+    )
+    return _envelope(
+        "coaching",
+        available=True,
+        subject=tag,
+        battles=len(rows),
+        record={"wins": wins, "losses": losses},
+        win_rate=_win_rate(wins, losses),
+        upsets=sum(1 for r in rows if r["performance"] == 1),
+        underperformances=sum(1 for r in rows if r["performance"] == -1),
+        decisive_factors=tally("decisive_factor"),
+        air_matchups=tally("air_matchup"),
+        wincon_pressure=tally("wincon_pressure"),
+        primary_deck_shape=deck_shape,
+        lost_to_archetypes=dict(sorted(lost_to.items(), key=lambda kv: -kv[1])[:5]),
+        spell_bait_exposed_battles=sum(1 for r in rows if r["spell_bait_exposed"]),
+        level_normalized_battles=sum(1 for r in rows if r["level_validity"] == "normalized"),
+        note="Structural aggregate over recent battles. level_gap claims are valid only "
+        "where level_validity='real'; normalized modes (ranked, Showdown) cap card levels.",
+    )
