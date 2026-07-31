@@ -149,11 +149,16 @@ floor. Query-driven is a tighter, more honest bound than "seen ≥3×".)*
 
 ## 4. Matchup matrix
 
-6 families → **36 ordered cells** (`our × their`; direction matters — cycle
-*into* beatdown ≠ the reverse). LLM once per era, `advantage` in −2..+2 + a
-one-sentence `basis`. (Keyed on `family`; if a finer axis is ever needed,
-re-key on specific labels — but 36 cells is where the exploration's measured
-signal lives, and it's ~10× cheaper than the old 400-cell enum matrix.)
+**DECISION LOCKED (2026-07-30): the matrix axis is `family` — 6 families → 36
+ordered cells.** Not the specific labels, not the old 20-value enum. Rationale:
+36 cells is where the exploration's measured signal was validated (bait→control,
+hybrid→beatdown), it's ~10× cheaper than a label-level matrix, and any label-level
+nuance is recoverable later by re-keying without re-backfilling data. Dimensional
+scores and the frequency floor are both **cut** (§3, §7), so this matrix is the
+*entire* remaining LLM surface of Feature 2.
+
+`our × their`, direction matters (cycle *into* beatdown ≠ the reverse). LLM once
+per era, `advantage` in −2..+2 + a one-sentence `basis`.
 
 - **`unclassified`**: never scored — a deck with no win condition has no
   meaningful matchup. Skip those cells entirely; the tool synthesizes an
