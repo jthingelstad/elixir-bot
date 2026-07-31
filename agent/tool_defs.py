@@ -28,12 +28,8 @@ TOOLS = [
             "discipline, best/worst cards). Requires 'member_tag'.\n"
             "- deck: a member's observed decks with rules archetype, avg elixir, and W/L. "
             "Requires 'member_tag'.\n"
-            "- newcomer: THE view for a member_joined — who this player is on their first "
-            "day, when there is no history yet: King level, the deck they walked in with "
-            "(named archetype), Evolutions unlocked, collection depth, peak trophies. Use it "
-            "to write a welcome that shows you actually looked.\n"
             "- newcomer: THE view for a member_joined — who this player is on their "
-            "first day, when there is no history yet: King level, the deck they walked in "
+            "first day, when there is no history yet: Collection Level, the deck they walked in "
             "with (named archetype), Evolutions unlocked, collection depth, peak trophies. "
             "Use it to write a welcome that shows you actually looked.\n"
             "- coaching: THE view for 'how have I been playing?' / 'what should I work on?' — "
@@ -61,6 +57,7 @@ TOOLS = [
                         "deck",
                         "matchup",
                         "coaching",
+                        "newcomer",
                     ],
                     "default": "battle",
                 },
