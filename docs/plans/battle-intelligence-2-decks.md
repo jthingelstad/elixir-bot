@@ -120,31 +120,32 @@ the exploration's signal (bait→control, hybrid→beatdown) was already measure
 `deck_profile.archetype` (§1) stores the `_classify` `family`/`label` for the
 deck's hash — a cached projection of the rules output, never a model call.
 
-## 3. Deck coverage — archetype is universal, scoring is gated
+## 3. Deck coverage — universal, no frequency floor
 
-**Archetype is free and universal.** Every 1v1 deck on either side gets a
-`family` + `label` from `_classify` at $0 — no worklist, no gating. So
-`deck_profile.archetype` can be populated for *all* decks, and (critically)
-Feature 1's **`expected_advantage` fills for every 1v1 battle whose both decks
-classify** (≈98%; only `unclassified` decks abstain), not just for a profiled
-subset. The old "NULL `their_deck_hash` profile → NULL `expected_advantage`"
-degradation mostly disappears: an opponent's hapax deck still has a known
-archetype, so its matchup cell is known.
+The old plan gated deck profiling behind a **member ∪ seen ≥3×** frequency floor.
+That floor existed for exactly one reason: to cap the cost of an **LLM profiling
+each deck** (~$0.001 each, 11k decks). We deleted that cost — archetype is now a
+$0 rules call — so **the floor is deleted too. Every 1v1 deck on either side is
+classified, any frequency.**
 
-**Only the OPTIONAL dimensional scores are worklist-gated** (they're the sole
-LLM per-deck spend, if we keep them at all):
+- `deck_profile` is written for **all ~11,152 distinct decks** (trivial storage),
+  both sides.
+- Feature 1's **`expected_advantage` fills for every battle whose both decks
+  classify** (≈98%; only `unclassified` abstains). An opponent's one-off deck
+  still has a known archetype and a known matchup cell — nothing is gated on how
+  often a deck recurs. The old "hapax deck → NULL profile → NULL advantage"
+  degradation is simply gone.
 
-| set | count | why |
-|---|---|---|
-| all distinct decks, both sides | 11,152 | — |
-| seen exactly once | 9,545 (86%) | **skip scoring** — ladder randos, ~zero query value |
-| **worklist: member ∪ seen≥3** | **~1,994** | members query their own decks; ≥3 = the recurring meta |
+**The only frequency notion that survives is a statistical *claim*-floor, and it
+lives in the tool, not in coverage.** An aggregate win-rate claim (card / deck /
+matchup) needs **n≥30**; below that the capability returns `insufficient_sample`,
+never a weak number. That gates what we *assert* ("this matchup wins 75%"), not
+what we *classify* — every deck is labelled; we just don't make a strong claim
+off n=4. Coverage is universal; claim strength is floored. Two different things.
 
-At ~$0.001/deck the worklist scores for **~$2 one-time** — spend it only if the
-dimensional scores prove to add signal over measured win rates (§5 blend). The
-≥3 floor kills the unbounded hapax trickle. The `deck` tool view always returns
-the rules archetype; "no dimensional scores yet" is a separate, softer gap than
-"no archetype" — it never fabricates a label.
+*(If dimensional scores are ever revisited — cut from v1, §7 — score decks
+**lazily on query** for the few anyone actually asks about, never on a recurrence
+floor. Query-driven is a tighter, more honest bound than "seen ≥3×".)*
 
 ## 4. Matchup matrix
 
@@ -191,10 +192,10 @@ signal lives, and it's ~10× cheaper than the old 400-cell enum matrix.)
 Adds the LLM half behind Feature 1's Stage-A cursor job. **Every 30 min, capped
 per run, Haiku:**
 
-1. **Classify** decks needing a `deck_profile` row via `_classify` — rules,
-   both sides, **$0**. Compute `avg_elixir` from `card_catalog` here too (never
-   the model). *(Optional LLM step, only if kept: dimensional scores on
-   unscored worklist decks.)*
+1. **Classify** every deck needing a `deck_profile` row via `_classify` — rules,
+   both sides, **$0, no frequency floor**. Compute `avg_elixir` from
+   `card_catalog` here too (never the model). *(Dimensional scores are cut from
+   v1; if ever revisited, score lazily on query, not on a recurrence gate.)*
 2. **Score** missing `matchup_expectation` cells for the current era (skip any
    cell touching `unclassified`).
 3. **Fill** `expected_advantage` (snapshot the current cell's `advantage`) and
@@ -234,9 +235,10 @@ Both versioned; a bump is an era re-score, auditable via `prompt_version`.
 Same tool from Feature 1 (no new wiring — the tool already exists); add two
 views to its dispatch and prompt docs:
 
-- **`deck`**: a deck's profile (archetype, scores, avg_elixir) + its observed
-  W/L from `battle_card_plays`. Unprofiled → `insufficient_sample` /
-  "uncommon deck".
+- **`deck`**: a deck's profile (archetype/`family`, avg_elixir) + its observed
+  W/L from `battle_card_plays`. **Every deck has an archetype** (no "unprofiled"
+  state); the only gap is a thin sample — a deck seen `n<30` returns its label
+  but flags the W/L `insufficient_sample`, never a weak rate.
 - **`matchup`**: archetype pair → stored `advantage`, the blended
   `effective_advantage`, measured n, and calibration state. Below-n cells report
   the model prior only, flagged low-confidence. Floors live here.
@@ -258,7 +260,8 @@ deck-matchup** claims:
 | archetype labels (all decks) | universal | **$0** (rules) |
 | matchup matrix | ≤~36 `family`-pair cells/era | **~$1/era** |
 | `expected_advantage` / `performance` | ~all 1v1 battles | **$0** (SQL) |
-| deck dimensional scores *(optional)* | ~1,994 (member ∪ ≥3) | ~$2 one-time, only if kept |
+| deck classification (all ~11k decks) | universal, no floor | **$0** (rules) |
+| deck dimensional scores | cut from v1 (lazy-on-query if ever) | $0 in v1 |
 
 ## 11. Build order (each = one commit, suite + simulator green)
 
@@ -301,7 +304,7 @@ deck-matchup** claims:
 | ~~enum too coarse → matrix is noise~~ | **retired** — archetype is rules; ~2% `unclassified` residual, measured, excluded from the matrix |
 | model archetype instability | **retired** — labels are deterministic rules, not a model; calibration + blend still correct the matrix `advantage` |
 | model staleness after balance patch | calibration alarm + blend + era supersede + `card_catalog`-diff re-score |
-| form-aware hash inflates deck count | worklist floor (member ∪ ≥3) caps it at ~2k, not 11k |
-| unprofiled opponent decks | NULL-tolerant `expected_advantage`; tool returns "uncommon deck" |
+| ~~form-aware hash inflates deck count~~ | **not a problem** — classifying all ~11k decks is a $0 rules pass; storage is trivial, no floor needed |
+| ~~unprofiled opponent decks~~ | **gone** — every deck is classified ($0 rules); only `unclassified` (no win condition, ~2%) abstains from matrix cells |
 | era snapshot drift (performance judged vs a stale era) | documented: `performance` is point-in-time; re-derivable by re-snapshotting if ever needed |
 | silent worker death | work-set counts in Stage-B telemetry |
