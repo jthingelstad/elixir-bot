@@ -95,3 +95,53 @@ def test_coaching_reports_when_the_window_is_only_sampled(tmp_path):
     assert r["battles_in_window"] == 620
     assert r["sample_truncated"] is True
     conn.close()
+
+
+def test_card_view_survives_a_mode_scope_with_a_time_window(tmp_path):
+    """war/ranked/ladder join battle_events, which also has battle_time, so an
+    unqualified cutoff made every "<card> in war this week" question die with
+    "ambiguous column name". Found by fuzzing, not by any hand-written case."""
+    import sqlite3
+
+    from capabilities.battle_intel import get_battle_intelligence
+    from db.schema import build_database
+
+    path = tmp_path / "s.db"
+    build_database(str(path))
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "INSERT INTO card_catalog (card_id, name, card_type, synced_at, first_seen_at) "
+        "VALUES (26000059, 'Royal Hogs', 'troop', 'x', 'x')"
+    )
+    for scope in ("war", "ranked", "ladder", "all", "competitive"):
+        r = get_battle_intelligence(
+            view="card", card="Royal Hogs", member_tag="#M", scope=scope, days=7, conn=conn
+        )
+        assert r["available"] is True, f"scope={scope} with a days window must not error"
+    conn.close()
+
+
+def test_capabilities_tolerate_model_shaped_argument_noise(tmp_path):
+    """A model can hand back a list or a bare number where a string is expected. That
+    used to surface as AttributeError / "type 'list' is not supported" — a dead tool
+    call instead of a clean answer."""
+    import sqlite3
+
+    from capabilities.battle_intel import get_battle_intelligence
+    from capabilities.deck_intel import get_deck_recommendations
+    from db.schema import build_database
+
+    path = tmp_path / "n.db"
+    build_database(str(path))
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    for bad in (["Witch"], 12345, None, ""):
+        assert isinstance(get_battle_intelligence(view="card", card=bad, conn=conn), dict)
+        assert isinstance(
+            get_deck_recommendations(view="anchored", member_tag=bad, card=bad, conn=conn), dict
+        )
+        assert isinstance(
+            get_deck_recommendations(view="upgrades", member_tag=bad, conn=conn), dict
+        )
+    conn.close()

@@ -48,8 +48,10 @@ _FAMILIARITY_SLACK = 1.0  # levels_from_max a KNOWN deck may concede and still b
 _MIN_USAGE_SHARE = 0.04  # a card must be ~1 slot in 1 of 3 decks before an upgrade is advice
 
 
-def _tag(value: str) -> str:
-    v = (value or "").strip().upper()
+def _tag(value) -> str:
+    # str() coercion, not `value or ""`: a model can hand back a bare numeric tag, and
+    # an AttributeError here surfaces as a dead tool call rather than a clean answer.
+    v = str(value or "").strip().upper()
     return v if v.startswith("#") else f"#{v}"
 
 
@@ -419,7 +421,9 @@ def _anchored_view(conn, tag, card, limit) -> dict[str, Any]:
     own = _collection(conn, tag)
     if not own:
         return _envelope("anchored", available=False, error="no_collection", member_tag=tag)
-    want = (card or "").strip().lower()
+    if isinstance(card, (list, tuple)):
+        card = card[0] if card else ""
+    want = str(card or "").strip().lower()
     cid = next((k for k, v in cat.items() if v["name"].lower() == want), None)
     if cid is None:
         cid = next((k for k, v in cat.items() if want and want in v["name"].lower()), None)
