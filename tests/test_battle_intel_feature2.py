@@ -99,3 +99,32 @@ def test_matchup_and_deck_views(tmp_path):
 
     bad = get_battle_intelligence(view="matchup", our_family="nonsense", conn=conn)
     assert bad["error"] == "unknown_family"
+
+
+def test_deck_profile_cards_json_preserves_card_form(tmp_path):
+    """deck_profile identity must match deck_hash's, form included.
+
+    _profile_row read evolution_level off the CATALOG-ENRICHED card, which drops it, so
+    every stored deck was base-form. 983 of 1,678 member decks (59%) actually run an Evo
+    or Hero. The damage was silent and severe: the Evo ownership gate never fired, so
+    get_deck_recommendations offered decks needing Evolutions the member does not own
+    (King Thing's buildable count fell 9,046 -> 5,164 once fixed), and deck facts were
+    scored against base-form cards.
+    """
+    import json
+
+    from engine.deck_hash import _identity_pairs
+    from storage.battle_intel import _profile_row
+
+    deck = [
+        {"id": 26000000 + i, "name": f"C{i}", "elixir_cost": 3, "evolution_level": None}
+        for i in range(8)
+    ]
+    deck[0]["evolution_level"] = 1  # an Evolution
+    deck[1]["evolution_level"] = 2  # a Hero
+    row = _profile_row(json.dumps(deck), {})
+    assert row is not None
+    stored = [tuple(p) for p in json.loads(row[4])]
+    assert stored == _identity_pairs(deck), "cards_json must match deck_hash identity"
+    assert (26000000, 1) in stored, "Evolution form was dropped"
+    assert (26000001, 2) in stored, "Hero form was dropped"

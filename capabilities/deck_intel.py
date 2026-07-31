@@ -44,6 +44,7 @@ CONTRACT_VERSION = 1
 _WAR_DECKS = 4  # a war set is four decks with no card reused
 _MIN_AIR_ANSWERS = 1  # structural floor: a deck with no air answer loses on structure
 _USAGE_SINCE = "2026-06-01"  # window for "cards you actually field"
+_FAMILIARITY_SLACK = 1.0  # levels_from_max a KNOWN deck may concede and still be picked
 _MIN_USAGE_SHARE = 0.04  # a card must be ~1 slot in 1 of 3 decks before an upgrade is advice
 
 
@@ -344,15 +345,28 @@ def _discover_view(conn, tag, limit) -> dict[str, Any]:
 
 
 # ── modes C/D: war set and anchored ──────────────────────────────────────────
-def _pick_disjoint(cands, count, *, pinned=None) -> list[dict]:
+def _pick_disjoint(cands, count, *, pinned=None, played=frozenset()) -> list[dict]:
     """Greedy maximin: take the best-leveled deck, drop everything sharing a card,
-    repeat. Prefers a different family each pick so the set covers varied matchups."""
+    repeat. Prefers a different family each pick so the set covers varied matchups.
+
+    Familiarity breaks near-ties. War is the worst place to hand someone four decks
+    they have never piloted — this view once gave a member four unplayed lists while
+    the deck he actually runs sat just outside. A deck he knows wins unless it is more
+    than ``_FAMILIARITY_SLACK`` levels behind on readiness.
+    """
+    ranked = sorted(
+        cands,
+        key=lambda d: (
+            d["levels_from_max"] - (_FAMILIARITY_SLACK if d["deck_hash"] in played else 0.0),
+            d["worst_card_from_max"],
+        ),
+    )
     picks, used, fams = [], set(), set()
     if pinned is not None:
         picks.append(pinned)
         used |= pinned["card_ids"]
         fams.add(pinned["family"])
-    for d in cands:
+    for d in ranked:
         if len(picks) >= count:
             break
         if d["card_ids"] & used:
@@ -374,7 +388,7 @@ def _war_set_view(conn, tag) -> dict[str, Any]:
     played = set(_their_decks(conn, tag))
     fielded = _fielded_by(conn)
     cands = _candidates(conn, cat, own, forms)
-    picks = _pick_disjoint(cands, _WAR_DECKS)
+    picks = _pick_disjoint(cands, _WAR_DECKS, played=frozenset(played))
     if len(picks) < _WAR_DECKS:
         return _envelope(
             "war_set",

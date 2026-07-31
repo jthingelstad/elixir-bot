@@ -25,7 +25,7 @@ from engine.battle_metrics import (
     hp_margin,
     level_gap,
 )
-from engine.deck_hash import deck_hash
+from engine.deck_hash import _identity_pairs, deck_hash
 
 
 def _now() -> str:
@@ -215,7 +215,12 @@ def _profile_row(cards_json, catalog):
     names = {c["name"] for c in cards if c.get("name")}
     avg = _average_elixir(cards)
     label, family, wincons = _classify(names, avg)
-    ids = json.dumps(sorted((c.get("id"), c.get("evolution_level")) for c in cards))
+    # Identity comes from the RAW deck_json via the same helper deck_hash() uses.
+    # Reading evolution_level off the catalog-enriched card silently dropped it, so
+    # every deck was stored base-form: 983 of 1,678 member decks (59%) actually run an
+    # Evo or Hero. That made the Evo ownership gate inert (decks needing an Evo the
+    # member lacks looked buildable) and scored deck facts against base-form cards.
+    ids = json.dumps([list(p) for p in _identity_pairs(raw)])
     return family, label, ", ".join(wincons), avg, ids
 
 
