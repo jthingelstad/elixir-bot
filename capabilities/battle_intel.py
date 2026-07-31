@@ -81,9 +81,13 @@ def _win_rate(w: int, losses: int) -> Optional[float]:
     return round(w / decided, 3) if decided else None
 
 
-def _resolve_card_id(conn: sqlite3.Connection, card: str) -> Optional[int]:
+def _resolve_card_id(conn: sqlite3.Connection, card) -> Optional[int]:
+    # Coerce: a model can hand back a list or number for `card`, and an unbound type
+    # reaches sqlite as "type 'list' is not supported" instead of a clean unknown_card.
+    if isinstance(card, (list, tuple)):
+        card = card[0] if card else ""
     row = conn.execute(
-        "SELECT card_id FROM card_catalog WHERE name = ? COLLATE NOCASE", (card,)
+        "SELECT card_id FROM card_catalog WHERE name = ? COLLATE NOCASE", (str(card or ""),)
     ).fetchone()
     return int(row[0]) if row else None
 
@@ -159,7 +163,10 @@ def _card_view(conn, tag, card, scope, days=None) -> dict[str, Any]:
     params: list = []
     cutoff = _since(days)
     if cutoff:
-        where.append("battle_time >= ?")
+        # MUST be qualified: the war/ranked/ladder scopes join battle_events, which also
+        # has battle_time, so a bare column made every "<card> in war this week" question
+        # fail with "ambiguous column name".
+        where.append("p.battle_time >= ?")
         params.append(cutoff)
     subject = "clan"
     if tag:
