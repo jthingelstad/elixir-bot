@@ -12,6 +12,43 @@
 TOOLS = [
     # ── BATTLE INTELLIGENCE (computed, no model) ───────────────────────────
     {
+        "name": "get_deck_recommendations",
+        "description": (
+            "FORWARD-LOOKING deck recommendations, bound by what a member OWNS and can "
+            "field at level. Distinct from get_deck_intelligence, which reports how their "
+            "OBSERVED decks have performed — this one suggests decks they have never played.\n\n"
+            "Views (all require 'member_tag'):\n"
+            "- upgrades: 'what can I do to improve my deck?' — which cards to upgrade, "
+            "ranked by how much they are actually played x how far from max they are. "
+            "Returns all_played_cards_maxed=true when there is genuinely nothing to do; "
+            "say that plainly rather than inventing an upgrade.\n"
+            "- discover: 'what decks should I consider?' — for a member in a rut or one "
+            "whose main deck is already maxed. Includes decks nobody in the clan plays, "
+            "plus a current-meta snapshot when one has been refreshed.\n"
+            "- war_set: FOUR war decks using 32 DISTINCT cards (war forbids reusing a card "
+            "across decks). THE view for 'suggest war decks'.\n"
+            "- anchored: best decks built around a specific card. Requires 'card'.\n\n"
+            "IMPORTANT: this tool deliberately reports NO win rates. Clan deck win rates "
+            "are skill-confounded and do not transfer between members, so ranking is level "
+            "readiness and structural soundness. 'fielded_by_members' is context only — "
+            "never present it as evidence a deck is good."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "view": {
+                    "type": "string",
+                    "enum": ["upgrades", "discover", "war_set", "anchored"],
+                    "description": "Which recommendation view to return.",
+                },
+                "member_tag": {"type": "string", "description": "Member tag or name."},
+                "card": {"type": "string", "description": "Anchor card for the 'anchored' view."},
+                "limit": {"type": "integer", "description": "Max decks to return (default 6)."},
+            },
+            "required": ["view", "member_tag"],
+        },
+    },
+    {
         "name": "get_battle_intelligence",
         "description": (
             "Computed battle intelligence from BOTH sides of Elixir's observed 1v1 "
@@ -1362,6 +1399,7 @@ _SHARED_TOOL_NAMES = (
     "get_clan_roster",
     "get_elixir_state",
     "get_deck_intelligence",
+    "get_deck_recommendations",
     "get_battle_intelligence",
     "lookup_cards",
     "get_member_cards",
