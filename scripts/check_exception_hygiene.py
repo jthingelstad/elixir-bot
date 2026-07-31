@@ -33,6 +33,7 @@ BROAD_EXCEPTION_BASELINE = {
     "agent/release_notes.py": 2,
     "agent/tool_exec.py": 8,  # -1: #225 removed the obsolete watch-to-case fallback
     "agent/workflows.py": 10,
+    "capabilities/battle_intel.py": 1,  # newcomer view: deck naming must never fail a welcome
     "capabilities/decks.py": 2,
     "capabilities/members.py": 1,
     "capabilities/war.py": 1,
