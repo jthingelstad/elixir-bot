@@ -43,8 +43,8 @@ Evidence standard:
 
 Every run:
 
-1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). An issue-driven task arrives
-   with the initiating conversation's `wip` claim; accept that specific claim. A calendar scan
+1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). A dispatcher-created
+   issue-driven task arrives with the dispatcher's `wip` claim; accept that specific claim. A calendar scan
    must skip all claimed work and remains quiet if another role owns the checkout.
 2. Gather signal since the last run:
    * What did Elixir do, and what did members and leaders do in response? (delivered vs. ignored, accept rates, 👍/👎 via `review_agent_feedback.py`)

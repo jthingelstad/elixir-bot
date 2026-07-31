@@ -15,6 +15,15 @@ dispatcher = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = dispatcher
 SPEC.loader.exec_module(dispatcher)
 
+AUDIT_MODULE_PATH = ROOT / "AGENT-TEAM/scripts/automation_audit.py"
+AUDIT_SPEC = importlib.util.spec_from_file_location(
+    "agent_team_automation_audit", AUDIT_MODULE_PATH
+)
+assert AUDIT_SPEC and AUDIT_SPEC.loader
+automation_audit = importlib.util.module_from_spec(AUDIT_SPEC)
+sys.modules[AUDIT_SPEC.name] = automation_audit
+AUDIT_SPEC.loader.exec_module(automation_audit)
+
 
 @pytest.fixture
 def config():
@@ -34,6 +43,8 @@ def issue(number: int, *labels: str, state: str = "OPEN"):
 
 
 def test_config_routes_all_elixir_roles(config):
+    raw = tomllib.loads((ROOT / "AGENT-TEAM/dispatch.toml").read_text())
+    assert raw["poll_interval_seconds"] == 900
     assert set(config.routes) == {
         "dispatch:operations",
         "dispatch:build",
@@ -201,7 +212,7 @@ def test_open_orphan_is_not_success(config):
     assert "no next dispatch" in transition.outcome
 
 
-def test_cli_refuses_automatic_launch(monkeypatch, config, capsys):
+def test_cli_selector_remains_read_only(monkeypatch, config, capsys):
     called = False
 
     def unexpected_shadow(*_args, **_kwargs):
@@ -212,19 +223,47 @@ def test_cli_refuses_automatic_launch(monkeypatch, config, capsys):
     monkeypatch.setattr(dispatcher, "shadow", unexpected_shadow)
     assert dispatcher.main(["--config", str(config.path)]) == 2
     assert not called
-    assert "Automatic role launch does not exist" in capsys.readouterr().err
+    assert "selector is read-only" in capsys.readouterr().err
     assert not hasattr(dispatcher, "run_role")
     assert not hasattr(dispatcher, "LAUNCH_AGENT")
 
 
-def test_automation_registry_keeps_only_windowed_or_recovery_schedules_active(config):
+def test_automation_registry_has_one_dispatcher_and_pauses_role_polling(config):
     plan = tomllib.loads((ROOT / "AGENT-TEAM/automations.toml").read_text())
     entries = {item["id"]: item for item in plan["automation"]}
+    dispatcher_entry = entries["elixir-dispatcher"]
+    assert dispatcher_entry["status"] == "ACTIVE"
+    assert dispatcher_entry["schedule_kind"] == "dispatcher"
+    assert dispatcher_entry["rrule"] == "FREQ=MINUTELY;INTERVAL=15"
+    assert dispatcher_entry["role_file"] == "AGENT-TEAM/dispatcher.md"
     assert entries["elixir-build-manager"]["status"] == "PAUSED"
     assert entries["elixir-build-manager"]["schedule_kind"] == "event_driven"
     assert all(
-        item["schedule_kind"] in {"time_window", "recovery"}
+        item["schedule_kind"] in {"time_window", "recovery", "dispatcher"}
         for item in entries.values()
         if item["status"] == "ACTIVE"
     )
-    assert {item["dispatch_label"] for item in entries.values()} == set(config.routes)
+    role_entries = [item for item in entries.values() if "dispatch_label" in item]
+    assert {item["dispatch_label"] for item in role_entries} == set(config.routes)
+
+
+def test_missing_paused_event_driven_automation_is_expected(tmp_path):
+    plan = tomllib.loads((ROOT / "AGENT-TEAM/automations.toml").read_text())
+    build = next(item for item in plan["automation"] if item["id"] == "elixir-build-manager")
+
+    successes, failures = automation_audit.audit({"automation": [build]}, codex_home=tmp_path)
+
+    assert failures == []
+    assert successes == ["OK  elixir-build-manager  PAUSED  event_driven  absent (expected)"]
+
+
+def test_dispatcher_automation_contract_is_a_heartbeat():
+    plan = tomllib.loads((ROOT / "AGENT-TEAM/automations.toml").read_text())
+    entry = next(item for item in plan["automation"] if item["id"] == "elixir-dispatcher")
+
+    expected = automation_audit._expected(entry)
+
+    assert expected["kind"] == "heartbeat"
+    assert expected["rrule"] == "FREQ=MINUTELY;INTERVAL=15"
+    assert "AGENT-TEAM/dispatcher.md" in expected["prompt"]
+    assert "one-child limit" in expected["prompt"]

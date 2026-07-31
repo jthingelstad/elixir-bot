@@ -19,7 +19,7 @@ Every run:
    unexpectedly ahead without Jamie's explicit local-work authorization, stop and open/comment
    an issue describing the state.
 2. Pick exactly one issue. An issue-driven project task names the issue and arrives with the
-   initiating conversation's `wip` claim; accept that specific claim rather than skipping it.
+   dispatcher's `wip` claim; accept that specific claim rather than skipping it.
    Otherwise skip every existing `wip` and prefer in priority order: `bug`/`regression` (with a
    clear repro), then `ready`/`approved` `enhancement` issues, then `prompt`/`persona` changes that
    have an Evaluator-owned regression test. **Skip `proposal`** — Jamie approves by swapping it

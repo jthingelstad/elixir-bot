@@ -20,8 +20,8 @@ Healthy-run rule: if production is healthy, do not opportunistically change code
 
 Every run:
 
-1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). An issue-driven task arrives
-   with the initiating conversation's `wip` claim; accept that specific claim. A calendar recovery
+1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). A dispatcher-created
+   issue-driven task arrives with the dispatcher's `wip` claim; accept that specific claim. A calendar recovery
    pass must not claim new work while any other `wip` exists.
 2. **`needs-deploy` first — before anything else.** A claimed issue-driven task names the deploy.
    Otherwise inspect the queue. Deploy committed code **now**, atomically: pull only when doing so
@@ -40,11 +40,11 @@ Every run:
    - tool usage
 Identify unusual increases, regressions, or waste.
 6. Review open GitHub issues labeled `operations`, `reliability`, `bug`, or `regression`. Accept
-   this task's initiating claim; skip every other `wip`. A `bug`/`regression` defaults to the Build
+   this task's dispatcher claim; skip every other `wip`. A `bug`/`regression` defaults to the Build
    Manager; only take one if it is genuinely operational, and relabel it `operations` so ownership
    is unambiguous.
 7. If you find an operational problem:
-    * claim it with `wip` before you start unless the initiating conversation already did
+    * claim it with `wip` before you start unless the dispatcher already did
     * diagnose it
     * implement one focused fix
     * test it

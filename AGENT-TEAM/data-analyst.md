@@ -30,8 +30,8 @@ with short phase suffixes for a claimed handoff, per `AGENT-TEAM/README.md`.
 
 Every run:
 
-1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). An issue-driven task arrives
-   with the initiating conversation's `wip` claim; accept that specific claim. A calendar scan
+1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). A dispatcher-created
+   issue-driven task arrives with the dispatcher's `wip` claim; accept that specific claim. A calendar scan
    must skip all claimed work and remains quiet if another role owns the checkout.
 2. Scan for what's new in the stream since the last run:
    * New API schema paths / fields in `raw_api_payloads` and `api_sentinel_observations` (drift).

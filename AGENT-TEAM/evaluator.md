@@ -22,8 +22,8 @@ Evidence standard:
 
 Every run:
 
-1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). An issue-driven task arrives
-   with the initiating conversation's `wip` claim; accept that specific claim. A calendar baseline
+1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). A dispatcher-created
+   issue-driven task arrives with the dispatcher's `wip` claim; accept that specific claim. A calendar baseline
    must skip all claimed work and remains quiet if another role owns the checkout.
 2. Triage open `eval` issues — measurement requests filed by the Quality Manager or Product
    Manager. Pick at most one only when this task did not arrive with a claimed issue.
