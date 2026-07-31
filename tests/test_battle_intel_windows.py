@@ -62,3 +62,36 @@ def test_unknown_scope_falls_back_to_all_rather_than_crashing(tmp_path):
     r = get_battle_intelligence(view="card", card="Arrows", scope="nonsense", conn=conn)
     assert r["available"] is True
     conn.close()
+
+
+def test_coaching_reports_when_the_window_is_only_sampled(tmp_path):
+    """A `days` window is capped at 500 battles. A heavy player blows past that, and the
+    view reported battles=500 with nothing marking it a sample — Vijay's "last 30 days"
+    was 500 of 1,168 real battles (43%), which turns into the false claim "you played
+    500 battles in the last 30 days" and skews aggregates toward recent days."""
+    import sqlite3
+
+    from capabilities.battle_intel import get_battle_intelligence
+    from db.schema import build_database
+
+    path = tmp_path / "w.db"
+    build_database(str(path))
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    for i in range(620):
+        key = f"b{i}"
+        conn.execute(
+            "INSERT INTO battle_events (dedup_key, player_tag, battle_time, observed_at, "
+            "battle_type, outcome) VALUES (?, '#M', ?, 'x', 'PvP', 'W')",
+            (key, f"2026-07-{(i % 28) + 1:02d}T00:00:00Z"),
+        )
+        conn.execute(
+            "INSERT INTO battle_enrichment (battle_dedup_key, player_tag, battle_time) "
+            "VALUES (?, '#M', ?)",
+            (key, f"2026-07-{(i % 28) + 1:02d}T00:00:00Z"),
+        )
+    r = get_battle_intelligence(view="coaching", member_tag="#M", days=365, conn=conn)
+    assert r["battles"] == 500, "sample cap should still apply"
+    assert r["battles_in_window"] == 620
+    assert r["sample_truncated"] is True
+    conn.close()
