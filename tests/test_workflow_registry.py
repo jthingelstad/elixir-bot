@@ -53,11 +53,12 @@ def test_empty_toolsets_stay_empty():
         assert elixir_agent.TOOLSETS_BY_WORKFLOW[workflow] == []
 
 
-def test_shared_tool_block_has_fourteen_non_overlapping_owners():
+def test_shared_tool_block_has_fifteen_non_overlapping_owners():
     shared = get_workflow_spec("clanops").tools
     names = _names(shared)
 
-    assert len(names) == len(set(names)) == 14
+    assert len(names) == len(set(names)) == 15
+    assert "get_battle_intelligence" in names
     assert "get_member_cards" in names
     assert "record_leadership_followup" in names
     assert {

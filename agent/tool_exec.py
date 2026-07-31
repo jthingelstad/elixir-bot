@@ -6,6 +6,7 @@ import cr_api
 from agent.core import log
 from agent.cr_api_tool import _execute_cr_api
 from capabilities import awards as awards_capability
+from capabilities import battle_intel as battle_intel_capability
 from capabilities import decks as deck_capability
 from capabilities import game_modes as game_mode_capability
 from capabilities import management as management_capability
@@ -493,6 +494,25 @@ def _execute_get_deck_intelligence(arguments, workflow=None):
     if view == "member" and isinstance(result, dict) and member_tag:
         _annotate_roster_status(result, member_tag)
     return result
+
+
+def _execute_get_battle_intelligence(arguments):
+    """Computed battle intelligence (Feature 1). Reads the enriched tables the
+    Stage-A worker fills; member_tag is required only for the per-member views."""
+    view = arguments.get("view", "battle")
+    member_tag = arguments.get("member_tag")
+    if member_tag:
+        member_tag = _resolve_member_tag(member_tag)
+    elif view in {"battle", "member_summary"}:
+        return {"error": "member_tag_required", "view": view}
+    return battle_intel_capability.get_battle_intelligence(
+        view=view,
+        member_tag=member_tag,
+        card=arguments.get("card"),
+        scope=arguments.get("scope", "all"),
+        limit=arguments.get("limit", 20),
+        source=db,
+    )
 
 
 def _execute_get_member_cards(arguments):
@@ -1705,6 +1725,7 @@ ADVERTISED_TOOL_EXECUTOR_NAMES = frozenset(
         "get_clan_roster",
         "get_elixir_state",
         "get_deck_intelligence",
+        "get_battle_intelligence",
         "lookup_cards",
         "get_member_cards",
         "cr_api",
@@ -1770,6 +1791,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_elixir_state(arguments, workflow=workflow)
         elif name == "get_deck_intelligence":
             result = _execute_get_deck_intelligence(arguments, workflow=workflow)
+        elif name == "get_battle_intelligence":
+            result = _execute_get_battle_intelligence(arguments)
         elif name == "lookup_cards":
             result = db.lookup_cards(
                 name=arguments.get("name"),

@@ -538,9 +538,9 @@ def _member_view(
         },
         "upgrade_bottlenecks": _upgrade_bottlenecks(source, player_tag, conn=conn),
         "evidence_limits": {
-            "opponent_decks_captured": False,
+            "opponent_decks_captured": True,
             "global_meta_claims_supported": False,
-            "note": "Performance is association over observed own decks; opponent deck lists are unavailable.",
+            "note": "Own-deck performance is association over observed decks. Opponent card matchup data IS captured — call get_battle_intelligence (card/nemesis views) for it, not this tool.",
         },
         "sources": [
             "battle_events.deck_json",
@@ -619,7 +619,7 @@ def _clan_view(rows: list[dict], *, days: int, scope: str) -> DeckIntelligenceRe
         "members": sorted(members, key=lambda item: (-item["battles"], item["player_name"] or "")),
         "evidence_limits": {
             "scope": "POAP KINGS observed decks only; this is clan-local meta, not global ladder meta",
-            "opponent_decks_captured": False,
+            "opponent_decks_captured": True,
         },
         "sources": ["battle_events.deck_json", "card_catalog", "clan_memberships"],
     }
@@ -782,7 +782,7 @@ def _card_impact(
         "interpretation": "Who actually uses the named cards and their observed results; does not infer the balance change itself.",
         "evidence_limits": {
             "global_meta_claims_supported": False,
-            "opponent_decks_captured": False,
+            "opponent_decks_captured": True,
         },
         "sources": [
             "battle_events.deck_json",
