@@ -23,7 +23,42 @@ CAPABILITY_ID = "battle_intelligence"
 CONTRACT_VERSION = 1
 _N_FLOOR = 30  # min encounters for a win-rate CLAIM (not for classification)
 
-_SCOPES = {"all": "1=1", "competitive": "is_competitive = 1"}
+
+def _since(days) -> Optional[str]:
+    """UTC cutoff for a `days` window, or None for all-time.
+
+    Every view was previously an undefined "recent", so "am I improving?" and "how did
+    I do this week?" were unanswerable. Views now report the window they used.
+    """
+    if not days:
+        return None
+    from datetime import datetime, timedelta, timezone
+
+    days = max(1, min(int(days), 365))
+    return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# scope predicates. "competitive" alone covered 96% of battles (is_competitive
+# includes ladder), so war and ranked were impossible to isolate — the #1 complaint
+# from the question audit. These map to the same flags the rest of the codebase uses.
+_SCOPES = {
+    "all": "1=1",
+    "competitive": "p.is_competitive = 1",  # denormalized onto battle_card_plays
+    # battle_card_plays only carries is_competitive, so the mode-specific scopes
+    # resolve against battle_events via the join below.
+    "war": "b.is_war = 1",
+    "ranked": "b.is_ranked = 1",
+    "ladder": "b.is_ladder = 1",
+}
+# Scopes that need the battle_events join (the plays table lacks these flags).
+_SCOPES_NEEDING_JOIN = {"war", "ranked", "ladder"}
+
+
+def _plays_from(scope: str) -> str:
+    """FROM clause for card/nemesis: join battle_events only when the scope needs it."""
+    if scope in _SCOPES_NEEDING_JOIN:
+        return "battle_card_plays p JOIN battle_events b ON b.dedup_key = p.battle_dedup_key"
+    return "battle_card_plays p"
 
 
 def _tag(value: str) -> str:
@@ -62,25 +97,29 @@ def _envelope(view: str, **extra: Any) -> dict[str, Any]:
     }
 
 
-def _card_view(conn, tag, card, scope) -> dict[str, Any]:
+def _card_view(conn, tag, card, scope, days=None) -> dict[str, Any]:
     if not card:
         return _envelope("card", available=False, error="card_required")
     card_id = _resolve_card_id(conn, card)
     if card_id is None:
         return _envelope("card", available=False, error="unknown_card", card=card)
     predicate = _SCOPES.get(scope, _SCOPES["all"])
-    where = [f"card_id = {card_id}", predicate]
+    where = [f"p.card_id = {card_id}", predicate]
     params: list = []
+    cutoff = _since(days)
+    if cutoff:
+        where.append("battle_time >= ?")
+        params.append(cutoff)
     subject = "clan"
     if tag:
-        where.append("player_tag = ?")
+        where.append("p.player_tag = ?")
         params.append(tag)
         subject = tag
     rows = conn.execute(
-        f"SELECT side, evolution_level, "
-        f"SUM(outcome = 'W') w, SUM(outcome = 'L') l, COUNT(*) n "
-        f"FROM battle_card_plays WHERE {' AND '.join(where)} "
-        f"GROUP BY side, evolution_level",
+        f"SELECT p.side, p.evolution_level, "
+        f"SUM(p.outcome = 'W') w, SUM(p.outcome = 'L') l, COUNT(*) n "
+        f"FROM {_plays_from(scope)} WHERE {' AND '.join(where)} "
+        f"GROUP BY p.side, p.evolution_level",
         tuple(params),
     ).fetchall()
     names = _card_names(conn)
@@ -100,6 +139,7 @@ def _card_view(conn, tag, card, scope) -> dict[str, Any]:
         subject=subject,
         card=card,
         scope=scope,
+        window_days=days,
         playing=sorted(playing, key=lambda e: -e["n"]),
         facing=sorted(facing, key=lambda e: -e["n"]),
         note=(
@@ -109,17 +149,22 @@ def _card_view(conn, tag, card, scope) -> dict[str, Any]:
     )
 
 
-def _nemesis_view(conn, tag, scope) -> dict[str, Any]:
+def _nemesis_view(conn, tag, scope, days=None) -> dict[str, Any]:
     predicate = _SCOPES.get(scope, _SCOPES["all"])
-    where = ["side = 'opponent'", predicate]
+    where = ["p.side = 'opponent'", predicate]
     params: list = []
     if tag:
-        where.append("player_tag = ?")
+        where.append("p.player_tag = ?")
         params.append(tag)
+    cutoff = _since(days)
+    if cutoff:
+        where.append("p.battle_time >= ?")
+        params.append(cutoff)
     rows = conn.execute(
-        f"SELECT card_id, evolution_level, SUM(outcome = 'W') w, SUM(outcome = 'L') l, "
-        f"COUNT(*) n FROM battle_card_plays WHERE {' AND '.join(where)} "
-        f"GROUP BY card_id, evolution_level HAVING n >= ? ORDER BY (1.0 * w / (w + l)) ASC",
+        f"SELECT p.card_id, p.evolution_level, SUM(p.outcome = 'W') w, "
+        f"SUM(p.outcome = 'L') l, COUNT(*) n FROM {_plays_from(scope)} "
+        f"WHERE {' AND '.join(where)} "
+        f"GROUP BY p.card_id, p.evolution_level HAVING n >= ? ORDER BY (1.0 * w / (w + l)) ASC",
         (*params, _N_FLOOR),
     ).fetchall()
     names = _card_names(conn)
@@ -137,6 +182,7 @@ def _nemesis_view(conn, tag, scope) -> dict[str, Any]:
         available=True,
         subject=tag or "clan",
         scope=scope,
+        window_days=days,
         nemeses=nemeses[:10],
         note="Opponent card-forms the member faces most poorly (n>=30, member win rate).",
     )
@@ -198,7 +244,7 @@ def _battle_view(conn, tag, limit) -> dict[str, Any]:
     )
 
 
-def _member_summary_view(conn, tag) -> dict[str, Any]:
+def _member_summary_view(conn, tag, days=None) -> dict[str, Any]:
     if not tag:
         return _envelope("member_summary", available=False, error="member_tag_required")
     agg = conn.execute(
@@ -206,8 +252,9 @@ def _member_summary_view(conn, tag) -> dict[str, Any]:
         "AVG(discipline_delta) avg_discipline, "
         "SUM(closeness = 0) stomps, SUM(closeness = 3) squeakers, "
         "COUNT(hp_margin) with_tower_data "
-        "FROM battle_enrichment WHERE player_tag = ?",
-        (tag,),
+        "FROM battle_enrichment WHERE player_tag = ? "
+        + ("AND battle_time >= ? " if _since(days) else ""),
+        (tag, _since(days)) if _since(days) else (tag,),
     ).fetchone()
     if not agg or agg["battles"] == 0:
         return _envelope("member_summary", available=False, subject=tag, error="no_battles")
@@ -240,10 +287,39 @@ def _member_summary_view(conn, tag) -> dict[str, Any]:
             (tag,),
         ).fetchall()
     )
+    # (3) Clan-relative context: "am I above average?" needed a distribution, not a
+    # rollup. Win rate is computed over the same window so the comparison is fair.
+    cutoff = _since(days)
+    peers = conn.execute(
+        "SELECT e.player_tag, SUM(b.outcome = 'W') w, SUM(b.outcome = 'L') l "
+        "FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
+        "JOIN clan_memberships cm ON cm.player_tag = e.player_tag AND cm.left_at IS NULL "
+        + ("WHERE e.battle_time >= ? " if cutoff else "")
+        + "GROUP BY e.player_tag HAVING (w + l) >= 20",
+        (cutoff,) if cutoff else (),
+    ).fetchall()
+    rates = sorted(r["w"] / (r["w"] + r["l"]) for r in peers if (r["w"] + r["l"]))
+    mine = next(
+        (r["w"] / (r["w"] + r["l"]) for r in peers if r["player_tag"] == tag and (r["w"] + r["l"])),
+        None,
+    )
+    standing = None
+    if mine is not None and len(rates) >= 5:
+        below = sum(1 for x in rates if x < mine)
+        standing = {
+            "win_rate": round(mine, 3),
+            "clan_median_win_rate": round(rates[len(rates) // 2], 3),
+            "percentile": round(100 * below / len(rates)),
+            "ranked_members": len(rates),
+            "basis": "active members with 20+ battles in the same window",
+        }
+
     return _envelope(
         "member_summary",
         available=True,
         subject=tag,
+        window_days=days,
+        clan_standing=standing,
         battles=agg["battles"],
         battles_with_tower_data=agg["with_tower_data"],
         stomps=agg["stomps"],
@@ -332,6 +408,7 @@ def get_battle_intelligence(
     their_family: Optional[str] = None,
     scope: str = "all",
     limit: int = 20,
+    days: Optional[int] = None,
     source: Any = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
@@ -357,9 +434,9 @@ def get_battle_intelligence(
         conn = provider.get_connection()
     try:
         if view == "card":
-            return _card_view(conn, tag, card, scope)
+            return _card_view(conn, tag, card, scope, days)
         if view == "nemesis":
-            return _nemesis_view(conn, tag, scope)
+            return _nemesis_view(conn, tag, scope, days)
         if view == "battle":
             return _battle_view(conn, tag, limit)
         if view == "matchup":
@@ -367,21 +444,23 @@ def get_battle_intelligence(
         if view == "deck":
             return _deck_view(conn, tag)
         if view == "coaching":
-            return _coaching_view(conn, tag, limit)
+            return _coaching_view(conn, tag, limit, days)
         if view == "newcomer":
             return _newcomer_view(conn, tag)
-        return _member_summary_view(conn, tag)
+        return _member_summary_view(conn, tag, days)
     finally:
         if own:
             conn.close()
 
 
-def _coaching_view(conn, tag, limit) -> dict[str, Any]:
+def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
     """Aggregated structural read of a member's recent play — the input the Layer-4
     summarizer reasons over. All computed; no per-battle model call."""
     if not tag:
         return _envelope("coaching", available=False, error="member_tag_required")
-    n = max(5, min(int(limit or 40), 200))
+    # A `days` window should govern the sample, not `limit` (default 20) — otherwise
+    # "last 7 days" and "last 30 days" return the identical most-recent 20 battles.
+    n = 500 if days else max(5, min(int(limit or 40), 200))
     rows = conn.execute(
         "SELECT e.battle_time, b.outcome, e.closeness, e.performance, e.level_gap, "
         "e.level_validity, e.air_matchup, e.wincon_pressure, e.spell_bait_exposed, "
@@ -391,8 +470,10 @@ def _coaching_view(conn, tag, limit) -> dict[str, Any]:
         "FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
         "LEFT JOIN deck_profile op ON op.deck_hash = e.our_deck_hash "
         "LEFT JOIN deck_profile tp ON tp.deck_hash = e.their_deck_hash "
-        "WHERE e.player_tag = ? ORDER BY e.battle_time DESC LIMIT ?",
-        (tag, n),
+        "WHERE e.player_tag = ? "
+        + ("AND e.battle_time >= ? " if _since(days) else "")
+        + "ORDER BY e.battle_time DESC LIMIT ?",
+        (tag, _since(days), n) if _since(days) else (tag, n),
     ).fetchall()
     if not rows:
         return _envelope("coaching", available=False, subject=tag, error="no_battles")
@@ -428,6 +509,7 @@ def _coaching_view(conn, tag, limit) -> dict[str, Any]:
         "coaching",
         available=True,
         subject=tag,
+        window_days=days,
         battles=len(rows),
         record={"wins": wins, "losses": losses},
         win_rate=_win_rate(wins, losses),

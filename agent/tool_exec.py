@@ -513,6 +513,7 @@ def _execute_get_battle_intelligence(arguments):
         their_family=arguments.get("their_family"),
         scope=arguments.get("scope", "all"),
         limit=arguments.get("limit", 20),
+        days=arguments.get("days"),
         source=db,
     )
 
