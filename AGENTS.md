@@ -293,6 +293,39 @@ Principle: **Prompts define what Elixir says and why. Code defines when, where, 
 
 Activity scheduling, channel routing, stream emission, hard-post floors, copy-policy invariants, outcome fan-out, delivery bookkeeping, tool execution, JSON response contracts, memory enforcement, nickname matching, LLM parameters, Elixir data normalization, and in-game clan chat copy guardrails. The awareness model makes editorial worthiness judgments; code still owns factual and delivery invariants.
 
+### A "DO NOT" in a prompt is a bug report about the tool layer
+
+Every `NEVER` / `DO NOT` / `don't` in `prompts/` is a suspect. Almost all of them
+were written the day a model said something wrong, and the fastest fix was a
+sentence telling it not to. That sentence then ships on **every call, forever** —
+we rent the workaround while the defect stays. Worse, a rule the data can violate
+is a rule the model will eventually break anyway.
+
+**Before adding one, try to make it unnecessary:**
+
+| Prompt says | Usually means | Real fix |
+|---|---|---|
+| "never quote X from memory" | X is stale or absent in the read | put the live value in the data |
+| "never confuse A with B" | A and B are named alike, or share a field | rename at the source so they cannot be confused |
+| "don't repeat a post/write" | dedup is not enforced | a key/constraint in the store |
+| "don't cite N below a sample floor" | the view hands over a weak number | omit it in the capability, return `insufficient_sample` |
+| "that field is unreliable" | it is | fix, or stop sending it |
+
+**When adding one is right:** the rule needs judgment a constraint cannot express
+(semantic duplication, editorial worthiness, tone), or it reinforces a fix already
+shipped in code and is cheap insurance. Say which, in the prompt, with the date.
+
+**When deleting one is right:** the defect it guarded is fixed. Grep the negative
+instructions periodically and re-check each against live data — several outlive
+their cause. Verify end to end before deleting: the join-floor rule looked like a
+fossil until `prompts.py:_live_required_trophies()` was confirmed to substitute
+the live value into what the model actually receives, which made it cheap
+reinforcement rather than a mask.
+
+The same discipline applies to prompt text that *describes* data. Check documented
+fields against real captured payloads — `season_window` and `roster_vitals` were
+documented in the awareness prompt long after they stopped being sent.
+
 ## Memory Model
 
 Elixir uses two memory layers:
@@ -358,6 +391,38 @@ uv run --locked python scripts/review_agent_feedback.py --workflow clanops --jso
   - chat workflows use `MAX_CONTEXT_MEMBERS_DEFAULT` (30)
   - site generation uses `MAX_CONTEXT_MEMBERS_FULL` (50)
 - When clipping occurs, context includes an omitted-members summary line.
+
+### Auditing a read block: ask what it could ever CHANGE
+
+Volatility is the wrong test. `management.materialization.source_freshness` changed
+every tick — per-member battlelog and profile ages — and looked alive. Across 20
+sampled ticks, **907 of 907 member rows said `status: ready` with no reasons**: it
+churned constantly and could never change a decision. ~3,700 tokens a tick, 30% of
+the whole read, telling the brain that nothing was wrong once per member. It now
+sends a count plus the exceptions in full (98% smaller).
+
+The check that finds this: pull real payloads out of `llm_calls.prompt_json`, size
+every field, and for the big ones ask what value would make the brain act
+differently. If the answer is "nothing it has ever contained," summarise it and keep
+the exceptions.
+
+**Two ways this audit goes wrong, both hit in practice:**
+
+- **Regex "unused" is a false negative.** `game_context` matched none of 111 posts
+  and looked identical to the waste above. Checking its literal values showed
+  "Merge Tactics", "Ronin" and "legendary" all reaching output. Match values, not
+  themes, before calling a block dead.
+- **Some blocks work by preventing output.** `channel_memory`,
+  `recent_agent_writes`, `recent_member_spotlights` and `posting_pulse` exist to
+  stop repetition — absence from posts is them succeeding. Output-matching cannot
+  measure them at all.
+
+**A rarely-used block is not automatically a tool.** Moving it means the brain must
+know to ask, and models under-fetch: on replayed rounds Haiku ended the tool loop
+early in 3 of 5, and `game_context` is what tells the brain a new card exists at all —
+without it `lookup_cards` is never called. Price it before moving: `award_races` is
+1,192 tokens at 23% usage, and a triggered tool round re-reads the whole ~57K
+context, so the tool version saves nothing and adds a way to fail.
 
 ## Announcements and API drift
 
