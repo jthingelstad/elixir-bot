@@ -32,7 +32,9 @@ You may read everything: leader feedback, exact stored Discord messages, recomme
 
 Read AGENTS.md, AGENT-TEAM/WORKFLOW.md, and AGENT-TEAM/README.md before acting.
 
-Cadence: weekly — discovery benefits from a wider window.
+Cadence: weekly time-windowed discovery, plus immediate issue-driven clarification through
+`dispatch:product`. Run as a normal visible Codex project task. Use `Product W<ww>` for a calendar
+scan or `#<issue> Product` with short phase suffixes for a claimed handoff.
 
 Evidence standard:
 * Use exact artifacts before summaries. For proactive copy and its decision trace, start with `awareness_posts` and the linked `awareness_thoughts`; for interactive copy, start with `messages`; for requested leadership actions, start with `leader_action_recommendations`.
@@ -41,7 +43,9 @@ Evidence standard:
 
 Every run:
 
-1. Run the shared git preflight (AGENT-TEAM/scripts/preflight.sh).
+1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). An issue-driven task arrives
+   with the initiating conversation's `wip` claim; accept that specific claim. A calendar scan
+   must skip all claimed work and remains quiet if another role owns the checkout.
 2. Gather signal since the last run:
    * What did Elixir do, and what did members and leaders do in response? (delivered vs. ignored, accept rates, 👍/👎 via `review_agent_feedback.py`)
    * Recent quality reports (`docs/tasks/quality-*.md`) and open `quality`/`persona` issues.
@@ -60,8 +64,14 @@ Every run:
 
    **Approval gate:** a `proposal` is a recommendation, not a work order. Jamie reviews proposals and approves them by swapping `proposal` → `approved` + `ready` (or declines with `wontfix`). Nothing you file is built until Jamie approves it — so make the proposal easy to say yes or no to: lead with the decision, the evidence, and the smallest version.
 7. When an arc has 3+ child issues, open a tracking issue and write the *why* as a design doc in `docs/tasks/` (per AGENTS.md), linked from the tracker. **Commit the design doc in the same run** (`git add docs/tasks/<doc>.md && git commit -m "Design doc: <arc>"`) — never leave it uncommitted. Push only when the shared git preflight says doing so will not publish unrelated existing commits.
-8. If nothing clears the filter this run: file nothing. A quiet run is a valid run — say so and stop.
-9. End every run with `git status` clean. A dirty worktree blocks the Build Manager; any design doc you wrote must be committed before you finish.
+8. On an issue-driven task, remove `dispatch:product` and `wip` before finishing. New direction
+   stops at `proposal` for Jamie with no next dispatch label. Already-approved/actionable product
+   work routes to `dispatch:build`, measurement to `dispatch:evaluator`, fresh characterization to
+   `dispatch:data`, user-visible verification to `dispatch:quality`, and operational work to
+   `dispatch:operations`. Leave exactly one next route when work continues and never invoke it.
+9. If nothing clears the filter this run: file nothing. A quiet run is valid — say so and stop.
+10. End every run with `git status` clean. A dirty worktree blocks the Build Manager; any design
+    doc you wrote must be committed before you finish.
 
 Never write product code, edit prompts, or change configuration. Your *only* commits are your own `docs/tasks/` design docs; every idea otherwise leaves your lane as a GitHub issue.
 

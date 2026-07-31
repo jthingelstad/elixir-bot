@@ -12,14 +12,22 @@ Read AGENTS.md, AGENT-TEAM/WORKFLOW.md, and AGENT-TEAM/README.md before acting. 
 
 The former standalone `confidence-monitor` role is folded into this role. There is one operational watcher, not two competing owners. Run the confidence report and Error Watch here. Do not edit or delete Discord copy as an operational shortcut; factual or editorial post problems go to the Quality Manager unless the delivery mechanism itself is broken.
 
-Cadence: hourly, or every few hours — production health needs a tight loop.
+Cadence: every three hours as the external health/recovery watcher, plus immediate issue-driven
+work through `dispatch:operations`. Run as a normal visible Codex project task. Use `Ops Recovery`
+for a calendar pass or `#<issue> Ops` with short phase suffixes for a claimed handoff.
 
 Healthy-run rule: if production is healthy, do not opportunistically change code. Either work one existing `operations`/`reliability` issue that authorizes the improvement, file a small issue with the evidence and stop, or take no action.
 
 Every run:
 
-1. Run the shared git preflight (AGENT-TEAM/scripts/preflight.sh).
-2. **`needs-deploy` first — before anything else.** Any open issue labeled `needs-deploy` is a change committed but not yet live (usually a DB migration). Deploy it **now**, atomically: pull the commit and restart so the new code and its migration go live together — never let a migration sit applied-but-un-deployed or committed-but-un-migrated (that interim breaks the running process). Then remove `needs-deploy` and close/return the issue. Only after the deploy queue is clear do you move on.
+1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). An issue-driven task arrives
+   with the initiating conversation's `wip` claim; accept that specific claim. A calendar recovery
+   pass must not claim new work while any other `wip` exists.
+2. **`needs-deploy` first — before anything else.** A claimed issue-driven task names the deploy.
+   Otherwise inspect the queue. Deploy committed code **now**, atomically: pull only when doing so
+   cannot publish or combine unrelated work, then restart so new code and its migration go live
+   together. Never deploy or restart into pre-existing unpublished commits. Remove `needs-deploy`
+   only after live verification. Only after the deploy queue is clear do you move on.
 3. Check production status (scripts/admin.sh status).
 4. **Work AGENT-TEAM/error-watch.md** — read `logs/elixir-error.log` whole, group by kind, separate still-firing from historical, and run the CR API drift query. Alongside it:
    - `uv run --locked python scripts/confidence_report.py --quick --json` (grouped `errors` + the `liveness` silence alarm)
@@ -31,9 +39,12 @@ Every run:
    - retry rates
    - tool usage
 Identify unusual increases, regressions, or waste.
-6. Review open GitHub issues labeled `operations`, `reliability`, `bug`, or `regression`. Skip anything already labeled `wip` — another agent has it. A `bug`/`regression` defaults to the Build Manager; only take one if it is genuinely operational, and relabel it `operations` so ownership is unambiguous.
+6. Review open GitHub issues labeled `operations`, `reliability`, `bug`, or `regression`. Accept
+   this task's initiating claim; skip every other `wip`. A `bug`/`regression` defaults to the Build
+   Manager; only take one if it is genuinely operational, and relabel it `operations` so ownership
+   is unambiguous.
 7. If you find an operational problem:
-    * claim it: add the `wip` label before you start
+    * claim it with `wip` before you start unless the initiating conversation already did
     * diagnose it
     * implement one focused fix
     * test it
@@ -42,6 +53,11 @@ Identify unusual increases, regressions, or waste.
 8. If production is healthy:
     * look for one existing `operations`/`reliability` issue that authorizes an observability or reliability improvement
     * if no such issue exists, file a small issue with the evidence or take no action
+9. On an issue-driven task, remove `dispatch:operations` and `wip` before finishing. After a
+   verified deploy or fix, route retained `needs-eval` to `dispatch:evaluator`, `needs-quality` to
+   `dispatch:quality`, or `needs-data` to `dispatch:data`; otherwise close. If diagnosis proves a
+   product-code defect, route it to `dispatch:build`. Leave exactly one next `dispatch:*` label and
+   never invoke that role directly.
 
 Open an issue instead of changing code when the problem concerns recommendation quality, product behavior, missing features, prompts, or leadership decisions.
 

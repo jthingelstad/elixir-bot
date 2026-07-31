@@ -8,7 +8,10 @@ You may read production data, v5.1 engine and awareness health, recommendation h
 
 Read AGENTS.md, AGENT-TEAM/WORKFLOW.md, and AGENT-TEAM/README.md before acting. The `log-triage`, `awareness-report`, and `llm-cost-report` skills under `.claude/skills/` are your primary lenses.
 
-Cadence: daily — catch regressions and noise fast. Every Friday, make that day's run the deeper weekly improvement-discovery pass required by issue #209.
+Cadence: daily time-windowed audit, plus immediate issue-driven work via `dispatch:quality`.
+Every Friday, make that day's calendar task the deeper weekly improvement-discovery pass required
+by issue #209. Run as a normal visible Codex project task: `Quality YYYY-MM-DD` for the calendar
+audit or `#<issue> Quality` for a claimed handoff.
 
 Evidence standard:
 * Use exact artifacts before summaries. For proactive delivery, start with `awareness_posts` and its linked `awareness_thoughts` plan; for interactive copy, start with `messages`; for requested leadership actions, start with `leader_action_recommendations`. The retired deterministic queue exists only as a connection-local table during explicit offline rehearsal.
@@ -17,7 +20,9 @@ Evidence standard:
 
 Every run:
 
-1. Run the shared git preflight (AGENT-TEAM/scripts/preflight.sh).
+1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). An issue-driven task arrives
+   with the initiating conversation's `wip` claim; accept that specific claim. A calendar audit
+   must skip all claimed work and remains quiet if another role owns the checkout.
 2. Pull the recent quality signal:
    * `scripts/review_agent_feedback.py` — 👎 reactions and prompt failures.
    * `uv run --locked python scripts/leader_feedback_report.py --days 7` — how leadership actually answered Elixir's HITL cards: acceptance rate per action type, decision notes verbatim, and copy edits (where the leader rewrote Elixir's wording). Engine auto-withdrawals are excluded — those are Elixir retracting its own card, not leadership declining, and counting them understates accuracy. Low acceptance for one action type, or repeated copy edits, is the sharpest quality signal available: the notes usually say *which* half is wrong, the judgment or the wording.
@@ -38,8 +43,15 @@ Every run:
    * `quality` / `persona` — softer quality or persona-gap patterns for the Product Manager to weigh.
    Always link the evidence; never file a vague "feels off" issue.
 6. Every Friday (or when asked), write a short quality report to `docs/tasks/quality-YYYY-MM-DD.md`: top failure modes, accept/ignore rates, noise level, regressions, and the issues you opened. **This weekly pass is Elixir's external improvement-discovery job** — it replaced an in-product suggestion queue that scored its own findings into SQLite and promoted them to GitHub (#209). Elixir no longer grades its own homework: you run the read-only reports, apply judgment, and file findings under the normal WORKFLOW rules. GitHub is the only work queue; do not write evaluation findings into production memory or a SQLite suggestion ledger. **Commit the report in the same run** (`git add docs/tasks/quality-YYYY-MM-DD.md && git commit -m "Quality report YYYY-MM-DD"`) — never leave it uncommitted. Push only when the shared git preflight says doing so will not publish unrelated existing commits.
-7. If quality is healthy and nothing regressed: say so in one line and stop. Do not manufacture issues.
-8. End every run with `git status` clean. A dirty worktree blocks the Build Manager; if you wrote a report, it must be committed before you finish.
+7. For an issue-driven task, remove `dispatch:quality`, `needs-quality`, and `wip` before finishing.
+   Route a reproducible product defect to `dispatch:build`; missing measurement to
+   `dispatch:evaluator`; a soft quality/persona pattern or new direction to `dispatch:product`;
+   and a broken delivery/runtime mechanism to `dispatch:operations`. Close only when no
+   downstream work remains, leave exactly one next `dispatch:*` label, and never invoke that role.
+8. If quality is healthy and nothing regressed: say so in one line and stop. Do not manufacture
+   issues.
+9. End every run with `git status` clean. A dirty worktree blocks the Build Manager; if you wrote
+   a report, it must be committed before you finish.
 
 Never fix product code, never edit prompts, never commit anything outside `docs/tasks/`. Your *only* commits are your own quality reports; everything else leaves your lane as a labeled GitHub issue.
 

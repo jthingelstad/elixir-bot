@@ -1,9 +1,9 @@
 # AGENT-TEAM/ — Elixir product team
 
-Role-prompts, each meant to run as a **scheduled Codex/Claude agent** that maintains and
-improves Elixir. Each file is a self-contained job description: a lane, an explicit boundary,
-an "Every run" runbook, and a success definition. Point a scheduled agent at one file and let
-it run.
+Role prompts for the agents that maintain and improve Elixir. Run issue-driven work as a
+**normal, app-visible Codex project task**; keep schedules only for activities whose evidence is
+inherently time-windowed or whose purpose is operational recovery. Each file is a self-contained
+job description: a lane, an explicit boundary, an "Every run" runbook, and a success definition.
 
 **The workflow these roles share** — the GitHub-Issues spine, the approval gate, the label
 taxonomy, `wip` claiming, commit lanes, the `notes/` convention, and the operating rules — is
@@ -17,7 +17,8 @@ AGENT-TEAM/
   README.md            # this file — Elixir specifics
   <role>.md            # the roster below
   error-watch.md       # Operations Manager runbook: logs/elixir-error.log triage
-  automations.toml     # desired Codex schedules for every rostered role
+  dispatch.toml        # deterministic issue route and inference rules
+  automations.toml     # desired time-windowed/recovery Codex schedules
   scripts/             # preflight, queue audit, automation audit, attribution, notes
   notes/               # gitignored per-run scratch
   summaries/           # committed weekly Manager digests
@@ -48,6 +49,90 @@ a new game mode, card, event, schema field, or behavior pattern arrives as a *fr
 pattern* before it's ever a feature request. The analyst catches it, quantifies it, and hands
 the Product Manager the product-intelligence picture; the PM decides what is worth proposing,
 and the Build Manager builds approved work.
+
+## Visible role tasks
+
+Issue-driven team work runs as **one normal local Codex project task per role**, never as a
+background shell or launchd run. GitHub chooses the work and records the handoff; the visible task
+is the resumable execution record. The selector is deliberately read-only and cannot claim an
+issue, invoke Codex, or mutate the repository.
+
+### Start one role
+
+1. From an active Codex conversation in the `elixir-bot` project, run
+   `uv run --locked python AGENT-TEAM/scripts/dispatcher.py --shadow --all`. It names eligible
+   issues and roles without changing anything. A human may name a specific issue or role instead.
+2. Re-read the issue and run `AGENT-TEAM/scripts/preflight.sh`. Confirm there is **no open `wip`
+   anywhere in the repository**: one active claim owns the shared checkout. If safe, add `wip`,
+   retain or add exactly one `dispatch:*` label, and comment with the role plus an
+   America/Chicago timestamp. Do not create the role task if preflight fails or any claim exists.
+3. Run `uv run --locked python AGENT-TEAM/scripts/dispatcher.py --handoff <issue>` and create the
+   requested **normal local project task** from the active Codex conversation. Pass the generated
+   prompt, issue, claim, and role file. Never substitute a subagent, `codex exec`, launchd, or an
+   ephemeral/background shell run; those are not the visible project task Jamie expects.
+4. The role does one focused issue-scoped run, updates its title only at meaningful phases, and
+   completes the authoritative GitHub transition before its final response.
+5. The role removes `wip` and its current `dispatch:*` label, then closes the issue, stops at an
+   explicit human state, or leaves exactly one next `dispatch:*` label. It does not invoke the next
+   role. A later active conversation creates that visible task.
+
+The selector fails closed while any `wip` claim exists. The 24-hour stale-claim rule in
+`WORKFLOW.md` is the only way to recover an abandoned claim. This serializes Build, Operations,
+Evaluator artifacts, discovery reports, and Manager summaries against the one shared checkout.
+
+### Live task titles
+
+Set the base title immediately, add only a short phase suffix when the work materially changes,
+and keep the whole title at 24 characters or fewer.
+
+| Role | Issue title base | Examples |
+|------|------------------|----------|
+| Operations Manager | `#245 Ops` | `#245 Ops · deploy`, `#245 Ops · verify` |
+| Build Manager | `#245 Build` | `#245 Build · code`, `#245 Build · tests` |
+| Evaluator | `#245 Eval` | `#245 Eval · baseline`, `#245 Eval · guard` |
+| Data Analyst | `#245 Data` | `#245 Data · query`, `#245 Data · brief` |
+| Quality Manager | `#245 Quality` | `#245 Quality · evidence`, `#245 Quality · verify` |
+| Product Manager | `#245 Product` | `#245 Product · signal`, `#245 Product · brief` |
+| Manager | `#245 Team` | `#245 Team · queue`, `#245 Team · digest` |
+
+For a calendar run with no issue, use `Data 2026-07-31`, `Quality 2026-07-31`, `Eval W31`,
+`Product W31`, `Ops Recovery`, or `Team W31`. Finish with `✓` only after a valid repository/GitHub
+transition, or `!` when blocked or unable to complete safely. A checkmark says the role completed
+its run correctly; it does not mean an evaluation passed or that the issue necessarily closed.
+
+### GitHub handoffs
+
+GitHub issue state, never a task's final prose or calendar, drives executable handoffs.
+
+| Handoff label | Worker |
+|---------------|--------|
+| `dispatch:operations` | Operations Manager |
+| `dispatch:build` | Build Manager |
+| `dispatch:evaluator` | Evaluator |
+| `dispatch:data` | Data Analyst |
+| `dispatch:quality` | Quality Manager |
+| `dispatch:product` | Product Manager |
+| `dispatch:manager` | Manager |
+
+Exactly one handoff label is active at a time. `needs-data`, `needs-quality`, and `needs-eval`
+remember downstream work still owed; `needs-deploy` retains its existing operational meaning.
+The initiating conversation owns the `wip` claim. The role removes its current handoff before
+finishing, then closes, enters `proposal`/`blocked`/`needs-design`, or adds exactly one next
+handoff. Product and meta proposals still wait for Jamie; proven defects and approved work flow
+autonomously.
+
+The canonical `manager.md` remains byte-identical across projects. For an Elixir issue-driven
+`dispatch:manager` task, the initiating conversation supplies the claim and visible title; the
+Manager keeps its existing lane, removes `dispatch:manager` and `wip`, leaves any new `meta`
+direction at `proposal` for Jamie, and routes an already-approved implementation to
+`dispatch:build`. It never edits another role or launches that next task itself.
+
+There is no automatic launcher to install. Read-only inspection is:
+
+```bash
+uv run --locked python AGENT-TEAM/scripts/dispatcher.py --check --live
+uv run --locked python AGENT-TEAM/scripts/dispatcher.py --shadow --all
+```
 
 ## Current runtime map
 
@@ -95,36 +180,35 @@ stable-system docs live in `docs/reference/`. That is separate from `AGENT-TEAM/
 is gitignored per-run scratch (see `WORKFLOW.md`). Durable = issues + `docs/tasks/` + the
 Manager's `summaries/`; ephemeral = `notes/`.
 
-## Suggested cadence
+## Cadence
 
-Recommended defaults — the actual scheduling lives in Codex/Claude routines. All times
-America/Chicago.
+Issue handoffs are event-driven through GitHub. Calendar tasks remain only where the input is a
+time window or the role is the external recovery watcher. Every scheduled execution is still a
+normal visible project task and follows the title protocol above. All times America/Chicago.
 
-| Role | Cadence | Why |
-|------|---------|-----|
-| Operations Manager | Hourly (or every few hours) | Prod health needs a tight loop |
-| Data Analyst | Daily | A new game mode / card / event should surface within a day |
-| Quality Manager | Daily | Catch regressions and noise fast |
-| Build Manager | Every 6 hours | Drain up to three issues sequentially without batching work |
-| Evaluator | Weekly + after any router/prompt/workflow change | Keep baselines current; guard changes |
-| Product Manager | Weekly | Discovery benefits from a wider window |
-| Manager | Weekly | Team-health review + the notes digest |
+| Role | Cadence | Why the calendar task remains |
+|------|---------|-------------------------------|
+| Operations Manager | Every 3 hours + event-driven | External error/liveness recovery; Elixir does not monitor itself |
+| Data Analyst | Daily + event-driven | Detect new CR API patterns within a day |
+| Quality Manager | Daily + event-driven | Review a bounded recent behavior window |
+| Build Manager | Event-driven only | Queue state is the input; polling adds latency and debris |
+| Evaluator | Friday baseline + event-driven | Weekly baseline is time-windowed; acceptance is immediate |
+| Product Manager | Weekly discovery + event-driven | Weekly horizon scan plus immediate clarification of domain findings |
+| Manager | Weekly + event-driven | Team-health review and notes digest need a fixed period |
 
-The desired live Codex configuration is versioned in `automations.toml`. Check it with
-`uv run --locked python AGENT-TEAM/scripts/automation_audit.py`; use `--apply` only when Jamie
-has authorized schedule changes. The audit also catches paused roles, stale models, wrong
-cadences, missing role files, and prompts that do not enforce the full read order and clean-run
-rules.
+The desired live Codex configuration is versioned in `automations.toml`. A `PAUSED` entry is the
+historical schedule definition for an event-driven role, not a dormant queue to reactivate. Check
+the registry with `uv run --locked python AGENT-TEAM/scripts/automation_audit.py`; use Codex's
+automation controls, not shell edits, to apply an authorized schedule change. The audit catches
+paused/active drift, stale models, wrong cadences, missing role files, and prompts that omit the
+full read order, visible-task protocol, or clean-run rules.
 
-The Build Manager has one approved project-specific refinement to the shared workflow's “one
-focused thing per run” rule: it may complete up to three issues **sequentially** inside one
-90-minute run. “One focused thing” applies to each claim, change, verification cycle, and commit;
-it never permits a batched claim or a commit spanning issues. `build-manager.md` owns the exact
-loop and stop conditions.
+The Build Manager handles exactly one issue per visible task. That keeps the task, claim, diff,
+verification, and commit aligned with one durable GitHub transition.
 
-All scheduled roles share one checkout. A clean checkout that is ahead of `origin/main` is
-read-only: agents may inspect evidence and file issues, but must not commit, push, deploy, or
-restart into those pre-existing commits. Dirty, behind, or diverged checkouts stop the run.
+All role tasks share one checkout. A clean checkout that is ahead of `origin/main` is read-only
+unless Jamie explicitly authorizes bounded local work; it still may not push, deploy, or restart
+into pre-existing commits. Dirty, behind, or diverged checkouts stop the run.
 
 ## Agent attribution
 

@@ -76,6 +76,20 @@ upsert "prompt"   "BFD4F2" "Prompt or persona-text change — Build Manager (+ E
 upsert "persona"  "C5DEF5" "Gap vs SOUL.md / PURPOSE.md — Product/Quality -> Build Manager"
 upsert "data"     "1D76DB" "New/changed data pattern or data-quality finding — Data Analyst -> Product Manager"
 
+echo "==> PROJECT: pending acceptance labels"
+upsert "needs-data"    "1D76DB" "Data characterization remains owed — Data Analyst"
+upsert "needs-quality" "FBCA04" "User-visible quality verification remains owed — Quality Manager"
+upsert "needs-eval"    "5319E7" "Evaluator acceptance or measurement remains owed — Evaluator"
+
+echo "==> PROJECT: visible role handoffs"
+upsert "dispatch:operations" "D93F0B" "Next visible task: Operations Manager"
+upsert "dispatch:build"      "D73A4A" "Next visible task: Build Manager"
+upsert "dispatch:evaluator"  "5319E7" "Next visible task: Evaluator"
+upsert "dispatch:data"       "1D76DB" "Next visible task: Data Analyst"
+upsert "dispatch:quality"    "FBCA04" "Next visible task: Quality Manager"
+upsert "dispatch:product"    "A2EEEF" "Next visible task: Product Manager"
+upsert "dispatch:manager"    "6F42C1" "Next visible task: Team Manager"
+
 echo "==> PROJECT: elixir-bot label migrations"
 rename "cost-reliability" "reliability" "E99695" "Stability, runtime, cost, observability — Operations Manager"
 rename "routing-quality"  "quality"     "FBCA04" "Recommendation quality: accuracy, noise, routing, delivery — Quality Manager"

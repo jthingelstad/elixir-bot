@@ -3,12 +3,8 @@
 
 from __future__ import annotations
 
-import argparse
-import json
 import os
-import re
 import sys
-import time
 import tomllib
 from pathlib import Path
 
@@ -29,9 +25,12 @@ def _prompt(entry: dict) -> str:
         f"Read {rendered} completely, then execute the role exactly as written. "
         f"Your automation identity is `{entry['id']}` / `{entry['name']}`; use the attribution "
         "contract and helper in AGENT-TEAM/README.md for every issue comment and commit. "
-        "Start with the shared preflight, respect issue claims and lane boundaries, do one "
-        "focused thing at a time within the role's run budget, write the required AGENT-TEAM "
-        "run note, and end with a clean repository. "
+        f"This is the `{entry['schedule_kind']}` calendar activity; issue handoffs use "
+        f"`{entry['dispatch_label']}` and run on demand. Run as a normal app-visible project "
+        "task and follow the title protocol in AGENT-TEAM/README.md. Start with the shared "
+        "preflight, stop if any other `wip` owns the shared checkout, respect issue claims and "
+        "lane boundaries, do one focused thing, write the required AGENT-TEAM run note, and end "
+        "with a clean repository. "
         "If main is ahead of origin/main, remain read-only: never commit, push, deploy, or restart "
         "into pre-existing commits. Never push a commit this run did not create."
     )
@@ -52,49 +51,24 @@ def _expected(entry: dict) -> dict:
     }
 
 
-def _replace(text: str, key: str, value) -> str:
-    encoded = json.dumps(value, ensure_ascii=False)
-    line = f"{key} = {encoded}"
-    pattern = re.compile(rf"^{re.escape(key)}\s*=.*$", re.MULTILINE)
-    if pattern.search(text):
-        return pattern.sub(line, text, count=1)
-    return text.rstrip() + "\n" + line + "\n"
-
-
-def _apply(path: Path, expected: dict) -> None:
-    if not path.exists():
-        raise FileNotFoundError(
-            f"{path} does not exist; create the automation in Codex once so its project target is known"
-        )
-    text = path.read_text()
-    for key, value in expected.items():
-        text = _replace(text, key, value)
-    text = _replace(text, "updated_at", int(time.time() * 1000))
-    path.write_text(text)
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--apply", action="store_true", help="update existing Codex automation files"
-    )
-    args = parser.parse_args()
-
     plan = tomllib.loads(PLAN_PATH.read_text())
     failures: list[str] = []
     for entry in plan["automation"]:
+        status = entry.get("status")
+        schedule_kind = entry.get("schedule_kind")
+        if status == "ACTIVE" and schedule_kind not in {"time_window", "recovery"}:
+            failures.append(f"{entry['id']}: ACTIVE requires time_window or recovery schedule_kind")
+            continue
+        if status == "PAUSED" and schedule_kind != "event_driven":
+            failures.append(f"{entry['id']}: PAUSED requires event_driven schedule_kind")
+            continue
         role_path = REPO / entry["role_file"]
         if not role_path.exists():
             failures.append(f"{entry['id']}: missing role file {entry['role_file']}")
             continue
         path = CODEX_HOME / "automations" / entry["id"] / "automation.toml"
         expected = _expected(entry)
-        if args.apply:
-            try:
-                _apply(path, expected)
-            except Exception as exc:
-                failures.append(f"{entry['id']}: apply failed: {exc}")
-                continue
         if not path.exists():
             failures.append(f"{entry['id']}: missing {path}")
             continue
@@ -107,7 +81,9 @@ def main() -> int:
         if drift:
             failures.append(f"{entry['id']}: drift in {', '.join(drift)}")
         else:
-            print(f"OK  {entry['id']}  {entry['rrule']}  {entry['model']}")
+            print(
+                f"OK  {entry['id']}  {entry['status']}  {entry['schedule_kind']}  {entry['model']}"
+            )
 
     if failures:
         for failure in failures:
