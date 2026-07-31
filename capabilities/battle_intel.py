@@ -594,6 +594,18 @@ def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
     if not rows:
         return _envelope("coaching", available=False, subject=tag, error="no_battles")
 
+    # How many battles the window ACTUALLY holds. The cap above is a sample, and a heavy
+    # player blows through it — Vijay's "last 30 days" was 500 of 1,168 real battles
+    # (43%), reported as battles=500 with nothing marking it a sample. That turns into
+    # "in the last 30 days you played 500 battles", which is false, and skews every
+    # aggregate toward the most recent days.
+    cutoff = _since(days)
+    in_window = conn.execute(
+        "SELECT COUNT(*) FROM battle_enrichment WHERE player_tag = ?"
+        + (" AND battle_time >= ?" if cutoff else ""),
+        (tag, cutoff) if cutoff else (tag,),
+    ).fetchone()[0]
+
     def tally(key):
         out: dict = {}
         for r in rows:
@@ -627,6 +639,8 @@ def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
         subject=tag,
         window_days=days,
         battles=len(rows),
+        battles_in_window=in_window,
+        sample_truncated=in_window > len(rows),
         record={"wins": wins, "losses": losses},
         win_rate=_win_rate(wins, losses),
         upsets=sum(1 for r in rows if r["performance"] == 1),
@@ -645,7 +659,10 @@ def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
         note="Structural aggregate over recent battles. level_gap claims are valid only "
         "where level_validity='real'; normalized modes (ranked, Showdown) cap card levels. "
         "decisive_factors carries only factors measured to separate outcome — do not "
-        "coach on deck-composition tallies, which are flat against winning.",
+        "coach on deck-composition tallies, which are flat against winning. When "
+        "sample_truncated is true, `battles` is the most-recent SAMPLE, not the window "
+        "total (battles_in_window) — describe it as a sample and never state `battles` "
+        "as how many games they played in the window.",
     )
 
 
