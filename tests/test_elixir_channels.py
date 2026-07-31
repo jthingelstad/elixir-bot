@@ -3391,7 +3391,7 @@ def test_build_schedule_report_includes_awareness_owner():
 
     assert "elixir-log" in report
     assert "awareness-loop" in report
-    assert "Every 6 hours at :05 CT." in report
+    assert "Daily at 03:05, 09:05, 15:05, 21:05 CT." in report
     assert "member-facing lanes selected by the validated awareness plan" in report
 
 
@@ -3420,7 +3420,7 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert specs["engine-tick"]["schedule"] == "Every 10 minutes."
     assert "war-poll" not in specs
     assert specs["awareness-loop"]["activity_role"] == "observer+communicator"
-    assert specs["awareness-loop"]["schedule"] == "Every 6 hours at :05 CT."
+    assert specs["awareness-loop"]["schedule"] == "Daily at 03:05, 09:05, 15:05, 21:05 CT."
     assert "daily-clan-insight" in specs
     assert specs["daily-clan-insight"]["owner_lane"] == "ask-elixir"
     assert specs["daily-clan-insight"]["activity_role"] == "communicator"

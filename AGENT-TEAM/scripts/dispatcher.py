@@ -48,7 +48,13 @@ class InferenceRule:
 class Config:
     path: Path
     repo: str
+    # `cwd` is a deployment setting: the absolute directory a dispatched agent is
+    # told to work in on the operator's machine. `repo_root` is where THIS config
+    # was read from. They are the same on the operator's box and differ anywhere
+    # else (CI, another checkout), so role files -- which ship in the repo -- are
+    # resolved against repo_root; only the agent's working directory uses cwd.
     cwd: Path
+    repo_root: Path
     dispatch_prefix: str
     serial_claim_label: str
     stop_labels: frozenset[str]
@@ -103,6 +109,7 @@ class Transition:
 def load_config(path: Path = DEFAULT_CONFIG) -> Config:
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     cwd = Path(raw["cwd"]).resolve()
+    repo_root = path.resolve().parents[1]
     routes: dict[str, Route] = {}
     for item in raw.get("routes", []):
         label = str(item["label"])
@@ -111,7 +118,7 @@ def load_config(path: Path = DEFAULT_CONFIG) -> Config:
         routes[label] = Route(
             label=label,
             role=str(item["role"]),
-            role_file=cwd / str(item["role_file"]),
+            role_file=repo_root / str(item["role_file"]),
             title=str(item["title"]),
             model=str(item["model"]),
             reasoning_effort=str(item["reasoning_effort"]),
@@ -130,6 +137,7 @@ def load_config(path: Path = DEFAULT_CONFIG) -> Config:
         path=path.resolve(),
         repo=str(raw["repo"]),
         cwd=cwd,
+        repo_root=repo_root,
         dispatch_prefix=str(raw["dispatch_prefix"]),
         serial_claim_label=str(raw["serial_claim_label"]),
         stop_labels=frozenset(raw["stop_labels"]),
@@ -330,7 +338,7 @@ Do not use a subagent, `codex exec`, launchd, or an ephemeral/background shell r
 Pass this role prompt to the new task:
 
 Read `AGENTS.md`, `AGENT-TEAM/WORKFLOW.md`, `AGENT-TEAM/README.md`, and
-`{route.role_file.relative_to(config.cwd)}` completely, in that order, then execute the role
+`{route.role_file.relative_to(config.repo_root)}` completely, in that order, then execute the role
 for [{issue.title}]({issue.url}) (issue #{issue.number}). Your identity is `{route.role}`.
 The initiating conversation already ran preflight and added `{config.serial_claim_label}` plus
 `{route.label}`. Re-read authoritative issue state and rerun preflight before acting. Accept this
@@ -410,7 +418,7 @@ def shadow(config: Config, *, show_all: bool = False) -> int:
                     "title": item.issue.title,
                     "route": item.route.label,
                     "role": item.route.role,
-                    "role_file": str(item.route.role_file.relative_to(config.cwd)),
+                    "role_file": str(item.route.role_file.relative_to(config.repo_root)),
                     "task_title": f"#{item.issue.number} {item.route.title}",
                     "model": item.route.model,
                     "reasoning_effort": item.route.reasoning_effort,

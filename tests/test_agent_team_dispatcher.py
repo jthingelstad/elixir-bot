@@ -48,6 +48,35 @@ def test_config_routes_all_elixir_roles(config):
     assert all(route.role_file.is_file() for route in config.routes.values())
 
 
+def test_role_files_resolve_against_the_checkout_not_the_configured_cwd(tmp_path):
+    """Role files ship in the repo, so they must resolve against the checkout.
+
+    `cwd` in dispatch.toml is the operator's absolute working directory. Resolving
+    role files through it meant the assertion above could only ever pass on that
+    one machine -- it passed on every laptop run and failed the moment CI (a Linux
+    checkout with no /Users/otto) saw it. Rewriting cwd to a path that does not
+    exist reproduces CI locally, so this class of drift fails where we can see it.
+    """
+    checkout = tmp_path / "elixir-bot"
+    (checkout / "AGENT-TEAM").mkdir(parents=True)
+    for name in ("dispatch.toml", *(r.name for r in (ROOT / "AGENT-TEAM").glob("*.md"))):
+        (checkout / "AGENT-TEAM" / name).write_bytes((ROOT / "AGENT-TEAM" / name).read_bytes())
+
+    config_path = checkout / "AGENT-TEAM/dispatch.toml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            f'cwd = "{dispatcher.load_config(ROOT / "AGENT-TEAM/dispatch.toml").cwd}"',
+            'cwd = "/nonexistent/somewhere-else"',
+        ),
+        encoding="utf-8",
+    )
+    relocated = dispatcher.load_config(config_path)
+
+    assert all(route.role_file.is_file() for route in relocated.routes.values())
+    assert relocated.cwd == Path("/nonexistent/somewhere-else")
+    assert relocated.repo_root == checkout
+
+
 def test_explicit_dispatch_wins_over_inference(config):
     selected = dispatcher.infer_route(issue(1, "bug", "needs-eval", "dispatch:quality"), config)
     assert selected is not None

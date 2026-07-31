@@ -78,12 +78,13 @@ ACTION_OUTCOME_REFRESH_HOUR = int(os.getenv("ACTION_OUTCOME_REFRESH_HOUR", "9"))
 ACTION_OUTCOME_REFRESH_MINUTE = int(os.getenv("ACTION_OUTCOME_REFRESH_MINUTE", "30"))
 ASK_ELIXIR_DAILY_INSIGHT_HOUR = int(os.getenv("ASK_ELIXIR_DAILY_INSIGHT_HOUR", "12"))
 # The awareness loop runs on a wall-clock cron (deterministic across restarts).
-# AWARENESS_LOOP_HOURS is an APScheduler cron hour expression ("*/3" = every 3
-# hours: 00:05, 03:05, ... CT); AWARENESS_LOOP_MINUTE is the minute past the hour.
-# :05 lands just after the top-of-hour engine tick, so the brain reads freshly-
-# refreshed state. Cadence widened hourly -> 3h on 2026-07-23 for cost: the loop
+# AWARENESS_LOOP_HOURS is an APScheduler cron hour expression, evaluated in CT
+# (the scheduler's timezone): the default "3,9,15,21" fires at 03:05/09:05/15:05/
+# 21:05 CT. AWARENESS_LOOP_MINUTE is the minute past the hour; :05 lands just
+# after the top-of-hour engine tick, so the brain reads freshly-refreshed state.
+# Cadence widened hourly -> 3h (2026-07-23) -> 6h (2026-07-31) for cost: the loop
 # is an always-on Sonnet agentic turn, and hourly was more attentiveness than the
-# clan needs. Hard-posts now wait up to 3h (was <=1h). Revert via env if too slow.
+# clan needs. Hard-posts now wait up to 6h (was <=1h). Revert via env if too slow.
 AWARENESS_LOOP_MINUTE = int(os.getenv("AWARENESS_LOOP_MINUTE", "5"))
 AWARENESS_LOOP_HOURS = os.getenv("AWARENESS_LOOP_HOURS", AWARENESS_LOOP_HOURS_DEFAULT)
 ASK_ELIXIR_DAILY_INSIGHT_MINUTE = int(os.getenv("ASK_ELIXIR_DAILY_INSIGHT_MINUTE", "0"))
