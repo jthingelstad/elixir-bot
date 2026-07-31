@@ -57,6 +57,25 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         activity_role="observer",
     ),
     ActivityDefinition(
+        activity_key="battle-intel-stage-a",
+        owner_lane="elixir-log",  # data-only job; operator surface is #elixir-log
+        purpose="Battle Intelligence Feature 1 (computed, no LLM): extend "
+        "battle_card_plays (both sides, form-aware) and battle_enrichment "
+        "(hp_margin/closeness/discipline_delta/level_gap/deck hashes) for "
+        "un-enriched 1v1 battles. Self-catching-up + idempotent; runs off the "
+        "engine tick so ingestion stays deterministic.",
+        job_id="battle-intel-stage-a",
+        job_function="_battle_intel_stage_a",
+        schedule_kind="interval",
+        schedule_config={
+            "minutes": _attr("BATTLE_INTEL_STAGE_A_MINUTES", 15),
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=("Storage: battle_card_plays + battle_enrichment computed rows",),
+        activity_role="observer",
+    ),
+    ActivityDefinition(
         activity_key="weekly-leadership-review",
         owner_lane="actions",
         purpose="Q1's weekly batch half: roll the management week (hysteresis "
