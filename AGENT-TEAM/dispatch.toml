@@ -1,0 +1,118 @@
+version = 1
+repo = "jthingelstad/elixir-bot"
+cwd = "/Users/otto/Projects/elixir-bot"
+
+# Selection is read-only. An active Codex project conversation performs preflight,
+# adds the global `wip` claim, and creates one normal app-visible role task.
+dispatch_prefix = "dispatch:"
+serial_claim_label = "wip"
+stop_labels = ["proposal", "blocked", "needs-design"]
+pending_labels = ["needs-data", "needs-quality", "needs-eval"]
+
+[[routes]]
+label = "dispatch:operations"
+role = "operations-manager"
+role_file = "AGENT-TEAM/operations-manager.md"
+title = "Ops"
+model = "gpt-5.6-terra"
+reasoning_effort = "high"
+priority = 10
+
+[[routes]]
+label = "dispatch:build"
+role = "build-manager"
+role_file = "AGENT-TEAM/build-manager.md"
+title = "Build"
+model = "gpt-5.6-sol"
+reasoning_effort = "xhigh"
+priority = 20
+
+[[routes]]
+label = "dispatch:evaluator"
+role = "evaluator"
+role_file = "AGENT-TEAM/evaluator.md"
+title = "Eval"
+model = "gpt-5.6-sol"
+reasoning_effort = "xhigh"
+priority = 30
+
+[[routes]]
+label = "dispatch:data"
+role = "data-analyst"
+role_file = "AGENT-TEAM/data-analyst.md"
+title = "Data"
+model = "gpt-5.6-terra"
+reasoning_effort = "high"
+priority = 40
+
+[[routes]]
+label = "dispatch:quality"
+role = "quality-manager"
+role_file = "AGENT-TEAM/quality-manager.md"
+title = "Quality"
+model = "gpt-5.6-terra"
+reasoning_effort = "high"
+priority = 50
+
+[[routes]]
+label = "dispatch:product"
+role = "product-manager"
+role_file = "AGENT-TEAM/product-manager.md"
+title = "Product"
+model = "gpt-5.6-sol"
+reasoning_effort = "xhigh"
+priority = 60
+
+[[routes]]
+label = "dispatch:manager"
+role = "manager"
+role_file = "AGENT-TEAM/manager.md"
+title = "Team"
+model = "gpt-5.6-sol"
+reasoning_effort = "high"
+priority = 70
+
+# Explicit dispatch labels always win. These rules only seed a handoff for an
+# older or human-filed issue that predates the dispatcher protocol. When more
+# than one rule matches, the lowest route priority wins deterministically.
+[[inference]]
+route = "dispatch:operations"
+all = ["needs-deploy"]
+
+[[inference]]
+route = "dispatch:data"
+all = ["needs-data"]
+
+[[inference]]
+route = "dispatch:quality"
+all = ["needs-quality"]
+
+[[inference]]
+route = "dispatch:evaluator"
+all = ["needs-eval"]
+
+[[inference]]
+route = "dispatch:operations"
+any = ["operations", "reliability"]
+
+[[inference]]
+route = "dispatch:evaluator"
+all = ["eval"]
+none = ["bug", "regression", "needs-deploy"]
+
+[[inference]]
+route = "dispatch:build"
+any = ["bug", "regression"]
+none = ["needs-deploy", "needs-data", "needs-quality", "needs-eval"]
+
+[[inference]]
+route = "dispatch:build"
+all = ["approved", "ready"]
+none = ["eval", "needs-deploy", "needs-data", "needs-quality", "needs-eval"]
+
+# Data and soft quality findings have already been characterized by their
+# domain role; Product decides what is worth doing next.
+[[inference]]
+route = "dispatch:product"
+any = ["data", "quality", "persona"]
+none = ["bug", "regression", "operations", "reliability", "eval"]

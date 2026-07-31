@@ -8,7 +8,10 @@ You may read the codebase, production data, SQLite, exact stored Discord message
 
 Read AGENTS.md, AGENT-TEAM/WORKFLOW.md, and AGENT-TEAM/README.md before acting. The existing harnesses are your foundation: `eval_intent_router.py` (routing), `eval_all_requests.py` (cross-bucket including deck requests), `eval_card_conversations.py` (card-tool conversations), `eval_ask_elixir_alignment.py` (`#ask-elixir` answer/topic alignment), plus `review_agent_feedback.py`.
 
-Cadence: weekly, plus an extra run after any router, prompt, or workflow change — keep baselines current and guard changes.
+Cadence: Friday time-windowed baseline, plus immediate acceptance/follow-up through
+`dispatch:evaluator`. Run as a normal visible Codex project task. A calendar baseline uses
+`Eval W<ww>`; an issue-driven task uses `#<issue> Eval` with short phase suffixes and a final
+`✓` or `!`, per `AGENT-TEAM/README.md`.
 
 Evidence standard:
 * For communication, routing, persona, recommendation-quality, ranked-play, or leadership-action evals, use exact artifacts over summaries. Pull the actual user message, actual Elixir response, channel, workflow, event type, Discord message ID, timestamp, intent ID, and raw trace where available.
@@ -19,8 +22,11 @@ Evidence standard:
 
 Every run:
 
-1. Run the shared git preflight (AGENT-TEAM/scripts/preflight.sh).
-2. Triage open `eval` issues — measurement requests filed by the Quality Manager or Product Manager. Pick at most one to satisfy this run.
+1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). An issue-driven task arrives
+   with the initiating conversation's `wip` claim; accept that specific claim. A calendar baseline
+   must skip all claimed work and remains quiet if another role owns the checkout.
+2. Triage open `eval` issues — measurement requests filed by the Quality Manager or Product
+   Manager. Pick at most one only when this task did not arrive with a claimed issue.
 3. Establish or refresh baselines:
    * Run the harness(es) relevant to recent changes (router/prompt/workflow edits since last run).
    * Always run the `#ask-elixir` alignment check after router, channel routing, conversation-memory, or prompt changes; run it during weekly baselines even when no explicit feedback exists.
@@ -32,8 +38,16 @@ Every run:
    * Add a deterministic regression test to `tests/` when the behavior can be pinned without a live API call.
 5. Convert recurring quality findings into permanent guards: when the Quality Manager reports the same failure twice, add a regression scenario so it can't silently return.
 6. Verify your own work: `uv run --locked pytest tests/ -v` passes; new harnesses run clean and write JSON to `scripts/<name>_results.json` (gitignored per the scripts README).
-7. Commit datasets, scoring rules, and tests to main referencing the issue. Push only when the shared git preflight says doing so will not publish unrelated existing commits. Comment the baseline numbers on the issue so other roles can use them.
-8. If there are no open `eval` requests and baselines are current: take one small step to widen coverage of an under-measured workflow, otherwise report "baselines current" and stop.
+7. Commit datasets, scoring rules, and tests to main referencing the issue. Push only when the
+   shared git preflight says doing so will not publish unrelated existing commits. Comment the
+   baseline numbers on the issue so other roles can use them.
+8. On an issue-driven pass, remove `dispatch:evaluator` and `wip`. On acceptance success, also
+   remove `needs-eval`, then route any remaining `needs-deploy` to `dispatch:operations`,
+   `needs-quality` to `dispatch:quality`, or `needs-data` to `dispatch:data`; otherwise close. On
+   a reproducible product failure, retain `needs-eval` and add `dispatch:build`. Leave exactly one
+   next `dispatch:*` label and never invoke that role directly.
+9. If there are no open `eval` requests and baselines are current: take one small step to widen
+   coverage of an under-measured workflow, otherwise report "baselines current" and stop.
 
 Open an issue instead of acting when: a score reveals a real product defect (`bug`/`regression` → Build Manager), the right thing to measure is actually a strategy question (`proposal` → Product Manager), or a harness needs production data you don't have (`operations` → Operations Manager).
 

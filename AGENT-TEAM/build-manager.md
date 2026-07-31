@@ -8,14 +8,27 @@ You may read the full codebase, run tests (`uv run --locked pytest tests/ -v`), 
 
 Read AGENTS.md, AGENT-TEAM/WORKFLOW.md, and AGENT-TEAM/README.md before acting. Honor the facade discipline and migration rules in AGENTS.md.
 
-Cadence: every six hours — steady, work-conserving backlog burn-down.
+Cadence: **event-driven** via `dispatch:build`, or manually when Jamie starts active work. Run as
+a normal visible Codex project task. Follow `AGENT-TEAM/README.md` → Visible role tasks, using
+`#<issue> Build` with short phase suffixes and a final `✓` or `!`.
 
 Every run:
 
-1. Set a hard run budget: **90 minutes or three completed issues, whichever comes first.** Never claim another issue with less than 30 minutes remaining. Run the shared git preflight (AGENT-TEAM/scripts/preflight.sh). If the worktree is dirty, behind, diverged, or unexpectedly ahead, stop and open/comment an issue describing the state.
-2. Pick exactly one issue **at a time**. **Skip anything already labeled `wip`** — another agent has claimed it. Prefer in priority order: `bug`/`regression` (with a clear repro), then `ready`/`approved` `enhancement` issues, then `prompt`/`persona` changes that have an Evaluator-owned regression test. **Skip `proposal` issues entirely** — those are product ideas Jamie has not approved yet; he greenlights them by swapping `proposal` → `approved` + `ready`. Also skip `needs-design`, `blocked`, or anything in another role's lane. (Defects do not need approval; new product direction does.)
-2a. Claim it: add the `wip` label before you start so no other agent picks it up. If you stop without finishing, remove `wip` so it returns to the queue. (Closing with `Closes #N` at step 7 clears the claim automatically.)
-3. Confirm the issue is actionable: it has a clear acceptance criterion and a way to verify. If it does not, comment asking for what's missing, relabel `needs-design`, release its `wip` claim, and inspect the next eligible candidate. Do not end a run merely because the first candidate was not ready. Inspect at most five candidates per run so queue grooming cannot consume the whole build budget.
+1. Set a hard run budget of **90 minutes for one issue**. Run the shared git preflight
+   (`AGENT-TEAM/scripts/preflight.sh`). If the worktree is dirty, behind, diverged, or
+   unexpectedly ahead without Jamie's explicit local-work authorization, stop and open/comment
+   an issue describing the state.
+2. Pick exactly one issue. An issue-driven project task names the issue and arrives with the
+   initiating conversation's `wip` claim; accept that specific claim rather than skipping it.
+   Otherwise skip every existing `wip` and prefer in priority order: `bug`/`regression` (with a
+   clear repro), then `ready`/`approved` `enhancement` issues, then `prompt`/`persona` changes that
+   have an Evaluator-owned regression test. **Skip `proposal`** — Jamie approves by swapping it
+   to `approved` + `ready`. Also skip `needs-design`, `blocked`, or another lane.
+2a. If this task started without a claim, add `wip` before working. Keep the claim until the
+   authoritative handoff is recorded; remove it if you stop without finishing.
+3. Confirm the issue is actionable: it has a clear acceptance criterion and a way to verify. If
+   it does not, comment asking for what's missing, relabel `needs-design`, release `wip` and
+   `dispatch:build`, and end this task. A later selector pass may choose another issue.
 4. Plan the smallest safe change:
    * What is the minimal diff that satisfies the acceptance criterion?
    * What tests prove it works and guard against regression?
@@ -24,16 +37,22 @@ Every run:
 6. Verify before committing:
    * `uv run --locked pytest tests/ -v` passes.
    * If you touched the intent router, a prompt, or a workflow, run the relevant eval harness (`scripts/eval_*.py`) and confirm no regression vs. the issue's baseline.
-7. Commit directly to main with the issue reference (`Closes #N` / `Refs #N`). Push only when the shared git preflight says doing so will not publish unrelated existing commits. Update the issue: what changed, test evidence, and whether a deploy is required. **If the change carries a DB migration, add the `needs-deploy` label and leave the issue open** — it is not done until deployed. You can't invoke Ops directly (roles coordinate only through the queue); you don't need to. Because you never applied the migration to the live DB, it sits **inert** — the running old code keeps using the old schema until the Operations Manager's next run restarts into the new code and applies the migration atomically. Just don't close it, and never deploy/restart yourself.
-8. After each successfully completed issue, decide whether to continue:
-   * **Stop** if the issue now has `needs-deploy`, any verification or push failed, the checkout is not clean and even with `origin/main`, three issues are complete, or less than 30 minutes remain.
-   * Otherwise, refresh the GitHub queue, rerun the shared preflight, and return to step 2. Each iteration gets a fresh claim and must start from a clean checkout synchronized with `origin/main`.
-9. If no issue is actionable: do not invent work. Take one small, safe maintenance step that an open issue already authorizes (e.g. a flaky-test fix), otherwise take no action and stop.
+7. Commit directly to main with the issue reference (`Closes #N` / `Refs #N`). Push only when the
+   shared git preflight says doing so will not publish unrelated existing commits. Update the
+   issue with the change and test evidence. If runtime code, prompts, configuration, or a migration
+   must become live, add `needs-deploy` and `dispatch:operations`; leave the issue open. Pending
+   `needs-eval`/`needs-quality` stays on the issue so Operations can route acceptance after deploy.
+   For an evaluator-only next step that needs no deploy, add `dispatch:evaluator`. Close only when
+   no downstream work remains.
+8. Before finishing an issue-driven task, remove `dispatch:build` and `wip`, then close, enter an
+   explicit human stop state, or leave exactly one next `dispatch:*` label. Never invoke the next
+   role. Do not claim a second issue in this task.
+9. If no issue is actionable: do not invent work. Take no action and stop.
 
 Open an issue instead of changing code when the problem concerns: production health or deploys (`operations`), recommendation quality or persona (`quality`/`persona`), missing measurement (`eval`), or a feature/strategy decision that hasn't been made (`proposal`/`needs-design`).
 
 Hard rules:
-* One issue at a time, one focused change per issue, and one issue per commit. A run may complete up to three issues sequentially; never batch claims, code, tests, or commits across issues.
+* One issue, one focused change, and one commit per visible task.
 * Never commit with failing tests or an unverified eval regression.
 * Never reach into another role's lane — hand off via a labeled issue.
 
