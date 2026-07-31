@@ -164,3 +164,23 @@ def test_meta_overlay_absent_is_not_an_error(conn):
     r = get_deck_recommendations(view="discover", member_tag=TAG, conn=conn)
     assert r["available"] is True
     assert r["meta_snapshot_available"] is False
+
+
+def test_incidental_cards_do_not_become_upgrade_advice(conn):
+    """Everyone dabbles, so some played card is always below max. Without a usage floor
+    a maxed veteran gets "upgrade Bandit" off 1.8% usage — true, and useless."""
+    conn.execute("UPDATE player_card_collection SET level=6 WHERE card_id=1")  # legendary -2
+    # 1 play of the under-levelled card against 60 plays of maxed ones
+    conn.execute(
+        "INSERT INTO battle_card_plays VALUES ('x0','member',1,0,?,'2026-07-01T00:00:00Z')",
+        (TAG,),
+    )
+    for i in range(60):
+        conn.execute(
+            "INSERT INTO battle_card_plays VALUES (?,'member',3,0,?,'2026-07-01T00:00:00Z')",
+            (f"y{i}", TAG),
+        )
+    r = get_deck_recommendations(view="upgrades", member_tag=TAG, conn=conn)
+    assert r["no_material_upgrades"] is True
+    assert r["upgrades"] == []
+    assert r["incidental_cards_below_max"] == 1

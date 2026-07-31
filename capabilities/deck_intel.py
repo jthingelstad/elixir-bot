@@ -44,6 +44,7 @@ CONTRACT_VERSION = 1
 _WAR_DECKS = 4  # a war set is four decks with no card reused
 _MIN_AIR_ANSWERS = 1  # structural floor: a deck with no air answer loses on structure
 _USAGE_SINCE = "2026-06-01"  # window for "cards you actually field"
+_MIN_USAGE_SHARE = 0.04  # a card must be ~1 slot in 1 of 3 decks before an upgrade is advice
 
 
 def _tag(value: str) -> str:
@@ -226,17 +227,28 @@ def _upgrades_view(conn, tag) -> dict[str, Any]:
             }
         )
     rows.sort(key=lambda r: -r["impact"])
+    # Materiality floor. Everyone dabbles, so *some* played card is always below max and
+    # an unfiltered list hands a maxed veteran "upgrade Bandit" off 1.8% usage — advice
+    # that is technically true and practically noise. A card has to be a real part of how
+    # they play before upgrading it is worth saying.
+    material = [r for r in rows if r["usage_share"] >= _MIN_USAGE_SHARE]
     return _envelope(
         "upgrades",
         available=True,
         member_tag=tag,
         battles_sampled=total,
         since=_USAGE_SINCE,
-        upgrades=rows[:8],
+        upgrades=material[:8],
         all_played_cards_maxed=not rows,
+        no_material_upgrades=not material,
+        incidental_cards_below_max=len(rows) - len(material),
+        min_usage_share=_MIN_USAGE_SHARE,
         note=(
             "Ranked by usage x levels_from_max — impact on decks this member actually "
-            "fields. Levels are rarity-relative; levels_from_max is the comparable one."
+            "fields. Levels are rarity-relative; levels_from_max is the comparable one. "
+            "Cards below the usage floor are excluded as incidental. When "
+            "no_material_upgrades is true, say their deck is in good shape rather than "
+            "reaching for a card they barely play."
         ),
     )
 

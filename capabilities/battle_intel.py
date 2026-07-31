@@ -173,18 +173,30 @@ def _nemesis_view(conn, tag, scope, days=None) -> dict[str, Any]:
             "card": _card_label(names.get(cid), evo),
             "n": n,
             "member_win_rate": _win_rate(w, losses),
+            # "worst" is a ranking, not a verdict. With one card clearing the sample
+            # floor, the worst card can still be a winning matchup — this view was
+            # reporting a 58.3% card as a nemesis, and only the model's own scepticism
+            # stopped it going out. Say plainly whether it is actually a losing matchup.
+            "losing_matchup": (_win_rate(w, losses) or 0) < 0.5,
         }
         for cid, evo, w, losses, n in rows
         if _win_rate(w, losses) is not None
     ]
+    top = nemeses[:10]
     return _envelope(
         "nemesis",
         available=True,
         subject=tag or "clan",
         scope=scope,
         window_days=days,
-        nemeses=nemeses[:10],
-        note="Opponent card-forms the member faces most poorly (n>=30, member win rate).",
+        nemeses=top,
+        any_losing_matchup=any(e["losing_matchup"] for e in top),
+        note=(
+            "Opponent card-forms ranked worst-first by member win rate (n>=30). This is a "
+            "RANKING: when losing_matchup is false the member still wins that matchup, so "
+            "do not call it a nemesis. any_losing_matchup=false means there is no card "
+            "they genuinely struggle against at this sample size — say that."
+        ),
     )
 
 
@@ -516,14 +528,20 @@ def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
         upsets=sum(1 for r in rows if r["performance"] == 1),
         underperformances=sum(1 for r in rows if r["performance"] == -1),
         decisive_factors=tally("decisive_factor"),
-        air_matchups=tally("air_matchup"),
-        wincon_pressure=tally("wincon_pressure"),
+        # air_matchup and wincon_pressure are deliberately NOT reported here. Measured
+        # across 12,687 clan battles they are flat against outcome (opponent defense
+        # 4..8 -> 52.7/53.1/53.7/52.8/53.7% vs a 53.6% baseline; air deficit -5..-2 all
+        # within 1.5%), and their raw tallies are lopsided enough to look like findings:
+        # this view was handing back "wincon countered in 118 of 135 battles". They stay
+        # available as DECK descriptions via the deck view; they are not coaching.
         primary_deck_shape=deck_shape,
         lost_to_archetypes=dict(sorted(lost_to.items(), key=lambda kv: -kv[1])[:5]),
         spell_bait_exposed_battles=sum(1 for r in rows if r["spell_bait_exposed"]),
         level_normalized_battles=sum(1 for r in rows if r["level_validity"] == "normalized"),
         note="Structural aggregate over recent battles. level_gap claims are valid only "
-        "where level_validity='real'; normalized modes (ranked, Showdown) cap card levels.",
+        "where level_validity='real'; normalized modes (ranked, Showdown) cap card levels. "
+        "decisive_factors carries only factors measured to separate outcome — do not "
+        "coach on deck-composition tallies, which are flat against winning.",
     )
 
 
@@ -568,9 +586,16 @@ def _newcomer_view(conn, tag) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 - a welcome must never fail on deck naming
         deck = None
 
+    # Card levels are RARITY-RELATIVE: legendary maxes at 8, epic at 11, rare at 14,
+    # common at 16. The old `level >= 14` test was wrong in BOTH directions — it could
+    # not see a maxed legendary or epic (33 of Vijay's 72 maxed cards were invisible)
+    # and it counted a common at 14/16 as maxed (King Thing read 13 for 10 real).
+    # Compare against the card's own max_level, never a fixed number.
     collection = conn.execute(
-        "SELECT COUNT(*) known, SUM(level >= 14) maxed, SUM(evolution_level >= 1) evos "
-        "FROM player_card_collection WHERE player_tag = ?",
+        "SELECT COUNT(*) known, SUM(pc.level = c.max_level) maxed, "
+        "SUM(pc.evolution_level >= 1) evos "
+        "FROM player_card_collection pc JOIN card_catalog c USING(card_id) "
+        "WHERE pc.player_tag = ?",
         (tag,),
     ).fetchone()
     form = conn.execute(
@@ -597,7 +622,7 @@ def _newcomer_view(conn, tag) -> dict[str, Any]:
         arena=state["arena_name"],
         deck=deck,
         cards_known=collection["known"] if collection else None,
-        cards_at_14_plus=collection["maxed"] if collection else None,
+        cards_maxed=collection["maxed"] if collection else None,
         evolutions_unlocked=collection["evos"] if collection else None,
         years_played=meta["years"] if meta else None,
         career_wins=meta["career_wins"] if meta else None,
