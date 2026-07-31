@@ -102,12 +102,13 @@ def _chat_model_name():
 
 
 def _creative_model_name():
-    return os.getenv("ELIXIR_CREATIVE_MODEL", "claude-opus-4-8")
+    return os.getenv("ELIXIR_CREATIVE_MODEL", "claude-opus-5")
 
 
 def _intensive_model_name():
     # Low-volume intensive writing: release notes, weekly recap, scouting.
-    return os.getenv("ELIXIR_INTENSIVE_MODEL", "claude-opus-4-8")
+    # Opus 5 (2026-07-31): ~30 calls/week where writing quality IS the product.
+    return os.getenv("ELIXIR_INTENSIVE_MODEL", "claude-opus-5")
 
 
 def _lightweight_model_name():

@@ -1677,7 +1677,7 @@ def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
                 workflow=workflow,
                 messages=[{"role": "user", "content": "status"}],
             )
-            assert create.call_args.kwargs["model"] == "claude-opus-4-8", workflow
+            assert create.call_args.kwargs["model"] == "claude-opus-5", workflow
 
 
 def test_synthesize_leader_action_feedback_uses_strict_profile_schema():
