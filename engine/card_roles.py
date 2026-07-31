@@ -130,11 +130,11 @@ def air_matchup(our: dict, their: dict) -> Optional[str]:
     our_answers = our.get("air_answer_count", 0)
     if their_air == 0:
         return "untested"
-    if our_answers == 0:
+    # Thresholds are calibrated to the observed spread (0-6, median 4): "stressed"
+    # is the bottom tail, "favored" the top, so each tag means something.
+    if our_answers <= 1 or (our_answers == 2 and their_air >= 3):
         return "stressed"
-    if our_answers == 1 and their_air >= 2:
-        return "stressed"
-    return "favored" if our_answers >= 3 else "even"
+    return "favored" if our_answers >= 5 else "even"
 
 
 def wincon_pressure(our: dict, their: dict) -> Optional[str]:
@@ -146,9 +146,11 @@ def wincon_pressure(our: dict, their: dict) -> Optional[str]:
     if not their:
         return None
     defense = their.get("tank_answer_count", 0) + their.get("splash_answer_count", 0)
-    if defense == 0:
+    # Observed spread is 2-8 with median 5, so "countered" is the top tail (>=7) and
+    # "clear" the bottom (<=3). An earlier >=4 cut tagged 92% of decks "countered".
+    if defense <= 3:
         return "clear"
-    return "countered" if defense >= 4 else "contested"
+    return "countered" if defense >= 7 else "contested"
 
 
 def spell_bait_exposed(our: dict, their: dict) -> Optional[int]:
