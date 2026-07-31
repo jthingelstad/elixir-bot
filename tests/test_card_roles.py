@@ -68,14 +68,17 @@ def test_air_matchup_flags_an_air_hole():
     no_air = {"air_answer_count": 0}
     flying = {"air_threat_count": 2}
     assert air_matchup(no_air, flying) == "stressed"
-    assert air_matchup({"air_answer_count": 3}, flying) == "favored"
+    assert air_matchup({"air_answer_count": 5}, flying) == "favored"
+    assert air_matchup({"air_answer_count": 4}, flying) == "even"  # the common case
     assert air_matchup(no_air, {"air_threat_count": 0}) == "untested"
 
 
 def test_wincon_pressure():
     ours = {"win_condition_count": 1}
-    assert wincon_pressure(ours, {"tank_answer_count": 3, "splash_answer_count": 2}) == "countered"
-    assert wincon_pressure(ours, {"tank_answer_count": 0, "splash_answer_count": 0}) == "clear"
+    # Calibrated to the real spread (2-8, median 5): 5 is typical, not "countered".
+    assert wincon_pressure(ours, {"tank_answer_count": 3, "splash_answer_count": 2}) == "contested"
+    assert wincon_pressure(ours, {"tank_answer_count": 4, "splash_answer_count": 3}) == "countered"
+    assert wincon_pressure(ours, {"tank_answer_count": 1, "splash_answer_count": 1}) == "clear"
     assert wincon_pressure({"win_condition_count": 0}, {}) == "no_wincon"
 
 
