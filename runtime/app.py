@@ -292,6 +292,7 @@ from runtime.helpers import (  # noqa: E402,F401  # noqa: E402,F401
     _with_leader_ping,
 )
 from runtime.jobs._battle_intel import (  # noqa: E402,F401
+    _battle_intel_prose,
     _battle_intel_stage_a,
     _battle_intel_stage_b,
 )

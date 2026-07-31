@@ -232,6 +232,17 @@ _WORKFLOW_SPECS = (
         model_family="chat",
         tools_allowed=False,
     ),
+    WorkflowSpec(
+        # Battle Intelligence Feature 3: per-battle prose. No tools — the model
+        # explains the computed numbers it is handed (it never fetches). Haiku
+        # (lightweight), gated to a tiny allowlist so it stays ~$1/mo.
+        "battle_prose",
+        response_schema={"required": ["commentary", "notable"]},
+        tools=[],
+        max_tool_rounds=1,
+        model_family="lightweight",
+        tools_allowed=False,
+    ),
     # weekly_recap: brain-powered Weekly Clan Recap (rebuilt 2026-07-11 to
     # compose from the awareness read via tools, like ask_elixir_daily). The
     # workflow key stays "weekly_recap" for lane-routing stability.

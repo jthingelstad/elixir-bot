@@ -149,6 +149,7 @@ def _battle_view(conn, tag, limit) -> dict[str, Any]:
         "SELECT e.battle_time, b.outcome, b.opponent_name, b.game_mode_name, "
         "e.hp_margin, e.closeness, e.discipline_delta, e.level_gap, "
         "e.our_deck_hash, e.their_deck_hash, e.expected_advantage, e.performance, "
+        "e.commentary, e.loss_nature, e.notable, e.confidence, "
         "op.archetype our_archetype, tp.archetype their_archetype, b.is_ranked "
         "FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
         "LEFT JOIN deck_profile op ON op.deck_hash = e.our_deck_hash "
@@ -179,6 +180,9 @@ def _battle_view(conn, tag, limit) -> dict[str, Any]:
                 "vs_expectation": perf_word.get(r["performance"])
                 if r["performance"] is not None
                 else None,
+                "commentary": r["commentary"],
+                "loss_nature": r["loss_nature"],
+                "notable": bool(r["notable"]) if r["notable"] is not None else None,
                 "our_deck_hash": r["our_deck_hash"],
                 "their_deck_hash": r["their_deck_hash"],
             }
@@ -188,8 +192,9 @@ def _battle_view(conn, tag, limit) -> dict[str, Any]:
         available=bool(battles),
         subject=tag,
         battles=battles,
-        note="Computed read only (no commentary in Feature 1). closeness/hp_margin "
-        "need both sides' tower data; NULL where absent.",
+        note="commentary is present only for allowlisted members (gated); NULL means "
+        "prose was not generated for this member, not that the battle was unremarkable. "
+        "closeness/hp_margin need both sides' tower data.",
     )
 
 
@@ -218,6 +223,23 @@ def _member_summary_view(conn, tag) -> dict[str, Any]:
         for cid, evo, w, losses, n in cards
         if _win_rate(w, losses) is not None
     ]
+    # Prose (present only for allowlisted members): a few recent lines + the
+    # loss_nature mix. Absent for non-allowlisted members (computed rollup still returns).
+    recent_commentary = [
+        row["commentary"]
+        for row in conn.execute(
+            "SELECT commentary FROM battle_enrichment WHERE player_tag = ? AND commentary IS NOT NULL "
+            "ORDER BY battle_time DESC LIMIT 3",
+            (tag,),
+        ).fetchall()
+    ]
+    loss_nature_mix = dict(
+        conn.execute(
+            "SELECT loss_nature, COUNT(*) FROM battle_enrichment WHERE player_tag = ? "
+            "AND loss_nature IS NOT NULL GROUP BY loss_nature",
+            (tag,),
+        ).fetchall()
+    )
     return _envelope(
         "member_summary",
         available=True,
@@ -231,7 +253,10 @@ def _member_summary_view(conn, tag) -> dict[str, Any]:
         else None,
         best_cards=ranked[:5],
         worst_cards=ranked[5:][::-1][:5],  # ranked 6th-onward, worst first; no overlap with best
-        note="Computed rollup (no prose). Card win rates are member-plays-it, n>=30.",
+        recent_commentary=recent_commentary,  # empty for non-allowlisted members
+        loss_nature_mix=loss_nature_mix,
+        note="Card win rates are member-plays-it, n>=30. commentary/loss_nature present "
+        "only for allowlisted members; their absence is not 'no issues'.",
     )
 
 

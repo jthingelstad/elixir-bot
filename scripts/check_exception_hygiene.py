@@ -42,7 +42,7 @@ BROAD_EXCEPTION_BASELINE = {
     # even with no database; an unavailable floor renders as "read it live"
     # rather than a guessed number.
     "prompts.py": 1,
-    "db/schema.py": 28,  # +1: V28 migration rollback/re-raise (same pattern as v2-v27)
+    "db/schema.py": 29,  # +1: V29 migration rollback/re-raise (same pattern as v2-v28)
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
@@ -72,7 +72,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/helpers/_members.py": 2,
     "runtime/helpers/_reports.py": 10,
     "runtime/jobs/_core.py": 15,
-    "runtime/jobs/_battle_intel.py": 2,  # Stage-A + Stage-B jobs: mark_job_failure on any tick error
+    "runtime/jobs/_battle_intel.py": 3,  # Stage-A/B + prose jobs: mark_job_failure on any tick error
     "runtime/jobs/_intel.py": 4,
     "runtime/jobs/_maintenance.py": 4,
     "runtime/jobs/_memory.py": 23,  # +1: optional contradiction-card channel lookup fails soft (#229)
@@ -92,6 +92,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/webapp/routes.py": 4,
     "runtime/webapp/ticks.py": 2,
     "storage/_formatting.py": 2,
+    "storage/battle_intel.py": 1,  # prose worker: one battle's LLM failure must not stop the batch
     "storage/identity.py": 2,
     # storage/incidents.py removed with the ledger it wrote (2026-07-28).
     "storage/leader_actions.py": 2,
