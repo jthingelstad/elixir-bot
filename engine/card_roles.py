@@ -172,21 +172,26 @@ def decisive_factor(
 ) -> str:
     """The single biggest driver of this battle's result, ranked.
 
-    This is what kills the elixir-discipline crutch: the driver is a computed ranking
-    over the strongest available signal, not the model's fallback narrative. Structural
-    reads (air hole, walled win condition) outrank elixir because they are the thing a
-    player can actually change about their deck.
+    Every rank below is a factor MEASURED to separate outcome across 12,687 clan
+    battles (53.6% baseline). ``air`` and ``wincon`` are accepted for signature
+    compatibility but deliberately unused: at complete card-facts coverage their
+    win rates are flat, so they describe a deck without diagnosing a battle.
+
+        card_levels   level_gap -3 -> 48.7%, +2 -> 61.4%, +4 -> 71.1% (monotonic)
+        elixir_mgmt   |delta| >= 3.5 splits 41.1% / 65.1%
+        coin_flip     closeness band 3 is the measured toss-up
+        (dropped)     opponent defense 4..8 -> 52.7/53.1/53.7/52.8/53.7%, flat
+        (dropped)     air deficit -5..-2 -> all within 1.5% of baseline
+
+    Card levels outrank elixir because levels are the thing a player can act on,
+    and because elixir leak is partly an EFFECT of losing rather than a cause.
     """
     if level_ok and level_gap is not None and abs(level_gap) >= 2.0:
         return "card_levels"
-    if air == "stressed":
-        return "air_defense"
-    if wincon == "countered":
-        return "wincon_walled"
+    if discipline_delta is not None and abs(discipline_delta) >= 3.5:
+        return "elixir_management"
     if closeness == 3:
         return "coin_flip"
-    if discipline_delta is not None and abs(discipline_delta) >= 3.0:
-        return "elixir_management"
     if performance:
         return "matchup"
     return "even_game"

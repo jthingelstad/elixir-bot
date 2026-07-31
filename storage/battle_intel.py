@@ -379,8 +379,12 @@ def _fill_deck_facts(conn) -> int:
     if not facts:
         return 0
     updated = 0
+    # Retry decks marked incomplete, not just never-scored ones. A deck scored while
+    # the card enricher was still running got counts from a partial fact table; without
+    # this it would keep those wrong counts forever, because its own `facts_complete=0`
+    # stamp excluded it from the next pass.
     rows = conn.execute(
-        "SELECT deck_hash FROM deck_profile WHERE facts_complete IS NULL"
+        "SELECT deck_hash FROM deck_profile WHERE facts_complete IS NULL OR facts_complete = 0"
     ).fetchall()
     for r in rows:
         card_facts = _deck_card_facts(conn, r["deck_hash"], facts)
@@ -424,8 +428,12 @@ def _deck_summary(conn, deck_hash: str, facts: dict) -> dict:
     return d
 
 
-def _fill_battle_tags(conn, limit: int = 5000) -> int:
-    """Snapshot per-battle structural tags for battles that don't have them yet."""
+def _fill_battle_tags(conn, limit: Optional[int] = 5000, force: bool = False) -> int:
+    """Snapshot per-battle structural tags for battles that don't have them yet.
+
+    ``force`` re-tags every battle (see ``rebuild_interpreted``); ``limit=None`` lifts
+    the batch cap so a forced sweep completes in one pass.
+    """
     from engine.card_roles import (
         air_matchup,
         decisive_factor,
@@ -437,13 +445,27 @@ def _fill_battle_tags(conn, limit: int = 5000) -> int:
     facts = _card_facts_map(conn)
     if not facts:
         return 0
-    rows = conn.execute(
+    where = (
+        "1=1"
+        if force
+        else (
+            "e.level_validity IS NULL OR EXISTS ("
+            "  SELECT 1 FROM deck_profile dp"
+            "  WHERE dp.deck_hash IN (e.our_deck_hash, e.their_deck_hash)"
+            "    AND COALESCE(dp.facts_complete, 0) = 0)"
+        )
+    )
+    sql = (
         "SELECT e.battle_dedup_key, e.our_deck_hash, e.their_deck_hash, e.level_gap, "
         "e.closeness, e.discipline_delta, e.performance, b.game_mode_name, b.is_ranked "
         "FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
-        "WHERE e.level_validity IS NULL LIMIT ?",
-        (limit,),
-    ).fetchall()
+        f"WHERE {where}"
+    )
+    params: tuple = ()
+    if limit is not None:
+        sql += " LIMIT ?"
+        params = (limit,)
+    rows = conn.execute(sql, params).fetchall()
     cache: dict = {}
     updated = 0
     for r in rows:
@@ -483,9 +505,22 @@ def _fill_battle_tags(conn, limit: int = 5000) -> int:
 
 
 @managed_connection
-def rebuild_interpreted(*, conn: Optional[sqlite3.Connection] = None) -> dict:
+def rebuild_interpreted(*, force: bool = False, conn: Optional[sqlite3.Connection] = None) -> dict:
     """v2 Layers 2-3 (all $0): deck facts from enriched card facts, then per-battle
-    structural tags. Safe to re-run; only fills what is missing."""
+    structural tags. Safe to re-run; only fills what is missing.
+
+    ``force`` re-tags every battle regardless of state. Needed after the card-facts
+    table gains coverage, because a battle tagged against partial facts looks settled:
+    its decks are complete now, so the incremental guard would skip it.
+    """
     decks = _fill_deck_facts(conn)
-    battles = _fill_battle_tags(conn)
+    if force:
+        battles = _fill_battle_tags(conn, limit=None, force=True)
+    else:
+        battles = 0
+        while True:
+            n = _fill_battle_tags(conn)
+            battles += n
+            if not n:
+                break
     return {"deck_facts": decks, "battle_tags": battles}

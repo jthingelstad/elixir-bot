@@ -88,11 +88,30 @@ def test_spell_bait_exposed():
     assert spell_bait_exposed(baity, {"has_small_spell": 0}) == 0
 
 
-def test_decisive_factor_ranks_structure_over_elixir():
-    """The elixir crutch fix: a real air hole outranks an elixir delta."""
+def test_decisive_factor_ignores_unpredictive_structure():
+    """air/wincon must NEVER drive the read: measured against 12,687 clan battles
+    both are flat vs outcome, so citing them would narrate noise as a cause."""
+    for air, wincon in (("stressed", "countered"), ("favored", "clear")):
+        assert (
+            decisive_factor(
+                level_gap=0.1,
+                level_ok=True,
+                closeness=1,
+                discipline_delta=0.0,
+                performance=0,
+                air=air,
+                wincon=wincon,
+            )
+            == "even_game"
+        )
+
+
+def test_decisive_factor_ranks_levels_over_elixir():
+    """Card levels outrank elixir: levels are monotonic vs outcome AND actionable,
+    while elixir leak is partly an effect of already losing."""
     assert (
         decisive_factor(
-            level_gap=0.1,
+            level_gap=2.5,
             level_ok=True,
             closeness=1,
             discipline_delta=9.0,
@@ -100,9 +119,9 @@ def test_decisive_factor_ranks_structure_over_elixir():
             air="stressed",
             wincon="clear",
         )
-        == "air_defense"
+        == "card_levels"
     )
-    # elixir only wins when nothing structural explains it
+    # elixir still wins when levels are even
     assert (
         decisive_factor(
             level_gap=0.1,
