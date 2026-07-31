@@ -42,7 +42,7 @@ BROAD_EXCEPTION_BASELINE = {
     # even with no database; an unavailable floor renders as "read it live"
     # rather than a guessed number.
     "prompts.py": 1,
-    "db/schema.py": 27,  # +1: V27 migration rollback/re-raise (same pattern as v2-v26)
+    "db/schema.py": 28,  # +1: V28 migration rollback/re-raise (same pattern as v2-v27)
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
@@ -72,7 +72,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/helpers/_members.py": 2,
     "runtime/helpers/_reports.py": 10,
     "runtime/jobs/_core.py": 15,
-    "runtime/jobs/_battle_intel.py": 1,  # Stage-A job: mark_job_failure on any tick error
+    "runtime/jobs/_battle_intel.py": 2,  # Stage-A + Stage-B jobs: mark_job_failure on any tick error
     "runtime/jobs/_intel.py": 4,
     "runtime/jobs/_maintenance.py": 4,
     "runtime/jobs/_memory.py": 23,  # +1: optional contradiction-card channel lookup fails soft (#229)

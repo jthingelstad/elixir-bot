@@ -25,7 +25,12 @@ TOOLS = [
             "- battle: a member's recent battles with their computed read (margin, how "
             "close, elixir discipline, deck-level gap). Requires 'member_tag'.\n"
             "- member_summary: a member's computed rollup (record, stomps/squeakers, "
-            "discipline, best/worst cards). Requires 'member_tag'.\n\n"
+            "discipline, best/worst cards). Requires 'member_tag'.\n"
+            "- deck: a member's observed decks with rules archetype, avg elixir, and W/L. "
+            "Requires 'member_tag'.\n"
+            "- matchup: measured advantage (-2..+2) for a deck FAMILY vs family "
+            "(beatdown/control/cycle/bait/bridge spam/siege), from clan outcomes. Pass "
+            "our_family and/or their_family, or omit for the whole 6x6 matrix.\n\n"
             "Statistical floor: win-rate claims need n>=30; below that the view returns "
             "insufficient_sample with the real n, never a weak number. Ranked (Path of "
             "Legends) suppresses level_gap (levels are normalized)."
@@ -35,17 +40,27 @@ TOOLS = [
             "properties": {
                 "view": {
                     "type": "string",
-                    "enum": ["card", "nemesis", "battle", "member_summary"],
+                    "enum": ["card", "nemesis", "battle", "member_summary", "deck", "matchup"],
                     "default": "battle",
                 },
                 "member_tag": {
                     "type": "string",
                     "description": "Player tag, name, alias, or Discord handle. Required for "
-                    "battle/member_summary; optional for card/nemesis (omit for clan-wide).",
+                    "battle/member_summary/deck; optional for card/nemesis (omit for clan-wide).",
                 },
                 "card": {
                     "type": "string",
                     "description": "Card name for the 'card' view (e.g. 'Bats', 'Royal Hogs').",
+                },
+                "our_family": {
+                    "type": "string",
+                    "enum": ["beatdown", "control", "cycle", "bait", "bridge spam", "siege"],
+                    "description": "Deck family for the 'matchup' view (attacker perspective).",
+                },
+                "their_family": {
+                    "type": "string",
+                    "enum": ["beatdown", "control", "cycle", "bait", "bridge spam", "siege"],
+                    "description": "Opponent deck family for the 'matchup' view.",
                 },
                 "scope": {
                     "type": "string",

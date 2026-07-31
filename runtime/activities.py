@@ -76,6 +76,24 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         activity_role="observer",
     ),
     ActivityDefinition(
+        activity_key="battle-intel-stage-b",
+        owner_lane="elixir-log",
+        purpose="Battle Intelligence Feature 2 (computed, no LLM): profile decks "
+        "with the rules classifier, recompute the MEASURED family matchup matrix "
+        "(all 36 cells clear n>=30 on live data), and fill expected_advantage / "
+        "performance (the upset detector). $0.",
+        job_id="battle-intel-stage-b",
+        job_function="_battle_intel_stage_b",
+        schedule_kind="interval",
+        schedule_config={
+            "minutes": _attr("BATTLE_INTEL_STAGE_B_MINUTES", 60),
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=("Storage: deck_profile + matchup_expectation + expected_advantage",),
+        activity_role="observer",
+    ),
+    ActivityDefinition(
         activity_key="weekly-leadership-review",
         owner_lane="actions",
         purpose="Q1's weekly batch half: roll the management week (hysteresis "

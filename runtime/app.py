@@ -293,6 +293,7 @@ from runtime.helpers import (  # noqa: E402,F401  # noqa: E402,F401
 )
 from runtime.jobs._battle_intel import (  # noqa: E402,F401
     _battle_intel_stage_a,
+    _battle_intel_stage_b,
 )
 from runtime.jobs._core import (  # noqa: E402,F401
     WEEKLY_DISCORD_INVITE_RELAY_DAY,
