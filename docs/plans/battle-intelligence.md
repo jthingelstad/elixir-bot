@@ -85,13 +85,13 @@ by the append-only battle stream is arithmetic.
 
 Two tiers, and the split is deliberate:
 
-- **Data + intelligence — universal.** All members, all battles, all time. The
-  computed layers (Feature 1) and the deck/matchup intelligence (Feature 2) are
-  built for everyone — decks and matchups aren't per-player. Cheap because
-  **archetype labels are now rules ($0)** and the only LLM spend is the ≤400-cell
-  matchup matrix (~$1/era) plus optional dimensional scores on the *meaningful*
-  decks (member decks ∪ decks seen ≥3× ≈ 2k). We want the whole structure in
-  place so the feature can evolve without re-backfilling data.
+- **Data + intelligence — universal, no frequency floor.** All members, all
+  battles, all time, and **every deck classified regardless of how often it
+  recurs** — archetype is a $0 rules call, so there is no worklist and no
+  "seen ≥3×" gate (that floor only ever existed to cap LLM per-deck profiling,
+  which we deleted). The only LLM spend is the ≤36-cell `family` matchup matrix
+  (~$1/era). We want the whole structure in place so the feature can evolve
+  without re-backfilling data.
 - **Per-battle prose — gated.** The one genuinely per-player, iterate-heavy,
   regenerate-often LLM output (`loss_nature`/`notable`/`commentary`, Feature 3)
   is gated to an **allowlist** (`battle_enrichment_enabled` on `player_metadata`;
