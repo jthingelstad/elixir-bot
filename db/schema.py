@@ -13,8 +13,8 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 26
-EXPECTED_TABLE_COUNT = 59
+CURRENT_SCHEMA_VERSION = 27
+EXPECTED_TABLE_COUNT = 61
 
 
 def initialize_empty_database(
@@ -318,6 +318,16 @@ REQUIRED_SCHEMA = {
         "note_interpret_note_hash",
         "premise_rejected",
         "premise_fingerprint",
+    },
+    "battle_card_plays": {"battle_dedup_key", "side", "card_id", "player_tag", "battle_time"},
+    "battle_enrichment": {
+        "battle_dedup_key",
+        "player_tag",
+        "battle_time",
+        "hp_margin",
+        "closeness",
+        "our_deck_hash",
+        "their_deck_hash",
     },
 }
 
@@ -1354,6 +1364,84 @@ def _apply_v26(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v27(conn: sqlite3.Connection) -> None:
+    """Battle Intelligence Feature 1: the computed foundation.
+
+    Two derived, dedup-keyed tables (docs/plans/battle-intelligence-1-data.md):
+
+    * ``battle_card_plays`` — every card played on BOTH sides of every 1v1
+      battle (member + opponent), form-aware. The subject member's tag is
+      stamped on both sides for index locality; ``battle_time``/``outcome``/
+      ``mode_group``/``is_competitive`` are denormalized from ``battle_events``
+      so card win-rate queries never join back.
+    * ``battle_enrichment`` — one row per 1v1 battle. The full column shape ships
+      now (so Features 2-3 fill columns, never ``ALTER``); Feature 1 populates
+      only the computed ones (``hp_margin``/``closeness``/``discipline_delta``/
+      ``level_gap``/``our_deck_hash``/``their_deck_hash``). ``battle_time`` is
+      denormalized (rebuildable, and the table is derived anyway) so the
+      per-member time-axis index needs no join. The Feature-2/3 columns stay
+      NULL until those features land.
+
+    Both key on ``battle_events.dedup_key`` verbatim (the v25/v26 lesson); the
+    Stage-A worker backfills rows with ``INSERT OR IGNORE``. Duels
+    (``rounds_json``) and 2v2 (``teammate_tag``) get no rows.
+
+    The ``loss_nature`` CHECK keeps an explicit ``IS NULL OR`` guard so Feature 1's
+    computed-only inserts (which leave it NULL) pass on every SQLite build.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS battle_card_plays (
+            battle_dedup_key TEXT NOT NULL REFERENCES battle_events(dedup_key),
+            side             TEXT NOT NULL CHECK (side IN ('member', 'opponent')),
+            card_id          INTEGER NOT NULL,
+            level            INTEGER,
+            evolution_level  INTEGER,
+            star_level       INTEGER,
+            player_tag       TEXT NOT NULL,
+            battle_time      TEXT NOT NULL,
+            outcome          TEXT,
+            mode_group       TEXT,
+            is_competitive   INTEGER,
+            PRIMARY KEY (battle_dedup_key, side, card_id)
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bcp_card ON battle_card_plays(card_id, side, battle_time)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bcp_member_card ON battle_card_plays(player_tag, card_id, side)"
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS battle_enrichment (
+            battle_dedup_key TEXT PRIMARY KEY REFERENCES battle_events(dedup_key),
+            player_tag       TEXT NOT NULL,
+            battle_time      TEXT NOT NULL,
+            hp_margin        INTEGER,
+            closeness        INTEGER,
+            discipline_delta REAL,
+            level_gap        REAL,
+            our_deck_hash    TEXT,
+            their_deck_hash  TEXT,
+            expected_advantage INTEGER,
+            performance      INTEGER,
+            loss_nature      TEXT CHECK (loss_nature IS NULL OR loss_nature IN
+                             ('structural', 'piloting', 'level', 'close', 'unclear')),
+            notable          INTEGER NOT NULL DEFAULT 0,
+            confidence       TEXT,
+            commentary       TEXT,
+            coaching_note    TEXT,
+            verdict          TEXT,
+            model            TEXT,
+            prompt_version   INTEGER,
+            input_hash       TEXT,
+            enriched_at      TEXT
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_be_player_time ON battle_enrichment(player_tag, battle_time)"
+    )
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1600,6 +1688,14 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+    if version < 27:
+        try:
+            _apply_v27(conn)
+            conn.execute("PRAGMA user_version = 27")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1789,7 +1885,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "f7e93fe16dc820800d71b423f01900402b7e81cf8eacc50a259eb635670dde5c"
+CURRENT_SCHEMA_FINGERPRINT = "665ed192c29bb8ee0f4dfc70246e87b583d6f37b24379a0461ef92da39f9445c"
 
 
 __all__ = [
