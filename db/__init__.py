@@ -611,7 +611,26 @@ def _configure_connection(conn: sqlite3.Connection, path: str) -> None:
         conn.execute("PRAGMA busy_timeout = 30000")
 
 
-def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
+def get_connection(db_path: Optional[str] = None, *, migrate: bool = False) -> sqlite3.Connection:
+    """Open a connection to a database that is ALREADY at the current schema.
+
+    ``migrate`` defaults to **False**: connecting never upgrades an existing
+    database. If the database is behind (or ahead of) this build, the call raises
+    with instructions instead of silently changing production data.
+
+    This default is deliberate and was learned twice the hard way. Migrate-on-connect
+    meant *any* process — a one-off script, a validation snippet, a background job
+    that inherited ``ELIXIR_DB_PATH`` from ``.env`` — silently applied a brand-new
+    ``_apply_vN`` to the live database the moment it connected. The running bot, still
+    on the older build, then failed every tick with "schema newer than this build".
+    A migration is a deploy; it must be an explicit act, not a side effect of opening
+    a file.
+
+    Exactly one caller should pass ``migrate=True``: the bot's startup
+    (``db.migrate_to_current()`` in ``runtime/app.py``). An **empty** database is
+    still initialized on connect — creating a fresh schema destroys nothing and the
+    test fixtures depend on it.
+    """
     path = os.fspath(db_path or _resolve_db_path())
     conn = sqlite3.connect(path)
     # Inspect a possibly mispointed database before enabling WAL or changing
@@ -631,15 +650,49 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
             f"docs/reference/v5.1/migration.md."
         )
     _configure_connection(conn, path)
-    from db.schema import apply_schema_migrations, initialize_empty_database
+    from db.schema import (
+        CURRENT_SCHEMA_VERSION,
+        apply_schema_migrations,
+        initialize_empty_database,
+    )
 
     if not tables:
         # Empty DB (tests, scratch work): use the same complete builder as the
         # fixture template rather than reassembling schema pieces here.
         initialize_empty_database(conn)
-    else:
+        return conn
+    if migrate:
         apply_schema_migrations(conn)
+        return conn
+    version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    if version != CURRENT_SCHEMA_VERSION:
+        conn.close()
+        raise SchemaNotCurrentError(
+            f"Database at {path} is at schema v{version}; this build expects "
+            f"v{CURRENT_SCHEMA_VERSION}. Connecting does NOT migrate — a migration is "
+            f"a deploy. If this is intended, run it explicitly:\n"
+            f"    python -c \"import db; db.migrate_to_current('{path}')\"\n"
+            f"and restart the bot so the running build matches. If you did NOT mean to "
+            f"touch this database, check ELIXIR_DB_PATH — sourcing .env overrides it."
+        )
     return conn
+
+
+class SchemaNotCurrentError(RuntimeError):
+    """The database's schema version does not match this build (and we did not migrate)."""
+
+
+def migrate_to_current(db_path: Optional[str] = None) -> int:
+    """Explicitly bring a database up to this build's schema. Returns the new version.
+
+    The ONLY supported way to migrate. Called once at bot startup; run by hand for a
+    deploy. Every other connection asserts instead of upgrading.
+    """
+    conn = get_connection(db_path, migrate=True)
+    try:
+        return int(conn.execute("PRAGMA user_version").fetchone()[0])
+    finally:
+        conn.close()
 
 
 def managed_connection(fn: Callable) -> Callable:
@@ -985,6 +1038,8 @@ _CORE_EXPORTS = {
     "CONVERSATION_MAX_PER_SCOPE",
     "CONVERSATION_RETENTION_DAYS",
     "DB_PATH",
+    "migrate_to_current",
+    "SchemaNotCurrentError",
     "LLM_CALL_RETENTION_DAYS",
     "LLM_PROMPT_RETENTION_DAYS",
     "PLAYER_EVENT_RETENTION_DAYS",
