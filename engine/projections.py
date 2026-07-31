@@ -540,3 +540,68 @@ def refresh_management_inputs(conn, player_tag, now=None):
             len(days),
         ),
     )
+
+
+# Badge-derived profile facts. These live in player_metadata and had NO ongoing
+# writer: the values present today were COPIED FORWARD by the one-time v5.1
+# migration transform (2026-07-03/04) from a pre-v5.1 code path, and that transform
+# was deleted as a dead script on 2026-07-29. So the columns had been frozen for
+# ~4 weeks and every member who joined after the cutover had none — which is why a
+# new member's welcome had nothing to say but trophies. This is the ingest that
+# should always have existed.
+#
+# Collection Level is the CURRENT progression number (expLevel is deprecated and
+# actively misleading — a 7k-trophy account can report King level 1). It arrives as
+# a BADGE, not a field: the top-level `collectionLevel` key is a stub that reads 0.
+_COLLECTION_BADGE = "CollectionLevel"
+_YEARS_BADGE = "YearsPlayed"
+
+
+def _badge_map(profile_payload) -> dict:
+    badges = (profile_payload or {}).get("badges")
+    if not isinstance(badges, list):
+        return {}
+    return {b.get("name"): b for b in badges if isinstance(b, dict) and b.get("name")}
+
+
+def refresh_profile_metadata(conn, player_tag, profile_payload, observed_at) -> bool:
+    """Write the badge-derived facts from a player profile into player_metadata.
+
+    Returns True when something was written. Every field is independently optional —
+    the YearsPlayed badge is genuinely absent for some accounts, so it must never
+    block the Collection Level write. Timestamps are stamped per group so staleness
+    is visible rather than silently assumed fresh.
+    """
+    from db import _upsert_member_metadata
+
+    p = profile_payload or {}
+    badges = _badge_map(p)
+    fields: dict = {}
+
+    collection = badges.get(_COLLECTION_BADGE)
+    if isinstance(collection, dict) and collection.get("progress") is not None:
+        # `progress` is the Collection Level itself; level/maxLevel are the badge tier.
+        fields["cr_collection_level"] = collection.get("progress")
+        fields["cr_collection_level_badge_tier"] = collection.get("level")
+        fields["cr_collection_level_badge_max_tier"] = collection.get("maxLevel")
+        fields["cr_collection_level_updated_at"] = observed_at
+
+    years = badges.get(_YEARS_BADGE)
+    if isinstance(years, dict) and years.get("level") is not None:
+        # The YearsPlayed badge's `level` IS the number of years played.
+        fields["cr_account_age_years"] = years.get("level")
+        fields["cr_account_age_updated_at"] = observed_at
+
+    wins = p.get("wins")
+    if isinstance(wins, int):
+        fields["cr_battle_wins"] = wins
+    war_wins = p.get("warDayWins")
+    if isinstance(war_wins, int):
+        fields["cr_clan_war_wins"] = war_wins
+    donations = p.get("totalDonations")
+    if isinstance(donations, int):
+        fields["cr_clan_donations"] = donations
+    if fields:
+        fields["cr_profile_badges_updated_at"] = observed_at
+        _upsert_member_metadata(conn, canon_tag(player_tag), **fields)
+    return bool(fields)

@@ -458,7 +458,7 @@ def _newcomer_view(conn, tag) -> dict[str, Any]:
     if not tag:
         return _envelope("newcomer", available=False, error="member_tag_required")
     state = conn.execute(
-        "SELECT exp_level, trophies, best_trophies, arena_name, current_deck_json, "
+        "SELECT trophies, best_trophies, arena_name, current_deck_json, "
         "donations_week FROM player_current_state WHERE player_tag = ?",
         (tag,),
     ).fetchone()
@@ -506,7 +506,10 @@ def _newcomer_view(conn, tag) -> dict[str, Any]:
         "newcomer",
         available=True,
         subject=tag,
-        king_level=state["exp_level"],
+        # expLevel (King level) is DEPRECATED and actively misleading — a 7k-trophy
+        # account can report King level 1. Collection Level is the current progression
+        # number, and it arrives as a badge (see engine.projections).
+        collection_level=meta["collection_level"] if meta else None,
         trophies=state["trophies"],
         best_trophies=state["best_trophies"],
         arena=state["arena_name"],
@@ -515,12 +518,12 @@ def _newcomer_view(conn, tag) -> dict[str, Any]:
         cards_at_14_plus=collection["maxed"] if collection else None,
         evolutions_unlocked=collection["evos"] if collection else None,
         years_played=meta["years"] if meta else None,
-        collection_level=meta["collection_level"] if meta else None,
         career_wins=meta["career_wins"] if meta else None,
         observed_record=(
             {"wins": form["w"], "losses": form["l"]} if form and form["w"] is not None else None
         ),
         note="First-impression facts. Lead with what distinguishes THIS player — their "
         "deck, Evolutions unlocked, King level, or peak — not trophies. Fields that are "
-        "null are genuinely unknown; never guess one.",
+        "null are genuinely unknown; never guess one. Collection Level is the current "
+        "progression number — King level (expLevel) is deprecated and not reported.",
     )
