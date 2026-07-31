@@ -97,6 +97,57 @@ def _envelope(view: str, **extra: Any) -> dict[str, Any]:
     }
 
 
+_LIFT_CARD_FLOOR = 30  # min battles a player must have WITH the card to contribute
+_LIFT_BASE_FLOOR = 100  # min battles overall before a player's baseline is stable
+_LIFT_MIN_PLAYERS = 4  # below this the average is one or two people's taste
+
+
+def _player_adjusted_lift(conn, card_id: int, evo, scope: str) -> Optional[dict]:
+    """How much this card moves a player's OWN win rate, averaged across players.
+
+    A pooled clan win rate conflates the card with the people who play it: skill here
+    spans 36.4%-70.2%, as wide as any card effect. Measured against the pooled numbers,
+    raw and adjusted lift correlate r=+0.75 but pooled overstates by ~2x, and the
+    ranking moves a median of 11 places across 67 cards. Night Witch is the clean
+    example: -9.5 points pooled, -0.5 adjusted — the pooled figure was reporting that
+    weaker players favour it.
+
+    Each player contributes (their rate with the card) - (their overall rate), so the
+    player's own skill cancels. Returns None when too few players clear the floors.
+    """
+    predicate = _SCOPES.get(scope, _SCOPES["all"])
+    evo_pred = "COALESCE(p.evolution_level, 0) = ?"
+    rows = conn.execute(
+        f"SELECT p.player_tag, SUM(p.outcome = 'W') w, SUM(p.outcome = 'L') l "
+        f"FROM {_plays_from(scope)} "
+        f"WHERE p.side = 'member' AND p.card_id = ? AND {evo_pred} AND {predicate} "
+        f"GROUP BY p.player_tag HAVING (w + l) >= ?",
+        (card_id, evo or 0, _LIFT_CARD_FLOOR),
+    ).fetchall()
+    if len(rows) < _LIFT_MIN_PLAYERS:
+        return None
+    base = {
+        r[0]: (r[1], r[2])
+        for r in conn.execute(
+            "SELECT player_tag, SUM(outcome = 'W'), SUM(outcome = 'L') "
+            "FROM battle_card_plays WHERE side = 'member' GROUP BY player_tag"
+        )
+    }
+    lifts = []
+    for tag_, w, losses in rows:
+        bw, bl = base.get(tag_, (0, 0))
+        if bw + bl < _LIFT_BASE_FLOOR:
+            continue
+        lifts.append((w / (w + losses)) - (bw / (bw + bl)))
+    if len(lifts) < _LIFT_MIN_PLAYERS:
+        return None
+    return {
+        "lift": round(sum(lifts) / len(lifts), 3),
+        "players": len(lifts),
+        "basis": "mean of (player's win rate with card - that player's own baseline)",
+    }
+
+
 def _card_view(conn, tag, card, scope, days=None) -> dict[str, Any]:
     if not card:
         return _envelope("card", available=False, error="card_required")
@@ -132,7 +183,22 @@ def _card_view(conn, tag, card, scope, days=None) -> dict[str, Any]:
             "win_rate": _win_rate(w, losses) if n >= _N_FLOOR else None,
             "insufficient_sample": n < _N_FLOOR,
         }
+        if side == "member" and not tag:
+            entry["player_adjusted_lift"] = _player_adjusted_lift(conn, card_id, evo, scope)
         (playing if side == "member" else facing).append(entry)
+    note = (
+        "Win rate omitted below n=30 (insufficient_sample). Intra-clan battles "
+        "can double-count in clan-wide aggregates."
+    )
+    if not tag:
+        note += (
+            " QUOTE player_adjusted_lift, not the pooled win_rate: a clan-wide rate "
+            "measures who plays the card as much as the card. Player skill spans "
+            "36.4%-70.2% here, and pooled figures overstate by roughly 2x (Evo Witch "
+            "reads +6.7 points over base pooled, +4.3 adjusted; Night Witch reads "
+            "-9.5 pooled and is actually neutral). The lift is the average of each "
+            "player's rate WITH the card minus their own baseline."
+        )
     return _envelope(
         "card",
         available=True,
@@ -142,10 +208,7 @@ def _card_view(conn, tag, card, scope, days=None) -> dict[str, Any]:
         window_days=days,
         playing=sorted(playing, key=lambda e: -e["n"]),
         facing=sorted(facing, key=lambda e: -e["n"]),
-        note=(
-            "Win rate omitted below n=30 (insufficient_sample). Intra-clan battles "
-            "can double-count in clan-wide aggregates."
-        ),
+        note=note,
     )
 
 
@@ -391,24 +454,65 @@ def _deck_view(conn, tag) -> dict[str, Any]:
     if not tag:
         return _envelope("deck", available=False, error="member_tag_required")
     rows = conn.execute(
-        "SELECT dp.archetype, dp.family, dp.avg_elixir, "
+        "SELECT e.our_deck_hash, dp.archetype, dp.family, dp.avg_elixir, dp.cards_json, "
         "SUM(b.outcome = 'W') w, SUM(b.outcome = 'L') l, COUNT(*) n "
         "FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
         "JOIN deck_profile dp ON dp.deck_hash = e.our_deck_hash "
         "WHERE e.player_tag = ? GROUP BY e.our_deck_hash ORDER BY n DESC LIMIT 10",
         (tag,),
     ).fetchall()
-    decks = [
-        {
-            "archetype": r["archetype"],
-            "family": r["family"],
-            "avg_elixir": r["avg_elixir"],
-            "battles": r["n"],
-            "win_rate": _win_rate(r["w"], r["l"]),
-        }
-        for r in rows
-    ]
-    return _envelope("deck", available=bool(decks), subject=tag, decks=decks)
+    names = _card_names(conn)
+
+    def card_set(cards_json):
+        try:
+            import json as _json
+
+            return [(p[0], p[1] or 0) for p in _json.loads(cards_json or "[]")]
+        except TypeError, ValueError:
+            return []
+
+    parsed = [(r, card_set(r["cards_json"])) for r in rows]
+    # A member commonly runs several variants of one archetype. Reporting them as
+    # repeated "Mega Knight Control / 3.25 elixir" rows with different win rates is
+    # unusable — nothing says what differs. Compare each deck only against its
+    # SAME-ARCHETYPE siblings (comparing against every deck yields a near-empty
+    # intersection, which marks almost every card "distinguishing" and disambiguates
+    # nothing), and report what this variant runs that its siblings do not.
+    by_archetype: dict[str, list[set]] = {}
+    for r, cards in parsed:
+        by_archetype.setdefault(r["archetype"], []).append(set(cards))
+    decks = []
+    for r, cards in parsed:
+        siblings = by_archetype.get(r["archetype"], [])
+        if len(siblings) > 1:
+            common = set.intersection(*siblings)
+            distinct = [
+                _card_label(names.get(cid), f) for cid, f in cards if (cid, f) not in common
+            ]
+        else:
+            distinct = []  # nothing to disambiguate — the archetype name is enough
+        decks.append(
+            {
+                "archetype": r["archetype"],
+                "family": r["family"],
+                "avg_elixir": r["avg_elixir"],
+                "battles": r["n"],
+                "win_rate": _win_rate(r["w"], r["l"]),
+                "cards": [_card_label(names.get(cid), f) for cid, f in cards],
+                "distinguishing_cards": distinct,
+            }
+        )
+    return _envelope(
+        "deck",
+        available=bool(decks),
+        subject=tag,
+        decks=decks,
+        note=(
+            "Several rows can share an archetype and elixir cost — they are different "
+            "8-card lists. Use distinguishing_cards to name a variant; never present two "
+            "same-archetype rows as if they were the same deck performing differently."
+        ),
+    )
 
 
 def get_battle_intelligence(
