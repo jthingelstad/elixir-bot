@@ -14,7 +14,7 @@ every feature inherits, and the coverage/cost decision that splits them.
 | 1 | [`battle-intelligence-1-data.md`](battle-intelligence-1-data.md) | `battle_card_plays` + computed `battle_enrichment` + card/nemesis/battle tool views | **none** | **$0** | card matchup data, nemesis, adoption, battle closeness — clan-wide, all-time |
 | 2 | [`battle-intelligence-2-decks.md`](battle-intelligence-2-decks.md) | archetype **by rules** (`decks.py` `_classify`, shipped), `deck_profile` dimensional scores, `matchup_expectation` matrix, calibration/blend, deck+matchup views | Haiku, **matrix only** | ~$1/era | deck archetypes (rules, $0), matchup expectations, upset detector |
 | 3 | [`battle-intelligence-3-prose.md`](battle-intelligence-3-prose.md) | per-battle `loss_nature`/`notable`/`commentary`, prose prompt, **allowlist + date gate**, verdict/eval | Haiku, **gated** | ~$1/mo | per-battle commentary for a few members |
-| 4 | [`battle-intelligence-4-strength.md`](battle-intelligence-4-strength.md) | compare any two players on 4 axes from the `player` payload (king level, collection level, games won, years played); members ingested, **opponents fetched via CR API** (capped/cached) | none | $0 LLM + modest API | head-to-head player strength, member↔opponent |
+| 4 | [`battle-intelligence-4-strength.md`](battle-intelligence-4-strength.md) | **battle-bound strength only** — `level_gap` + tower margins from the battle record; **no profile fetch, no new ingestion, no table**; ranked/normalized modes suppress the level signal | none | **$0** | strength as battle context, war/ladder only |
 
 Each feature is independently shippable and de-risks the next. **Feature 1 is
 pure SQL** — it proves the scary plumbing (the `_apply_v27` migration on an
@@ -79,7 +79,7 @@ by the append-only battle stream is arithmetic.
 | `deck_profile` dimensional scores | deck hash | ~2k, immutable | LLM once per deck (optional) | 2 |
 | `matchup_expectation` | archetype pair × era | ~400 | LLM once per era | 2 |
 | `battle_enrichment` (prose cols) | battle | gated | LLM per battle | 3 |
-| player-strength triad | player | ~150 | ingestion, derived | 4 |
+| strength (battle-bound) | battle | all 1v1 | SQL from the battle (`level_gap`) | 4 |
 
 ## Coverage & the cost decision (Jamie, 2026-07-30)
 
