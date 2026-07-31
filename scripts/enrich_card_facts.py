@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enrich Clash Royale card behavior facts with Opus + web search (v2 Layer 1).
+"""Enrich Clash Royale card behavior facts with Opus 5 + web search (v2 Layer 1).
 
 The CR API gives us NOTHING behavioral (only id/name/elixirCost/rarity/maxLevel),
 so the structured facts every downstream layer needs — what a card targets, whether
@@ -39,7 +39,7 @@ import anthropic
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-MODEL = "claude-opus-4-8"
+MODEL = "claude-opus-5"
 BATCH = 8  # cards per call — small enough that web search stays focused per card
 
 ENUMS = {
@@ -144,6 +144,7 @@ def enrich_batch(client: anthropic.Anthropic, cards: list[dict]) -> list[dict]:
         model=MODEL,
         max_tokens=16000,
         thinking={"type": "adaptive"},
+        output_config={"effort": "xhigh"},  # one-time data asset — favor quality
         system=SYSTEM,
         tools=[{"type": "web_search_20260209", "name": "web_search"}],
         messages=[
@@ -164,6 +165,7 @@ def enrich_batch(client: anthropic.Anthropic, cards: list[dict]) -> list[dict]:
             model=MODEL,
             max_tokens=16000,
             thinking={"type": "adaptive"},
+            output_config={"effort": "xhigh"},
             system=SYSTEM,
             tools=[{"type": "web_search_20260209", "name": "web_search"}],
             messages=messages,
