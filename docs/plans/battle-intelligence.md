@@ -1,14 +1,33 @@
-# Battle Intelligence v1
+# Battle Intelligence — v1 Overview
 
-Status: **designed, not built** (2026-07-30). Owner: Jamie. Design partner: Claude.
+Status: **designed, being built in features** (2026-07-30). Owner: Jamie.
+Design partner: Claude.
+
+This is the index. The buildable work lives in per-feature plans; this doc holds
+the shared context, the one architectural principle, the cross-cutting lessons
+every feature inherits, and the coverage/cost decision that splits them.
+
+## Feature map (dependency order)
+
+| # | plan | scope | LLM? | cost | ships |
+|---|---|---|---|---|---|
+| 1 | [`battle-intelligence-1-data.md`](battle-intelligence-1-data.md) | `battle_card_plays` + computed `battle_enrichment` + card/nemesis/battle tool views | **none** | **$0** | card matchup data, nemesis, adoption, battle closeness — clan-wide, all-time |
+| 2 | [`battle-intelligence-2-decks.md`](battle-intelligence-2-decks.md) | archetype **by rules** (`decks.py` `_classify`, shipped), `deck_profile` dimensional scores, `matchup_expectation` matrix, calibration/blend, deck+matchup views | Haiku, **matrix only** | ~$1/era | deck archetypes (rules, $0), matchup expectations, upset detector |
+| 3 | [`battle-intelligence-3-prose.md`](battle-intelligence-3-prose.md) | per-battle `loss_nature`/`notable`/`commentary`, prose prompt, **allowlist + date gate**, verdict/eval | Haiku, **gated** | ~$1/mo | per-battle commentary for a few members |
+| 4 | [`battle-intelligence-4-strength.md`](battle-intelligence-4-strength.md) | compare any two players on 4 axes from the `player` payload (king level, collection level, games won, years played); members ingested, **opponents fetched via CR API** (capped/cached) | none | $0 LLM + modest API | head-to-head player strength, member↔opponent |
+
+Each feature is independently shippable and de-risks the next. **Feature 1 is
+pure SQL** — it proves the scary plumbing (the `_apply_v27` migration on an
+884 MB live DB, the cursor worker, the tool wiring) at zero model cost and zero
+model-quality risk before a dollar of LLM is spent.
 
 ## Context
 
-`battle_events` now carries full card detail for **both sides** of every battle
-(14.5k battles, ~240k card plays, 122 cards), plus per-tower HP and elixir
+`battle_events` carries full card detail for **both sides** of every battle
+(13.5k battles, ~240k card plays, 126 cards), plus per-tower HP and elixir
 leaked for both players. Nothing reads the opponent half; the deck capability
-still tells the brain "opponent deck lists are unavailable," which was true on
-2026-07-15 and false since #216 landed 2026-07-28.
+still tells the brain "opponent deck lists are unavailable," true on 2026-07-15
+and false since #216 landed 2026-07-28.
 
 Exploration on live data established that the signal is real:
 
@@ -17,314 +36,170 @@ Exploration on live data established that the signal is real:
   members adopted it in three weeks, winning 50.4% with it and losing 52%
   against it.
 - **Decks**: exact decks are hopelessly sparse (10,006 distinct in 14,269
-  battles; a 7-of-8-overlap clustering collapses only 13%). The head is ~37
-  real decks covering 19% of battles; everything else is only reachable
-  through archetype.
+  battles; 7-of-8 clustering collapses only 13%). Reachable only through
+  archetype — hence Feature 2's LLM labels.
 - **Archetype matchups**: 32 of 81 cells clear n=100. Bait into control runs
   −9.9 points off baseline (n=265); hybrid into beatdown +7.3 (n=1,202).
-- **The existing classifier is broken**: `capabilities/decks.py` declares
-  `card_catalog` as a source but never joins it, so `_average_elixir` is None
-  for 100% of battle decks, four of ten branches can never fire, and 47% of
-  decks land in `hybrid`.
+- **The classifier was coarse, not starved (corrected 2026-07-30)**: an earlier
+  read claimed `capabilities/decks.py` "never joins `card_catalog`, so
+  `_average_elixir` is None for 100% of battle decks, 47% land in `hybrid`."
+  That reproduces only on **raw `deck_json`** — the production path *does* join
+  the catalog (`storage/cards.py` `_deck_catalog`/`_enrich_deck_cards`), so
+  `_average_elixir` is None just ~4.3% (Mirror decks) and the elixir branches
+  fire. The real gap was **coarse rules** (43% `hybrid`), because the branch
+  logic had no home for Mega Knight / Champions / P.E.K.K.A / Ronin. **Fixed by
+  a rules rebuild** (win-condition-driven `_classify`, ~40 conventional named
+  archetypes + a coarse `family`, $0, form-ready): the honest residual is now
+  **~2% of battles** (decks with genuinely no win condition), measured live.
+  **So archetype LABELS are a solved rules problem — Feature 2's LLM shrinks to
+  the matchup-advantage matrix, it no longer labels decks.**
 - **Haiku enrichment works when framed as knowledge, not narration** (30-battle
-  experiment): structural reads and archetype labels were stable and genuinely
-  insightful ("a lvl5 Witch does not belong in war"; "the loss is structural,
-  not mechanical"). Judgment verdicts (matchup_favours) flip-flopped on
-  identical input — the accidental A/B from the dedup bug proved it.
-- **Most metrics need no model at all**: hp_margin, discipline_delta,
-  level_gap computed by SQL cleanly separated a 0–3 stomp (−9,470) from a
-  54-HP squeaker, and reproduced Haiku's "panic spending" read as a number
-  (−5.9).
+  experiment): structural reads and archetype labels were stable and insightful.
+  Judgment verdicts (matchup_favours) flip-flopped on identical input — the
+  accidental A/B from the dedup bug proved it. Hence: dimensional scores, not
+  verdicts (Feature 2); minimized judgment in prose (Feature 3).
+- **Most metrics need no model at all**: hp_margin, discipline_delta, level_gap
+  computed by SQL cleanly separated a 0–3 stomp (−9,470) from a 54-HP squeaker,
+  and reproduced Haiku's "panic spending" read as a number (−5.9). **This is all
+  of Feature 1.**
 
-Decisions taken (Jamie):
-
-- **Enrollment**: per-member opt-in. Seed: King Thing `#20JJJ2CCRU`,
-  raquaza `#UL2V9QRG0`. Enrollment gates only the per-battle LLM prose; the
-  intelligence layers (cards, decks, matchups, computed metrics) are clan-wide.
-- **Window**: enrich battles with `battle_time >= 2026-07-20` only. We will
-  rebuild repeatedly; `prompt_version` makes rebuilds cheap and auditable.
-- **Insights and data first** (Jamie, 2026-07-30): v1 is the intelligence
-  layers and their tool surface. Per-battle prose is `commentary` only —
-  insight-flavored, public-safe. `coaching_note` (personal critique, and the
-  identity/privacy machinery it requires) is deferred to v2.
-- **Freshness**: the model is the prior, measured data is the corrector
-  (see §6).
-
-## 1. Architecture — one principle
+## The one architectural principle
 
 **Each table's key has a different cardinality and stability, and that decides
 who fills it.** LLM knowledge attaches only to immutable keys; everything keyed
 by the append-only battle stream is arithmetic.
 
-| layer | keyed by | count | filled by | cost |
+| layer | keyed by | count | filled by | feature |
 |---|---|---|---|---|
-| `battle_card_plays` | battle × side × card | ~240k | SQL, derived | $0 |
-| `deck_profile` | deck hash | ~10k, immutable | LLM once per deck | ~$0.001/deck, amortizes to 0 |
-| `matchup_expectation` | archetype pair × era | ~400 | LLM once per era | ~$1/era |
-| `battle_enrichment` | battle | enrolled only | computed + 4 small LLM fields | pennies/mo |
+| `battle_card_plays` | battle × side × card | ~240k | SQL, derived | 1 |
+| `battle_enrichment` (computed cols) | battle | all 1v1 | SQL, derived | 1 |
+| `deck_profile.archetype` | deck hash | ~2k meaningful | **rules** (`_classify`) | 2 |
+| `deck_profile` dimensional scores | deck hash | ~2k, immutable | LLM once per deck (optional) | 2 |
+| `matchup_expectation` | archetype pair × era | ~400 | LLM once per era | 2 |
+| `battle_enrichment` (prose cols) | battle | gated | LLM per battle | 3 |
+| player-strength triad | player | ~150 | ingestion, derived | 4 |
 
-Card-level intel (nemesis, adoption, win rates) is **computed views over
-`battle_card_plays`** in the capability — no card rollup table in v1, no LLM.
-If those queries get slow at 2-year retention, a rollup is a v2 addition.
+## Coverage & the cost decision (Jamie, 2026-07-30)
 
-## 2. Schema (one migration, `_apply_v27`)
+Two tiers, and the split is deliberate:
 
-All new tables are **derived and rebuildable** from `battle_events` +
-`card_catalog`; only the enrollment flag is source-of-truth.
+- **Data + intelligence — universal.** All members, all battles, all time. The
+  computed layers (Feature 1) and the deck/matchup intelligence (Feature 2) are
+  built for everyone — decks and matchups aren't per-player. Cheap because
+  **archetype labels are now rules ($0)** and the only LLM spend is the ≤400-cell
+  matchup matrix (~$1/era) plus optional dimensional scores on the *meaningful*
+  decks (member decks ∪ decks seen ≥3× ≈ 2k). We want the whole structure in
+  place so the feature can evolve without re-backfilling data.
+- **Per-battle prose — gated.** The one genuinely per-player, iterate-heavy,
+  regenerate-often LLM output (`loss_nature`/`notable`/`commentary`, Feature 3)
+  is gated to an **allowlist** (`battle_enrichment_enabled` on `player_metadata`;
+  seed King Thing `#20JJJ2CCRU`, raquaza `#UL2V9QRG0`) **and a date boundary**
+  (`battle_time >= 2026-07-20`). Measured cost at that scope: **~$0.34 backfill
+  + ~$1/mo** (94 prose-eligible seed battles since 07-20), versus ~$42/mo if
+  prose ran clan-wide. We fully expect to evolve this; spending clan-wide on the
+  part we'll keep rewriting is the waste to avoid. Flip the gate open once the
+  prompt stabilizes.
 
-```sql
-ALTER TABLE player_metadata ADD COLUMN battle_enrichment_enabled INTEGER NOT NULL DEFAULT 0;
--- seed: UPDATE ... WHERE player_tag IN ('#20JJJ2CCRU', '#UL2V9QRG0')
--- (INSERT OR IGNORE the rows first; player_metadata is sparse)
+The rationale: the expensive, evolving thing is per-battle prose regenerated
+across thousands of battles — not the ~$3 of immutable deck profiles. So gate
+the prose, build everything else for everyone.
 
-CREATE TABLE battle_card_plays (
-    battle_dedup_key TEXT NOT NULL REFERENCES battle_events(dedup_key),
-    side             TEXT NOT NULL CHECK (side IN ('member','opponent')),
-    card_id          INTEGER NOT NULL,
-    level            INTEGER,
-    evolution_level  INTEGER,
-    star_level       INTEGER,
-    -- denormalized for index locality (rebuildable):
-    player_tag       TEXT NOT NULL,   -- the SUBJECT member, both sides
-    battle_time      TEXT NOT NULL,
-    outcome          TEXT,
-    mode_group       TEXT,
-    is_competitive   INTEGER,
-    PRIMARY KEY (battle_dedup_key, side, card_id)
-);
-CREATE INDEX idx_bcp_card ON battle_card_plays(card_id, side, battle_time);
-CREATE INDEX idx_bcp_member_card ON battle_card_plays(player_tag, card_id, side);
+## Cross-cutting lessons (every feature inherits these)
 
-CREATE TABLE deck_profile (
-    deck_hash        TEXT NOT NULL,       -- sha256 of sorted card_ids, first 16 hex
-    valid_from       TEXT NOT NULL,
-    superseded_at    TEXT,
-    cards_json       TEXT NOT NULL,
-    archetype        TEXT NOT NULL,       -- CHECK against the shared enum
-    win_condition_type TEXT,              -- air|ground|siege|spell|bridge|none
-    defense_air      INTEGER CHECK (defense_air BETWEEN 0 AND 5),
-    defense_tank     INTEGER CHECK (defense_tank BETWEEN 0 AND 5),
-    defense_swarm    INTEGER CHECK (defense_swarm BETWEEN 0 AND 5),
-    spell_bait_vuln  INTEGER CHECK (spell_bait_vuln BETWEEN 0 AND 5),
-    coherence        INTEGER CHECK (coherence BETWEEN 0 AND 5),
-    avg_elixir       REAL,                -- COMPUTED from card_catalog, not the model
-    model            TEXT NOT NULL,
-    prompt_version   INTEGER NOT NULL,
-    scored_at        TEXT NOT NULL,
-    PRIMARY KEY (deck_hash, valid_from)
-);
+Earned scars — each feature's plan restates the ones it touches, but they live
+here so no feature re-learns them:
 
-CREATE TABLE matchup_expectation (
-    our_archetype    TEXT NOT NULL,
-    their_archetype  TEXT NOT NULL,
-    valid_from       TEXT NOT NULL,
-    superseded_at    TEXT,
-    advantage        INTEGER NOT NULL CHECK (advantage BETWEEN -2 AND 2),
-    basis            TEXT,                -- one sentence, model
-    model            TEXT NOT NULL,
-    prompt_version   INTEGER NOT NULL,
-    PRIMARY KEY (our_archetype, their_archetype, valid_from)
-);
+- **Migration hits the LIVE db.** Any elixir process connecting without an
+  explicit path applies a new `_apply_vN` to production, then the running old
+  build fails every tick with "schema newer than this build." A migration is a
+  deploy: validate on a copy with `ELIXIR_DB_PATH` set, back up, then
+  `admin.sh restart`. Ask before restarting.
+- **Migration bookkeeping**: update `REQUIRED_SCHEMA` and the simulator's
+  `EXPECTED_TABLE_COUNT` (`db/schema.py:56`, currently **59**); bump the
+  exception-hygiene baseline for `db/schema.py` (+1 per `_apply_vN`).
+- **Dedup-key discipline**: every battle-keyed table keys on
+  `battle_events.dedup_key` **verbatim** — never re-derive keys from formatted
+  values (the v25 lesson; `tests/test_battle_ingest_idempotent.py`).
+- **Tool wiring is a checklist, not a definition** (the `raise_clan_chat_relay`
+  lesson — a write tool that never reached `AWARENESS_WRITE_TOOL_NAMES` was
+  offered 0×): `agent/tool_defs.py` → `_SHARED_TOOL_NAMES` (currently **14**) →
+  `agent/tool_exec.py` dispatch → `tests/test_entrypoints_smoke.py` AST parity →
+  coverage matrix → prompt documentation. Miss a step and the tool silently
+  doesn't exist.
+- **Job telemetry with real work-set counts**: `mark_job_start/success/failure`
+  with counts in the message — never a bare success indistinguishable from "did
+  nothing" (the operational-audit class: four jobs today report success while
+  structurally unable to work).
+- **Statistical floors live in the capability, not the prompt**: member×card
+  claims need n≥30; below-floor queries return an explicit `insufficient_sample`
+  reason, never a weak number. A tool cannot be talked out of a floor; a prompt
+  can.
+- **Validate data, not just errors**: error-free ≠ correct. Sample real values
+  and sanity-check against game reality before trusting a rebuild.
+- **Card form (base / Evo / Hero) is part of card identity — never merge it.**
+  `evolution_level` is an overloaded form discriminator, not a level: `1` = Evo,
+  `2` = Hero (CR devs reused the field when Heroes shipped; confirmed 14 Hero
+  cards ↔ 14 catalog `hero_icon_url` cards). A card can hold both forms (Knight,
+  Wizard). Card identity and `deck_hash` key on `(card_id, evolution_level)`;
+  `star_level` is cosmetic and excluded. This is why Feature 1 distinguishes
+  "Evo Wizard" from "Wizard", and Feature 2/3 can speak to form choices. Detail:
+  [`battle-intelligence-1-data.md`](battle-intelligence-1-data.md) §2.
 
-CREATE TABLE battle_enrichment (
-    battle_dedup_key TEXT PRIMARY KEY REFERENCES battle_events(dedup_key),
-    player_tag       TEXT NOT NULL,
-    -- computed at insert, no model:
-    hp_margin        INTEGER,   -- (our towers standing − theirs)*3000 + HP delta
-    closeness        INTEGER,   -- 0 stomp .. 3 squeaker, banded from |hp_margin|
-    discipline_delta REAL,      -- opponent_elixir_leaked − elixir_leaked
-    level_gap        REAL,      -- avg our card levels − theirs
-    our_deck_hash    TEXT,
-    their_deck_hash  TEXT,
-    expected_advantage INTEGER, -- SNAPSHOT from matchup_expectation at enrich time
-    performance      INTEGER,   -- −1|0|+1: outcome vs expectation (upset detector)
-    -- model (per battle, enrolled members only):
-    loss_nature      TEXT CHECK (loss_nature IN
-                     ('structural','piloting','level','close','unclear')),
-    notable          INTEGER NOT NULL DEFAULT 0,
-    confidence       TEXT,
-    commentary       TEXT,      -- public-safe, 1–2 sentences
-    coaching_note    TEXT,      -- v2: stays NULL in v1 (see §7)
-    -- iteration machinery:
-    verdict          TEXT,      -- Jamie-graded: accurate|wrong|useful (eval benchmark)
-    model            TEXT,
-    prompt_version   INTEGER,
-    input_hash       TEXT,
-    enriched_at      TEXT
-);
-```
+## The archetype vocabulary lives in `capabilities/decks.py` (shipped, rules)
 
-Migration mechanics (lessons from today, all of them earned):
+The archetype label is **rules, not an LLM enum**. `_classify`/`_archetype` in
+`capabilities/decks.py` (rebuilt 2026-07-30) name a deck by a priority-ordered
+win-condition lookup — a coarse `family` (beatdown / control / cycle / bait /
+bridge spam / siege, or `unclassified`) plus a conventional `<win condition>
+<family>` `label` (~40 names: `Hog Cycle`, `Lavaloon`, `Log Bait`, `Mega Knight
+Bridge Spam`, `X-Bow Siege`, …). $0, deterministic, form-ready (keys on
+`(card_id, evolution_level)` once Feature 1 lands). Naming conventions were tuned
+live with King Thing + raquaza (see memory `elixir-deck-archetype-classifier`):
+Royal Hogs is bridge-pressure, Log Bait requires a real bait package (else Miner
+Control), Ronin/Boss Bandit are win conditions.
 
-- Update `REQUIRED_SCHEMA` and the simulator's `EXPECTED_TABLE_COUNT`
-  (`db/schema.py:56`) — the war-week sim asserts the designed table count.
-- Bump the exception-hygiene baseline for `db/schema.py` (+1 per `_apply_vN`).
-- Validate on a copy with `ELIXIR_DB_PATH` before any restart; the migration
-  reaches production only via `admin.sh restart` after a backup.
-- **Dedup-key discipline**: `battle_card_plays` and `battle_enrichment` key on
-  `battle_dedup_key` — never re-derive keys from formatted values (the v25
-  lesson; see `tests/test_battle_ingest_idempotent.py`).
+`deck_profile.archetype` (Feature 2) is filled by this same classifier, **not**
+the model. There is one archetype vocabulary, in one place — no LLM enum to drift
+from it, which also kills the "fourth disagreeing vocabulary" trap.
 
-## 3. The shared archetype enum — one home
+**The old `other`-bucket gate is moot** — the rules residual is already measured
+at ~2% of battles (decks with genuinely no win condition, honestly labelled
+`unclassified`), far below the 15% threshold that would have needed a richer
+enum.
 
-`engine/deck_archetypes.py` (new, pure, leaf module):
-
-```python
-ARCHETYPES = ("log bait", "hog cycle", "hog control", "siege", "golem beatdown",
-              "lavaloon", "giant beatdown", "graveyard control",
-              "royal giant control", "bridge spam", "miner control",
-              "balloon cycle", "x-bow siege", "mortar cycle",
-              "pekka bridge spam", "three musketeers", "wall breakers cycle",
-              "goblin drill control", "splashyard", "other")
-```
-
-Consumed by: the deck-profile prompt, the matchup prompt, both CHECK
-constraints (a parity test asserts SQL == Python), and the capability. This is
-how we avoid a fourth disagreeing vocabulary (the cascade in
-`capabilities/decks.py` is the third; it stays untouched in v1 and its
-retirement is a v2 question once LLM labels prove out).
-
-## 4. Workers (`runtime/jobs/_battle_intel.py`)
-
-Cursor-driven, **outside the engine tick** (pattern: `emit_game_from_sentinel`).
-Ingestion stays deterministic and replayable; enrichment catches up behind it.
-
-**Stage A — computed (every 15 min, no LLM):**
-1. Extend `battle_card_plays` for ALL new battles (clan-wide).
-2. Insert computed-metrics rows into `battle_enrichment` for enrolled members'
-   battles ≥ 2026-07-20 (LLM columns NULL).
-
-**Stage B — LLM (every 30 min, capped per run, Haiku):**
-1. Profile unscored `deck_hash`es appearing in enrolled battles (both sides).
-2. Score missing `matchup_expectation` cells (400 one-time, then only on
-   re-score triggers).
-3. Fill `expected_advantage`/`performance` once both profiles + cell exist.
-4. Write prose (`loss_nature`, `notable`, `commentary`, `coaching_note`) for
-   enrolled battles missing it at the current `prompt_version`. **The prompt
-   receives the computed numbers** — the model explains data, it does not
-   invent observations.
-
-Job telemetry: `mark_job_start/success/failure` with real work-set counts in
-the message — never a bare success that is indistinguishable from "did
-nothing" (the operational-audit class: four jobs today report success while
-structurally unable to work).
-
-LLM calls go through the standard no-tool workflow path (like
-`generate_clan_chat_copy`) with new workflow names `deck_profile`,
-`matchup_score`, `battle_prose` so `llm_calls` telemetry and the cost skill see
-them.
-
-## 5. Prompts (3, all Haiku, all versioned)
-
-Shared framing that made the experiment honest — state what the model CANNOT
-see (no play-by-play), allow "insufficient", constrain labels to the enum:
-
-1. **Deck profile**: 8 cards + catalog costs → archetype, win_condition_type,
-   five 0–5 scores. Dimensional scores, not verdicts (scores were stable in
-   the consistency test; verdicts were not).
-2. **Matchup cell**: two archetypes → advantage −2..+2 + one-sentence basis.
-3. **Battle prose**: the battle record + BOTH deck profiles + the computed
-   metrics → loss_nature, notable, commentary. Explicit rule:
-   `final-state claims must reference the provided numbers` (the two
-   hallucination slips both came from free-form final-state reading).
-
-## 6. Freshness: model = prior, data = corrector
+## Freshness principle (Feature 2 implements it)
 
 - **Supersede, never overwrite**: era rows via `valid_from`/`superseded_at`.
   `battle_enrichment.expected_advantage` is a snapshot, so history never needs
   rewriting when eras change.
-- **Calibration** (weekly, SQL only): per live cell, measured win rate vs
-  predicted band, with n. Drift + sufficient n ⇒ flag the cell. This detects
-  stat-only balance patches the API cannot show and the model may not know.
-- **Blend**: `effective_advantage = w·measured + (1−w)·model`, `w = n/(n+30)`,
-  measured mapped to −2..+2. Self-heals balance patches without a model call;
-  also corrects model error from day one.
-- **Re-score triggers**, in order of trust: calibration alarm (cell) →
-  `card_catalog` diff: new card / evolution / elixir-cost change (decks
-  containing it + its archetype's cells) → `season_started` event (cheap full
-  re-score) → manual with patch notes pasted into the prompt (the only fix for
-  the model's training cutoff).
+- **Calibration** (weekly, SQL): measured win rate vs predicted band, with n;
+  drift + sufficient n ⇒ flag the cell. Detects stat-only balance patches the
+  API can't show and the model may not know.
+- **Blend**: `effective_advantage = w·measured + (1−w)·model`, `w = n/(n+30)`.
+  Self-heals balance patches without a model call.
+- **Re-score triggers**, in order of trust: calibration alarm → `card_catalog`
+  diff (new card / evolution / elixir-cost change) → `season_started` → manual
+  with patch notes pasted in (the only fix for the model's training cutoff).
 
-## 7. Tool surface + privacy
+## Explicitly out of scope for all of v1
 
-**One new tool**: `get_battle_intelligence` in `capabilities/battle_intel.py`,
-views: `member_summary` | `battle` | `card` | `deck` | `matchup` | `nemesis`.
-
-Wiring checklist (every step, or the tool silently doesn't exist — the
-`raise_clan_chat_relay` lesson):
-`agent/tool_defs.py` definition → `_SHARED_TOOL_NAMES` (14→15) →
-`agent/tool_exec.py` dispatch → `tests/test_entrypoints_smoke.py` AST parity →
-coverage matrix → prompt documentation.
-
-**Statistical floors live in the capability**: member×card claims need n≥30;
-matchup cells report their n and calibration state; below-floor queries return
-an explicit `insufficient_sample` reason, never a weak number. A tool cannot
-be talked out of a floor; a prompt can.
-
-**Coaching deferred to v2 — and with it the identity plumbing.** The
-interactive workflow passes only `author_name` (a display string); the asker's
-`discord_user_id` never reaches `tool_exec`, so there is no hook today to
-scope output to "the member it is about." Rather than build that plumbing now,
-v1 simply does not generate personal critique: `coaching_note` stays NULL, the
-prose prompt asks for insight-flavored `commentary` only, and the tool returns
-data and insights that are safe for any asker. When coaching returns in v2,
-the requester-identity threading (channel_router → workflow → tool_exec →
-`discord_links`) is its named prerequisite.
-
-**Prompt-truth fixes shipped with the tool** (currently blocking any use of
-the opponent data):
-- `agent/prompt_builders.py:530` — delete "Elixir does NOT store opponent deck
-  lists"; replace with guidance to use `get_battle_intelligence`.
-- `capabilities/decks.py` `evidence_limits` — `opponent_decks_captured: True`.
-
-## 8. Explicitly out of scope for v1
-
-- `coaching_note` generation and the requester-identity plumbing it requires
-  (§7) — v1 is insights and data.
+- `coaching_note` (personal critique) and the requester-identity plumbing it
+  needs (`channel_router → workflow → tool_exec → discord_links`) — v2. The
+  interactive workflow passes only `author_name`; the asker's `discord_user_id`
+  never reaches `tool_exec`, so there is no hook to scope output to "the member
+  it is about." v1 generates commentary that is safe for any asker.
 - Awareness-loop proactive posting from enrichment (`notable` exists; using it
   is v2, after the revision-trap snapshot question is settled).
-- Duels: battles with `rounds_json` get computed metrics but are **excluded
-  from prose and coaching aggregation** (concatenated decks would produce
-  confident nonsense about war's highest-stakes battles).
-- 2v2 prose (teammate deck context) — computed metrics only.
-- Retiring the `_archetype()` cascade; card rollup table; war-prep
-  opponent-clan precompute (the data supports it; build after v1 proves out).
-
-## 9. Cost (measured, not estimated)
-
-Haiku at $1/$5 per M; experiment measured 881 in / 534 out per battle-prose
-call, less for profiles/cells.
-
-| item | volume | cost |
-|---|---|---|
-| backfill: enrolled battles since 07-20 | ~94 + ~9/day | ~$0.35 + ~$1/mo |
-| deck profiles (enrolled + opponents) | ≤~200 backfill, trickle after | <$1, amortizes |
-| matchup matrix | 400 cells | ~$1 one-time per era |
-| computed layers | everything else | $0 |
-
-## 10. Build order (each phase = one commit, suite + simulator green)
-
-1. **Foundation**: enum module, `_apply_v27`, Stage-A worker, computed
-   backfill. Validate migration on a copy. No LLM, no behaviour change.
-   *Restart needed (migration) — ask first.*
-2. **LLM scoring**: three prompts, Stage-B worker, telemetry workflows,
-   backfill profiles/cells/prose for enrolled members. Mutation-check the
-   floors.
-3. **The tool**: capability + wiring checklist + prompt-truth fixes. All
-   views return data/insights safe for any asker.
-4. **Calibration + eval**: weekly calibration job, blend in the matchup view,
-   `verdict` grading path (Jamie grades ~20 of his own battles' commentary
-   and computed reads before any prompt v2 — the benchmark that makes
-   iteration non-vibes).
-
-## 11. Risks
-
-| risk | guard |
-|---|---|
-| model judgment instability | judgments minimized to loss_nature/notable; verdicts computed; dimensional scores |
-| model staleness after balance patches | calibration + blend; supersede eras |
-| personal critique reaching the wrong audience | v1 generates none (commentary only); coaching + identity scoping are one v2 unit |
-| weak-sample confident claims | floors in the capability |
-| silent worker death | work-set counts in job telemetry; missing rows are self-evident |
-| prompt iteration blindness | verdict column graded against Jamie's own games |
-| key drift duplicating rows | keys taken from `battle_events.dedup_key` verbatim; ingest idempotency suite |
+- **Duels (`rounds_json`) — skipped entirely in v1** (no computed metrics, no
+  prose): a best-of-3's top-level tower HP and concatenated sub-decks would
+  produce confident nonsense, and that failure is as real in a number as in a
+  sentence. **v1-only skip, not permanent** — duels are a large share of
+  clan-war activity and the priority v2 addition; they need per-round
+  decomposition (score each `rounds_json` sub-battle on its own deck pair).
+  ~1.3% of battles today, but the highest stakes.
+- **2v2 — permanently excluded** (`teammate_tag IS NOT NULL`, ~7.5% of
+  battles): two decks per side is a problem the single-subject model does not
+  represent, and not worth modelling.
+- Retiring the `_archetype()` cascade (Feature 2 supersedes it once labels prove
+  out); card rollup table; war-prep opponent-clan precompute — after v1 proves
+  out.
