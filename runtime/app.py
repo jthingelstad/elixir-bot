@@ -1613,4 +1613,12 @@ def main():
             "Elixir cannot start — missing required environment variable(s): "
             f"{', '.join(missing)}. Set them in .env and retry."
         )
+
+    # A migration is a DEPLOY, and this is the one place it happens. Opening a
+    # connection anywhere else asserts the schema instead of upgrading it, so a
+    # stray script can never silently migrate production out from under a running
+    # build (which it did, twice, before this was made explicit).
+    version = db.migrate_to_current()
+    log.info("database schema at v%s", version)
+
     return _process_service.main(TOKEN, bot)
