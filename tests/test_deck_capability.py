@@ -128,7 +128,8 @@ def test_member_deck_intelligence_explains_primary_variant_and_limits():
 
     assert result["available"] is True
     assert result["primary_deck"]["battles"] == 3
-    assert result["primary_deck"]["archetype"]["label"] == "cycle"
+    assert result["primary_deck"]["archetype"]["label"] == "Hog Cycle"
+    assert result["primary_deck"]["archetype"]["family"] == "cycle"
     assert result["primary_deck"]["archetype"]["win_conditions"] == ["Hog Rider"]
     assert result["stability"] == {
         "label": "stable",

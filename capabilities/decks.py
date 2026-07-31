@@ -20,39 +20,45 @@ CAPABILITY_ID = "deck_intelligence"
 CONTRACT_VERSION = 1
 log = logging.getLogger("elixir.capabilities.decks")
 
-_WIN_CONDITIONS = {
-    "Balloon",
+# Archetype naming follows the community convention (RoyaleAPI/Deckshop style):
+# a deck is named "<win condition> <family>" and belongs to one of six families —
+# beatdown, control, cycle, bait, bridge spam, siege. Cycle decks sit at/below
+# CYCLE_MAX elixir; beatdown decks run high. The win condition is a deterministic
+# catalog lookup, so the label needs no model. Tuned against live clan decks with
+# King Thing and raquaza (2026-07-30): Royal Hogs is bridge-pressure not control,
+# Ronin/Boss Bandit are win conditions, and "Log Bait" requires a real bait
+# package (a lone barrel behind a Miner is Miner Control, not bait).
+CYCLE_MAX = 3.3  # cycle: community says <3.5, in practice <=3.3
+BEATDOWN_MIN = 4.2  # heavy beatdown decks run 4.0-5.2
+
+# Fast, aggressive units that turn a heavy (Mega Knight / P.E.K.K.A) into a
+# bridge-spam deck rather than a defensive control shell.
+_BRIDGE_PARTNERS = {
+    "Bandit",
     "Battle Ram",
-    "Electro Giant",
-    "Elixir Golem",
-    "Giant",
-    "Goblin Barrel",
-    "Goblin Drill",
-    "Goblin Giant",
-    "Golem",
-    "Graveyard",
-    "Hog Rider",
-    "Lava Hound",
-    "Miner",
-    "Mortar",
     "Ram Rider",
-    "Royal Giant",
+    "Royal Ghost",
     "Royal Hogs",
-    "Skeleton Barrel",
-    "Three Musketeers",
     "Wall Breakers",
-    "X-Bow",
+    "Prince",
+    "Dark Prince",
+    "Lumberjack",
+    "Golden Knight",
+    "Boss Bandit",
+    "Ronin",
 }
-_SIEGE = {"X-Bow", "Mortar"}
-_HEAVY_BEATDOWN = {
-    "Golem",
-    "Lava Hound",
-    "Electro Giant",
-    "Goblin Giant",
-    "Giant",
-    "Elixir Golem",
+# Spell-vulnerable swarm units — the tell of a real spell-bait deck.
+_BAIT_UNITS = {
+    "Princess",
+    "Goblin Gang",
+    "Skeleton Army",
+    "Dart Goblin",
+    "Rascals",
+    "Goblins",
+    "Spear Goblins",
+    "Guards",
+    "Firecracker",
 }
-_BRIDGE_PRESSURE = {"Battle Ram", "Ram Rider", "Royal Hogs"}
 
 
 def _source(source):
@@ -102,14 +108,16 @@ def _elixir_cost(card: dict) -> float | None:
 
 
 def _average_elixir(cards: Iterable[dict]) -> float | None:
-    """Mean deck cost, or None unless EVERY card has a readable cost.
+    """Mean cost over the cards that carry a cost.
 
-    All-or-nothing on purpose: averaging the subset that happens to carry a
-    cost silently reports a cheaper deck than the member is playing.
+    Mirror (and any other cost-less catalog row) is excluded rather than
+    invalidating the whole average — a Mirror deck's average is of its other
+    seven cards, matching how deck sites report it. Returns None only when
+    nothing has a readable cost (a data problem, not a Mirror).
     """
     playable = [card for card in cards or [] if isinstance(card, dict)]
     costs = [cost for cost in (_elixir_cost(card) for card in playable) if cost is not None]
-    if not playable or len(costs) != len(playable):
+    if not costs:
         return None
     return round(sum(costs) / len(costs), 2)
 
@@ -119,36 +127,151 @@ def _battle_count(rows: list[dict]) -> int:
     return len(keys) if keys else len(rows)
 
 
+def _classify(names: set, average: float | None) -> tuple[str, str, list[str]]:
+    """Return (label, family, win_conditions) for a deck's card names.
+
+    Priority-ordered: the most deck-defining win condition anchors the
+    conventional name. ``family`` is the coarse bucket (one of the six, or
+    ``unclassified``); ``label`` is the player-facing "<win condition> <family>"
+    name. Pure — no model, no catalog call beyond the cost already on the cards.
+    """
+
+    def has(*cards):
+        return names & set(cards)
+
+    # Tier 1: siege buildings.
+    if "X-Bow" in names:
+        return "X-Bow Siege", "siege", ["X-Bow"]
+    if "Mortar" in names:
+        if average is not None and average <= 3.2:
+            return "Mortar Cycle", "siege", ["Mortar"]
+        return "Mortar Siege", "siege", ["Mortar"]
+
+    # Tier 2: heavy beatdown tanks (the biggest tank names the deck).
+    if "Golem" in names:
+        return "Golem Beatdown", "beatdown", ["Golem"]
+    if "Lava Hound" in names:
+        if "Balloon" in names:
+            return "Lavaloon", "beatdown", ["Lava Hound", "Balloon"]
+        return "Lava Hound Beatdown", "beatdown", ["Lava Hound"]
+    if "Electro Giant" in names:
+        return "Electro Giant Beatdown", "beatdown", ["Electro Giant"]
+    if "Goblin Giant" in names:
+        if "Sparky" in names:
+            return "Goblin Giant Sparky", "beatdown", ["Goblin Giant", "Sparky"]
+        return "Goblin Giant Beatdown", "beatdown", ["Goblin Giant"]
+    if "Elixir Golem" in names:
+        return "Elixir Golem Beatdown", "beatdown", ["Elixir Golem"]
+    if "Three Musketeers" in names:
+        return "Three Musketeers", "beatdown", ["Three Musketeers"]
+
+    # Tier 3: Graveyard (control win condition).
+    if "Graveyard" in names:
+        return "Graveyard Control", "control", ["Graveyard"]
+
+    # Tier 4: Giant / Royal Giant.
+    if "Giant" in names:
+        return "Giant Beatdown", "beatdown", ["Giant"]
+    if "Royal Giant" in names:
+        return "Royal Giant Control", "control", ["Royal Giant"]
+
+    # Tier 5: Balloon (no Lava Hound).
+    if "Balloon" in names:
+        if average is not None and average <= CYCLE_MAX:
+            return "Balloon Cycle", "cycle", ["Balloon"]
+        return "Balloon Beatdown", "beatdown", ["Balloon"]
+
+    # Tier 6: Sparky.
+    if "Sparky" in names:
+        return "Sparky", "beatdown", ["Sparky"]
+
+    # Tier 6.5: a real Log Bait (a bait PACKAGE — >=2 spell-vulnerable swarm
+    # units) outranks a Mega Knight / P.E.K.K.A defender; the bait is the win
+    # plan. A lone Goblin Barrel + Miner deck is NOT bait — it routes to Miner.
+    if "Goblin Barrel" in names and len(names & _BAIT_UNITS) >= 2:
+        return "Log Bait", "bait", ["Goblin Barrel"]
+
+    # Tier 7: bridge-spam heavy tanks (vs a defensive control shell).
+    if "P.E.K.K.A" in names:
+        if has(*_BRIDGE_PARTNERS):
+            return "P.E.K.K.A Bridge Spam", "bridge spam", ["P.E.K.K.A"]
+        return "P.E.K.K.A Control", "control", ["P.E.K.K.A"]
+    if "Mega Knight" in names:
+        if has(*_BRIDGE_PARTNERS):
+            return "Mega Knight Bridge Spam", "bridge spam", ["Mega Knight"]
+        return "Mega Knight Control", "control", ["Mega Knight"]
+
+    # Tier 8: spell bait. Goblin Barrel + one swarm unit = light bait; with zero
+    # bait units the barrel is a chip splash — fall through to the real win
+    # condition below and only name it "Goblin Barrel <family>" if nothing claims it.
+    if "Goblin Barrel" in names and (names & _BAIT_UNITS):
+        return "Goblin Barrel Bait", "bait", ["Goblin Barrel"]
+    if "Skeleton Barrel" in names:
+        return "Skeleton Barrel Bait", "bait", ["Skeleton Barrel"]
+
+    # Tier 9: cheap chip win conditions.
+    if "Hog Rider" in names:
+        if average is not None and average <= CYCLE_MAX:
+            return "Hog Cycle", "cycle", ["Hog Rider"]
+        return "Hog Rider Control", "control", ["Hog Rider"]
+    if "Ram Rider" in names:
+        if has(*(_BRIDGE_PARTNERS - {"Ram Rider"})):
+            return "Ram Rider Bridge Spam", "bridge spam", ["Ram Rider"]
+        return "Ram Rider Control", "control", ["Ram Rider"]
+    if "Royal Hogs" in names:
+        # Royal Hogs is a bridge-pressure win condition: cheap enough to cycle,
+        # otherwise bridge spam (King Thing's call — too heavy for cycle).
+        if average is not None and average <= CYCLE_MAX:
+            return "Royal Hogs Cycle", "cycle", ["Royal Hogs"]
+        return "Royal Hogs Bridge Spam", "bridge spam", ["Royal Hogs"]
+    if "Battle Ram" in names:
+        return "Battle Ram Bridge Spam", "bridge spam", ["Battle Ram"]
+    if "Miner" in names:
+        if "Wall Breakers" in names:
+            return "Miner Wall Breakers Cycle", "cycle", ["Miner", "Wall Breakers"]
+        if average is not None and average <= CYCLE_MAX:
+            return "Miner Cycle", "cycle", ["Miner"]
+        return "Miner Control", "control", ["Miner"]
+    if "Wall Breakers" in names:
+        return "Wall Breakers Cycle", "cycle", ["Wall Breakers"]
+    if "Goblin Drill" in names:
+        if average is not None and average <= CYCLE_MAX:
+            return "Goblin Drill Cycle", "cycle", ["Goblin Drill"]
+        return "Goblin Drill Control", "control", ["Goblin Drill"]
+
+    # Goblin Barrel with no bait package and no bigger win condition: it IS the
+    # chip win condition, named by family (a barrel-only control/cycle shell).
+    if "Goblin Barrel" in names:
+        if average is not None and average <= CYCLE_MAX:
+            return "Goblin Barrel Cycle", "cycle", ["Goblin Barrel"]
+        return "Goblin Barrel Control", "control", ["Goblin Barrel"]
+
+    # Tier 9.5: newer bridge win conditions (anchor only when nothing above did).
+    if "Ronin" in names:
+        return "Ronin Bridge Spam", "bridge spam", ["Ronin"]
+    if "Boss Bandit" in names:
+        return "Boss Bandit Bridge Spam", "bridge spam", ["Boss Bandit"]
+    if "Elite Barbarians" in names:
+        return "Elite Barbarians Bridge Spam", "bridge spam", ["Elite Barbarians"]
+
+    # Tier 10: no recognized win condition — family by elixir, and say so plainly
+    # (never invent a win condition). ~2% of live decks land here honestly.
+    if average is None:
+        return "Unclassified", "unclassified", []
+    if average <= CYCLE_MAX:
+        return "Cycle", "cycle", []
+    if average >= BEATDOWN_MIN:
+        return "Beatdown", "beatdown", []
+    return "Control", "control", []
+
+
 def _archetype(cards: Iterable[dict]) -> dict:
     names = set(_names(cards))
-    win_conditions = sorted(names & _WIN_CONDITIONS)
     average = _average_elixir(cards)
-    if names & _SIEGE:
-        label = "siege"
-    elif "Goblin Barrel" in names and names & {
-        "Princess",
-        "Dart Goblin",
-        "Skeleton Barrel",
-    }:
-        label = "bait"
-    elif names & _HEAVY_BEATDOWN:
-        label = "beatdown"
-    elif "Graveyard" in names:
-        label = "graveyard control"
-    elif "Royal Giant" in names:
-        label = "royal giant control"
-    elif "Balloon" in names:
-        label = "balloon cycle" if average is not None and average <= 3.4 else "balloon beatdown"
-    elif names & _BRIDGE_PRESSURE and names & {"Bandit", "Royal Ghost", "P.E.K.K.A"}:
-        label = "bridge spam"
-    elif names & {"Hog Rider", "Goblin Drill", "Miner", "Wall Breakers"}:
-        label = "cycle" if average is not None and average <= 3.4 else "control"
-    elif average is not None and average <= 3.1:
-        label = "cycle"
-    else:
-        label = "hybrid"
+    label, family, win_conditions = _classify(names, average)
     return {
         "label": label,
+        "family": family,
         "win_conditions": win_conditions,
         "average_elixir": average,
         "classification_basis": "observed cards + catalog elixir costs",
@@ -441,8 +564,11 @@ def _clan_view(rows: list[dict], *, days: int, scope: str) -> DeckIntelligenceRe
         if not groups:
             continue
         primary = groups[0]
+        # Clan-meta spread aggregates on the coarse FAMILY (six buckets); the
+        # per-member row keeps the specific deck name (e.g. "Hog Cycle").
+        family = primary["archetype"]["family"]
         label = primary["archetype"]["label"]
-        bucket = archetypes.setdefault(label, {"members": 0, "battles": 0, "wins": 0})
+        bucket = archetypes.setdefault(family, {"members": 0, "battles": 0, "wins": 0})
         bucket["members"] += 1
         bucket["battles"] += primary["battles"]
         bucket["wins"] += primary["wins"]
@@ -453,6 +579,7 @@ def _clan_view(rows: list[dict], *, days: int, scope: str) -> DeckIntelligenceRe
                 "player_tag": tag,
                 "player_name": player_rows[0].get("player_name"),
                 "archetype": label,
+                "family": family,
                 "win_conditions": primary["archetype"]["win_conditions"],
                 "battles": primary["battles"],
                 "win_rate": primary["win_rate"],
