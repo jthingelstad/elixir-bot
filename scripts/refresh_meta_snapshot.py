@@ -81,7 +81,13 @@ def _extract_json(text: str) -> dict:
 
 
 def fetch(client) -> dict:
-    """One Opus call with web search. Handles `pause_turn` by continuing the turn."""
+    """One Opus call with web search. Handles `pause_turn` by continuing the turn.
+
+    **Streamed** — xhigh effort over a dozen searched decks is a minutes-long request,
+    and a non-streaming call that size is the classic request-timeout shape. This runs
+    unattended on balance patches, so it also prints each leg: without that, a hang and
+    real work look identical from the outside.
+    """
     messages = [
         {
             "role": "user",
@@ -90,15 +96,17 @@ def fetch(client) -> dict:
             ),
         }
     ]
-    for _ in range(6):
-        resp = client.messages.create(
+    for leg in range(1, 7):
+        print(f"  ... leg {leg}: waiting on {MODEL} (streaming)", flush=True)
+        with client.messages.stream(
             model=MODEL,
             max_tokens=16000,
             thinking={"type": "adaptive"},
             output_config={"effort": "xhigh"},  # infrequent, durable asset — favor quality
             tools=[{"type": "web_search_20260209", "name": "web_search"}],
             messages=messages,
-        )
+        ) as stream:
+            resp = stream.get_final_message()
         if resp.stop_reason == "pause_turn":
             messages.append({"role": "assistant", "content": resp.content})
             continue
