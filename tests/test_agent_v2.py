@@ -1652,14 +1652,13 @@ def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
         patch("agent.core._get_client", return_value=mock_client),
         patch("elixir_agent.runtime_status.record_llm_call"),
     ):
-        # leader_action_feedback demoted opus->sonnet 2026-07-23 (internal guidance
-        # synthesis; Sonnet at parity with Opus on replayed prompts, ~half the cost).
+        # leader_action_feedback left this set 2026-07-31 (chat -> lightweight/Haiku;
+        # 8/8 schema-complete on replayed live prompts at 1/3 the cost).
         for workflow in (
             "clan_chat_copy",
             "interactive",
             "channel_update",
             "clanops",
-            "leader_action_feedback",
         ):
             elixir_agent._create_chat_completion(
                 workflow=workflow,

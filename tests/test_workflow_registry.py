@@ -37,8 +37,10 @@ def test_registry_model_selection_matches_existing_defaults(monkeypatch):
     assert elixir_agent._model_for_workflow("interactive") == "chat-model"
     assert elixir_agent._model_for_workflow("recruiting_copy") == "creative-model"
     assert elixir_agent._model_for_workflow("intel_report") == "intensive-model"
-    # leader_action_feedback demoted intensive->chat 2026-07-23 (Sonnet at parity, ~half cost)
-    assert elixir_agent._model_for_workflow("leader_action_feedback") == "chat-model"
+    # leader_action_feedback: intensive->chat 2026-07-23, chat->lightweight 2026-07-31.
+    # Each step replayed real captured prompts (scripts/replay_model_swap.py); Haiku
+    # scored 8/8 schema-complete at 1/3 the price. Internal guidance, never a post.
+    assert elixir_agent._model_for_workflow("leader_action_feedback") == "light-model"
     assert elixir_agent._model_for_workflow("memory_synthesis") == "intensive-model"
     assert elixir_agent._model_for_workflow("clan_chat_copy") == "chat-model"
 

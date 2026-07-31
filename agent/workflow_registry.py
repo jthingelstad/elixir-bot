@@ -216,12 +216,17 @@ _WORKFLOW_SPECS = (
         },
         tools=[],
         max_tool_rounds=1,
-        # Was "intensive" (Opus). Demoted to chat (Sonnet 5) 2026-07-23 for cost:
-        # this is a single-shot structured synthesis of a leader-action sample into
-        # internal guidance the brain reads (not a public post). A head-to-head replay
-        # of real captured prompts showed Sonnet 5 at parity with Opus here at ~half
-        # the cost; the response parser already strips the ```json fences Sonnet emits.
-        model_family="chat",
+        # Opus -> chat/Sonnet 5 (2026-07-23) -> lightweight/Haiku 4.5 (2026-07-31),
+        # each step justified by replaying REAL captured prompts, not by intuition
+        # (scripts/replay_model_swap.py). This is a single-shot structured synthesis
+        # of a leader-action sample into internal guidance the brain reads — never a
+        # public post, so the prose bar that protects awareness does not apply.
+        # Haiku replay over the 8 most recent live prompts: 8/8 parsed, 8/8
+        # schema-complete, output slightly LONGER than Sonnet's and equally specific
+        # (both grounded the same approval rate from the same sample). At 17% of
+        # spend and ~5.5 calls/day this was the second-largest line; Haiku is 1/3 the
+        # price across every token class.
+        model_family="lightweight",
         tools_allowed=False,
     ),
     WorkflowSpec(
