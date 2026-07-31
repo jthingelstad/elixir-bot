@@ -13,8 +13,8 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 29
-EXPECTED_TABLE_COUNT = 63
+CURRENT_SCHEMA_VERSION = 30
+EXPECTED_TABLE_COUNT = 64
 
 
 def initialize_empty_database(
@@ -331,6 +331,7 @@ REQUIRED_SCHEMA = {
         "their_deck_hash",
     },
     "deck_profile": {"deck_hash", "family", "archetype", "avg_elixir", "cards_json"},
+    "card_facts": {"card_id", "evolution_level", "targets", "role", "is_win_condition"},
     "matchup_expectation": {"our_family", "their_family", "advantage", "n"},
 }
 
@@ -1517,6 +1518,78 @@ def _apply_v29(conn: sqlite3.Connection) -> None:
         )
 
 
+def _apply_v30(conn: sqlite3.Connection) -> None:
+    """Battle Intelligence v2 Layer 1: enriched card behavior facts.
+
+    ``card_facts`` holds the behavior primitives the CR API does not expose (it gives
+    only id/name/elixirCost/rarity/maxLevel — nothing about what a card targets, whether
+    it flies, or what role it plays). Filled by ``scripts/enrich_card_facts.py`` using
+    Opus 5 + web search, keyed **form-aware** on ``(card_id, evolution_level)`` because
+    Evo/Hero forms behave differently (Evo Bats gain lifesteal; Evo Knight gains a dash).
+
+    Deliberately **primitives only** — the deck-level roles (air answer, tank answer,
+    splash answer) are DERIVED from these in ``engine/card_roles.py``, so the model's
+    error surface stays small and the roles are auditable/fixable in one place without
+    re-enriching. Tiers rather than raw HP/damage: raw stats are level-dependent and move
+    every balance patch, tiers are stable and are all the reads need.
+
+    Current-state, not a slowly-changing dimension: intrinsic card behavior is very
+    stable (only a rework changes it), and meta strength is already measured in
+    ``matchup_expectation``. Era-faithfulness comes from snapshotting the DERIVED
+    per-battle tags, the same move Feature 1 uses for ``expected_advantage``.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS card_facts (
+            card_id                INTEGER NOT NULL,
+            evolution_level        INTEGER NOT NULL DEFAULT 0,
+            unit_domain            TEXT,
+            targets                TEXT,
+            attack_style           TEXT,
+            splash_hits_air        INTEGER NOT NULL DEFAULT 0,
+            dps_tier               TEXT,
+            hp_tier                TEXT,
+            unit_count             TEXT,
+            range_type             TEXT,
+            role                   TEXT,
+            spell_tier             TEXT,
+            is_win_condition       INTEGER NOT NULL DEFAULT 0,
+            fragile_to_small_spell INTEGER NOT NULL DEFAULT 0,
+            special_json           TEXT,
+            source                 TEXT,
+            note                   TEXT,
+            model                  TEXT,
+            enriched_at            TEXT,
+            PRIMARY KEY (card_id, evolution_level)
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_card_facts_role ON card_facts(role)")
+
+    # Deck-level derived facts (computed from card_facts by the Stage-B worker).
+    for column, decl in (
+        ("air_answer_count", "INTEGER"),
+        ("tank_answer_count", "INTEGER"),
+        ("splash_answer_count", "INTEGER"),
+        ("swarm_count", "INTEGER"),
+        ("bait_unit_count", "INTEGER"),
+        ("has_big_spell", "INTEGER"),
+        ("has_small_spell", "INTEGER"),
+        ("facts_complete", "INTEGER"),
+    ):
+        if column not in {r[1] for r in conn.execute("PRAGMA table_info(deck_profile)")}:
+            conn.execute(f"ALTER TABLE deck_profile ADD COLUMN {column} {decl}")
+
+    # Per-battle structural tags (snapshotted; replace Feature 3's prose).
+    for column, decl in (
+        ("air_matchup", "TEXT"),
+        ("wincon_pressure", "TEXT"),
+        ("spell_bait_exposed", "INTEGER"),
+        ("level_validity", "TEXT"),
+        ("decisive_factor", "TEXT"),
+    ):
+        if column not in {r[1] for r in conn.execute("PRAGMA table_info(battle_enrichment)")}:
+            conn.execute(f"ALTER TABLE battle_enrichment ADD COLUMN {column} {decl}")
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1787,6 +1860,14 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+    if version < 30:
+        try:
+            _apply_v30(conn)
+            conn.execute("PRAGMA user_version = 30")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1976,7 +2057,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "c8a07e717643d88b12e6b52d0d8aedd6962d1575ca242290b710a15d1aca33e0"
+CURRENT_SCHEMA_FINGERPRINT = "04afba3e1f94c570ff414206b9d1db037bf7993bdfc47f50188970b9a054ba6d"
 
 
 __all__ = [

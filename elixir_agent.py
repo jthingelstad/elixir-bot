@@ -39,7 +39,6 @@ from agent.tool_policy import (
 from agent.workflows import (
     analyze_leader_screenshot,
     generate_ask_elixir_daily,
-    generate_battle_prose,
     generate_channel_update,
     generate_clan_chat_copy,
     generate_intel_report,
@@ -76,7 +75,6 @@ __all__ = [
     "generate_ask_elixir_daily",
     "generate_channel_update",
     "generate_clan_chat_copy",
-    "generate_battle_prose",
     "generate_intel_report",
     "generate_message",
     "generate_promote_content",

@@ -28,6 +28,11 @@ TOOLS = [
             "discipline, best/worst cards). Requires 'member_tag'.\n"
             "- deck: a member's observed decks with rules archetype, avg elixir, and W/L. "
             "Requires 'member_tag'.\n"
+            "- coaching: THE view for 'how have I been playing?' / 'what should I work on?' — "
+            "an aggregated structural read of a member's recent battles: record, upsets, what "
+            "decided their games (decisive_factors), whether their deck has an air hole, which "
+            "archetypes they keep losing to, and their deck's answer counts. Requires "
+            "'member_tag'. Ground coaching advice in THIS, not in single battles.\n"
             "- matchup: measured advantage (-2..+2) for a deck FAMILY vs family "
             "(beatdown/control/cycle/bait/bridge spam/siege), from clan outcomes. Pass "
             "our_family and/or their_family, or omit for the whole 6x6 matrix.\n\n"
@@ -40,7 +45,15 @@ TOOLS = [
             "properties": {
                 "view": {
                     "type": "string",
-                    "enum": ["card", "nemesis", "battle", "member_summary", "deck", "matchup"],
+                    "enum": [
+                        "card",
+                        "nemesis",
+                        "battle",
+                        "member_summary",
+                        "deck",
+                        "matchup",
+                        "coaching",
+                    ],
                     "default": "battle",
                 },
                 "member_tag": {
