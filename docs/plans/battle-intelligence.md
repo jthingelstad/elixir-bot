@@ -26,8 +26,10 @@ model-quality risk before a dollar of LLM is spent.
 `battle_events` carries full card detail for **both sides** of every battle
 (13.5k battles, ~240k card plays, 126 cards), plus per-tower HP and elixir
 leaked for both players. Nothing reads the opponent half; the deck capability
-still tells the brain "opponent deck lists are unavailable," true on 2026-07-15
-and false since #216 landed 2026-07-28.
+still tells the brain "opponent deck lists are unavailable." That prompt line is
+stale, not the data: **`opponent_deck_json` is populated back to 2026-04-18**
+(verified live) — #216 (2026-07-28) flipped the reader/capability flag, it did
+not start the capture. So opponent-deck history is deep, not eight days thin.
 
 Exploration on live data established that the signal is real:
 
@@ -115,8 +117,15 @@ here so no feature re-learns them:
   deploy: validate on a copy with `ELIXIR_DB_PATH` set, back up, then
   `admin.sh restart`. Ask before restarting.
 - **Migration bookkeeping**: update `REQUIRED_SCHEMA` and the simulator's
-  `EXPECTED_TABLE_COUNT` (`db/schema.py:56`, currently **59**); bump the
+  `EXPECTED_TABLE_COUNT` (`db/schema.py:17`, currently **59**); bump the
   exception-hygiene baseline for `db/schema.py` (+1 per `_apply_vN`).
+- **Migration numbers are assigned at ship time, not hardcoded to feature order.**
+  The `_apply_vN` numbers (`v27`…) and `EXPECTED_TABLE_COUNT` deltas in these
+  plans assume Features ship 1→2→3→4. They don't have to — **Feature 4 is
+  independent**. Whatever ships next takes the next `_apply_vN` off the live
+  `user_version` and adds its own table count to the *current* baseline; treat
+  the per-feature numbers as illustrative, and reconcile against the live schema
+  at build, not against the plan's assumed order.
 - **Dedup-key discipline**: every battle-keyed table keys on
   `battle_events.dedup_key` **verbatim** — never re-derive keys from formatted
   values (the v25 lesson; `tests/test_battle_ingest_idempotent.py`).
@@ -126,6 +135,12 @@ here so no feature re-learns them:
   `agent/tool_exec.py` dispatch → `tests/test_entrypoints_smoke.py` AST parity →
   coverage matrix → prompt documentation. Miss a step and the tool silently
   doesn't exist.
+- **Job wiring is a checklist too** (the same lesson, for scheduled workers): a
+  `runtime/jobs/` function only runs if registered as an `ActivityDefinition` in
+  `runtime/activities.py` (`job_id`, `job_function`, `schedule_kind`/`config`,
+  `delivery_targets`) and re-exported through `runtime/jobs/__init__.py`. Miss it
+  and the worker is defined but never fires — verify it in the scheduler startup
+  summary.
 - **Job telemetry with real work-set counts**: `mark_job_start/success/failure`
   with counts in the message — never a bare success indistinguishable from "did
   nothing" (the operational-audit class: four jobs today report success while

@@ -37,8 +37,12 @@ A battle gets prose iff **all three** hold:
    seed: King Thing `#20JJJ2CCRU`, raquaza `#UL2V9QRG0`).
 3. `battle_time >= BATTLE_PROSE_MIN_DATE` (`'2026-07-20'`).
 
-At that scope: **94 battles backfill (~$0.34) + ~$1/mo**, versus ~$42/mo
-clan-wide. The gate is a **cost/iteration control, not a privacy control** —
+At that scope: **~94 battles backfill (~$0.34) + ~$1/mo**, versus ~$42/mo
+clan-wide. **Verified 2026-07-30**: the gate currently matches **97** seed
+battles since 07-20, and **all 97 carry `opponent_deck_json`** (0 one-sided) —
+so the gate date does not predate opponent-deck capture (that history runs back
+to April), and Feature 3's both-decks prompt always has both decks. The gate is
+a **cost/iteration control, not a privacy control** —
 `commentary` is public-safe, so the tool may surface it to any asker; the gate
 only limits *what we pay to generate*. Privacy scoping arrives with
 `coaching_note` in v2.

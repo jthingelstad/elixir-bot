@@ -148,11 +148,19 @@ A card can hold **both** an Evo and a Hero form — Knight and Wizard appear at
 - **`discipline_delta`** = `opponent_elixir_leaked − elixir_leaked`. Positive =
   we wasted less elixir than them. Both columns exist; NULL if either is NULL.
 - **`hp_margin`** = `(our_standing − opp_standing) * 3000 + (our_hp − opp_hp)`
-  where `standing` = `(king_tower_hp > 0) + len(princess_towers_hp_json)` (the
-  JSON array lists only surviving princess towers), and `hp` = king + sum of
-  princess HP. **The 3000 is a coarse tower-worth constant** (real princess HP
-  scales with tower level ~2400–3600); acceptable because `closeness` only reads
-  its band, not its precision. NULL if tower fields are absent.
+  where `standing` = `(king_tower_hp > 0) + len(princess_towers_hp_json)` and
+  `hp` = king + sum of princess HP. **The 3000 is a coarse tower-worth constant**
+  (real princess HP scales with tower level ~2400–3600); acceptable because
+  `closeness` only reads its band, not its precision.
+  - **Verified on live data (2026-07-30, 12,433 1v1 battles):** the array lists
+    **only surviving princess towers**, and the standing formula reproduces the
+    independent crowns signal — `standing == 3 − crowns_against` in **99.99%** of
+    battles. Build it as written.
+  - **A destroyed king reports `king_tower_hp = 0`, not NULL** (confirmed: 1,612
+    of 1,616 three-crown losses have `0`), so `(king_tower_hp > 0)` evaluates
+    cleanly — **no `COALESCE` needed on the king term**, no NULL-propagation.
+    Whole-battle tower data is truly absent in only **0.04%** (5/12,433); there,
+    and only there, `hp_margin` is NULL — the intended behaviour.
 - **`closeness`** = band of `|hp_margin|`: `0` (≥7000, a stomp), `1`
   (3000–6999), `2` (500–2999), `3` (<500, a squeaker). Calibrate the cuts
   against real values during verification (§6), don't trust these numbers blind.
@@ -167,11 +175,21 @@ A card can hold **both** an Evo and a Hero form — Knight and Wizard appear at
 
 ## 3. Worker — `runtime/jobs/_battle_intel.py` (Stage A)
 
-Cursor-driven, **outside the engine tick** so ingestion stays deterministic and
+Cursor-driven (reuse the `stream_cursors` table + `engine/db.py` cursor
+helpers), **outside the engine tick** so ingestion stays deterministic and
 replayable and enrichment catches up behind it. The reference pattern is the
 existing cursor jobs in `runtime/jobs/_*.py` (e.g. `_api_sentinel_tick` in
-`_maintenance.py`) — **not** `emit_game_from_sentinel`, which does not exist
-(overview corrected).
+`_maintenance.py`). **Not** `emit_game_from_sentinel` — that one *exists*
+(`engine/emitters/game.py:92`, called from `materialize.py`) but runs *inside*
+the engine tick, which is exactly the coupling we avoid; mirror the off-tick
+cursor jobs instead.
+
+**Job wiring is a checklist too** (the tool-wiring lesson, applied to jobs — miss
+a step and the worker is defined but never runs): add an `ActivityDefinition` in
+`runtime/activities.py` (`job_id`, `job_function`, `schedule_kind="interval"`,
+`schedule_config`, `delivery_targets`) → re-export the function through
+`runtime/jobs/__init__.py` → confirm it appears in the scheduler startup summary.
+A job function alone, with no `ActivityDefinition`, silently never fires.
 
 **Stage A — computed, every 15 min, no LLM:**
 
@@ -181,10 +199,15 @@ existing cursor jobs in `runtime/jobs/_*.py` (e.g. `_api_sentinel_tick` in
 2. Insert `battle_enrichment` computed rows for all new 1v1 battles (same skip),
    LLM/Feature-2 columns NULL.
 
-**Backfill** (one-time, run once at ship): the same two steps over the full
-history (13,570 battles → ~12,379 1v1 rows in `battle_enrichment`, ~240k card
-plays). Idempotent via `INSERT OR IGNORE` on the dedup-keyed PKs, so a re-run or
-an overlap with the live cursor is safe.
+**Backfill** (one-time, ~13,570 battles → ~12,379 1v1 `battle_enrichment` rows,
+~240k card plays). Idempotent via `INSERT OR IGNORE` on the dedup-keyed PKs, so a
+re-run or an overlap with the live cursor is safe. **Reaching prod (the open op
+question):** validation runs on a copy, but prod still needs the ~240k-row load.
+Don't let the first live Stage-A run do it in one transaction — that is a large
+write contending with the running bot's WAL (`database is locked` risk). Either
+run it as a **gated one-time backfill job in bounded chunks** (commit every N
+battles, cursor-advanced so it resumes), or run it off-hours; the incremental
+15-min worker then only ever sees a small delta. Log the running total.
 
 **Telemetry**: `mark_job_start/success/failure` with real work-set counts
 (`"card_plays +N, enrichment +M, skipped D duels / T 2v2"`) — never a bare

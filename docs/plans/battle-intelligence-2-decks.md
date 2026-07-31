@@ -170,6 +170,12 @@ signal lives, and it's ~10× cheaper than the old 400-cell enum matrix.)
   know. Anchor sanity: exploration measured **bait into control −9.9 pts
   (n=265)** and **hybrid into beatdown +7.3 (n=1,202)** — calibration must
   reproduce these directions.
+  - **Intra-clan dedup**: a battle between two current members appears twice in
+    `battle_events` (once per member as subject, sides swapped, `advantage`
+    mirrored), so it double-counts in the win-rate. Measured at **2.3%** of
+    member 1v1 battles (264/11,273) — small, but dedup the calibration query on
+    the unordered `{player_tag, opponent_tag}` pair so a friendly isn't weighed
+    twice. (Same class as the Feature 1 `card`-view double-count.)
 - **Blend** (in the `matchup` tool view, not stored): `effective_advantage =
   w·measured + (1−w)·model`, `w = n/(n+30)`, measured mapped to −2..+2.
   Self-heals balance patches without a model call and corrects model error from
