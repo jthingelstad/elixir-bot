@@ -542,8 +542,13 @@ def test_report_depth_brief_states_polarity_in_every_line():
     assert "LOWER IS BETTER" in brief
     assert "do NOT call these dominant" in brief
     assert "NOT a proven cause" in brief, "elixir gap is a correlation"
-    assert "these BEAT them" in brief
-    assert "never a weakness" in brief, "best matchups must not read as a problem"
+    # The weekly card record is a diary, not a verdict. It used to be labelled
+    # "these BEAT them", which promoted a 2-16 inside one window into a standing
+    # weakness; the standing claim belongs to the STANDING MATCHUP READ line,
+    # which carries a real sample floor. The polarity now lives in that split.
+    assert "NOT a standing weakness" in brief
+    assert "STANDING MATCHUP READ" in brief, "the diary must point at the line that can judge"
+    assert "never a weakness" in brief, "cards they handled must not read as a problem"
     assert "Dagger Duchess" in brief
 
 

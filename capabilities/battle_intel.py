@@ -253,6 +253,14 @@ def _nemesis_view(conn, tag, scope, days=None) -> dict[str, Any]:
         if _win_rate(w, losses) is not None
     ]
     top = nemeses[:10]
+    # An empty result has two completely different meanings and the caller cannot
+    # tell them apart from `nemeses` alone: "we checked their cards and they beat
+    # all of them" versus "not one card has been faced enough times to check". A
+    # member with 40 lifetime battles can never put any card over n=30, so
+    # any_losing_matchup=false was reading as a compliment earned by playing too
+    # little. cards_evaluated is how many card-forms actually cleared the floor;
+    # at zero there is no read here at all, and saying so is the honest answer.
+    evaluated = len(nemeses)
     return _envelope(
         "nemesis",
         available=True,
@@ -260,12 +268,16 @@ def _nemesis_view(conn, tag, scope, days=None) -> dict[str, Any]:
         scope=scope,
         window_days=days,
         nemeses=top,
+        cards_evaluated=evaluated,
+        sample_floor=_N_FLOOR,
         any_losing_matchup=any(e["losing_matchup"] for e in top),
         note=(
-            "Opponent card-forms ranked worst-first by member win rate (n>=30). This is a "
-            "RANKING: when losing_matchup is false the member still wins that matchup, so "
-            "do not call it a nemesis. any_losing_matchup=false means there is no card "
-            "they genuinely struggle against at this sample size — say that."
+            f"Opponent card-forms ranked worst-first by member win rate (n>={_N_FLOOR}). This "
+            "is a RANKING: when losing_matchup is false the member still wins that matchup, "
+            "so do not call it a nemesis. Read cards_evaluated FIRST: at 0 no card has been "
+            "faced enough times to judge and there is no matchup read to give — say that, and "
+            "never phrase it as having no weaknesses. Only when cards_evaluated > 0 does "
+            "any_losing_matchup=false mean they genuinely beat every card with enough games."
         ),
     )
 
