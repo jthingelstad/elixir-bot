@@ -291,6 +291,9 @@ from runtime.helpers import (  # noqa: E402,F401  # noqa: E402,F401
     _strip_weekly_recap_header,
     _with_leader_ping,
 )
+from runtime.jobs._battle_intel import (  # noqa: E402,F401
+    _battle_intel_stage_a,
+)
 from runtime.jobs._core import (  # noqa: E402,F401
     WEEKLY_DISCORD_INVITE_RELAY_DAY,
     WEEKLY_DISCORD_INVITE_RELAY_HOUR,

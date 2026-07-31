@@ -8,6 +8,11 @@ from runtime.helpers import (  # noqa: F401
     _format_weekly_recap_post,
     _strip_weekly_recap_header,
 )
+from runtime.jobs._battle_intel import (  # noqa: F401
+    BATTLE_INTEL_BATCH,
+    BATTLE_INTEL_STAGE_A_MINUTES,
+    _battle_intel_stage_a,
+)
 from runtime.jobs._core import (  # noqa: F401
     WEEKLY_DISCORD_INVITE_RELAY_DAY,
     WEEKLY_DISCORD_INVITE_RELAY_HOUR,

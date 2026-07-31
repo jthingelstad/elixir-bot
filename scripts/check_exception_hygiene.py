@@ -72,6 +72,7 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/helpers/_members.py": 2,
     "runtime/helpers/_reports.py": 10,
     "runtime/jobs/_core.py": 15,
+    "runtime/jobs/_battle_intel.py": 1,  # Stage-A job: mark_job_failure on any tick error
     "runtime/jobs/_intel.py": 4,
     "runtime/jobs/_maintenance.py": 4,
     "runtime/jobs/_memory.py": 23,  # +1: optional contradiction-card channel lookup fails soft (#229)
