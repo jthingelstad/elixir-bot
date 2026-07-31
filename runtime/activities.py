@@ -3,7 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-AWARENESS_LOOP_HOURS_DEFAULT = "*/6"
+# Phased for Central-time leaders, not for clock symmetry: */6 put the loop at
+# 00:05/06:05/12:05/18:05 CT, i.e. two of four runs land while the clan is asleep
+# and none land in the evening play window. 3/9/15/21 keeps the same 6h interval
+# but moves the runs to 09:05 (morning check-in), 15:05 (after school), 21:05
+# (peak evening play, and the last chance to voice anything before the day rolls)
+# and 03:05 (the one quiet slot, which absorbs overnight war-day boundaries).
+AWARENESS_LOOP_HOURS_DEFAULT = "3,9,15,21"
 
 
 @dataclass(frozen=True)
@@ -392,7 +398,9 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         # re-phases to "startup + N" every restart). :05 lands just after the top-
         # of-hour engine tick, so the brain reads freshly-refreshed state and dodges
         # the :00 cron crowd. AWARENESS_LOOP_HOURS and AWARENESS_LOOP_MINUTE are the
-        # tunables: hourly -> */3 (2026-07-23) -> */6 (2026-07-31), both for cost.
+        # tunables: hourly -> */3 (2026-07-23) -> */6 (2026-07-31), both for cost,
+        # then */6 -> 3,9,15,21 (2026-07-31) to phase the same 6h interval onto CT
+        # waking hours (see AWARENESS_LOOP_HOURS_DEFAULT).
         # Awareness is 51% of Elixir's LLM spend, so the interval is the biggest
         # single lever (~$37/month here). Moving it to Haiku was measured and
         # REJECTED instead: replaying real captured rounds, Haiku wrote near-parity
@@ -514,11 +522,15 @@ def _format_schedule_description(resolved: dict[str, Any]) -> str:
         return f"Every {_format_day(day_of_week)} at {hour:02d}:{minute:02d} CT."
     if "hour" in schedule_config:
         hour = schedule_config.get("hour", 0)
-        # hour may be a cron expression (e.g. "*/3" every 3h, "0,6,12,18" a list),
+        # hour may be a cron expression (e.g. "*/3" every 3h, "3,9,15,21" a list),
         # not just a fixed int — describe those without int-formatting them.
         if isinstance(hour, str) and hour.startswith("*/"):
             return f"Every {hour[2:]} hours at :{minute:02d} CT."
         if isinstance(hour, str) and not hour.isdigit():
+            parts_ = [p.strip() for p in hour.split(",")]
+            if parts_ and all(p.isdigit() for p in parts_):
+                clock = ", ".join(f"{int(p):02d}:{minute:02d}" for p in parts_)
+                return f"Daily at {clock} CT."
             return f"At hours {hour}, :{minute:02d} CT."
         return f"Daily at {int(hour):02d}:{minute:02d} CT."
     return f"Every hour at :{minute:02d} CT."
