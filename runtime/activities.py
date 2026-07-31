@@ -94,6 +94,25 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         activity_role="observer",
     ),
     ActivityDefinition(
+        activity_key="battle-intel-prose",
+        owner_lane="elixir-log",
+        purpose="Battle Intelligence Feature 3 (the ONLY LLM spend): generate "
+        "per-battle prose (commentary/loss_nature/notable) for GATED battles — "
+        "allowlisted members (battle_enrichment_enabled) with battle_time >= the "
+        "min date. One Haiku call per battle, idempotent via input_hash. "
+        "Off-switch: ELIXIR_BATTLE_PROSE=0.",
+        job_id="battle-intel-prose",
+        job_function="_battle_intel_prose",
+        schedule_kind="interval",
+        schedule_config={
+            "minutes": _attr("BATTLE_INTEL_PROSE_MINUTES", 30),
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=("Storage: battle_enrichment prose columns (gated members only)",),
+        activity_role="observer",
+    ),
+    ActivityDefinition(
         activity_key="weekly-leadership-review",
         owner_lane="actions",
         purpose="Q1's weekly batch half: roll the management week (hysteresis "

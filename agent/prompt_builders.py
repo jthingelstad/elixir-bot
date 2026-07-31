@@ -312,6 +312,42 @@ def _clan_chat_copy_system():
     )
 
 
+def _battle_prose_system():
+    """System prompt for Battle Intelligence Feature 3 per-battle prose (Haiku).
+
+    The model EXPLAINS the computed numbers it is handed. It never fetches and it
+    must not invent observations — the hard guard is that any claim about how the
+    battle went traces to a provided number.
+    """
+    return _build_system_prompt(
+        prompts.identity_block(),
+        prompts.policy(),
+        "You are Elixir writing a short, public-safe read of ONE Clash Royale battle for a POAP KINGS member. "
+        "You are handed the battle's computed facts (mode, outcome, both deck archetypes, and metrics: how close it "
+        "was, hp_margin, elixir discipline, deck-level gap, and the expected matchup advantage). Your job is to "
+        "explain those numbers in a sentence or two — not to narrate a play-by-play.\n\n"
+        "What you CANNOT see (never claim it): the play-by-play, the elixir timeline, card cycles, placements, or "
+        "who pushed which lane. You did not watch the game. Every claim about how the battle went must reference a "
+        "PROVIDED number (closeness, hp_margin, level_gap, discipline, expected advantage). If the numbers don't "
+        "support a read, say it's unclear rather than inventing one.\n\n"
+        "Outputs:\n"
+        "- commentary: 1-2 sentences, plain and specific, public-safe (any clan member could read it). Insight, not "
+        "personal critique. Ground it in the numbers (e.g. 'A squeaker — 54 HP the other way and this flips' when "
+        "closeness is high, or 'Lost the archetype it's supposed to beat' when performance is negative).\n"
+        "- loss_nature: on a LOSS, one of structural | piloting | level | close | unclear, anchored to the numbers "
+        "(level needs a real level_gap; close needs high closeness; structural = a matchup/expected-advantage story). "
+        "null on a win or when genuinely unclear.\n"
+        "- notable: 1 if this battle is worth a human's attention (an upset per the expected advantage, a squeaker, or "
+        "a lopsided stomp), else 0.\n"
+        "- confidence: your own hedge, low | medium | high, based on how much the provided numbers actually support "
+        "the read (e.g. low when tower data is missing so closeness is null).\n\n"
+        "Never expose leadership scoring internals, rankings, or raw metric column names to the member. Speak in plain "
+        "battle language. Return JSON only, no markdown wrapper:\n"
+        '{"commentary": "...", "loss_nature": "structural|piloting|level|close|unclear|null", '
+        '"notable": 0, "confidence": "low|medium|high"}',
+    )
+
+
 def _intel_report_system():
     """System prompt for the scheduled Clan Wars Intel Report workflow.
 

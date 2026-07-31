@@ -13,7 +13,7 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 28
+CURRENT_SCHEMA_VERSION = 29
 EXPECTED_TABLE_COUNT = 63
 
 
@@ -235,6 +235,7 @@ REQUIRED_SCHEMA = {
         "email_verified_at",
         "email_source",
         "cr_years_celebrated",
+        "battle_enrichment_enabled",
     },
     "player_current_state": {"player_tag", "last_seen_api"},
     "war_weeks": {"season_id", "section_index", "defense_fame"},
@@ -1487,6 +1488,35 @@ def _apply_v28(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v29(conn: sqlite3.Connection) -> None:
+    """Battle Intelligence Feature 3: the per-battle prose allowlist.
+
+    The prose columns (``loss_nature``/``notable``/``confidence``/``commentary``/
+    ``verdict``/``model``/``prompt_version``/``input_hash``/``enriched_at``) already
+    exist on ``battle_enrichment`` (Feature 1 shipped the full shape). This
+    migration adds only the one bit of source-of-truth state Feature 3 needs — the
+    allowlist flag on ``player_metadata`` — and seeds the two members the prose
+    gate opens for (King Thing, raquaza). Prose is gated to allowlist ∩
+    ``battle_time >= 2026-07-20`` as a cost/iteration control; opening it wider is
+    a one-line query change once the prompt is graded. No new table (count stays 63).
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(player_metadata)")}
+    if "battle_enrichment_enabled" not in columns:
+        conn.execute(
+            "ALTER TABLE player_metadata "
+            "ADD COLUMN battle_enrichment_enabled INTEGER NOT NULL DEFAULT 0"
+        )
+    # Seed the allowlist by flag only — no INSERT, so a fresh/empty build (no
+    # players yet) doesn't trip the player_metadata->players foreign key. Both
+    # seeds are active members with a metadata row on the live DB; the UPDATE is a
+    # no-op on a fresh build.
+    for tag in ("#20JJJ2CCRU", "#UL2V9QRG0"):
+        conn.execute(
+            "UPDATE player_metadata SET battle_enrichment_enabled = 1 WHERE player_tag = ?",
+            (tag,),
+        )
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1749,6 +1779,14 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+    if version < 29:
+        try:
+            _apply_v29(conn)
+            conn.execute("PRAGMA user_version = 29")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1938,7 +1976,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "19790b101e90a6fcfc6ae00fdc771cc5b62a1b9765753a64194f929afcb20ef3"
+CURRENT_SCHEMA_FINGERPRINT = "c8a07e717643d88b12e6b52d0d8aedd6962d1575ca242290b710a15d1aca33e0"
 
 
 __all__ = [

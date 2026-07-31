@@ -22,6 +22,7 @@ from agent.core import (
 from agent.prompt_builders import (
     _ask_elixir_daily_system,
     _awareness_system,
+    _battle_prose_system,
     _channel_lane_system,
     _clan_chat_copy_system,
     _clanops_system,
@@ -411,6 +412,29 @@ def generate_clan_chat_copy(request: dict):
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["clan_chat_copy"],
         strict_json=True,
         max_tokens=900,
+    )
+
+
+def generate_battle_prose(context: dict):
+    """Generate the per-battle prose read for ONE battle (Battle Intelligence
+    Feature 3). ``context`` carries the battle's computed facts + both deck
+    archetypes; the model explains those numbers. No tools, Haiku, strict JSON."""
+    public_context = {k: v for k, v in (context or {}).items() if not str(k).startswith("_")}
+    user_msg = (
+        "Here is one battle's computed facts. Explain them in a short public-safe read, "
+        "following the output schema in your system prompt exactly. Do not invent anything "
+        "you were not given.\n\n"
+        f"```json\n{json.dumps(public_context, indent=2, default=str)}\n```"
+    )
+    return _chat_with_tools(
+        _battle_prose_system(),
+        user_msg,
+        workflow="battle_prose",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["battle_prose"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["battle_prose"],
+        strict_json=True,
+        return_errors=True,
+        max_tokens=500,
     )
 
 
@@ -1606,6 +1630,7 @@ def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_co
 __all__ = [
     "generate_channel_update",
     "generate_clan_chat_copy",
+    "generate_battle_prose",
     "generate_intel_report",
     "run_memory_synthesis",
     "run_awareness_tick",

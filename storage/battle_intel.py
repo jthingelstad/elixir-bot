@@ -332,3 +332,138 @@ def rebuild_deck_intel(*, conn: Optional[sqlite3.Connection] = None) -> dict:
     cells = _rebuild_matchup_matrix(conn)
     filled = _fill_expected_advantage(conn)
     return {"profiled": profiled, "matchup_cells": cells, "expected_filled": filled}
+
+
+# ── Feature 3: gated per-battle prose (Haiku, allowlist + date gate) ───────────
+
+PROSE_PROMPT_VERSION = 1
+BATTLE_PROSE_MIN_DATE = "2026-07-20"
+_PROSE_MODEL = "claude-haiku-4-5-20251001"
+_LOSS_NATURE = {"structural", "piloting", "level", "close", "unclear"}
+_CLOSENESS_WORD = {0: "a stomp", 1: "a clear margin", 2: "close", 3: "a squeaker (very close)"}
+_PERF_WORD = {
+    1: "upset (won when the matchup was against them)",
+    -1: "underperformed (lost a matchup they were favored in)",
+    0: "as expected",
+}
+
+
+def _prose_input_hash(row, prompt_version: int) -> str:
+    """sha256 over everything the prose depends on, so a Feature-2 re-profile or a
+    prompt bump changes the hash and triggers regeneration (plan §4)."""
+    import hashlib
+
+    parts = [
+        str(row["hp_margin"]),
+        str(row["closeness"]),
+        str(row["discipline_delta"]),
+        str(row["level_gap"]),
+        str(row["expected_advantage"]),
+        str(row["performance"]),
+        str(row["our_deck_hash"]),
+        str(row["their_deck_hash"]),
+        str(prompt_version),
+    ]
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+_GATED_PROSE_SQL = """
+    SELECT e.battle_dedup_key, e.battle_time, b.outcome, b.game_mode_name,
+           b.crowns_for, b.crowns_against, b.is_ranked,
+           e.hp_margin, e.closeness, e.discipline_delta, e.level_gap,
+           e.expected_advantage, e.performance, e.our_deck_hash, e.their_deck_hash,
+           op.archetype our_archetype, tp.archetype their_archetype,
+           e.input_hash, e.prompt_version
+      FROM battle_enrichment e
+      JOIN battle_events b ON b.dedup_key = e.battle_dedup_key
+      JOIN player_metadata pm ON pm.player_tag = e.player_tag
+                             AND pm.battle_enrichment_enabled = 1
+      LEFT JOIN deck_profile op ON op.deck_hash = e.our_deck_hash
+      LEFT JOIN deck_profile tp ON tp.deck_hash = e.their_deck_hash
+     WHERE e.battle_time >= ?
+       AND (e.commentary IS NULL OR e.prompt_version IS NULL OR e.prompt_version <> ?)
+     ORDER BY (e.performance IS NOT NULL AND e.performance <> 0) DESC, e.battle_time DESC
+     LIMIT ?
+"""
+
+
+def generate_prose_batch(limit: int = 10, *, conn: Optional[sqlite3.Connection] = None) -> dict:
+    """Feature 3: write per-battle prose for up to ``limit`` GATED battles
+    (allowlisted member ∩ battle_time >= min date) missing prose at the current
+    prompt_version. One Haiku call per battle; idempotent via input_hash. This is
+    the only LLM spend in Battle Intelligence v1.
+
+    Deliberately NOT wrapped in one transaction: the LLM call takes seconds, and
+    holding a write lock across it would block the live bot's DB (and the model
+    call's own ``record_llm_call``). Each battle is read lock-free, generated, then
+    written+committed in a short per-battle transaction. Opens its own connection
+    with a busy_timeout unless one is provided (tests)."""
+    import db as db_facade
+    import elixir_agent
+
+    own = conn is None
+    if own:
+        conn = db_facade.get_connection()
+        conn.execute("PRAGMA busy_timeout = 30000")
+    rows = conn.execute(
+        _GATED_PROSE_SQL,
+        (BATTLE_PROSE_MIN_DATE, PROSE_PROMPT_VERSION, max(1, min(int(limit or 10), 200))),
+    ).fetchall()
+    now = _now()
+    written = refreshed = 0
+    for r in rows:
+        ihash = _prose_input_hash(r, PROSE_PROMPT_VERSION)
+        if r["input_hash"] == ihash and r["prompt_version"] == PROSE_PROMPT_VERSION:
+            continue  # already current (defensive; the WHERE mostly excludes these)
+        was_present = r["prompt_version"] is not None
+        context = {
+            "mode": r["game_mode_name"],
+            "outcome": "win" if r["outcome"] == "W" else "loss" if r["outcome"] == "L" else "draw",
+            "crowns": f"{r['crowns_for']}-{r['crowns_against']}",
+            "our_deck": r["our_archetype"],
+            "their_deck": r["their_archetype"],
+            "how_close": _CLOSENESS_WORD.get(r["closeness"])
+            if r["closeness"] is not None
+            else "unknown (tower data missing)",
+            "hp_margin": r["hp_margin"],
+            "elixir_discipline_delta": r["discipline_delta"],
+            "deck_level_gap": None if r["is_ranked"] else r["level_gap"],
+            "expected_matchup_advantage": r["expected_advantage"],
+            "result_vs_expectation": _PERF_WORD.get(r["performance"])
+            if r["performance"] is not None
+            else None,
+        }
+        try:
+            result = elixir_agent.generate_battle_prose(context)
+        except Exception:  # noqa: BLE001 - one battle's LLM failure must not stop the batch
+            continue
+        if not isinstance(result, dict) or result.get("error") or not result.get("commentary"):
+            continue  # transient; retried next run
+        loss_nature = result.get("loss_nature")
+        if loss_nature not in _LOSS_NATURE:
+            loss_nature = None  # honor the CHECK constraint; model returned null/other
+        conn.execute(
+            "UPDATE battle_enrichment SET commentary = ?, loss_nature = ?, notable = ?, "
+            "confidence = ?, model = ?, prompt_version = ?, input_hash = ?, enriched_at = ? "
+            "WHERE battle_dedup_key = ?",
+            (
+                str(result.get("commentary"))[:600],
+                loss_nature,
+                1 if result.get("notable") else 0,
+                str(result.get("confidence") or "")[:10] or None,
+                _PROSE_MODEL,
+                PROSE_PROMPT_VERSION,
+                ihash,
+                now,
+                r["battle_dedup_key"],
+            ),
+        )
+        if own:
+            conn.commit()  # short per-battle write; no lock held across the LLM call
+        if was_present:
+            refreshed += 1
+        else:
+            written += 1
+    if own:
+        conn.close()
+    return {"prose_written": written, "prose_refreshed": refreshed, "scanned": len(rows)}
