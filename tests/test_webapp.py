@@ -12,6 +12,7 @@ from runtime.webapp import ops as webapp_ops
 from runtime.webapp import queries
 from runtime.webapp import ticks as webapp_ticks
 from runtime.webapp.server import build_app
+from storage import identity
 
 LOGIN = {"Tailscale-User-Login": "jthingelstad@github"}
 
@@ -90,11 +91,10 @@ def test_pages_render_on_empty_db():
 
 
 def test_llm_cost_page_aggregates_by_workflow_and_prices_models():
-    """The cost panel sums spend per workflow and prices Sonnet/Haiku/Opus (the
-    Opus branch fixes a $0 undercount in the canonical formula)."""
+    """The cost panel prices Sonnet 5 and observed Opus 4.8 calls."""
     conn = db.get_connection()
     try:
-        # 1M completion tokens: Sonnet 5 introductory pricing → $10, Opus → $75.
+        # 1M completion tokens: Sonnet 5 introductory pricing → $10, Opus 4.8 → $25.
         conn.execute(
             "INSERT INTO llm_calls (recorded_at, workflow, model, ok, "
             "completion_tokens, total_tokens) VALUES "
@@ -114,7 +114,7 @@ def test_llm_cost_page_aggregates_by_workflow_and_prices_models():
     data = queries.llm_cost_page()
     by_wf = {w["workflow"]: w for w in data["workflows_7d"]}
     assert abs(by_wf["awareness"]["cost_usd"] - 10.0) < 0.01
-    assert abs(by_wf["memory_synthesis"]["cost_usd"] - 75.0) < 0.01  # opus priced, not $0
+    assert abs(by_wf["memory_synthesis"]["cost_usd"] - 25.0) < 0.01
 
     async def body(client):
         r = await client.get("/cost", headers=LOGIN)
@@ -123,6 +123,23 @@ def test_llm_cost_page_aggregates_by_workflow_and_prices_models():
         assert "LLM cost" in text and "awareness" in text and "memory_synthesis" in text
 
     _client_run(body)
+
+
+def test_system_status_prices_observed_opus_48_calls():
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO llm_calls (recorded_at, workflow, model, ok, "
+            "completion_tokens, total_tokens) VALUES "
+            "(strftime('%Y-%m-%dT%H:%M:%S','now'), 'memory_synthesis', "
+            "'claude-opus-4-8', 1, 1000000, 1000000)",
+        )
+        conn.commit()
+        status = identity.get_system_status(conn=conn)
+    finally:
+        conn.close()
+
+    assert abs(status["llm_cost_7d"]["cost_usd"] - 25.0) < 0.01
 
 
 def test_api_sentinel_page_shows_admission_and_drift():

@@ -168,12 +168,14 @@ def ticks_page() -> dict:
         conn.close()
 
 
-# Per-call USD cost, in micro-dollars (÷1e6 for USD). Extends the canonical
-# storage/identity.py formula (Sonnet/Haiku weights per million) with an Opus
-# branch — the intensive workflows run Opus, which the canonical formula prices
-# at $0 (a pre-existing undercount worth unifying later).
+# Per-call USD cost, in micro-dollars (÷1e6 for USD). Opus 4.8 is the observed
+# intensive-workflow model; its current $5/$25 MTok pricing supersedes the old
+# Opus 4.1 rate that this panel previously applied.
 _LLM_COST_CASE = """
     CASE
+        WHEN model LIKE 'claude-opus-4-8%' OR model LIKE 'Codex-opus-4-8%'
+        THEN COALESCE(prompt_tokens,0)*5 + COALESCE(cache_read_tokens,0)*0.5
+             + COALESCE(cache_creation_tokens,0)*6.25 + COALESCE(completion_tokens,0)*25
         WHEN model LIKE 'claude-opus%' OR model LIKE 'Codex-opus%'
         THEN COALESCE(prompt_tokens,0)*15 + COALESCE(cache_read_tokens,0)*1.5
              + COALESCE(cache_creation_tokens,0)*18.75 + COALESCE(completion_tokens,0)*75
