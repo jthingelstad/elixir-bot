@@ -148,12 +148,16 @@ def _battle_view(conn, tag, limit) -> dict[str, Any]:
     rows = conn.execute(
         "SELECT e.battle_time, b.outcome, b.opponent_name, b.game_mode_name, "
         "e.hp_margin, e.closeness, e.discipline_delta, e.level_gap, "
-        "e.our_deck_hash, e.their_deck_hash, b.is_ranked "
+        "e.our_deck_hash, e.their_deck_hash, e.expected_advantage, e.performance, "
+        "op.archetype our_archetype, tp.archetype their_archetype, b.is_ranked "
         "FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
+        "LEFT JOIN deck_profile op ON op.deck_hash = e.our_deck_hash "
+        "LEFT JOIN deck_profile tp ON tp.deck_hash = e.their_deck_hash "
         "WHERE e.player_tag = ? ORDER BY e.battle_time DESC LIMIT ?",
         (tag, max(1, min(int(limit or 20), 100))),
     ).fetchall()
     closeness_word = {0: "stomp", 1: "clear", 2: "close", 3: "squeaker"}
+    perf_word = {1: "upset win", -1: "underperformed", 0: "as expected"}
     battles = []
     for r in rows:
         battles.append(
@@ -162,6 +166,8 @@ def _battle_view(conn, tag, limit) -> dict[str, Any]:
                 "outcome": r["outcome"],
                 "opponent": r["opponent_name"],
                 "mode": r["game_mode_name"],
+                "our_archetype": r["our_archetype"],
+                "their_archetype": r["their_archetype"],
                 "hp_margin": r["hp_margin"],
                 "closeness": closeness_word.get(r["closeness"])
                 if r["closeness"] is not None
@@ -169,6 +175,10 @@ def _battle_view(conn, tag, limit) -> dict[str, Any]:
                 "discipline_delta": r["discipline_delta"],
                 "level_gap": None if r["is_ranked"] else r["level_gap"],
                 "level_note": "levels_normalized" if r["is_ranked"] else None,
+                "expected_advantage": r["expected_advantage"],
+                "vs_expectation": perf_word.get(r["performance"])
+                if r["performance"] is not None
+                else None,
                 "our_deck_hash": r["our_deck_hash"],
                 "their_deck_hash": r["their_deck_hash"],
             }
@@ -225,11 +235,76 @@ def _member_summary_view(conn, tag) -> dict[str, Any]:
     )
 
 
+_FAMILIES = {"beatdown", "control", "cycle", "bait", "bridge spam", "siege"}
+
+
+def _matchup_view(conn, our_family, their_family) -> dict[str, Any]:
+    """Measured family matchup advantages (-2..+2 from clan win rates, n-gated)."""
+    where, params = [], []
+    for col, val in (("our_family", our_family), ("their_family", their_family)):
+        if val:
+            if val not in _FAMILIES:
+                return _envelope("matchup", available=False, error="unknown_family", value=val)
+            where.append(f"{col} = ?")
+            params.append(val)
+    sql = (
+        "SELECT our_family, their_family, advantage, measured_win_rate, n FROM matchup_expectation"
+    )
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY advantage DESC, n DESC"
+    cells = [
+        {
+            "our_family": r["our_family"],
+            "their_family": r["their_family"],
+            "advantage": r["advantage"],
+            "measured_win_rate": r["measured_win_rate"],
+            "n": r["n"],
+            "low_confidence": r["n"] < _N_FLOOR,
+        }
+        for r in conn.execute(sql, tuple(params)).fetchall()
+    ]
+    return _envelope(
+        "matchup",
+        available=bool(cells),
+        cells=cells,
+        note="advantage: +2 strongly favored .. -2 strongly against, from MEASURED "
+        "clan outcomes (member perspective). low_confidence flags n<30.",
+    )
+
+
+def _deck_view(conn, tag) -> dict[str, Any]:
+    """A member's observed decks: rules archetype/family, avg elixir, record."""
+    if not tag:
+        return _envelope("deck", available=False, error="member_tag_required")
+    rows = conn.execute(
+        "SELECT dp.archetype, dp.family, dp.avg_elixir, "
+        "SUM(b.outcome = 'W') w, SUM(b.outcome = 'L') l, COUNT(*) n "
+        "FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
+        "JOIN deck_profile dp ON dp.deck_hash = e.our_deck_hash "
+        "WHERE e.player_tag = ? GROUP BY e.our_deck_hash ORDER BY n DESC LIMIT 10",
+        (tag,),
+    ).fetchall()
+    decks = [
+        {
+            "archetype": r["archetype"],
+            "family": r["family"],
+            "avg_elixir": r["avg_elixir"],
+            "battles": r["n"],
+            "win_rate": _win_rate(r["w"], r["l"]),
+        }
+        for r in rows
+    ]
+    return _envelope("deck", available=bool(decks), subject=tag, decks=decks)
+
+
 def get_battle_intelligence(
     *,
     view: str = "battle",
     member_tag: Optional[str] = None,
     card: Optional[str] = None,
+    our_family: Optional[str] = None,
+    their_family: Optional[str] = None,
     scope: str = "all",
     limit: int = 20,
     source: Any = None,
@@ -237,9 +312,9 @@ def get_battle_intelligence(
 ) -> dict[str, Any]:
     """Computed battle intelligence. Views: ``card`` (needs ``card``, optional
     ``member_tag`` else clan-wide), ``nemesis`` (optional ``member_tag``),
-    ``battle`` (needs ``member_tag``), ``member_summary`` (needs ``member_tag``).
-    Read-only."""
-    if view not in {"card", "nemesis", "battle", "member_summary"}:
+    ``battle``/``member_summary``/``deck`` (need ``member_tag``), ``matchup``
+    (optional ``our_family``/``their_family`` else the full matrix). Read-only."""
+    if view not in {"card", "nemesis", "battle", "member_summary", "matchup", "deck"}:
         return _envelope(view, available=False, error="unsupported_view")
     tag = _tag(member_tag) if member_tag else None
     own = conn is None
@@ -253,6 +328,10 @@ def get_battle_intelligence(
             return _nemesis_view(conn, tag, scope)
         if view == "battle":
             return _battle_view(conn, tag, limit)
+        if view == "matchup":
+            return _matchup_view(conn, our_family, their_family)
+        if view == "deck":
+            return _deck_view(conn, tag)
         return _member_summary_view(conn, tag)
     finally:
         if own:

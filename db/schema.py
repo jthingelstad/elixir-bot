@@ -13,8 +13,8 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 27
-EXPECTED_TABLE_COUNT = 61
+CURRENT_SCHEMA_VERSION = 28
+EXPECTED_TABLE_COUNT = 63
 
 
 def initialize_empty_database(
@@ -329,6 +329,8 @@ REQUIRED_SCHEMA = {
         "our_deck_hash",
         "their_deck_hash",
     },
+    "deck_profile": {"deck_hash", "family", "archetype", "avg_elixir", "cards_json"},
+    "matchup_expectation": {"our_family", "their_family", "advantage", "n"},
 }
 
 
@@ -1442,6 +1444,49 @@ def _apply_v27(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v28(conn: sqlite3.Connection) -> None:
+    """Battle Intelligence Feature 2: deck profiles + the matchup matrix.
+
+    * ``deck_profile`` — one row per form-aware ``deck_hash``: its ``family`` and
+      conventional ``archetype`` label (from the deterministic ``_classify``
+      RULES, not a model, so no era versioning is needed — a deck's archetype is
+      a pure function of its cards) plus computed ``avg_elixir``. Filled for every
+      observed deck, both sides, at $0.
+    * ``matchup_expectation`` — the 6-family x 6-family matrix (36 cells). Filled
+      from MEASURED clan battle outcomes, not a model: all 36 cells clear n>=30 on
+      live data, so the clan's own history IS the matrix (the blend would let
+      measured dominate anyway). Recomputed weekly (calibration = recompute).
+
+    Feature 1's ``battle_enrichment.expected_advantage`` / ``performance`` columns
+    already exist; the Stage-B worker fills them by snapshotting the cell advantage
+    for each battle's (our_family, their_family). Pure SQL/rules, no LLM.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS deck_profile (
+            deck_hash      TEXT PRIMARY KEY,
+            family         TEXT NOT NULL,
+            archetype      TEXT NOT NULL,
+            win_condition  TEXT,
+            avg_elixir     REAL,
+            cards_json     TEXT NOT NULL,
+            scored_at      TEXT NOT NULL
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_deck_profile_family ON deck_profile(family)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS matchup_expectation (
+            our_family        TEXT NOT NULL,
+            their_family      TEXT NOT NULL,
+            advantage         INTEGER NOT NULL CHECK (advantage BETWEEN -2 AND 2),
+            measured_win_rate REAL,
+            n                 INTEGER NOT NULL,
+            basis             TEXT,
+            computed_at       TEXT NOT NULL,
+            PRIMARY KEY (our_family, their_family)
+        )"""
+    )
+
+
 def apply_schema_migrations(conn: sqlite3.Connection) -> None:
     """Advance a compatible v5.1 database to the current schema atomically."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -1696,6 +1741,14 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+    if version < 28:
+        try:
+            _apply_v28(conn)
+            conn.execute("PRAGMA user_version = 28")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -1885,7 +1938,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "665ed192c29bb8ee0f4dfc70246e87b583d6f37b24379a0461ef92da39f9445c"
+CURRENT_SCHEMA_FINGERPRINT = "19790b101e90a6fcfc6ae00fdc771cc5b62a1b9765753a64194f929afcb20ef3"
 
 
 __all__ = [

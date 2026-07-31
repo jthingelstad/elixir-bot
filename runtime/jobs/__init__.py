@@ -11,7 +11,9 @@ from runtime.helpers import (  # noqa: F401
 from runtime.jobs._battle_intel import (  # noqa: F401
     BATTLE_INTEL_BATCH,
     BATTLE_INTEL_STAGE_A_MINUTES,
+    BATTLE_INTEL_STAGE_B_MINUTES,
     _battle_intel_stage_a,
+    _battle_intel_stage_b,
 )
 from runtime.jobs._core import (  # noqa: F401
     WEEKLY_DISCORD_INVITE_RELAY_DAY,

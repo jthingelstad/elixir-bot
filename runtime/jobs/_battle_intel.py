@@ -16,11 +16,18 @@ import logging
 from runtime import status as runtime_status
 from storage import battle_intel
 
-__all__ = ["_battle_intel_stage_a", "BATTLE_INTEL_STAGE_A_MINUTES", "BATTLE_INTEL_BATCH"]
+__all__ = [
+    "_battle_intel_stage_a",
+    "_battle_intel_stage_b",
+    "BATTLE_INTEL_STAGE_A_MINUTES",
+    "BATTLE_INTEL_STAGE_B_MINUTES",
+    "BATTLE_INTEL_BATCH",
+]
 
 log = logging.getLogger("elixir")
 
 BATTLE_INTEL_STAGE_A_MINUTES = 15
+BATTLE_INTEL_STAGE_B_MINUTES = 60
 BATTLE_INTEL_BATCH = 500
 
 
@@ -39,3 +46,20 @@ async def _battle_intel_stage_a() -> None:
     except Exception as exc:
         log.error("Battle intel Stage A failed: %s", exc, exc_info=True)
         runtime_status.mark_job_failure("battle_intel_stage_a", str(exc))
+
+
+async def _battle_intel_stage_b() -> None:
+    """Feature 2 (all $0, no model): profile new decks with the rules classifier,
+    recompute the measured family matchup matrix, and fill expected_advantage /
+    performance (the upset detector). Cheap enough to run hourly."""
+    runtime_status.mark_job_start("battle_intel_stage_b")
+    try:
+        result = await asyncio.to_thread(battle_intel.rebuild_deck_intel)
+        runtime_status.mark_job_success(
+            "battle_intel_stage_b",
+            f"profiled +{result['profiled']}, matchup_cells {result['matchup_cells']}, "
+            f"expected_filled +{result['expected_filled']}",
+        )
+    except Exception as exc:
+        log.error("Battle intel Stage B failed: %s", exc, exc_info=True)
+        runtime_status.mark_job_failure("battle_intel_stage_b", str(exc))

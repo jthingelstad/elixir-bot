@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from typing import Optional
 
 from db import managed_connection
@@ -25,6 +26,16 @@ from engine.battle_metrics import (
     level_gap,
 )
 from engine.deck_hash import deck_hash
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _advantage_from_win_rate(win_rate: float) -> int:
+    """Map a measured member win rate to a -2..+2 advantage band (0.5 = even;
+    ~7 points per band)."""
+    return max(-2, min(2, round((win_rate - 0.5) / 0.07)))
 
 
 def _parse_deck(deck_json) -> list[dict]:
@@ -177,3 +188,147 @@ def backfill(*, batch: int = 2000, db_path: Optional[str] = None) -> dict:
         if result["scanned"] == 0:  # every scanned battle gets a row, so this terminates
             break
     return totals
+
+
+# ── Feature 2: deck profiles + measured matchup matrix (all $0, no model) ──────
+#
+# Archetype/family come from the deterministic ``_classify`` RULES, so a deck's
+# profile is a pure function of its cards (no era versioning). The matchup matrix
+# is MEASURED from clan outcomes — all 36 family cells clear n>=30 on live data,
+# so the clan's own history is the matrix. Imported lazily to keep the Stage-A
+# worker's import graph tiny and avoid a storage->capabilities import at module load.
+
+
+def _profile_row(cards_json, catalog):
+    """(family, archetype, win_condition, avg_elixir, ids_json) for a deck_json,
+    or None if it is not a clean 8-card deck."""
+    from capabilities.decks import _average_elixir, _classify
+    from storage.cards import _enrich_deck_cards
+
+    try:
+        raw = json.loads(cards_json) if isinstance(cards_json, str) else cards_json
+    except TypeError, ValueError:
+        return None
+    if not isinstance(raw, list) or len(raw) != 8:
+        return None
+    cards = _enrich_deck_cards(raw, catalog)
+    names = {c["name"] for c in cards if c.get("name")}
+    avg = _average_elixir(cards)
+    label, family, wincons = _classify(names, avg)
+    ids = json.dumps(sorted((c.get("id"), c.get("evolution_level")) for c in cards))
+    return family, label, ", ".join(wincons), avg, ids
+
+
+def _profile_new_decks(conn) -> int:
+    """Write a deck_profile row for every observed deck_hash not yet profiled
+    (both member and opponent sides). Returns rows written. $0."""
+    from storage.cards import _deck_catalog
+
+    catalog = _deck_catalog(conn)
+    now = _now()
+    # A representative deck_json per un-profiled hash, from either side.
+    rows = conn.execute(
+        """
+        SELECT h, dj FROM (
+            SELECT e.our_deck_hash h, b.deck_json dj
+              FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key
+             WHERE e.our_deck_hash IS NOT NULL
+            UNION
+            SELECT e.their_deck_hash h, b.opponent_deck_json dj
+              FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key
+             WHERE e.their_deck_hash IS NOT NULL
+        )
+        WHERE h NOT IN (SELECT deck_hash FROM deck_profile)
+        GROUP BY h
+        """
+    ).fetchall()
+    written = 0
+    for h, dj in rows:
+        profiled = _profile_row(dj, catalog)
+        if profiled is None:
+            continue
+        family, archetype, wincond, avg, ids = profiled
+        conn.execute(
+            "INSERT OR IGNORE INTO deck_profile "
+            "(deck_hash, family, archetype, win_condition, avg_elixir, cards_json, scored_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (h, family, archetype, wincond, avg, ids, now),
+        )
+        written += 1
+    return written
+
+
+def _rebuild_matchup_matrix(conn) -> int:
+    """Recompute the whole 6x6 family matrix from measured clan outcomes
+    (INSERT OR REPLACE). Weekly calibration is just re-running this. Returns cells."""
+    now = _now()
+    rows = conn.execute(
+        """
+        SELECT op.family our_f, tp.family their_f,
+               SUM(b.outcome = 'W') w, SUM(b.outcome = 'L') l, COUNT(*) n
+          FROM battle_enrichment e
+          JOIN battle_events b   ON b.dedup_key = e.battle_dedup_key
+          JOIN deck_profile op   ON op.deck_hash = e.our_deck_hash
+          JOIN deck_profile tp   ON tp.deck_hash = e.their_deck_hash
+         WHERE op.family <> 'unclassified' AND tp.family <> 'unclassified'
+         GROUP BY op.family, tp.family
+        """
+    ).fetchall()
+    cells = 0
+    for our_f, their_f, w, losses, n in rows:
+        decided = w + losses
+        if decided == 0:
+            continue
+        wr = w / decided
+        conn.execute(
+            "INSERT OR REPLACE INTO matchup_expectation "
+            "(our_family, their_family, advantage, measured_win_rate, n, basis, computed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                our_f,
+                their_f,
+                _advantage_from_win_rate(wr),
+                round(wr, 3),
+                n,
+                "measured from clan battles",
+                now,
+            ),
+        )
+        cells += 1
+    return cells
+
+
+def _fill_expected_advantage(conn) -> int:
+    """Snapshot each battle's matchup-cell advantage into
+    battle_enrichment.expected_advantage and set performance (the upset detector:
+    +1 = won when disadvantaged, -1 = lost when advantaged, else 0). Only battles
+    whose both decks are profiled and whose cell exists. Returns rows updated."""
+    cur = conn.execute(
+        """
+        UPDATE battle_enrichment AS e
+           SET expected_advantage = m.advantage,
+               performance = CASE
+                   WHEN b.outcome = 'W' AND m.advantage < 0 THEN 1
+                   WHEN b.outcome = 'L' AND m.advantage > 0 THEN -1
+                   ELSE 0 END
+          FROM battle_events b, deck_profile op, deck_profile tp, matchup_expectation m
+         WHERE b.dedup_key = e.battle_dedup_key
+           AND op.deck_hash = e.our_deck_hash
+           AND tp.deck_hash = e.their_deck_hash
+           AND m.our_family = op.family
+           AND m.their_family = tp.family
+           AND e.expected_advantage IS NULL
+        """
+    )
+    return cur.rowcount
+
+
+@managed_connection
+def rebuild_deck_intel(*, conn: Optional[sqlite3.Connection] = None) -> dict:
+    """Feature 2 Stage-B (all $0): profile new decks, recompute the measured
+    matchup matrix, and fill expected_advantage/performance. Returns work-set
+    counts for telemetry."""
+    profiled = _profile_new_decks(conn)
+    cells = _rebuild_matchup_matrix(conn)
+    filled = _fill_expected_advantage(conn)
+    return {"profiled": profiled, "matchup_cells": cells, "expected_filled": filled}

@@ -503,12 +503,14 @@ def _execute_get_battle_intelligence(arguments):
     member_tag = arguments.get("member_tag")
     if member_tag:
         member_tag = _resolve_member_tag(member_tag)
-    elif view in {"battle", "member_summary"}:
+    elif view in {"battle", "member_summary", "deck"}:
         return {"error": "member_tag_required", "view": view}
     return battle_intel_capability.get_battle_intelligence(
         view=view,
         member_tag=member_tag,
         card=arguments.get("card"),
+        our_family=arguments.get("our_family"),
+        their_family=arguments.get("their_family"),
         scope=arguments.get("scope", "all"),
         limit=arguments.get("limit", 20),
         source=db,
