@@ -20,8 +20,8 @@ Evidence standard:
 
 Every run:
 
-1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). An issue-driven task arrives
-   with the initiating conversation's `wip` claim; accept that specific claim. A calendar audit
+1. Run the shared git preflight (`AGENT-TEAM/scripts/preflight.sh`). A dispatcher-created
+   issue-driven task arrives with the dispatcher's `wip` claim; accept that specific claim. A calendar audit
    must skip all claimed work and remains quiet if another role owns the checkout.
 2. Pull the recent quality signal:
    * `scripts/review_agent_feedback.py` — 👎 reactions and prompt failures.

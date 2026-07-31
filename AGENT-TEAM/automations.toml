@@ -1,10 +1,21 @@
-version = 2
+version = 3
 repo = "/Users/otto/Projects/elixir-bot"
 timezone = "America/Chicago"
 
 # ACTIVE is reserved for a genuinely time-windowed or recovery activity. PAUSED means the
 # historical schedule remains recorded but issue work is selected from GitHub and runs on demand
-# as a normal app-visible project task. It is not a dormant queue to reactivate.
+# as a normal app-visible project task. It is not a dormant queue to reactivate. The dispatcher is
+# the one ACTIVE queue heartbeat and reuses one persistent app-visible task.
+
+[[automation]]
+id = "elixir-dispatcher"
+name = "Elixir Dispatcher"
+role_file = "AGENT-TEAM/dispatcher.md"
+schedule_kind = "dispatcher"
+rrule = "FREQ=MINUTELY;INTERVAL=15"
+model = "gpt-5.6-sol"
+reasoning_effort = "xhigh"
+status = "ACTIVE"
 
 [[automation]]
 id = "elixir-operations-manager"

@@ -14,6 +14,21 @@ CODEX_HOME = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
 
 
 def _prompt(entry: dict) -> str:
+    if entry["schedule_kind"] == "dispatcher":
+        paths = [
+            "AGENTS.md",
+            "AGENT-TEAM/WORKFLOW.md",
+            "AGENT-TEAM/README.md",
+            entry["role_file"],
+            "AGENT-TEAM/dispatch.toml",
+        ]
+        rendered = ", ".join(f"`{REPO / path}`" for path in paths)
+        return (
+            f"Read {rendered} completely, then execute exactly one dispatcher heartbeat as "
+            "written. Do not do role work yourself. Preserve preflight, global `wip` "
+            "serialization, deterministic priority, the one-child limit, approval gates, "
+            "claim cleanup, and normal app-visible task creation."
+        )
     paths = [
         "AGENTS.md",
         "AGENT-TEAM/WORKFLOW.md",
@@ -37,6 +52,15 @@ def _prompt(entry: dict) -> str:
 
 
 def _expected(entry: dict) -> dict:
+    if entry["schedule_kind"] == "dispatcher":
+        return {
+            "id": entry["id"],
+            "kind": "heartbeat",
+            "name": entry["name"],
+            "prompt": _prompt(entry),
+            "status": entry["status"],
+            "rrule": entry["rrule"],
+        }
     return {
         "id": entry["id"],
         "kind": "cron",
@@ -51,14 +75,20 @@ def _expected(entry: dict) -> dict:
     }
 
 
-def main() -> int:
-    plan = tomllib.loads(PLAN_PATH.read_text())
+def audit(plan: dict, *, codex_home: Path = CODEX_HOME) -> tuple[list[str], list[str]]:
+    successes: list[str] = []
     failures: list[str] = []
     for entry in plan["automation"]:
         status = entry.get("status")
         schedule_kind = entry.get("schedule_kind")
-        if status == "ACTIVE" and schedule_kind not in {"time_window", "recovery"}:
-            failures.append(f"{entry['id']}: ACTIVE requires time_window or recovery schedule_kind")
+        if status == "ACTIVE" and schedule_kind not in {
+            "time_window",
+            "recovery",
+            "dispatcher",
+        }:
+            failures.append(
+                f"{entry['id']}: ACTIVE requires time_window, recovery, or dispatcher schedule_kind"
+            )
             continue
         if status == "PAUSED" and schedule_kind != "event_driven":
             failures.append(f"{entry['id']}: PAUSED requires event_driven schedule_kind")
@@ -67,9 +97,12 @@ def main() -> int:
         if not role_path.exists():
             failures.append(f"{entry['id']}: missing role file {entry['role_file']}")
             continue
-        path = CODEX_HOME / "automations" / entry["id"] / "automation.toml"
+        path = codex_home / "automations" / entry["id"] / "automation.toml"
         expected = _expected(entry)
         if not path.exists():
+            if status == "PAUSED":
+                successes.append(f"OK  {entry['id']}  PAUSED  event_driven  absent (expected)")
+                continue
             failures.append(f"{entry['id']}: missing {path}")
             continue
         try:
@@ -81,9 +114,17 @@ def main() -> int:
         if drift:
             failures.append(f"{entry['id']}: drift in {', '.join(drift)}")
         else:
-            print(
+            successes.append(
                 f"OK  {entry['id']}  {entry['status']}  {entry['schedule_kind']}  {entry['model']}"
             )
+    return successes, failures
+
+
+def main() -> int:
+    plan = tomllib.loads(PLAN_PATH.read_text())
+    successes, failures = audit(plan)
+    for success in successes:
+        print(success)
 
     if failures:
         for failure in failures:

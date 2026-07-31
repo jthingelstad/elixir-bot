@@ -1,8 +1,9 @@
 version = 1
 repo = "jthingelstad/elixir-bot"
 cwd = "/Users/otto/Projects/elixir-bot"
+poll_interval_seconds = 900
 
-# Selection is read-only. An active Codex project conversation performs preflight,
+# Selection is read-only. The dedicated app-visible dispatcher heartbeat performs preflight,
 # adds the global `wip` claim, and creates one normal app-visible role task.
 dispatch_prefix = "dispatch:"
 serial_claim_label = "wip"

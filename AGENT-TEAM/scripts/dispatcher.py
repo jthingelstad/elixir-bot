@@ -2,8 +2,9 @@
 """Read-only selector and handoff prompt for app-visible AGENT-TEAM tasks.
 
 This program never claims an issue, invokes Codex, creates a task, or mutates the
-repository. GitHub is the durable queue; an active Codex project conversation
-performs preflight, claims the selected issue, and creates one visible role task.
+repository. GitHub is the durable queue; the dedicated app-visible dispatcher
+heartbeat performs preflight, claims the selected issue, and creates one visible
+role task around this deterministic selector.
 """
 
 from __future__ import annotations
@@ -462,8 +463,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.handoff is not None:
         return handoff(config, args.handoff)
     print(
-        "Automatic role launch does not exist. Use --shadow to select work, claim it from an "
-        "active Codex project conversation, then use --handoff ISSUE to create one visible task.",
+        "The selector is read-only. Use the app-owned Elixir Dispatcher heartbeat or manual "
+        "recovery in AGENT-TEAM/dispatcher.md to claim and create one visible task.",
         file=sys.stderr,
     )
     return 2

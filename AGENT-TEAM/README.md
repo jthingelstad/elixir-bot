@@ -17,8 +17,9 @@ AGENT-TEAM/
   README.md            # this file — Elixir specifics
   <role>.md            # the roster below
   error-watch.md       # Operations Manager runbook: logs/elixir-error.log triage
+  dispatcher.md        # persistent app-visible queue heartbeat contract
   dispatch.toml        # deterministic issue route and inference rules
-  automations.toml     # desired time-windowed/recovery Codex schedules
+  automations.toml     # desired dispatcher/time-windowed/recovery Codex schedules
   scripts/             # preflight, queue audit, automation audit, attribution, notes
   notes/               # gitignored per-run scratch
   summaries/           # committed weekly Manager digests
@@ -54,27 +55,26 @@ and the Build Manager builds approved work.
 
 Issue-driven team work runs as **one normal local Codex project task per role**, never as a
 background shell or launchd run. GitHub chooses the work and records the handoff; the visible task
-is the resumable execution record. The selector is deliberately read-only and cannot claim an
-issue, invoke Codex, or mutate the repository.
+is the resumable execution record. The selector remains deliberately read-only. One persistent
+app-visible `Elixir Dispatcher` task owns the claim-and-create steps around that selector.
 
 ### Start one role
 
-1. From an active Codex conversation in the `elixir-bot` project, run
-   `uv run --locked python AGENT-TEAM/scripts/dispatcher.py --shadow --all`. It names eligible
-   issues and roles without changing anything. A human may name a specific issue or role instead.
-2. Re-read the issue and run `AGENT-TEAM/scripts/preflight.sh`. Confirm there is **no open `wip`
-   anywhere in the repository**: one active claim owns the shared checkout. If safe, add `wip`,
-   retain or add exactly one `dispatch:*` label, and comment with the role plus an
-   America/Chicago timestamp. Do not create the role task if preflight fails or any claim exists.
-3. Run `uv run --locked python AGENT-TEAM/scripts/dispatcher.py --handoff <issue>` and create the
-   requested **normal local project task** from the active Codex conversation. Pass the generated
-   prompt, issue, claim, and role file. Never substitute a subagent, `codex exec`, launchd, or an
-   ephemeral/background shell run; those are not the visible project task Jamie expects.
-4. The role does one focused issue-scoped run, updates its title only at meaningful phases, and
-   completes the authoritative GitHub transition before its final response.
-5. The role removes `wip` and its current `dispatch:*` label, then closes the issue, stops at an
-   explicit human state, or leaves exactly one next `dispatch:*` label. It does not invoke the next
-   role. A later active conversation creates that visible task.
+One dedicated, app-visible `Elixir Dispatcher` task receives a heartbeat every 15 minutes. It
+runs preflight and the deterministic selector, stops if any `wip` already owns the shared checkout,
+and creates at most one normal local project task for the selected role. Idle heartbeats reuse the
+dispatcher task and create no child task, issue comment, run note, or repository change.
+
+The role does one focused issue-scoped run, updates its title only at meaningful phases, and
+completes the authoritative GitHub transition before its final response. It removes `wip` and its
+current `dispatch:*` label, then closes the issue, stops at an explicit human state, or leaves
+exactly one next `dispatch:*` label. It does not invoke the next role; a later heartbeat handles
+that hop.
+
+Manual recovery follows the same sequence in `dispatcher.md`: run the selector from an active
+`elixir-bot` conversation, preflight, confirm no `wip`, claim one issue, generate its `--handoff`
+prompt, and create one normal visible project task. Never substitute a subagent, `codex exec`,
+launchd, or an ephemeral/background shell run.
 
 The selector fails closed while any `wip` claim exists. The 24-hour stale-claim rule in
 `WORKFLOW.md` is the only way to recover an abandoned claim. This serializes Build, Operations,
@@ -116,23 +116,26 @@ GitHub issue state, never a task's final prose or calendar, drives executable ha
 
 Exactly one handoff label is active at a time. `needs-data`, `needs-quality`, and `needs-eval`
 remember downstream work still owed; `needs-deploy` retains its existing operational meaning.
-The initiating conversation owns the `wip` claim. The role removes its current handoff before
-finishing, then closes, enters `proposal`/`blocked`/`needs-design`, or adds exactly one next
-handoff. Product and meta proposals still wait for Jamie; proven defects and approved work flow
-autonomously.
+The dispatcher owns the initial `wip` claim and the child role accepts it as its own. The role
+removes its current handoff before finishing, then closes, enters
+`proposal`/`blocked`/`needs-design`, or adds exactly one next handoff. Product and meta proposals
+still wait for Jamie; proven defects and approved work flow autonomously.
 
 The canonical `manager.md` remains byte-identical across projects. For an Elixir issue-driven
-`dispatch:manager` task, the initiating conversation supplies the claim and visible title; the
+`dispatch:manager` task, the dispatcher supplies the claim and visible title; the
 Manager keeps its existing lane, removes `dispatch:manager` and `wip`, leaves any new `meta`
 direction at `proposal` for Jamie, and routes an already-approved implementation to
 `dispatch:build`. It never edits another role or launches that next task itself.
 
-There is no automatic launcher to install. Read-only inspection is:
+Read-only inspection is:
 
 ```bash
 uv run --locked python AGENT-TEAM/scripts/dispatcher.py --check --live
 uv run --locked python AGENT-TEAM/scripts/dispatcher.py --shadow --all
 ```
+
+The app-owned heartbeat is the only automatic launcher. Do not install a LaunchAgent or add a
+direct launch path to `dispatcher.py`.
 
 ## Current runtime map
 
@@ -182,9 +185,10 @@ Manager's `summaries/`; ephemeral = `notes/`.
 
 ## Cadence
 
-Issue handoffs are event-driven through GitHub. Calendar tasks remain only where the input is a
-time window or the role is the external recovery watcher. Every scheduled execution is still a
-normal visible project task and follows the title protocol above. All times America/Chicago.
+Issue handoffs are event-driven through GitHub and the single dispatcher heartbeat. Calendar tasks
+remain only where the input is a time window or the role is the external recovery watcher. Every
+scheduled execution is still a normal visible project task and follows the title protocol above.
+All times America/Chicago.
 
 | Role | Cadence | Why the calendar task remains |
 |------|---------|-------------------------------|
@@ -197,7 +201,8 @@ normal visible project task and follows the title protocol above. All times Amer
 | Manager | Weekly + event-driven | Team-health review and notes digest need a fixed period |
 
 The desired live Codex configuration is versioned in `automations.toml`. A `PAUSED` entry is the
-historical schedule definition for an event-driven role, not a dormant queue to reactivate. Check
+historical schedule definition for an event-driven role, not a dormant queue to reactivate; its
+automation file may be absent. Check
 the registry with `uv run --locked python AGENT-TEAM/scripts/automation_audit.py`; use Codex's
 automation controls, not shell edits, to apply an authorized schedule change. The audit catches
 paused/active drift, stale models, wrong cadences, missing role files, and prompts that omit the
