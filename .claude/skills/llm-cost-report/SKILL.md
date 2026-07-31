@@ -38,6 +38,7 @@ Use these exact numbers (per 1M tokens). Update this block if Anthropic changes 
 
 | Model | Prompt | Completion | Cache read | Cache write |
 |---|---:|---:|---:|---:|
+| Opus 4.8 (`claude-opus-4-8`) | $5.00 | $25.00 | $0.50 | $6.25 |
 | Sonnet 5 (`claude-sonnet-5`) | $2.00 | $10.00 | $0.20 | $2.50 |
 | Sonnet 4.6 (`claude-sonnet-4-6`) | $3.00 | $15.00 | $0.30 | $3.75 |
 | Haiku 4.5 (`claude-haiku-4-5-20251001`) | $1.00 | $5.00 | $0.10 | $1.25 |
@@ -59,6 +60,8 @@ SELECT date(recorded_at) AS day,
        COUNT(*) AS calls,
        ROUND(SUM(CASE WHEN model LIKE 'claude-sonnet-5%'
             THEN prompt_tokens*2 + cache_read_tokens*0.2 + cache_creation_tokens*2.5 + completion_tokens*10
+            WHEN model LIKE 'claude-opus-4-8%'
+            THEN prompt_tokens*5 + cache_read_tokens*0.5 + cache_creation_tokens*6.25 + completion_tokens*25
             WHEN model LIKE 'claude-sonnet%'
             THEN prompt_tokens*3 + cache_read_tokens*0.3 + cache_creation_tokens*3.75 + completion_tokens*15
             WHEN model LIKE 'claude-haiku%'
@@ -80,6 +83,8 @@ SELECT workflow,
        COUNT(*) AS calls,
        ROUND(SUM(CASE WHEN model LIKE 'claude-sonnet-5%'
             THEN prompt_tokens*2 + cache_read_tokens*0.2 + cache_creation_tokens*2.5 + completion_tokens*10
+            WHEN model LIKE 'claude-opus-4-8%'
+            THEN prompt_tokens*5 + cache_read_tokens*0.5 + cache_creation_tokens*6.25 + completion_tokens*25
             WHEN model LIKE 'claude-sonnet%'
             THEN prompt_tokens*3 + cache_read_tokens*0.3 + cache_creation_tokens*3.75 + completion_tokens*15
             WHEN model LIKE 'claude-haiku%'
@@ -122,6 +127,8 @@ WITH daily AS (
   SELECT date(recorded_at) AS day,
          SUM(CASE WHEN model LIKE 'claude-sonnet-5%'
               THEN prompt_tokens*2 + cache_read_tokens*0.2 + cache_creation_tokens*2.5 + completion_tokens*10
+              WHEN model LIKE 'claude-opus-4-8%'
+              THEN prompt_tokens*5 + cache_read_tokens*0.5 + cache_creation_tokens*6.25 + completion_tokens*25
               WHEN model LIKE 'claude-sonnet%'
               THEN prompt_tokens*3 + cache_read_tokens*0.3 + cache_creation_tokens*3.75 + completion_tokens*15
               WHEN model LIKE 'claude-haiku%'
