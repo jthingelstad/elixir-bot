@@ -8,6 +8,7 @@ sends (one To: per member, never BCC) and per-member failure isolation.
 from __future__ import annotations
 
 import asyncio
+import re
 
 import agent.mail.outbound as outbound
 import db
@@ -248,3 +249,305 @@ def test_weekly_member_report_no_recipients(monkeypatch):
     monkeypatch.setattr(db, "list_member_emails", lambda: [])
     result = asyncio.run(_core._weekly_member_report_cycle())
     assert result == {"sent": 0, "total": 0}
+
+
+# ── Battle + Deck Intelligence in the dispatch ────────────────────────────────
+#
+# The report reads both capabilities rather than recomputing them, so what these
+# pin is the TRANSLATION: an intelligence answer that refuses to overclaim must
+# still refuse to overclaim after the report has phrased it for a member.
+
+_NO_NEMESIS = {
+    "available": True,
+    "nemeses": [],
+    "cards_evaluated": 61,
+    "sample_floor": 30,
+    "any_losing_matchup": False,
+}
+_NO_EVIDENCE = {
+    "available": True,
+    "nemeses": [],
+    "cards_evaluated": 0,
+    "sample_floor": 30,
+    "any_losing_matchup": False,
+}
+_MAXED = {
+    "available": True,
+    "upgrades": [],
+    "no_material_upgrades": True,
+    "incidental_cards_below_max": 38,
+}
+_SUGGESTION = {
+    "archetype": "Hog Cycle",
+    "family": "cycle",
+    "avg_elixir": 3.0,
+    "levels_from_max": 0.5,
+    "fielded_by_members": 0,
+    "cards": [
+        {"name": "Hog Rider", "form": "base", "level": 13, "max_level": 14},
+        {"name": "Mini P.E.K.K.A", "form": "Hero", "level": 14, "max_level": 14},
+    ],
+}
+
+
+def _intel_ctx(**intel):
+    ctx = _ctx()
+    ctx["days"] = 7
+    ctx["intel"] = {
+        "coaching": None,
+        "nemesis": None,
+        "decks_played": None,
+        "upgrades": None,
+        "discover": None,
+        "war_set": None,
+        **intel,
+    }
+    return ctx
+
+
+def test_no_intelligence_renders_no_deck_block():
+    """Every view can be unavailable — a new member has no battles at all."""
+    assert member_report._render_deck(_intel_ctx()) is None
+    assert member_report._intel_brief(_intel_ctx()) == []
+    # And the email still assembles.
+    _, body = member_report.render_member_report(_intel_ctx())
+    assert "Your deck" not in body
+
+
+def test_no_losing_matchup_says_so_instead_of_naming_one():
+    """The failure this replaces: a 0-4 across four games read as a nemesis.
+
+    When the lifetime read finds no card the member actually loses to, both the
+    brief and the email have to say that — the interesting bug is not a wrong
+    card, it is quietly dropping the section so the week's diary becomes the
+    only matchup claim in the email.
+    """
+    ctx = _intel_ctx(nemesis=_NO_NEMESIS)
+    brief = "\n".join(member_report._intel_brief(ctx))
+    assert "no card they genuinely lose to" in brief.lower() or "NO card they genuinely" in brief
+    assert "do NOT promote" in brief
+    assert "no card you actually lose to" in member_report._render_deck(ctx)
+
+
+def test_a_real_losing_matchup_is_named_with_its_sample():
+    ctx = _intel_ctx(
+        nemesis={
+            "available": True,
+            "any_losing_matchup": True,
+            "nemeses": [
+                {"card": "Mega Knight", "n": 44, "member_win_rate": 0.41, "losing_matchup": True}
+            ],
+        }
+    )
+    rendered = member_report._render_deck(ctx)
+    assert "Mega Knight" in rendered and "41%" in rendered and "44" in rendered
+    assert "no card you actually lose to" not in rendered
+
+
+def test_ranked_but_not_losing_matchups_are_never_called_a_nemesis():
+    """nemesis is a RANKING: worst-first still includes cards they beat."""
+    ctx = _intel_ctx(
+        nemesis={
+            "available": True,
+            "any_losing_matchup": False,
+            "cards_evaluated": 1,
+            "sample_floor": 30,
+            "nemeses": [
+                {"card": "Arrows", "n": 36, "member_win_rate": 0.583, "losing_matchup": False}
+            ],
+        }
+    )
+    rendered = member_report._render_deck(ctx)
+    assert "Arrows" not in rendered, "a 58% matchup is not a struggle"
+    assert "no card you actually lose to" in rendered
+
+
+def test_maxed_deck_is_good_news_not_a_card_to_chase():
+    ctx = _intel_ctx(upgrades=_MAXED)
+    brief = "\n".join(member_report._intel_brief(ctx))
+    assert "do NOT reach for a card they barely play" in brief
+    assert "38 owned cards sit below max" in brief
+    assert "at or near max" in member_report._render_deck(ctx)
+
+
+def test_upgrades_are_ranked_by_what_they_actually_field():
+    ctx = _intel_ctx(
+        upgrades={
+            "available": True,
+            "no_material_upgrades": False,
+            "upgrades": [
+                {
+                    "card": "Fireball",
+                    "level": 8,
+                    "max_level": 14,
+                    "levels_from_max": 6,
+                    "usage_share": 0.082,
+                },
+            ],
+        }
+    )
+    rendered = member_report._render_deck(ctx)
+    assert "| Fireball | 8/14 | 6 | 8% |" in rendered
+    assert "how much you actually field the card" in rendered
+
+
+def test_suggested_decks_never_carry_a_win_rate():
+    """Mirrors capabilities' own invariant: clan deck win rates are ~half player
+    composition, so a rate on a deck the member has never played is a number
+    about somebody else. The report must not reintroduce one while phrasing."""
+    ctx = _intel_ctx(
+        discover={"available": True, "suggestions": [_SUGGESTION]},
+        war_set={
+            "available": True,
+            "distinct_cards": 32,
+            "worst_deck_from_max": 2.5,
+            "decks": [dict(_SUGGESTION, archetype=f"Deck {i}") for i in range(4)],
+        },
+    )
+    rendered = member_report._render_deck(ctx)
+    brief = "\n".join(member_report._intel_brief(ctx))
+
+    # Every line that describes a deck the member does not already play: no
+    # percentage, no record, no win-rate word anywhere on it.
+    deck_lines = [
+        line
+        for line in rendered.splitlines() + brief.splitlines()
+        if _SUGGESTION["archetype"] in line or "Deck " in line
+    ]
+    assert deck_lines, "the fixture must actually produce deck lines to inspect"
+    for line in deck_lines:
+        assert "%" not in line, line
+        assert not re.search(r"\d+\s*[-–]\s*\d+\b", line), f"reads as a record: {line}"
+        # "no win rate exists" is the disclaimer, not a claim — everything else is.
+        assert "win" not in line.lower().replace("no win rate exists", ""), line
+    assert "never state or imply one" in brief
+    assert "already own" in rendered
+
+
+def test_war_set_admits_how_weak_its_worst_deck_is():
+    """Four decks sharing no card is a constraint solve — the fourth is built from
+    leftovers. Handing a member an underlevelled deck without saying so is how a
+    war day gets lost on advice from this email."""
+    ctx = _intel_ctx(
+        war_set={
+            "available": True,
+            "distinct_cards": 32,
+            "worst_deck_from_max": 2.5,
+            "decks": [dict(_SUGGESTION, archetype=f"Deck {i}") for i in range(4)],
+        }
+    )
+    rendered = member_report._render_deck(ctx)
+    assert "**2.5** levels from max" in rendered
+    assert "no card" in rendered  # "four decks ... no card reused"
+    assert "32" in rendered
+
+
+def test_card_forms_survive_into_the_email():
+    """base / Evo / Hero are different cards. Dropping the form makes the advice
+    point at a card the member may not own."""
+    ctx = _intel_ctx(discover={"available": True, "suggestions": [_SUGGESTION]})
+    rendered = member_report._render_deck(ctx)
+    assert "**Hero Mini P.E.K.K.A** (14/14)" in rendered
+    assert "**Hog Rider** (13/14)" in rendered, "base form takes no prefix"
+
+
+def test_too_few_battles_gets_no_matchup_read_rather_than_a_compliment():
+    """The trap this closes: an empty nemesis list means "we judged every card and
+    you beat them all" for a veteran and "we could not judge a single card" for a
+    newcomer. Both arrive as any_losing_matchup=False. Reading it as the former
+    tells a member with 40 lifetime battles they have no weaknesses -- praise
+    earned by not playing.
+    """
+    ctx = _intel_ctx(nemesis=_NO_EVIDENCE)
+    brief = "\n".join(member_report._intel_brief(ctx))
+    assert "NONE AVAILABLE" in brief
+    assert "do NOT say they have no weaknesses" in brief
+    # And the email says nothing at all rather than guessing in either direction.
+    rendered = member_report._render_deck(ctx) or ""
+    assert "no card you actually lose to" not in rendered
+    assert "struggle" not in rendered
+
+
+def test_a_veteran_with_no_losing_matchups_is_told_so_with_the_count():
+    ctx = _intel_ctx(nemesis=_NO_NEMESIS)
+    assert "61 cards" in "\n".join(member_report._intel_brief(ctx))
+    assert "**61** cards" in member_report._render_deck(ctx)
+
+
+def _played(*archetypes):
+    return {
+        "available": True,
+        "decks": [
+            {"archetype": a, "family": "bridge spam", "avg_elixir": 4.4, "battles": 80}
+            for a in archetypes
+        ],
+    }
+
+
+def test_suggested_decks_avoid_the_archetype_they_already_play():
+    """ "Decks worth trying" ranked by how close to max the member can field them,
+    which puts their OWN archetype first -- their collection is built for it. A
+    member looking for a way out of a rut was handed their own deck back."""
+    ctx = _intel_ctx(
+        decks_played=_played("Mega Knight Bridge Spam", "Mega Knight Control"),
+        discover={
+            "available": True,
+            "suggestions": [
+                dict(_SUGGESTION, archetype="Mega Knight Bridge Spam"),
+                dict(_SUGGESTION, archetype="Mega Knight Control"),
+                dict(_SUGGESTION, archetype="Mortar Siege"),
+            ],
+        },
+    )
+    rendered = member_report._render_deck(ctx)
+    assert "Mortar Siege" in rendered
+    assert "Mega Knight" not in rendered.split("Decks worth trying")[1]
+
+
+def test_a_one_archetype_collection_still_gets_suggestions():
+    """Filtering to novel archetypes must not empty the section for a member who
+    can only build one thing."""
+    ctx = _intel_ctx(
+        decks_played=_played("Hog Cycle"),
+        discover={"available": True, "suggestions": [dict(_SUGGESTION, archetype="Hog Cycle")]},
+    )
+    assert "Hog Cycle" in member_report._render_deck(ctx)
+
+
+def test_nobody_runs_it_is_never_said_about_a_deck_they_run():
+    """fielded_by_members counts exact deck hashes, so a sibling of the member's
+    own deck arrives as unplayed. Telling them nobody runs the archetype they
+    play every day is simply false."""
+    ctx = _intel_ctx(
+        decks_played=_played("Hog Cycle"),
+        discover={
+            "available": True,
+            "suggestions": [dict(_SUGGESTION, archetype="Hog Cycle", fielded_by_members=0)],
+        },
+    )
+    assert "nobody in the clan runs it" not in member_report._render_deck(ctx)
+
+
+def test_only_the_worst_few_matchups_are_named_and_never_as_a_failing():
+    """Six records between 43% and 49% read as a list of failings; at n=32-67 none
+    of them is distinguishable from even. Name the worst few as hard games."""
+    nem = {
+        "available": True,
+        "any_losing_matchup": True,
+        "cards_evaluated": 61,
+        "sample_floor": 30,
+        "nemeses": [
+            {
+                "card": f"Card{i}",
+                "n": 40,
+                "member_win_rate": 0.43 + i * 0.01,
+                "losing_matchup": True,
+            }
+            for i in range(6)
+        ],
+    }
+    rendered = member_report._render_deck(_intel_ctx(nemesis=nem))
+    assert rendered.count("across 40 battles") == 3, "only the worst three"
+    assert "Card5" not in rendered
+    assert "struggle" not in rendered.lower()
+    assert "Close games, not lost ones" in rendered

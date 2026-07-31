@@ -16,6 +16,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 import db
+from capabilities import battle_intel, deck_intel
 from capabilities import members as member_capability
 from engine.normalize import humanize_badge, humanize_game_mode
 from engine.profiles import MODE_DISPLAY, playstyle_line
@@ -25,6 +26,16 @@ from storage.game_modes import mode_group_label
 from storage.player import NEAR_MISS_TOWER_HP
 
 _ISO_CUTOFF = "%Y-%m-%dT%H:%M:%SZ"
+
+# How many "decks worth considering" the brief may carry. Three is enough to
+# feel like a choice; more turns a letter into a catalogue and pays prompt cost
+# every week for options nobody reads past the first.
+_DISCOVER_LIMIT = 3
+_DISCOVER_POOL = 8
+
+# How many losing matchups the email names. Six near-even records read as a list
+# of failings; the worst few are the story.
+_NEMESIS_SHOWN = 3
 
 _CARD_EVENT_TYPES = (
     "card_unlocked",
@@ -424,6 +435,90 @@ def _clan_trending_cards(conn, cutoff: str, *, min_members: int = 2, limit: int 
     return [{"card_name": r["card"], "members": r["members"]} for r in rows if r["card"]]
 
 
+# ── Battle + Deck Intelligence ────────────────────────────────────────────────
+#
+# Read through the capabilities, never recomputed here. Both apply evidence
+# floors a 7-day slice of one member's battles cannot support on its own -- an
+# n>=30 player-relative floor before a matchup counts as a standing weakness, a
+# usage x levels_from_max materiality floor before a card is worth levelling --
+# and both would rather answer "there is nothing here" than answer thinly. That
+# is exactly the guardrail a personal email needs: this module's own weekly
+# card record (_card_matchups) is a DIARY of seven days and cannot tell anyone
+# what they are actually bad at. The capabilities own the standing claims; this
+# module owns what happened this week. Keeping those two straight is the whole
+# point of reading them here.
+#
+# No try/except: the weekly job already isolates one member's failure from the
+# rest of the send (test_weekly_member_report_isolates_one_failure), so a broken
+# view costs one email rather than being silently swallowed into a thinner one.
+
+
+def _unavailable(block: dict | None) -> bool:
+    return not block or not block.get("available")
+
+
+def _played_archetypes(intel: dict) -> set[str]:
+    return {d.get("archetype") for d in ((intel.get("decks_played") or {}).get("decks") or [])}
+
+
+def _fresh_suggestions(intel: dict, limit: int = _DISCOVER_LIMIT) -> list[dict]:
+    """Decks worth TRYING — which means decks in an archetype they do not already run.
+
+    `discover` ranks by how close to max a member can field a deck, and their own
+    archetype naturally ranks first: their collection is built for it. For a
+    member looking for a way out of a rut that hands back their own deck with the
+    serial numbers filed off, labelled "nobody in the clan runs it" because the
+    exact eight cards are novel even though they play the archetype every day.
+    Novelty lives at the archetype level, so that is where this filters. Falling
+    back to the unfiltered list keeps a member whose whole collection points at
+    one archetype from getting an empty section.
+    """
+    suggestions = (intel.get("discover") or {}).get("suggestions") or []
+    played = _played_archetypes(intel)
+    fresh = [s for s in suggestions if s.get("archetype") not in played]
+    return (fresh or suggestions)[:limit]
+
+
+def _novel(suggestion: dict, played: set[str]) -> bool:
+    """Whether 'nobody runs this' is a true thing to say to THIS member. The
+    capability counts exact deck hashes, so a sibling of their own deck reads as
+    unplayed; they demonstrably play the archetype."""
+    return not suggestion.get("fielded_by_members") and suggestion.get("archetype") not in played
+
+
+def _intelligence(conn, tag: str, days: int) -> dict:
+    """The four intelligence reads a personal weekly report can actually use.
+
+    Window choice is deliberate and differs per view. `coaching` is scoped to the
+    report window because "what decided YOUR battles this week" is a weekly
+    story. `nemesis` is deliberately UNSCOPED -- a nemesis is a standing trait
+    that needs n>=30 to claim at all, and seven days of one member's play never
+    reaches that floor, so scoping it to the week would silently turn every
+    member into "no weaknesses". The deck views are collection state, not window
+    state, and have no window at all.
+    """
+    coaching = battle_intel.get_battle_intelligence(
+        view="coaching", member_tag=tag, days=days, conn=conn
+    )
+    nemesis = battle_intel.get_battle_intelligence(view="nemesis", member_tag=tag, conn=conn)
+    decks = battle_intel.get_battle_intelligence(view="deck", member_tag=tag, conn=conn)
+    upgrades = deck_intel.get_deck_recommendations(view="upgrades", member_tag=tag, conn=conn)
+    # Fetch deeper than we show: the archetype filter above needs material to
+    # work with, and the member's own archetype reliably occupies the top slots.
+    discover = deck_intel.get_deck_recommendations(
+        view="discover", member_tag=tag, limit=_DISCOVER_POOL, conn=conn
+    )
+    war_set = deck_intel.get_deck_recommendations(view="war_set", member_tag=tag, conn=conn)
+    return {
+        "coaching": None if _unavailable(coaching) else coaching,
+        "nemesis": None if _unavailable(nemesis) else nemesis,
+        "decks_played": None if _unavailable(decks) else decks,
+        "upgrades": None if _unavailable(upgrades) else upgrades,
+        "discover": None if _unavailable(discover) else discover,
+        "war_set": None if _unavailable(war_set) else war_set,
+    }
+
+
 def build_member_report_context(
     tag: str, name: str, *, days: int = 7, now: str | None = None
 ) -> dict:
@@ -551,6 +646,7 @@ def build_member_report_context(
                 "trending_cards": _clan_trending_cards(conn, cutoff),
             },
         }
+        ctx["intel"] = _intelligence(conn, tag, days)
         ctx["progress"] = _progress_items(ctx)
         return ctx
     finally:
@@ -752,19 +848,165 @@ def _depth_brief(ctx: dict) -> list[str]:
                 "proven cause of the losses"
             )
 
+    # This is a seven-day DIARY, not a verdict. It used to be labelled "TOUGHEST
+    # MATCHUPS ... these BEAT them", which turned a 0-4 across four games into a
+    # standing weakness the member was told to fix. The standing claim now comes
+    # from the STANDING MATCHUP READ line (Battle Intelligence, lifetime n>=30);
+    # these two lines only report what happened inside the window, and say so.
     mu = b.get("matchups") or {}
     if mu.get("toughest"):
+        days = ctx.get("days")
+        window = f"IN THESE {days} DAYS" if days else "IN THE REPORT WINDOW"
         out.append(
-            f"TOUGHEST MATCHUPS (their record against cards faced {mu['min_faced']}+ times; "
-            "these BEAT them): " + ", ".join(_card_line(c) for c in mu["toughest"])
+            f"CARDS THAT GAVE THEM TROUBLE THIS WEEK (record against cards faced "
+            f"{mu['min_faced']}+ times {window} — a diary of the week, "
+            "NOT a standing weakness; only the STANDING MATCHUP READ line may be used to "
+            "say what they are actually bad against): "
+            + ", ".join(_card_line(c) for c in mu["toughest"])
         )
     if mu.get("best"):
         out.append(
-            "BEST MATCHUPS (cards they HANDLE — a strength, never a weakness): "
+            "CARDS THEY HANDLED THIS WEEK (a strength, never a weakness): "
             + ", ".join(_card_line(c) for c in mu["best"])
         )
     if b.get("tower_troop"):
         out.append(f"TOWER TROOP: {b['tower_troop']}")
+    return out
+
+
+_UPGRADE_LINES = 3
+_WAR_DECK_NAMES = 4
+
+
+def _intel_brief(ctx: dict) -> list[str]:
+    """Battle + Deck Intelligence, phrased so the model cannot overclaim (#216 rule).
+
+    Same discipline as _depth_brief: every line carries its own polarity and its
+    own evidence floor, because the model sees only this brief. The two lines
+    most easily turned into a lie are the matchup read (a weekly 0-4 is not a
+    weakness) and the deck suggestions (candidates built from a collection, with
+    no win rate anywhere behind them), so both say so in the sentence itself.
+    """
+    intel = ctx.get("intel") or {}
+    out: list[str] = []
+
+    played = (intel.get("decks_played") or {}).get("decks") or []
+    if played:
+        d = played[0]
+        shape = []
+        c = intel.get("coaching") or {}
+        s = c.get("primary_deck_shape") or {}
+        if s.get("air_answers") is not None:
+            shape.append(
+                f"{s['air_answers']} air answers, {s.get('tank_answers')} anti-tank, "
+                f"{s.get('splash_answers')} splash"
+            )
+        out.append(
+            f"THE DECK THEY PLAY: {d.get('archetype')} ({d.get('family')}, "
+            f"{d.get('avg_elixir')} average elixir, {d.get('battles')} battles on it)"
+            + (f" — structure: {'; '.join(shape)}" if shape else "")
+        )
+
+    c = intel.get("coaching") or {}
+    factors = c.get("decisive_factors") or {}
+    if factors:
+        out.append(
+            "WHAT ACTUALLY DECIDED THEIR BATTLES (only factors measured to separate "
+            "winning from losing appear here — these are the ONLY causes you may "
+            "name; 'even_game' means nothing separated them and is not a fault): "
+            + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in factors.items())
+        )
+    beat = c.get("lost_to_archetypes") or {}
+    if beat:
+        out.append(
+            "DECK ARCHETYPES THAT BEAT THEM THIS WEEK: "
+            + ", ".join(f"{k} ({v})" for k, v in list(beat.items())[:4])
+        )
+
+    nem = intel.get("nemesis")
+    if nem is not None:
+        losing = [n for n in (nem.get("nemeses") or []) if n.get("losing_matchup")]
+        if losing:
+            out.append(
+                "STANDING MATCHUP READ — their weakest matchups by lifetime record "
+                f"(n>={nem.get('sample_floor')} per card, worst first, "
+                f"{len(losing)} of {nem.get('cards_evaluated')} cards judged sit below "
+                "even). These are RECORDS, not verdicts: a few points under 50% at these "
+                "sample sizes is still close, so name them as the hardest games rather "
+                "than as things they are bad at: "
+                + ", ".join(
+                    f"{n['card']} {_pct(n['member_win_rate'])}% over {n['n']}"
+                    for n in losing[:_NEMESIS_SHOWN]
+                )
+            )
+        elif not nem.get("cards_evaluated"):
+            out.append(
+                "STANDING MATCHUP READ: NONE AVAILABLE — they have not faced any single "
+                f"card the {nem.get('sample_floor')}+ times it takes to judge a matchup. "
+                "There is no read here at all: do NOT say they have no weaknesses (that "
+                "would be a compliment earned by playing too little), and do NOT promote "
+                "anything from this week's card record into a standing weakness either. "
+                "Simply say nothing about their standing matchups."
+            )
+        elif not nem.get("any_losing_matchup"):
+            out.append(
+                f"STANDING MATCHUP READ: across the {nem['cards_evaluated']} cards they have "
+                f"faced {nem.get('sample_floor')}+ times, there is NO card they genuinely "
+                "lose to — they are above 50% against every one of them. Say that plainly "
+                "and warmly; do NOT promote anything from this week's card record into a "
+                "weakness to fix."
+            )
+
+    up = intel.get("upgrades") or {}
+    rows = up.get("upgrades") or []
+    if rows:
+        out.append(
+            "UPGRADES WORTH MAKING (ranked by how much they FIELD the card x how far "
+            "it is from max; cards below the usage floor are excluded as incidental): "
+            + ", ".join(
+                f"{r['card']} lvl {r['level']}/{r['max_level']} "
+                f"({r['levels_from_max']} from max, in {_pct(r['usage_share'])}% of their decks)"
+                for r in rows[:_UPGRADE_LINES]
+            )
+        )
+    elif up.get("no_material_upgrades"):
+        incidental = up.get("incidental_cards_below_max")
+        out.append(
+            "UPGRADES: none worth naming — every card they actually field is at or "
+            "near max"
+            + (
+                f" ({incidental} owned cards sit below max, but they don't play them)"
+                if incidental
+                else ""
+            )
+            + ". Tell them their deck is in good shape; do NOT reach for a card they barely play."
+        )
+
+    disc = _fresh_suggestions(intel)
+    if disc:
+        played = _played_archetypes(intel)
+        out.append(
+            "DECKS WORTH CONSIDERING (assembled ONLY from cards they already own at "
+            "the levels shown — these are CANDIDATES, no win rate exists for any of "
+            "them and you must never state or imply one): "
+            + "; ".join(
+                f"{s['archetype']} ({s['family']}, {s['avg_elixir']} elixir, "
+                f"{s['levels_from_max']} avg levels from max"
+                + (", nobody in the clan fields it" if _novel(s, played) else "")
+                + ")"
+                for s in disc
+            )
+        )
+
+    war = intel.get("war_set") or {}
+    war_decks = war.get("decks") or []
+    if war_decks:
+        out.append(
+            f"WAR SET THEY COULD FIELD ({war.get('distinct_cards')} distinct cards across "
+            "four decks — clan war requires four decks that share no card): "
+            + ", ".join(d["archetype"] for d in war_decks[:_WAR_DECK_NAMES])
+            + f"; the weakest of the four averages {war.get('worst_deck_from_max')} levels from max"
+        )
     return out
 
 
@@ -801,6 +1043,7 @@ def facts_for_model(ctx: dict) -> str:
             f"in {b['mode']} (trophy {int(b['trophy_change'] or 0):+d})"
         )
     lines.extend(_depth_brief(ctx))
+    lines.extend(_intel_brief(ctx))
     prog = _progress_brief(ctx)
     if prog:
         lines.append(prog)
@@ -916,9 +1159,10 @@ def _render_edge(ctx: dict) -> str | None:
 
     if mu.get("toughest"):
         block += [
-            "**Your matchups**",
+            "**Your week against the field**",
             "",
-            f"Cards you faced at least {mu['min_faced']} times this week, and how you did.",
+            f"Cards you faced at least {mu['min_faced']} times this week, and how you did. "
+            "Seven days — see below for what your whole record says.",
             "",
             "| Card | Record | Win rate | Faced |",
             "|---|---|---|---|",
@@ -980,6 +1224,156 @@ def _render_edge(ctx: dict) -> str | None:
     return "\n".join(block) if block else None
 
 
+_FACTOR_WORDS = {
+    "card_levels": "card levels",
+    "elixir_management": "elixir management",
+    "coin_flip": "a coin flip",
+    "matchup": "the matchup",
+    "even_game": "nothing — even games",
+}
+
+
+def _deck_card_list(cards: list[dict]) -> str:
+    """Cards with the form kept visible: base, Evo and Hero are different cards."""
+    out = []
+    for c in cards:
+        form = c.get("form")
+        label = c["name"] if form in (None, "base") else f"{form} {c['name']}"
+        out.append(f"**{label}** ({c['level']}/{c['max_level']})")
+    return ", ".join(out)
+
+
+def _render_deck(ctx: dict) -> str | None:
+    """The deck half of the report — deterministic for the same reason as
+    _render_edge: these are the numbers a member will act on (which card to
+    level, which deck to build), and a paraphrase can quietly move a level or
+    drop the form off a card, which makes the advice wrong rather than vague.
+
+    Everything here is bounded by what they own. No win rate appears anywhere:
+    clan deck win rates are roughly half player composition, so a rate attached
+    to a suggested deck would be a number about somebody else.
+    """
+    intel = ctx.get("intel") or {}
+    block: list[str] = []
+
+    coaching = intel.get("coaching") or {}
+    played = (intel.get("decks_played") or {}).get("decks") or []
+    if played:
+        d = played[0]
+        line = (
+            f"**Your deck** — you ran **{d.get('archetype')}** this week "
+            f"({d.get('family')}, {d.get('avg_elixir')} average elixir, "
+            f"{d.get('battles')} battles on it)."
+        )
+        block += [line, ""]
+
+    factors = coaching.get("decisive_factors") or {}
+    decided = [(k, v) for k, v in factors.items() if k != "even_game" and v]
+    if decided:
+        block.append(
+            "What decided those battles: "
+            + ", ".join(
+                f"**{_FACTOR_WORDS.get(k, k.replace('_', ' '))}** ({v})" for k, v in decided
+            )
+            + f", with **{factors.get('even_game', 0)}** genuinely even."
+        )
+        block.append("")
+
+    nem = intel.get("nemesis")
+    if nem is not None:
+        losing = [n for n in (nem.get("nemeses") or []) if n.get("losing_matchup")]
+        if losing:
+            block.append(
+                "Your hardest matchups, across your whole record: "
+                + ", ".join(
+                    f"**{n['card']}** ({_pct(n['member_win_rate'])}% across {n['n']} battles)"
+                    for n in losing[:_NEMESIS_SHOWN]
+                )
+                + ". Close games, not lost ones — but they're where your losses live."
+            )
+        elif nem.get("cards_evaluated") and not nem.get("any_losing_matchup"):
+            block.append(
+                f"Across the **{nem['cards_evaluated']}** cards you've faced enough times "
+                "to judge, there is **no card you actually lose to** — you beat every one "
+                "of them more often than not."
+            )
+        # cards_evaluated == 0 renders nothing: no card has been faced enough times,
+        # so there is no standing matchup read to give in either direction.
+        block.append("")
+
+    up = intel.get("upgrades") or {}
+    rows = up.get("upgrades") or []
+    if rows:
+        block += [
+            "**Worth levelling next**",
+            "",
+            "Ranked by how much you actually field the card, not how far it is from max.",
+            "",
+            "| Card | Level | From max | Share of your decks |",
+            "|---|---|---|---|",
+        ]
+        block += [
+            f"| {r['card']} | {r['level']}/{r['max_level']} | {r['levels_from_max']} | "
+            f"{_pct(r['usage_share'])}% |"
+            for r in rows[:_UPGRADE_LINES]
+        ]
+        block.append("")
+    elif up.get("no_material_upgrades"):
+        block += [
+            "**Worth levelling next** — nothing. Every card you actually field is at or near max.",
+            "",
+        ]
+
+    disc = _fresh_suggestions(intel)
+    if disc:
+        played = _played_archetypes(intel)
+        block += [
+            "**Decks worth trying**",
+            "",
+            "Built only from cards you already own, at the levels you already have.",
+            "",
+        ]
+        for s in disc:
+            tail = " — nobody in the clan runs it" if _novel(s, played) else ""
+            block.append(
+                f"- **{s['archetype']}** ({s['family']}, {s['avg_elixir']} elixir, "
+                f"{s['levels_from_max']} avg levels from max){tail}  \n  "
+                f"{_deck_card_list(s['cards'])}"
+            )
+        block.append("")
+
+    war = intel.get("war_set") or {}
+    war_decks = war.get("decks") or []
+    if len(war_decks) == _WAR_DECK_NAMES:
+        block += [
+            f"**A war set you can field** — four decks, {war.get('distinct_cards')} "
+            "distinct cards, no card reused.",
+            "",
+        ]
+        block += [
+            f"{i}. **{d['archetype']}** ({d['family']}, {d['avg_elixir']} elixir)"
+            + (" — _the one you already run_" if d.get("you_play_this") else "")
+            + f" — {_deck_card_list(d['cards'])}"
+            for i, d in enumerate(war_decks, start=1)
+        ]
+        # A war set is a constraint solve, not four good decks: the fourth deck is
+        # built from whatever the first three left behind. Saying how far the
+        # weakest one sits from max is the difference between honest advice and
+        # handing someone an underlevelled deck to lose a war day with.
+        worst = war.get("worst_deck_from_max")
+        if worst is not None:
+            block += [
+                "",
+                f"_Four decks that share no card is a squeeze — the weakest of these "
+                f"averages **{worst}** levels from max, so lead with the others._",
+            ]
+        block.append("")
+
+    while block and not block[-1]:
+        block.pop()
+    return "\n".join(block) if block else None
+
+
 def render_member_report(ctx: dict, narrative: dict | None = None) -> tuple[str, str]:
     """Assemble the email. The deterministic layer owns the scorecard, the progress
     milestone bullets, and a per-mode-family battle table under each type's intro;
@@ -1028,6 +1422,10 @@ def render_member_report(ctx: dict, narrative: dict | None = None) -> tuple[str,
     edge = _render_edge(ctx)
     if edge:
         parts.append(edge)
+
+    deck = _render_deck(ctx)
+    if deck:
+        parts.append(deck)
 
     if nar.get("meta"):
         parts.append(nar["meta"])

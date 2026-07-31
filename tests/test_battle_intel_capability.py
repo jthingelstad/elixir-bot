@@ -109,6 +109,26 @@ def test_nemesis_flags_a_worst_card_that_is_still_a_winning_matchup(tmp_path):
     assert r["nemeses"], "expected the card to clear the n>=30 floor"
     assert r["nemeses"][0]["losing_matchup"] is False
     assert r["any_losing_matchup"] is False
+    assert r["cards_evaluated"] == 1
+    conn.close()
+
+
+def test_nemesis_separates_no_weaknesses_from_no_evidence(tmp_path):
+    """An empty nemeses list has two opposite meanings and the caller cannot tell
+    them apart without cards_evaluated.
+
+    A member with 40 lifetime battles can never put a card over n=30, so
+    any_losing_matchup=false was reading as "you have no weaknesses" -- a
+    compliment earned by playing too little. cards_evaluated=0 is the tell.
+    """
+    conn = _db(tmp_path)
+    _plays(conn, 20, "opponent", 8)  # 20 battles: nothing can clear the n>=30 floor
+    r = get_battle_intelligence(view="nemesis", member_tag="#M", conn=conn)
+    assert r["nemeses"] == []
+    assert r["cards_evaluated"] == 0, "no card was judged, so nothing may be concluded"
+    assert r["any_losing_matchup"] is False
+    assert r["sample_floor"] == 30
+    assert "cards_evaluated FIRST" in r["note"]
     conn.close()
 
 
