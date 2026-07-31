@@ -13,8 +13,8 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 30
-EXPECTED_TABLE_COUNT = 64
+CURRENT_SCHEMA_VERSION = 31
+EXPECTED_TABLE_COUNT = 65
 
 
 def initialize_empty_database(
@@ -1518,6 +1518,46 @@ def _apply_v29(conn: sqlite3.Connection) -> None:
         )
 
 
+def _apply_v31(conn: sqlite3.Connection) -> None:
+    """Deck Intelligence: a current-meta deck snapshot the clan's own data cannot supply.
+
+    46 members are a thin slice of the meta, and measurement here is skill-confounded:
+    clan-wide deck win rates carry as much player-composition as deck quality (player
+    skill spans 36.4%-70.2%), and with only 2 shared-deck observations there is no
+    evidence a deck transfers between members. So "what decks should I consider?" cannot
+    be answered from clan battles at all — a member in a rut needs decks NOBODY here
+    plays, which is exactly where local data is silent.
+
+    Filled by ``scripts/refresh_meta_snapshot.py`` (Opus 5 + web search), refreshed on
+    balance patches. ``cards_json`` holds catalog-RESOLVED ``[[card_id, form], ...]``:
+    the model answers in card names and the resolver rejects anything the catalog does
+    not know, so a hallucinated card cannot reach a recommendation. Names that fail to
+    resolve are kept in ``unresolved_json`` so a rename shows up as data, not silence.
+
+    Advisory, never authoritative: every meta deck is still gated by what the member
+    OWNS and can field at level before it is ever shown.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS meta_decks (
+            meta_deck_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL,
+            archetype       TEXT,
+            family          TEXT,
+            tier            TEXT,
+            cards_json      TEXT NOT NULL,
+            unresolved_json TEXT,
+            win_condition   TEXT,
+            note            TEXT,
+            source_url      TEXT,
+            model           TEXT,
+            snapshot_at     TEXT NOT NULL
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_meta_decks_snapshot ON meta_decks(snapshot_at DESC)"
+    )
+
+
 def _apply_v30(conn: sqlite3.Connection) -> None:
     """Battle Intelligence v2 Layer 1: enriched card behavior facts.
 
@@ -1868,6 +1908,14 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+    if version < 31:
+        try:
+            _apply_v31(conn)
+            conn.execute("PRAGMA user_version = 31")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -2057,7 +2105,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "04afba3e1f94c570ff414206b9d1db037bf7993bdfc47f50188970b9a054ba6d"
+CURRENT_SCHEMA_FINGERPRINT = "27e288e720a1abf56692de8d48ec7e27c1e00704f0975d6c20fd0c6d97560b6d"
 
 
 __all__ = [

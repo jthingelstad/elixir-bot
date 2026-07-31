@@ -7,6 +7,7 @@ from agent.core import log
 from agent.cr_api_tool import _execute_cr_api
 from capabilities import awards as awards_capability
 from capabilities import battle_intel as battle_intel_capability
+from capabilities import deck_intel as deck_reco_capability
 from capabilities import decks as deck_capability
 from capabilities import game_modes as game_mode_capability
 from capabilities import management as management_capability
@@ -494,6 +495,20 @@ def _execute_get_deck_intelligence(arguments, workflow=None):
     if view == "member" and isinstance(result, dict) and member_tag:
         _annotate_roster_status(result, member_tag)
     return result
+
+
+def _execute_get_deck_recommendations(arguments):
+    """Forward-looking deck recommendations, gated by ownership and card level."""
+    view = arguments.get("view", "discover")
+    member_tag = arguments.get("member_tag")
+    if not member_tag:
+        return {"error": "member_tag_required", "view": view}
+    return deck_reco_capability.get_deck_recommendations(
+        view=view,
+        member_tag=_resolve_member_tag(member_tag),
+        card=arguments.get("card"),
+        limit=arguments.get("limit", 6),
+    )
 
 
 def _execute_get_battle_intelligence(arguments):
@@ -1728,6 +1743,7 @@ ADVERTISED_TOOL_EXECUTOR_NAMES = frozenset(
         "get_clan_roster",
         "get_elixir_state",
         "get_deck_intelligence",
+        "get_deck_recommendations",
         "get_battle_intelligence",
         "lookup_cards",
         "get_member_cards",
@@ -1794,6 +1810,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_elixir_state(arguments, workflow=workflow)
         elif name == "get_deck_intelligence":
             result = _execute_get_deck_intelligence(arguments, workflow=workflow)
+        elif name == "get_deck_recommendations":
+            result = _execute_get_deck_recommendations(arguments)
         elif name == "get_battle_intelligence":
             result = _execute_get_battle_intelligence(arguments)
         elif name == "lookup_cards":
