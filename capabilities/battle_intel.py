@@ -339,7 +339,16 @@ def get_battle_intelligence(
     ``member_tag`` else clan-wide), ``nemesis`` (optional ``member_tag``),
     ``battle``/``member_summary``/``deck`` (need ``member_tag``), ``matchup``
     (optional ``our_family``/``their_family`` else the full matrix). Read-only."""
-    if view not in {"card", "nemesis", "battle", "member_summary", "matchup", "deck", "coaching"}:
+    if view not in {
+        "card",
+        "nemesis",
+        "battle",
+        "member_summary",
+        "matchup",
+        "deck",
+        "coaching",
+        "newcomer",
+    }:
         return _envelope(view, available=False, error="unsupported_view")
     tag = _tag(member_tag) if member_tag else None
     own = conn is None
@@ -359,6 +368,8 @@ def get_battle_intelligence(
             return _deck_view(conn, tag)
         if view == "coaching":
             return _coaching_view(conn, tag, limit)
+        if view == "newcomer":
+            return _newcomer_view(conn, tag)
         return _member_summary_view(conn, tag)
     finally:
         if own:
@@ -431,4 +442,85 @@ def _coaching_view(conn, tag, limit) -> dict[str, Any]:
         level_normalized_battles=sum(1 for r in rows if r["level_validity"] == "normalized"),
         note="Structural aggregate over recent battles. level_gap claims are valid only "
         "where level_validity='real'; normalized modes (ranked, Showdown) cap card levels.",
+    )
+
+
+def _newcomer_view(conn, tag) -> dict[str, Any]:
+    """Who is this player? — the profile Elixir needs the first time it meets someone.
+
+    A brand-new member has no history, so the awareness read is nearly empty and a
+    welcome falls back to trophies (the one fact the prompt explicitly calls a
+    FALLBACK, not the lead). But the roster/profile poll already stores plenty that
+    distinguishes THIS player: their King level, the deck they walked in with, how
+    deep their collection is, how many Evolutions they have unlocked, their peak.
+    This view surfaces exactly those so a welcome can show Elixir actually looked.
+    """
+    if not tag:
+        return _envelope("newcomer", available=False, error="member_tag_required")
+    state = conn.execute(
+        "SELECT exp_level, trophies, best_trophies, arena_name, current_deck_json, "
+        "donations_week FROM player_current_state WHERE player_tag = ?",
+        (tag,),
+    ).fetchone()
+    if not state:
+        return _envelope("newcomer", available=False, subject=tag, error="no_profile_yet")
+
+    # The deck they walked in with — named with the shipped rules classifier.
+    deck = None
+    try:
+        import json as _json
+
+        from capabilities.decks import _archetype
+        from storage.cards import _deck_catalog, _enrich_deck_cards
+
+        raw = _json.loads(state["current_deck_json"] or "[]")
+        if len(raw) == 8:
+            cards = _enrich_deck_cards(raw, _deck_catalog(conn))
+            arch = _archetype(cards)
+            deck = {
+                "archetype": arch["label"],
+                "family": arch["family"],
+                "avg_elixir": arch["average_elixir"],
+                "cards": [c.get("name") for c in cards],
+            }
+    except Exception:  # noqa: BLE001 - a welcome must never fail on deck naming
+        deck = None
+
+    collection = conn.execute(
+        "SELECT COUNT(*) known, SUM(level >= 14) maxed, SUM(evolution_level >= 1) evos "
+        "FROM player_card_collection WHERE player_tag = ?",
+        (tag,),
+    ).fetchone()
+    form = conn.execute(
+        "SELECT SUM(outcome = 'W') w, SUM(outcome = 'L') l FROM battle_events "
+        "WHERE player_tag = ? AND teammate_tag IS NULL",
+        (tag,),
+    ).fetchone()
+    meta = conn.execute(
+        "SELECT cr_account_age_years years, cr_collection_level collection_level, "
+        "cr_battle_wins career_wins FROM player_metadata WHERE player_tag = ?",
+        (tag,),
+    ).fetchone()
+
+    return _envelope(
+        "newcomer",
+        available=True,
+        subject=tag,
+        king_level=state["exp_level"],
+        trophies=state["trophies"],
+        best_trophies=state["best_trophies"],
+        arena=state["arena_name"],
+        deck=deck,
+        cards_known=collection["known"] if collection else None,
+        cards_at_14_plus=collection["maxed"] if collection else None,
+        evolutions_unlocked=collection["evos"] if collection else None,
+        years_played=meta["years"] if meta else None,
+        collection_level=meta["collection_level"] if meta else None,
+        career_wins=meta["career_wins"] if meta else None,
+        observed_record=(
+            {"wins": form["w"], "losses": form["l"]} if form and form["w"] is not None else None
+        ),
+        note="First-impression facts. Lead with what distinguishes THIS player — their "
+        "deck, Evolutions unlocked, King level, or peak — not trophies. Fields that are "
+        "null are genuinely unknown; never guess one.",
     )

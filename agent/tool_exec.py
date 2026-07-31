@@ -503,7 +503,7 @@ def _execute_get_battle_intelligence(arguments):
     member_tag = arguments.get("member_tag")
     if member_tag:
         member_tag = _resolve_member_tag(member_tag)
-    elif view in {"battle", "member_summary", "deck", "coaching"}:
+    elif view in {"battle", "member_summary", "deck", "coaching", "newcomer"}:
         return {"error": "member_tag_required", "view": view}
     return battle_intel_capability.get_battle_intelligence(
         view=view,
