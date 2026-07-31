@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-AWARENESS_LOOP_HOURS_DEFAULT = "*/3"
+AWARENESS_LOOP_HOURS_DEFAULT = "*/6"
 
 
 @dataclass(frozen=True)
@@ -391,8 +391,15 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         # so the cadence is deterministic across restarts (an interval trigger
         # re-phases to "startup + N" every restart). :05 lands just after the top-
         # of-hour engine tick, so the brain reads freshly-refreshed state and dodges
-        # the :00 cron crowd. AWARENESS_LOOP_HOURS ("*/3" = every 3h, widened from
-        # hourly 2026-07-23 for cost) and AWARENESS_LOOP_MINUTE are the tunables.
+        # the :00 cron crowd. AWARENESS_LOOP_HOURS and AWARENESS_LOOP_MINUTE are the
+        # tunables: hourly -> */3 (2026-07-23) -> */6 (2026-07-31), both for cost.
+        # Awareness is 51% of Elixir's LLM spend, so the interval is the biggest
+        # single lever (~$37/month here). Moving it to Haiku was measured and
+        # REJECTED instead: replaying real captured rounds, Haiku wrote near-parity
+        # posts but terminated the tool loop early in 3 of 5 mid-loop rounds --
+        # including one where Sonnet called save_clan_memory. It can write the post
+        # but not do the research, which yields well-formatted posts built on
+        # thinner evidence. Cost of this change: hard-posts wait up to 6h.
         schedule_kind="cron",
         schedule_config={
             "hour": _attr("AWARENESS_LOOP_HOURS", AWARENESS_LOOP_HOURS_DEFAULT),
