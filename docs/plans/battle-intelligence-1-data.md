@@ -18,8 +18,9 @@ If the migration or worker has a bug, Feature 1 is where you find out — for fr
 
 - **No LLM anything.** No archetype labels, no `deck_profile`, no
   `matchup_expectation`, no prose. Those are Features 2–3.
-- **No player-strength triad** (collection level / tower level / games played) —
-  we don't ingest those today; that's Feature 4.
+- **No account-strength axes** (collection level / king level / games / years).
+  Player strength is battle-bound only (Feature 4): the sole strength signal is
+  `level_gap` below, computed from the battle. No profile fetch, ever.
 - `expected_advantage`, `performance`, and all prose columns exist in the schema
   but stay **NULL** in Feature 1 (they need Feature 2's profiles/cells).
 - Duels and 2v2 get **no rows at all** (not even computed) — see §Duels/2v2.
@@ -165,13 +166,19 @@ A card can hold **both** an Evo and a Hero form — Knight and Wizard appear at
   (3000–6999), `2` (500–2999), `3` (<500, a squeaker). Calibrate the cuts
   against real values during verification (§6), don't trust these numbers blind.
 - **`level_gap`** = `avg(member card levels) − avg(opponent card levels)` from
-  the two `deck_json`s. **Caveat (first-review flag):** raw levels average
-  across rarities, which is rarity-naive (a lvl-11 Common ≠ a lvl-11 Legendary).
-  It is the only per-battle level signal available (opponents carry no
-  collection level), and it feeds Feature 3's `loss_nature='level'` — the *deck
-  on the field*, which is the right question for that verdict. **This is NOT the
-  player-strength comparison** — that is Feature 4's tower/collection/games
-  triad. Keep `level_gap` deck-scoped; do not overload it.
+  the two `deck_json`s. **This is the whole player-strength story** (Feature 4):
+  strength is bound only to the battle, and this is the battle's level signal —
+  no profile fetch, no account axes. It feeds Feature 3's `loss_nature='level'`.
+  - **Normalized-mode guard (required):** `deck_json` stores *account* card
+    levels even for ranked, but Path of Legends plays every card at level 11, so
+    a `level_gap` there is fictional. **Set `level_gap = NULL` with reason
+    `levels_normalized` for `is_ranked` (and any level-capped special event);**
+    compute it only where levels are real (war, ladder). Verified live: ranked
+    `deck_json` carries varied account levels (8–16), confirming they are *not*
+    the in-battle values.
+  - **Caveat:** raw levels average across rarities, which is rarity-naive (a
+    lvl-11 Common ≠ a lvl-11 Legendary). Keep `level_gap` deck-scoped; do not
+    overload it into an account-strength claim.
 
 ## 3. Worker — `runtime/jobs/_battle_intel.py` (Stage A)
 
