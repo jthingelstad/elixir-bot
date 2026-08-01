@@ -7,6 +7,7 @@ Provides the data foundation for the lookup_cards LLM tool.
 from datetime import datetime, timezone
 
 from db import managed_connection
+from engine.normalize import card_display_max_level
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -154,6 +155,13 @@ def _row_to_dict(row) -> dict:
     the capability sense on the label.
     """
     d = dict(row)
+    # Report levels on the DISPLAY scale, like every other card surface. The
+    # catalog stores the API's rarity-relative max (epic 11, legendary 8), so this
+    # tool was telling the model Wall Breakers max at 11 while get_member_cards
+    # said 16 for the same card. Two scales in one conversation is how a member
+    # ended up reading "display Lv15/16, normalized 10/11".
+    if isinstance(d.get("max_level"), int):
+        d["max_level"] = card_display_max_level(d["max_level"]) or d["max_level"]
     evo = d.get("max_evolution_level")
     supports_evo = evo in (1, 3)
     supports_hero = evo in (2, 3)

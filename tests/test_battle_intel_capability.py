@@ -142,3 +142,59 @@ def test_coaching_omits_factors_that_do_not_predict_outcome():
     src = inspect.getsource(battle_intel._coaching_view)
     assert "air_matchups=" not in src
     assert "wincon_pressure=" not in src
+
+
+def test_every_view_runs_against_the_current_schema(tmp_path):
+    """v32 dropped the retired prose columns and _member_summary_view was missed —
+    it still selected `commentary` and raised OperationalError on any real
+    database. Nothing caught it because that view had no test at all.
+
+    This walks every view the tool advertises. It asserts they RUN, not what they
+    say: the point is that a schema change cannot quietly take one out."""
+    from db.schema import build_database
+
+    path = tmp_path / "views.db"
+    build_database(str(path))
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        views = {
+            "card": {"card": "Knight"},
+            "nemesis": {},
+            "battle": {},
+            "member_summary": {},
+            "deck": {},
+            "coaching": {},
+            "newcomer": {},
+        }
+        for view, extra in views.items():
+            r = get_battle_intelligence(view=view, member_tag="#M", conn=conn, **extra)
+            assert isinstance(r, dict) and r.get("view") == view, view
+            assert "available" in r, view
+    finally:
+        conn.close()
+
+
+def test_no_view_reports_a_rarity_relative_card_level(tmp_path):
+    """API card levels are rarity-relative — a maxed epic is 11 of 11 — and the
+    player's screen says 16 of 16. A member was shown "display Lv15/16, normalized
+    10/11" because a tool handed the model both scales and it invented an
+    authority for the wrong one. His Wall Breakers are level 15."""
+    import json as _json
+
+    from db.schema import build_database
+
+    path = tmp_path / "scale.db"
+    build_database(str(path))
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        for view, extra in (("battle", {}), ("member_summary", {}), ("newcomer", {}), ("deck", {})):
+            blob = _json.dumps(
+                get_battle_intelligence(view=view, member_tag="#M", conn=conn, **extra),
+                default=str,
+            )
+            assert "api_level" not in blob, view
+            assert "api_max_level" not in blob, view
+    finally:
+        conn.close()

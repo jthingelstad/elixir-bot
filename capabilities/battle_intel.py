@@ -358,23 +358,6 @@ def _member_summary_view(conn, tag, days=None) -> dict[str, Any]:
         for cid, evo, w, losses, n in cards
         if _win_rate(w, losses) is not None
     ]
-    # Prose (present only for allowlisted members): a few recent lines + the
-    # loss_nature mix. Absent for non-allowlisted members (computed rollup still returns).
-    recent_commentary = [
-        row["commentary"]
-        for row in conn.execute(
-            "SELECT commentary FROM battle_enrichment WHERE player_tag = ? AND commentary IS NOT NULL "
-            "ORDER BY battle_time DESC LIMIT 3",
-            (tag,),
-        ).fetchall()
-    ]
-    loss_nature_mix = dict(
-        conn.execute(
-            "SELECT loss_nature, COUNT(*) FROM battle_enrichment WHERE player_tag = ? "
-            "AND loss_nature IS NOT NULL GROUP BY loss_nature",
-            (tag,),
-        ).fetchall()
-    )
     # (3) Clan-relative context: "am I above average?" needed a distribution, not a
     # rollup. Win rate is computed over the same window so the comparison is fair.
     cutoff = _since(days)
@@ -417,10 +400,7 @@ def _member_summary_view(conn, tag, days=None) -> dict[str, Any]:
         else None,
         best_cards=ranked[:5],
         worst_cards=ranked[5:][::-1][:5],  # ranked 6th-onward, worst first; no overlap with best
-        recent_commentary=recent_commentary,  # empty for non-allowlisted members
-        loss_nature_mix=loss_nature_mix,
-        note="Card win rates are member-plays-it, n>=30. commentary/loss_nature present "
-        "only for allowlisted members; their absence is not 'no issues'.",
+        note="Card win rates are member-plays-it, n>=30.",
     )
 
 
