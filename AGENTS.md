@@ -326,6 +326,34 @@ The same discipline applies to prompt text that *describes* data. Check document
 fields against real captured payloads — `season_window` and `roster_vitals` were
 documented in the awareness prompt long after they stopped being sent.
 
+### Prompts work with the player; tools do the answering
+
+The rule above is the negative case. The general one: **a prompt owns the
+conversation, a capability owns the domain.** Prompts should be about understanding
+what the member wants, asking when it is ambiguous, and how to say the answer. The
+answer itself — what a deck needs, what counts as an air answer, which cards to
+name — belongs in a capability, where it is computed once, tested, and identical
+across every surface that asks.
+
+Domain knowledge written as prose in a prompt fails three ways at once: it is
+untestable, it is invisible to the weekly report and the Observatory, and the model
+follows it only approximately. Measured on the `deck_review` prompt (2026-08-01):
+
+| Prompt was doing | Tool already did it |
+|---|---|
+| "list all 32 cards and verify no duplicates" | `war_set` is disjoint by construction and returns `distinct_cards` |
+| "avoid four variants of the same archetype" | `_pick_disjoint` prefers a different family per pick |
+| "cite WHY for each card (win condition, anti-air…)" | `role_coverage` + per-card `roles`, from enriched `card_facts` |
+| "call lookup_cards before computing elixir" | `avg_elixir` and per-card `elixir_cost` ship in the payload |
+
+That last one was not merely redundant: it drove a 30+ call fan-out that blew the
+output limit and left a member with no reply at all. Prose asking the model to do
+arithmetic the tool has already done is a latency and reliability bug, not just
+clutter.
+
+When you find yourself writing domain rules into a prompt, that is the signal the
+capability is missing a field.
+
 ## Memory Model
 
 Elixir uses two memory layers:
