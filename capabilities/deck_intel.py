@@ -432,6 +432,7 @@ def _upgrades_view(conn, tag) -> dict[str, Any]:
     # that is technically true and practically noise. A card has to be a real part of how
     # they play before upgrading it is worth saying.
     material = [r for r in rows if r["usage_share"] >= _MIN_USAGE_SHARE]
+    unlock = _unlock_analysis(conn, cat, own, _owned_forms(conn, tag), tag)
     return _envelope(
         "upgrades",
         available=True,
@@ -443,14 +444,99 @@ def _upgrades_view(conn, tag) -> dict[str, Any]:
         no_material_upgrades=not material,
         incidental_cards_below_max=len(rows) - len(material),
         min_usage_share=_MIN_USAGE_SHARE,
+        **unlock,
         note=(
             "Ranked by usage x levels_from_max — impact on decks this member actually "
             "fields. Levels are rarity-relative; levels_from_max is the comparable one. "
             "Cards below the usage floor are excluded as incidental. When "
-            "no_material_upgrades is true, say their deck is in good shape rather than "
-            "reaching for a card they barely play."
+            "no_material_upgrades is true, their CURRENT decks are in good shape — do "
+            "not reach for a card they barely play. Answer from `unlocks` instead: the "
+            "cards whose upgrade would open decks they cannot field yet, ranked by how "
+            "many and in which archetypes. That is the useful half of the question for "
+            "anyone who has maxed what they run. readiness_tolerance is this member's "
+            "own standard (the readiness of the decks they actually play) plus a little "
+            "slack, so 'explorable' means 'about as ready as what you already run'."
         ),
     )
+
+
+_UNLOCK_SLACK = 0.5  # how much rougher than their own decks an "explorable" deck may be
+_UNLOCK_LIMIT = 6
+
+
+def _unlock_analysis(conn, cat, own, forms, tag) -> dict[str, Any]:
+    """Which single upgrade would OPEN new decks — the other half of "what should
+    I upgrade?".
+
+    The usage-weighted list answers "make the deck I play better", and goes silent
+    the moment a member has maxed what they field. That is a dead end exactly when
+    the question gets interesting: a maxed player asking what to upgrade wants to
+    know what would let them play something ELSE.
+
+    The readiness bar is the member's OWN, not a constant. Members field decks at
+    the top of their collection — median 0.12 levels from max for one, 1.12 for
+    another who rotates more widely — so "explorable" means "about as ready as the
+    decks you already run", plus a little slack. A fixed bar would tell a maxed
+    player everything is unlocked and a newer one that nothing is.
+    """
+    cands = _candidates(conn, cat, own, forms)
+    if not cands:
+        return {"unlocks": [], "readiness_standard": None}
+    by_hash = {d["deck_hash"]: d for d in cands}
+    mine = [by_hash[h]["levels_from_max"] for h in _their_decks(conn, tag) if h in by_hash]
+    if not mine:
+        return {"unlocks": [], "readiness_standard": None, "reason": "no_decks_played_yet"}
+    mine.sort()
+    standard = mine[len(mine) // 2]
+    tolerance = round(standard + _UNLOCK_SLACK, 2)
+    played = _played_archetypes(conn, tag)
+
+    found: dict[int, dict] = {}
+    for d in cands:
+        if d["levels_from_max"] <= tolerance or d["archetype"] in played:
+            continue  # already explorable, or an archetype they already run
+        total = d["levels_from_max"] * 8
+        for cid, _form in d["cards"]:
+            gap = cat[cid]["max_level"] - own[cid]
+            if gap <= 0:
+                continue
+            after = (total - gap) / 8
+            if after > tolerance:
+                continue  # this card alone is not what is holding the deck back
+            entry = found.setdefault(
+                cid, {"decks_opened": 0, "archetypes": set(), "best": None, "best_at": 99.0}
+            )
+            entry["decks_opened"] += 1
+            entry["archetypes"].add(d["archetype"])
+            if after < entry["best_at"]:
+                entry["best"], entry["best_at"] = d["archetype"], round(after, 2)
+
+    # Rank on ARCHETYPE breadth first, not raw deck count. A common card appears in
+    # hundreds of near-identical lists, so counting decks rewards ubiquity rather
+    # than reach — and the question is which upgrade opens something new to PLAY,
+    # not which touches the most permutations.
+    ranked = sorted(
+        found.items(),
+        key=lambda kv: (-len(kv[1]["archetypes"]), -kv[1]["decks_opened"], kv[1]["best_at"]),
+    )
+    return {
+        "readiness_standard": standard,
+        "readiness_tolerance": tolerance,
+        "unlocks": [
+            {
+                "card": cat[cid]["name"],
+                "level": own[cid],
+                "max_level": cat[cid]["max_level"],
+                "levels_to_max": cat[cid]["max_level"] - own[cid],
+                "decks_opened": e["decks_opened"],
+                "archetypes_opened": len(e["archetypes"]),
+                "archetypes": sorted(e["archetypes"])[:5],
+                "best_deck": e["best"],
+                "best_deck_readiness": e["best_at"],
+            }
+            for cid, e in ranked[:_UNLOCK_LIMIT]
+        ],
+    }
 
 
 # ── mode B: discover ─────────────────────────────────────────────────────────
