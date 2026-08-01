@@ -33,9 +33,34 @@ def _now() -> str:
 
 
 def _advantage_from_win_rate(win_rate: float) -> int:
-    """Map a measured member win rate to a -2..+2 advantage band (0.5 = even;
-    ~7 points per band)."""
+    """Map a SYMMETRIC matchup win rate to a -2..+2 advantage band (0.5 = even;
+    ~7 points per band).
+
+    0.5 is the correct anchor only for a symmetrized rate (see _symmetrize). Fed a
+    raw clan win rate it is wrong by however much the clan outperforms the field,
+    which was 3.5 points and enough to hand every mirror matchup a free +1.
+    """
     return max(-2, min(2, round((win_rate - 0.5) / 0.07)))
+
+
+def _symmetrize(forward: float, reverse: float) -> float:
+    """A matchup rate with the clan's own skill edge cancelled out.
+
+    ``forward`` is our-A vs their-B; ``reverse`` is our-B vs their-A. Both are
+    measured from OUR side, so both carry the same clan-strength term with opposite
+    sign relative to the matchup. Averaging the forward rate with the complement of
+    the reverse cancels it and leaves the matchup.
+
+    The test is the mirror: A vs A must come out at exactly 0.500, because a deck
+    family cannot be favoured against itself. Before this, control-vs-control was
+    stored at 58.4% and banded +1 -- the clan is simply better than the opponents it
+    meets, and the matrix was reading that as a property of control. Worse, cycle vs
+    control and control vs cycle were BOTH stored +1, which cannot be true of any
+    pair. That advantage fed expected_advantage -> performance -> decisive_factor,
+    so 781 losses in mirror matchups were flagged as underperformance against an
+    expectation that is 50/50 by construction.
+    """
+    return (forward + (1.0 - reverse)) / 2.0
 
 
 def _parse_deck(deck_json) -> list[dict]:
@@ -279,12 +304,35 @@ def _rebuild_matchup_matrix(conn) -> int:
          GROUP BY op.family, tp.family
         """
     ).fetchall()
-    cells = 0
+    # Raw rates first, so each cell can be paired with its opposite direction.
+    raw = {}
+    total_w = total_n = 0
     for our_f, their_f, w, losses, n in rows:
         decided = w + losses
-        if decided == 0:
-            continue
-        wr = w / decided
+        if decided:
+            raw[(our_f, their_f)] = (w / decided, n)
+            total_w += w
+            total_n += decided
+    # How much the clan beats the field overall. This is the term symmetrization
+    # cancels, and the fallback below subtracts directly when it cannot.
+    baseline = (total_w / total_n) if total_n else 0.5
+
+    cells = 0
+    for (our_f, their_f), (wr, n) in raw.items():
+        reverse = raw.get((their_f, our_f))
+        if reverse is None:
+            # Only one direction observed, so there is no opposite cell to cancel
+            # against. Subtract the clan's overall edge instead — a first-order
+            # version of the same correction. Not as good as symmetrizing (it uses
+            # the clan-wide edge rather than this pairing's), but far better than
+            # banding a rate we know carries the edge whole.
+            symmetric = min(1.0, max(0.0, wr - (baseline - 0.5)))
+            basis = f"baseline-adjusted (one direction); raw {wr:.3f} over {n}, base {baseline:.3f}"
+        else:
+            symmetric = _symmetrize(wr, reverse[0])
+            basis = (
+                f"symmetrized; raw {wr:.3f} over {n}, reverse {reverse[0]:.3f} over {reverse[1]}"
+            )
         conn.execute(
             "INSERT OR REPLACE INTO matchup_expectation "
             "(our_family, their_family, advantage, measured_win_rate, n, basis, computed_at) "
@@ -292,10 +340,10 @@ def _rebuild_matchup_matrix(conn) -> int:
             (
                 our_f,
                 their_f,
-                _advantage_from_win_rate(wr),
-                round(wr, 3),
+                _advantage_from_win_rate(symmetric),
+                round(symmetric, 3),
                 n,
-                "measured from clan battles",
+                basis,
                 now,
             ),
         )
@@ -303,11 +351,19 @@ def _rebuild_matchup_matrix(conn) -> int:
     return cells
 
 
-def _fill_expected_advantage(conn) -> int:
+def _fill_expected_advantage(conn, *, restate: bool = True) -> int:
     """Snapshot each battle's matchup-cell advantage into
     battle_enrichment.expected_advantage and set performance (the upset detector:
     +1 = won when disadvantaged, -1 = lost when advantaged, else 0). Only battles
-    whose both decks are profiled and whose cell exists. Returns rows updated."""
+    whose both decks are profiled and whose cell exists. Returns rows updated.
+
+    ``restate`` re-derives every battle rather than only the unset ones, and is the
+    default because the matrix is recomputed on the same pass: a battle's stored
+    expectation is a snapshot of a cell that has just moved, and leaving old
+    snapshots in place is how a corrected matrix fails to correct anything. It
+    matters here -- the symmetrization moved cells by up to 8.8 points, and every
+    mirror matchup from +/-1 to 0.
+    """
     cur = conn.execute(
         """
         UPDATE battle_enrichment AS e
@@ -322,8 +378,8 @@ def _fill_expected_advantage(conn) -> int:
            AND tp.deck_hash = e.their_deck_hash
            AND m.our_family = op.family
            AND m.their_family = tp.family
-           AND e.expected_advantage IS NULL
         """
+        + ("" if restate else " AND e.expected_advantage IS NULL")
     )
     return cur.rowcount
 
