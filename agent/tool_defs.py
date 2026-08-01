@@ -25,24 +25,55 @@ TOOLS = [
             "- discover: 'what decks should I consider?' — for a member in a rut or one "
             "whose main deck is already maxed. Includes decks nobody in the clan plays, "
             "plus a current-meta snapshot when one has been refreshed.\n"
+            "- build: EXACTLY the decks the member asked for — pass 'anchors' (one card per "
+            "deck wanted) and 'count'. THE view for 'build me two decks, one around X and "
+            "one around Y'. Decks may share cards, which is correct everywhere except war.\n"
             "- war_set: FOUR war decks using 32 DISTINCT cards (war forbids reusing a card "
-            "across decks). THE view for 'suggest war decks'.\n"
-            "- anchored: best decks built around a specific card. Requires 'card'.\n\n"
+            "across decks). ONLY for an explicit war request — 'war decks', 'river race', "
+            "'my four decks'. A member who says 'a deck' or names a number other than four "
+            "is NOT asking for a war set, and the no-overlap rule makes each individual "
+            "deck worse, so never reach for this view to be helpful.\n"
+            "- anchored: best decks built around ONE card. Requires 'card'. For several "
+            "cards use 'build'.\n\n"
+            "Every deck comes back with 'role_coverage' (which card fills each slot of the "
+            "deck formula, air answers split into troops vs spells, and a 'gaps' list) and "
+            "per-card 'roles'. EXPLAIN THE DECK FROM THESE rather than from your own "
+            "knowledge of the cards — the point is that the member learns what a deck needs, "
+            "not just what to copy. Read 'gaps' out honestly; an empty list means the deck is "
+            "structurally sound, and role_coverage.unknown means the cards are not enriched "
+            "yet, so say nothing about structure rather than guessing.\n\n"
             "IMPORTANT: this tool deliberately reports NO win rates. Clan deck win rates "
             "are skill-confounded and do not transfer between members, so ranking is level "
             "readiness and structural soundness. 'fielded_by_members' is context only — "
-            "never present it as evidence a deck is good."
+            "never present it as evidence a deck is good. For 'have they played this?' use "
+            "'you_play_this_archetype', not 'you_play_this' — the latter is an exact 8-card "
+            "match, so a deck one card different from their daily driver reads as brand new."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "view": {
                     "type": "string",
-                    "enum": ["upgrades", "discover", "war_set", "anchored"],
+                    "enum": ["upgrades", "discover", "build", "war_set", "anchored"],
                     "description": "Which recommendation view to return.",
                 },
                 "member_tag": {"type": "string", "description": "Member tag or name."},
                 "card": {"type": "string", "description": "Anchor card for the 'anchored' view."},
+                "anchors": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "For 'build': one card per deck wanted, in the order the member "
+                        "named them. Each returned deck is built around its anchor."
+                    ),
+                },
+                "count": {
+                    "type": "integer",
+                    "description": (
+                        "For 'build': how many decks the member asked for. Defaults to the "
+                        "number of anchors. Never inflate this to four."
+                    ),
+                },
                 "limit": {"type": "integer", "description": "Max decks to return (default 6)."},
             },
             "required": ["view", "member_tag"],

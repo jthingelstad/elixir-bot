@@ -723,6 +723,12 @@ def _validate_war_deck_suggestion(result):
     """
     if not isinstance(result, dict):
         return "Response was not a JSON object."
+    # A deterministic fallback is not a model answer to revise. Asking for a revision
+    # would spend three more attempts re-deriving decks we already know the model
+    # cannot fit inside the response limit, and would end up returning this same
+    # object anyway — four wasted calls and four more minutes of member silence.
+    if (result.get("metadata") or {}).get("fallback"):
+        return None
     decks = result.get("proposed_decks")
     if not isinstance(decks, list) or len(decks) != 4:
         return "proposed_decks must be an array of exactly 4 decks."
@@ -986,7 +992,29 @@ def respond_in_deck_review(
             retry_user_msg = [*turn_user_msg, {"type": "text", "text": retry_nudge}]
         else:
             retry_user_msg = f"{turn_user_msg}\n\n{retry_nudge}"
-        return _run(retry_user_msg, 8192)
+        retried = _run(retry_user_msg, 8192)
+        if not _is_truncation_error(retried):
+            return retried
+        # Both attempts hit the ceiling. Truncation used to return None all the way up,
+        # so the member got NOTHING: on 2026-07-26 a war-deck request burned 24 model
+        # calls over three and a half minutes, hit the limit six times, and never
+        # produced a reply. He waited, saw silence, and did not ask again for five days.
+        # A short honest answer beats that every time, and it keeps the conversation
+        # open by naming the narrower question we can definitely answer.
+        log.error("deck_review truncated twice (4096 then 8192); returning a spoken fallback")
+        return {
+            "event_type": "deck_review_response",
+            "member_tags": [],
+            "member_names": [],
+            "summary": "Deck answer exceeded the response limit twice.",
+            "content": (
+                "That one got away from me — the answer ran past my response limit twice, "
+                "so rather than leave you hanging with nothing: ask me for one deck at a "
+                "time and I'll get it right. If you were after a full war set, say "
+                "**war decks** and I'll do those four on their own."
+            ),
+            "metadata": {"fallback": "truncated_twice"},
+        }
 
     for attempt in range(max_attempts):
         result = _run_deck_turn(user_msg)

@@ -761,3 +761,51 @@ def test_eval_ask_elixir_alignment_accepts_open_lane_llm_chat_and_ignored_blank_
     assert result["metrics"]["blank_route_count"]["value"] == 0
     assert result["metrics"]["ignored_question_blank_route_count"]["value"] == 0
     assert result["metrics"]["topic_mismatch_count"]["value"] == 0
+
+
+def test_eval_deck_conversations_flags_a_war_set_fetched_for_a_non_war_turn():
+    """The live failure the build bucket exists to catch: a member asked for two decks
+    around two cards, the router had inherited war mode from an earlier turn, and the
+    answer came back as a four-deck war set. The old required-view check passed it —
+    `anchored` HAD been called — because it only asked whether the right view fired,
+    never whether a wrong one also did."""
+    from scripts import eval_deck_conversations
+
+    turn = {
+        "bucket": "build",
+        "content": "Here are your two decks, plus the full war set around them.",
+        "tool_calls": [
+            ("get_deck_recommendations", {"view": "build", "anchors": ["Bowler", "Balloon"]}),
+            ("get_deck_recommendations", {"view": "war_set", "member_tag": "#AAA111"}),
+        ],
+        "tool_trace": [],
+        "win_rate_in_answer": False,
+    }
+    turn["scope_check"] = eval_deck_conversations._scope_check(turn)
+    assert turn["scope_check"]["passed"] is False
+    assert turn["scope_check"]["reason"] == "war_set_fetched_for_non_war_turn"
+
+    summary = eval_deck_conversations.score_results([{"turns": [turn]}])
+    assert summary["metrics"]["war_set_intrusion_count"]["value"] == 1
+    assert summary["metrics"]["war_set_intrusion_count"]["passed"] is False
+    assert summary["passed"] is False
+
+
+def test_eval_deck_conversations_allows_a_war_set_on_the_war_turn():
+    """The same fetch is exactly right when war is what was asked for."""
+    from scripts import eval_deck_conversations
+
+    turn = {
+        "bucket": "war_set",
+        "tool_calls": [("get_deck_recommendations", {"view": "war_set"})],
+    }
+    assert eval_deck_conversations._scope_check(turn)["passed"] is True
+
+
+def test_eval_deck_conversations_requires_the_build_view_for_a_build_turn():
+    from scripts import eval_deck_conversations
+
+    good = {"bucket": "build", "tool_calls": [("get_deck_recommendations", {"view": "build"})]}
+    bad = {"bucket": "build", "tool_calls": [("get_deck_recommendations", {"view": "war_set"})]}
+    assert eval_deck_conversations._required_tool_view_pass(good) is True
+    assert eval_deck_conversations._required_tool_view_pass(bad) is False

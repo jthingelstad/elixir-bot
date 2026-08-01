@@ -880,9 +880,36 @@ def test_respond_in_deck_review_retries_truncated_image_request_once():
             image_blocks=[image_block],
         )
 
-    assert result == _DECK_REVIEW_TRUNCATION
+    # Was `result == _DECK_REVIEW_TRUNCATION` — which pinned the silence as a contract.
+    # Returning the error object is exactly what reached the member as nothing at all.
+    # The retry mechanics this test exists for are unchanged and still asserted below.
+    assert result["metadata"]["fallback"] == "truncated_twice"
+    assert result["content"].strip()
     assert len(calls) == 2
     assert calls[0]["user_msg"][1] == image_block
     assert calls[1]["user_msg"][1] == image_block
     assert calls[1]["user_msg"][-1]["type"] == "text"
     assert "complete JSON object" in calls[1]["user_msg"][-1]["text"]
+
+
+def test_a_twice_truncated_deck_review_still_says_something():
+    """The 2026-07-26 silence: a war-deck request burned 24 model calls, hit the output
+    limit six times, and posted nothing at all. The member waited and got no reply.
+    Truncation must degrade to a short honest answer, never to silence."""
+    from unittest.mock import patch
+
+    from agent import workflows
+
+    truncated = {"_error": {"kind": "truncation", "phase": "final"}}
+    with patch.object(workflows, "_chat_with_tools", return_value=truncated) as chat:
+        result = workflows.respond_in_deck_review(
+            question="build my war decks",
+            author_name="Tester",
+            channel_name="#ask-elixir",
+            mode="war",
+            subject="suggest",
+        )
+    assert chat.call_count == 2, "must try again with headroom before giving up"
+    assert result["event_type"] == "deck_review_response"
+    assert result["content"].strip(), "a truncated answer must never reach the member as silence"
+    assert result["metadata"]["fallback"] == "truncated_twice"
