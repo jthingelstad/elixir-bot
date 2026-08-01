@@ -184,3 +184,183 @@ def test_incidental_cards_do_not_become_upgrade_advice(conn):
     assert r["no_material_upgrades"] is True
     assert r["upgrades"] == []
     assert r["incidental_cards_below_max"] == 1
+
+
+# ── build view + role coverage (rebuilt 2026-08-01) ──────────────────────────
+#
+# Every test below traces to one real #ask-elixir conversation: a member asked for two
+# decks around two cards and was handed a four-deck war set instead.
+
+
+@pytest.fixture
+def rich(conn):
+    """The base fixture plus card_facts and a second buildable deck sharing cards."""
+    conn.executescript(
+        """
+        CREATE TABLE card_facts (card_id INTEGER, evolution_level INTEGER, unit_domain TEXT,
+            targets TEXT, attack_style TEXT, splash_hits_air INTEGER, dps_tier TEXT,
+            hp_tier TEXT, unit_count TEXT, range_type TEXT, role TEXT, spell_tier TEXT,
+            is_win_condition INTEGER, fragile_to_small_spell INTEGER, special_json TEXT,
+            source TEXT, note TEXT, model TEXT, enriched_at TEXT);
+        """
+    )
+    facts = [
+        # card_id, targets, attack_style, dps, role, spell_tier, wincon, note
+        (1, "air_and_ground", "single", "high", "support", "none", 0, "Shoots up, hits hard"),
+        (2, "none", "splash_small", "low", "spell", "small", 0, "Cheap answer"),
+        (3, "buildings_only", "single", "high", "win_condition", "none", 1, "Goes for towers"),
+        (4, "ground", "splash_large", "medium", "support", "none", 0, "Area damage"),
+        (5, "ground", "single", "low", "swarm", "none", 0, "Cheap cycle"),
+        (6, "none", "splash_large", "high", "spell", "big", 0, "The big one"),
+        (7, "ground", "single", "medium", "tank", "none", 0, "Soaks damage"),
+        (8, "air_and_ground", "splash_small", "medium", "support", "none", 0, "Chips air"),
+        (9, "ground", "single", "high", "support", "none", 0, "Unowned"),
+    ]
+    conn.executemany(
+        "INSERT INTO card_facts (card_id, evolution_level, targets, attack_style, dps_tier, "
+        "role, spell_tier, is_win_condition, note, splash_hits_air) VALUES (?,0,?,?,?,?,?,?,?,1)",
+        facts,
+    )
+    # A second deck the member can build, deliberately SHARING cards with H_OK so a
+    # disjointness rule would be forced to drop one of them.
+    conn.execute(
+        "INSERT INTO deck_profile VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "H_TWO",
+            "beatdown",
+            "Test Beatdown",
+            4.2,
+            _deck([(1, 0), (3, 0), (4, 0), (5, 0), (6, 0), (7, 0), (8, 0), (2, 0)]),
+            2,
+            1,
+            1,
+            1,
+            1,
+            1,
+        ),
+    )
+    return conn
+
+
+def test_build_returns_exactly_the_number_of_decks_asked_for(rich):
+    """The live failure: "build 2 decks, one around each card" returned four."""
+    r = get_deck_recommendations(
+        view="build", member_tag=TAG, anchors=["Legend", "Rare"], count=2, conn=rich
+    )
+    assert r["available"] is True
+    assert len(r["decks"]) == 2
+    assert [d["anchor_card"] for d in r["decks"]] == ["Legend", "Rare"]
+    for deck in r["decks"]:
+        assert any(c["name"] == deck["anchor_card"] for c in deck["cards"])
+
+
+def test_build_does_not_impose_the_war_no_overlap_rule(rich):
+    """War disjointness is a war rule. Applying it to an ordinary request removes cards
+    from the deck the player asked about to make room for decks they did not."""
+    r = get_deck_recommendations(
+        view="build", member_tag=TAG, anchors=["Legend", "Rare"], count=2, conn=rich
+    )
+    a, b = ({c["name"] for c in d["cards"]} for d in r["decks"])
+    assert a & b, "build must be free to reuse cards across decks"
+    assert "NOT a war set" in r["note"]
+
+
+def test_several_anchor_cards_are_never_collapsed_into_one(rich):
+    """`anchored` took card[0] and dropped the rest, so a request naming two cards
+    silently became a request about one."""
+    r = get_deck_recommendations(
+        view="anchored", member_tag=TAG, card=["Legend", "Rare"], conn=rich
+    )
+    assert r["view"] == "build"
+    assert r["anchors"] == ["Legend", "Rare"]
+
+
+def test_build_reports_an_anchor_it_could_not_honour(rich):
+    r = get_deck_recommendations(
+        view="build", member_tag=TAG, anchors=["Legend", "Unowned"], count=2, conn=rich
+    )
+    assert r["anchors"] == ["Legend"]
+    assert r["unresolved"] == [{"error": "card_not_owned", "card": "Unowned"}]
+
+
+def test_every_suggested_deck_explains_why_each_card_is_in_it(rich):
+    """The 'teach them to fish' property: the roles were computed and then discarded,
+    leaving the model to narrate deck construction from memory."""
+    r = get_deck_recommendations(view="discover", member_tag=TAG, conn=rich)
+    deck = r["suggestions"][0]
+    assert deck["role_coverage"]["win_conditions"] == ["Rare"]
+    by_name = {c["name"]: c for c in deck["cards"]}
+    assert "win condition" in by_name["Rare"]["roles"]
+    assert "heavy air answer" in by_name["Legend"]["roles"]
+    assert by_name["Legend"]["note"] == "Shoots up, hits hard"
+    assert by_name["Legend"]["elixir_cost"] == 4
+
+
+def test_air_coverage_distinguishes_troops_from_spells(rich):
+    r = get_deck_recommendations(view="discover", member_tag=TAG, conn=rich)
+    air = r["suggestions"][0]["role_coverage"]["air_answers"]
+    assert set(air["troops"]) == {"Legend", "Air"}
+    assert air["spells"] == ["Common"]
+    assert air["heavy"] == ["Legend"]
+
+
+def test_a_deck_the_member_already_plays_is_flagged_at_archetype_level(rich):
+    """Exact-hash novelty told a member he had never fielded an archetype he ran 21
+    times that month."""
+    rich.execute("INSERT INTO battle_events VALUES ('b9', ?)", (TAG,))
+    rich.execute("INSERT INTO battle_enrichment VALUES ('b9', 'H_OK')")
+    r = get_deck_recommendations(view="build", member_tag=TAG, anchors=["Legend"], conn=rich)
+    played = [d for d in r["decks"] if d["archetype"] == "Test Cycle"]
+    assert played and played[0]["you_play_this_archetype"] is True
+
+
+def test_no_role_claims_when_the_cards_are_not_enriched(conn):
+    """The base fixture has no card_facts table at all. An absent table is a state, not
+    an outage, and it must not become a critique of decks we never looked at."""
+    r = get_deck_recommendations(view="discover", member_tag=TAG, conn=conn)
+    assert r["available"] is True
+    assert r["suggestions"][0]["role_coverage"]["gaps"] == []
+    assert r["suggestions"][0]["role_coverage"]["unknown"] is True
+
+
+def test_an_off_band_deck_is_flagged_not_silently_recommended(rich):
+    """A 4.2-elixir 'beatdown' is in band; push it to 7 and the label stops describing
+    the deck. Nothing used to compare cost against archetype."""
+    rich.execute("UPDATE deck_profile SET avg_elixir = 7.0 WHERE deck_hash = 'H_TWO'")
+    r = get_deck_recommendations(view="discover", member_tag=TAG, conn=rich)
+    heavy = [d for d in r["suggestions"] if d["archetype"] == "Test Beatdown"]
+    assert heavy, "the deck is still buildable and must still be offered"
+    assert any("heavy for beatdown" in g for g in heavy[0]["role_coverage"]["gaps"])
+
+
+def test_a_deck_over_the_special_slot_cap_is_never_suggested(rich):
+    """Evo + Hero + Wild = 3. Verified against 13,701 real decks: never 4."""
+    rich.execute("UPDATE player_card_collection SET evolution_level = 2")
+    rich.execute(
+        "INSERT INTO deck_profile VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "H_ILLEGAL",
+            "cycle",
+            "Four Evos",
+            3.0,
+            _deck([(1, 1), (2, 1), (3, 1), (4, 1), (5, 0), (6, 0), (7, 0), (8, 0)]),
+            2,
+            1,
+            1,
+            1,
+            1,
+            1,
+        ),
+    )
+    r = get_deck_recommendations(view="discover", member_tag=TAG, limit=12, conn=rich)
+    assert "Four Evos" not in {d["archetype"] for d in r["suggestions"]}
+
+
+def test_the_air_floor_filters_a_deck_that_answers_air_with_one_spell(rich):
+    rich.execute("UPDATE deck_profile SET air_answer_count = 1 WHERE deck_hash = 'H_OK'")
+    r = get_deck_recommendations(view="discover", member_tag=TAG, conn=rich)
+    assert "Test Cycle" not in {d["archetype"] for d in r["suggestions"]}
+    # ... but the same deck at cycle cost keeps the exemption the guides give it.
+    rich.execute("UPDATE deck_profile SET avg_elixir = 2.6 WHERE deck_hash = 'H_OK'")
+    r = get_deck_recommendations(view="discover", member_tag=TAG, conn=rich)
+    assert "Test Cycle" in {d["archetype"] for d in r["suggestions"]}

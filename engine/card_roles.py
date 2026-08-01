@@ -36,6 +36,27 @@ def is_air_answer(fact: dict) -> bool:
     return bool(fact.get("spell_tier") in ("small", "medium") and fact.get("splash_hits_air"))
 
 
+def is_air_troop(fact: dict) -> bool:
+    """An air answer you can DEPLOY, as opposed to one you cast once and lose.
+
+    is_air_answer() deliberately counts small spells, and that conflation shipped a
+    real bad recommendation: a member was handed a deck whose "3 air answers" were
+    Arrows, Giant Snowball, and Furnace — two one-shot spells and a spawner, no unit
+    that can shoot up. Against a Balloon that deck has nothing that survives contact.
+    The community tooling makes the same split (deckshop.pro tags "anti-air troop"
+    separately from its spell properties), so report the two separately and let the
+    reader see which kind of coverage they actually have.
+    """
+    return fact.get("targets") == "air_and_ground" and fact.get("spell_tier") in (None, "none")
+
+
+def is_heavy_air_answer(fact: dict) -> bool:
+    """Can it kill a Lava Hound or a Balloon before the tower dies — deckshop.pro's
+    "air tank killer" tier. Chip damage that merely *reaches* air is not the same
+    answer, and a deck can satisfy a numeric air-count floor with none of this."""
+    return is_air_troop(fact) and fact.get("dps_tier") == "high"
+
+
 def is_tank_answer(fact: dict) -> bool:
     """High single-target DPS — what actually melts a big tank. Splash units chew
     swarms but bounce off a Golem, so attack_style matters as much as dps."""
@@ -100,6 +121,142 @@ def deck_facts(facts: Iterable[dict]) -> dict:
             counts["cycle_card_count"] += 1
     counts["facts_complete"] = 1 if len(rows) == 8 else 0
     return counts
+
+
+# ── deck-formula coverage (what goes back to the player) ─────────────────────
+#
+# deck_facts() above answers "does this deck pass?" for the candidate filter. The
+# functions below answer "why is each card here, and what is missing?", which is the
+# half a player can actually learn from. Same predicates, reported instead of consumed.
+
+# Published archetype elixir bands, cross-checked against our own corpus (11,775
+# profiled decks): our observed means land inside every band we could check — cycle
+# 2.98 (band <3.0), bait 3.41 (3.0-3.5), beatdown 4.07 (4.0-4.5+). The tails are the
+# problem the check exists for: "beatdown" decks up to 7.25 elixir and "siege" up to
+# 6.75 are all real decks somebody played, and all terrible things to recommend.
+# Ranges are (low, high); None = unbounded on that side.
+ELIXIR_BANDS = {
+    "cycle": (None, 3.0),
+    "control": (3.0, 3.6),
+    "siege": (3.0, 3.6),
+    "bait": (3.0, 3.6),
+    "bridge spam": (3.4, 3.9),
+    "beatdown": (4.0, 4.6),
+}
+
+# One Evolution slot + one Hero slot + one Wild slot (Evo OR Hero OR Champion) since
+# the March 2026 update. Verified first-party against 13,701 real 8-card decks played
+# in July 2026: the special-form count is 0, 1, 2, or 3 and NEVER 4+. Every deck we
+# profile is one somebody actually played, so nothing violates this today — but the
+# invariant lives nowhere else, and the first deck built combinatorially rather than
+# observed would be unfieldable with no test to catch it.
+MAX_SPECIAL_SLOTS = 3
+
+# Guides converge on 2-3 air answers, with an explicit exemption for very cheap cycle
+# decks that defend by rotation. Our floor was 1, which passed decks that answer air
+# with a single spell. Measured cost of moving to 2: 113 of 11,775 profiles (1.0%).
+CHEAP_CYCLE_ELIXIR = 2.8
+
+
+def min_air_answers(avg_elixir: Optional[float]) -> int:
+    """The air floor this deck should clear. Cheap cycle decks get the exemption the
+    guides give them; everything else needs two."""
+    if avg_elixir is not None and avg_elixir <= CHEAP_CYCLE_ELIXIR:
+        return 1
+    return 2
+
+
+def elixir_band_note(family: Optional[str], avg_elixir: Optional[float]) -> Optional[str]:
+    """``None`` when the deck's cost fits its archetype, else a plain-language note.
+
+    A 7-elixir "beatdown" is not a beatdown deck, it is a deck that cannot cycle. The
+    archetype label alone never says that, so nothing downstream could warn about it.
+    """
+    if family is None or avg_elixir is None:
+        return None
+    band = ELIXIR_BANDS.get(family)
+    if not band:
+        return None
+    low, high = band
+    if low is not None and avg_elixir < low:
+        return f"{avg_elixir:.2f} elixir is cheap for {family} (typical {low:.1f}-{high:.1f})"
+    if high is not None and avg_elixir > high:
+        return f"{avg_elixir:.2f} elixir is heavy for {family} (typical {low or 0:.1f}-{high:.1f})"
+    return None
+
+
+def deck_role_coverage(facts: Iterable[dict], *, family=None, avg_elixir=None) -> dict:
+    """Which formula slot each card fills, and what the deck is missing.
+
+    ``facts`` items are card_facts rows carrying ``name`` and ``elixir_cost``. Cards
+    are listed under EVERY role they fill — Valkyrie is a mini-tank and a splash answer
+    and an anti-swarm card at once, and collapsing that to one label is what makes
+    "why is this card here?" unanswerable.
+    """
+    rows = [f for f in facts if f]
+    if not rows:
+        # No enrichment for a single card in this deck. Every named() below would come
+        # back empty and every gap would then be asserted — "no win condition, no air
+        # answer, no spell" about a deck we simply have not looked at. Absence of facts
+        # is not absence of roles; say nothing rather than invent a critique.
+        return {"facts_complete": False, "gaps": [], "unknown": True}
+
+    def named(pred) -> list[str]:
+        return [f.get("name") for f in rows if pred(f) and f.get("name")]
+
+    air_troops = named(is_air_troop)
+    air_spells = named(lambda f: is_air_answer(f) and not is_air_troop(f))
+    coverage = {
+        "win_conditions": named(lambda f: f.get("is_win_condition")),
+        "air_answers": {
+            "troops": air_troops,
+            "spells": air_spells,
+            "heavy": named(is_heavy_air_answer),
+            "count": len(air_troops) + len(air_spells),
+        },
+        "tank_answers": named(is_tank_answer),
+        "splash_answers": named(is_splash_answer),
+        "swarm": named(is_swarm),
+        "big_spells": named(lambda f: f.get("spell_tier") == "big"),
+        "small_spells": named(lambda f: f.get("spell_tier") == "small"),
+        "cycle_cards": named(lambda f: is_cycle_card(f, f.get("elixir_cost"))),
+        "facts_complete": len(rows) == 8,
+    }
+
+    # Gaps are phrased as the sentence a player should hear, not as a field name. An
+    # empty list is the honest "this deck is structurally sound" — never invent one.
+    #
+    # Every gap below is an absence claim, and an absence claim is only true if we
+    # looked at all eight cards. With seven enriched and the win condition among the
+    # missing one, "no clear win condition" would be asserted about a deck that has
+    # one. Partial facts get the coverage they earned and no critique.
+    gaps: list[str] = []
+    if not coverage["facts_complete"]:
+        coverage["gaps"] = gaps
+        coverage["unknown_cards"] = 8 - len(rows)
+        return coverage
+    if not coverage["win_conditions"]:
+        gaps.append("no clear win condition — nothing here reliably reaches the tower")
+    floor = min_air_answers(avg_elixir)
+    if coverage["air_answers"]["count"] < floor:
+        gaps.append(f"only {coverage['air_answers']['count']} air answer(s); wants {floor}")
+    elif not air_troops:
+        gaps.append("air coverage is spells only — no unit here can shoot up")
+    elif not coverage["air_answers"]["heavy"]:
+        gaps.append("can chip air but has no heavy air answer for a Balloon or Lava Hound")
+    if not coverage["tank_answers"]:
+        gaps.append("no real tank answer — swarming a tank is not the same as answering it")
+    if not coverage["splash_answers"]:
+        gaps.append("no splash — swarms go unanswered")
+    if not coverage["small_spells"]:
+        gaps.append("no small spell")
+    if not coverage["big_spells"]:
+        gaps.append("no big spell")
+    band = elixir_band_note(family, avg_elixir)
+    if band:
+        gaps.append(band)
+    coverage["gaps"] = gaps
+    return coverage
 
 
 # ── per-battle structural tags (v2 Layer 3) ──────────────────────────────────
