@@ -635,33 +635,46 @@ def _elder_band(conn, scores: dict, now: str) -> dict:
     }
     eligible_order = [tag for tag, _ in order if _eligible(tag)]
 
-    # K = the target corps size, clamped into the band around the CURRENT count.
-    # The asymmetry is the whole design: the corps grows only to the FLOOR and
-    # shrinks only to the CEILING, and holds anywhere between.
+    # The band is a TOLERANCE around a target, not a target in itself. Growing to
+    # the floor and stopping was the old behaviour and it was wrong: the floor is
+    # the lowest acceptable count, not the goal. The goal is the middle of the
+    # band, and the edges are how far the corps may drift before anything is done
+    # about it.
     #
-    #   below floor  -> k = floor    grow to the minimum, never toward the max
-    #   inside band  -> k = current  hold; the only movement is a swap, which is
-    #                                count-neutral, so the number never drifts up
-    #   above ceiling-> k = ceil     shrink to the maximum
+    #   target  = midpoint          what the corps is pulled TOWARD (9-13 -> 11)
+    #   ceiling = hard cap          growth stops here; only above it is anyone
+    #                               demoted purely for the count
+    #   floor   = drift limit       nothing force-promotes to reach it; a clan
+    #                               with too few worthy members simply sits lower
     #
-    # So the ceiling is a SHRINK TRIGGER, not a target — nothing in here ever
-    # promotes toward it. Raising the floor is the only change that creates
-    # promotions; raising the ceiling only widens how many badges the clan may
-    # keep if leaders hand them out in-game.
-    k = min(max(current_elders, floor), ceil)
-    should_be = set(eligible_order[:k])
-    # Below-floor growth still requires worthiness (≥ median) so a thin/weak
-    # clan promotes nobody rather than elevating the undeserving to hit the floor.
-    if current_elders < floor:
-        should_be = {
-            t for t in should_be if scores[t]["role"] == "elder" or scores[t]["score"] >= median
-        }
+    # So a close call at the boundary can carry the corps to 13, and a thin field
+    # lets it settle back toward 9, without either edge ever being the aim.
+    target = round((floor + ceil) / 2)
+
+    # Two different lines. `grow_line` is who we actively promote toward; the
+    # target. `hold_line` is who keeps a seat; the ceiling. Separating them is
+    # what allows the count to sit anywhere in the band: an elder ranked 12th of
+    # 13 is inside the tolerance and is NOT displaced merely for being past the
+    # target, but a member ranked inside the top 11 is still worth promoting.
+    grow_line = set(eligible_order[:target])
+    hold_line = set(eligible_order[:ceil])
+
+    # Worthiness gates ALL growth, not just growth from below the floor. Promoting
+    # a below-average member to hit a number is exactly what the target must not
+    # be allowed to cause — this is the mechanism by which a weak field trends the
+    # corps down instead of padding it out.
+    should_be = {
+        t for t in grow_line if scores[t]["role"] == "elder" or scores[t]["score"] >= median
+    }
 
     want_promote = [t for t in should_be if scores[t]["role"] == "member"]
+    # An elder loses the seat only by falling outside the CEILING — not by
+    # slipping past the target. Using the target here would demote people for
+    # sitting in the tolerance band the band exists to permit.
     outranked = [
         t
         for t, r in scores.items()
-        if r["role"] == "elder" and t not in should_be and t not in abandoned
+        if r["role"] == "elder" and t not in hold_line and t not in abandoned
     ]
 
     # Displacement swaps carry the anti-flap deadband: pair the boundary member
@@ -681,8 +694,23 @@ def _elder_band(conn, scores: dict, now: str) -> dict:
     # nearest the line got taken on a hair's lead. Live: Sandeep beat Tere by
     # 0.020, well inside the 0.05 deadband, yet Tere was carded for demotion
     # because the code matched her against pax (+0.100) instead.
-    prom_by_rank = sorted(want_promote, key=lambda t: -rank[t])
+    # The contest is judged at the HOLD line, not the target. An elder who slipped
+    # past the ceiling was pushed out by whoever now occupies that seat, and that
+    # person may be ranked past the target — so pairing only against members inside
+    # the target would leave the elder unpaired and demote them with no deadband
+    # check at all. Live consequence before this: a near-tie 0.005 apart demoted the
+    # incumbent, which is exactly what SWAP_MARGIN exists to prevent.
+    challengers = [
+        t for t in hold_line if scores[t]["role"] == "member" and scores[t]["score"] >= median
+    ]
     out_by_rank = sorted(outranked, key=lambda t: rank[t])
+    # Only as many challengers as there are seats being contested, STRONGEST first.
+    # The pairing below then runs weakest-of-those against the strongest outranked
+    # elder, which is the closest contest and where the deadband belongs. Skipping
+    # this truncation let a weak filler member take the seat ahead of the strong
+    # one simply because the weakest-first ordering reached them first.
+    contenders = sorted(challengers, key=lambda t: rank[t])[: len(out_by_rank)]
+    prom_by_rank = sorted(contenders, key=lambda t: -rank[t])
     paired = min(len(prom_by_rank), len(out_by_rank))
     for i in range(paired):
         m, e = prom_by_rank[i], out_by_rank[i]
@@ -691,19 +719,43 @@ def _elder_band(conn, scores: dict, now: str) -> dict:
             demotable.add(e)
             demote_reasons[e] = "outranked"
         # else: deadband — the seat holds, the challenge is cancelled this week
-    # Unpaired promotes = genuine empty slots (below-floor growth): promote.
-    for m in prom_by_rank[paired:]:
-        promotable.add(m)
-    # Unpaired outranked = over-ceiling overflow: demote to return to the band.
+    # Unpaired outranked = past the ceiling: demote to return to the band.
     for e in out_by_rank[paired:]:
         demotable.add(e)
         demote_reasons[e] = "outranked"
+
+    # Growth into genuinely OPEN seats, which is a different thing from a swap:
+    # nobody loses a seat, so no deadband applies. Only members inside the target
+    # line qualify, strongest first, and never past the ceiling — so a corps that
+    # settles above the target got there on merit at the boundary (the close
+    # calls), not by scraping the bottom of the eligible list.
+    held = current_elders - len(demotable) + len(promotable)
+    growth = sorted((t for t in want_promote if t not in promotable), key=lambda t: rank[t])
+    taken: list[str] = []
+    for m in growth:
+        seats_used = held + len(taken)
+        if seats_used >= ceil:
+            break  # the ceiling is hard
+        if seats_used < target:
+            taken.append(m)  # filling toward the target
+            continue
+        # Past the target, the only remaining reason to promote is a CLOSE CALL:
+        # this candidate is within a deadband of the last one admitted, so drawing
+        # the line between them would be splitting hairs. That is what the room
+        # between the target and the ceiling is for. A clear drop in score ends it,
+        # which is also how a thin field lets the corps settle back toward the floor.
+        prev = taken[-1] if taken else None
+        if prev is None or scores[prev]["score"] - scores[m]["score"] >= SWAP_MARGIN:
+            break
+        taken.append(m)
+    promotable.update(taken)
 
     return {
         "n": n,
         "roster": roster,
         "floor": floor,
         "ceil": ceil,
+        "target": target,
         "current_elders": current_elders,
         "rank": rank,
         "median": median,

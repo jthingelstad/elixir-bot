@@ -579,17 +579,17 @@ def _band(conn):
 
 
 def test_below_floor_promotes_top_worthy_only(engine_conn):
-    # 7-member roster, 0 elders → floor round(.15*7)=1. Top worthy member is
-    # promotable; a war-absent member never is (fails the floor).
+    # 7-member roster, 0 elders → floor 1, ceil 2, TARGET 2. The corps grows to
+    # the target, not to the floor; a war-absent member never qualifies.
     _seed_ranked(engine_conn, "#TOP", war_used=16, war_avail=16, war_days=4, donations=800)
     for i in range(5):
         _seed_ranked(engine_conn, f"#M{i}", war_used=4, war_avail=16, war_days=2, donations=100)
     _seed_ranked(engine_conn, "#NOWAR", war_used=0, war_avail=0, war_days=0, donations=999)
     scores, band = _band(engine_conn)
-    assert band["floor"] == 1 and band["current_elders"] == 0
+    assert band["floor"] == 1 and band["target"] == 2 and band["current_elders"] == 0
     assert "#TOP" in band["promotable"]
     assert "#NOWAR" not in band["promotable"]  # war floor filter
-    assert len(band["promotable"]) == 1  # only need floor-0 = 1
+    assert len(band["promotable"]) == band["target"], "grows to the target, not the floor"
 
 
 def test_worthiness_floor_blocks_weak_promotion(engine_conn):
@@ -887,9 +887,12 @@ def test_swap_member_outranks_elder_by_margin(engine_conn):
 
 
 def test_swap_deadband_blocks_hair_lead(engine_conn):
-    # roster 10, 2 elders (in band 2-3). A member out-scores an elder by LESS
-    # than SWAP_MARGIN → no swap (anti-flap).
-    for i in range(7):
+    # roster 10, 3 elders — AT the ceiling, so there is no open seat and the only
+    # way in is displacement. That is where the deadband lives: a member who
+    # out-scores an elder by LESS than SWAP_MARGIN takes no seat (anti-flap).
+    # With room to grow the same member would simply be promoted, which is not
+    # churn because nobody loses anything.
+    for i in range(6):
         _seed_ranked(engine_conn, f"#P{i}", war_used=4, war_avail=16, war_days=2, donations=100)
     # near-tie: member and elder with almost identical output
     _seed_ranked(engine_conn, "#NEAR_M", war_used=12, war_avail=16, war_days=3, donations=300)
@@ -911,6 +914,17 @@ def test_swap_deadband_blocks_hair_lead(engine_conn):
         war_days=3,
         donations=350,
     )
+
+    _seed_ranked(
+        engine_conn,
+        "#E3",
+        role="elder",
+        war_used=14,
+        war_avail=16,
+        war_days=3,
+        donations=360,
+    )
+
     scores, band = _band(engine_conn)
     gap = scores["#NEAR_M"]["score"] - scores["#NEAR_E"]["score"]
     assert abs(gap) < management.SWAP_MARGIN  # within the deadband
@@ -1259,3 +1273,76 @@ def test_slack_tracks_roster_not_evidence_freshness(engine_conn):
 
     management.run_tick_evaluators(engine_conn, now=NOW, readiness=readiness)
     assert _kick_state(engine_conn) == "recommended"
+
+
+# ── the band is a target with tolerance, not a floor to reach ────────────────
+
+
+def test_growth_aims_at_the_midpoint_not_the_floor(engine_conn):
+    """The design goal is the middle of the band. Growing to the floor and
+    stopping was the old behaviour and it left the corps permanently at its
+    minimum acceptable size."""
+    for i in range(14):
+        _seed_ranked(
+            engine_conn, f"#M{i}", war_used=16 - i, war_avail=16, war_days=4, donations=900 - i * 40
+        )
+    scores, band = _band(engine_conn)
+    assert (band["floor"], band["target"], band["ceil"]) == (3, 4, 4)
+    assert band["current_elders"] == 0
+    assert len(band["promotable"]) >= band["target"], "must reach the target, not the floor"
+    assert len(band["promotable"]) <= band["ceil"], "and never pass the ceiling"
+
+
+def test_a_close_call_at_the_boundary_may_carry_the_corps_past_the_target(engine_conn):
+    """Between the target and the ceiling sits room for candidates too close to
+    separate. Splitting hairs at the line is worse than letting both in."""
+    # Three clear leaders, then two effectively tied at the boundary.
+    for i, don in enumerate((900, 850, 800)):
+        _seed_ranked(engine_conn, f"#TOP{i}", war_used=16, war_avail=16, war_days=4, donations=don)
+    _seed_ranked(engine_conn, "#TIE_A", war_used=12, war_avail=16, war_days=3, donations=500)
+    _seed_ranked(engine_conn, "#TIE_B", war_used=12, war_avail=16, war_days=3, donations=498)
+    for i in range(9):
+        _seed_ranked(engine_conn, f"#M{i}", war_used=2, war_avail=16, war_days=1, donations=50)
+    scores, band = _band(engine_conn)
+    admitted = sorted(band["promotable"], key=lambda t: band["rank"][t])
+    if len(admitted) > band["target"]:
+        last, extra = admitted[band["target"] - 1], admitted[band["target"]]
+        gap = scores[last]["score"] - scores[extra]["score"]
+        assert gap < management.SWAP_MARGIN, "only a genuine near-tie may exceed the target"
+    assert len(admitted) <= band["ceil"]
+
+
+def test_a_thin_field_lets_the_corps_sit_below_the_target(engine_conn):
+    """ "If there's not close calls it may trend down." The target never forces a
+    promotion: a field where nobody clears the participation floor leaves the
+    corps below it rather than padding it out to hit a number.
+
+    Note it is the FILTERS that thin the field, not the median — half the roster
+    is at or above the median by construction, so worthiness alone can never keep
+    a corps small. (test_worthiness_floor_blocks_weak_promotion covers that gate.)
+    """
+    for i in range(12):  # present, donating, and entirely absent from war and ranked
+        _seed_ranked(engine_conn, f"#IDLE{i}", war_used=0, war_avail=0, war_days=0, donations=400)
+    scores, band = _band(engine_conn)
+    assert band["target"] >= 2
+    assert band["current_elders"] == 0
+    assert band["promotable"] == set(), "nobody clears the competitive floor, target or not"
+
+
+def test_an_elder_inside_the_ceiling_is_never_demoted_for_passing_the_target(engine_conn):
+    """The tolerance band only means something if sitting in it is safe."""
+    for i in range(6):
+        _seed_ranked(engine_conn, f"#M{i}", war_used=4, war_avail=16, war_days=2, donations=100)
+    for i, don in enumerate((500, 480, 460)):
+        _seed_ranked(
+            engine_conn,
+            f"#E{i}",
+            role="elder",
+            war_used=15 - i,
+            war_avail=16,
+            war_days=4,
+            donations=don,
+        )
+    scores, band = _band(engine_conn)
+    assert band["target"] < band["current_elders"] <= band["ceil"]
+    assert band["demotable"] == set(), "inside the band, past the target, still safe"
