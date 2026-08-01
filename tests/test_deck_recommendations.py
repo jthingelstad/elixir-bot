@@ -31,8 +31,11 @@ def conn():
             evolution_level INTEGER);
         CREATE TABLE battle_card_plays (battle_dedup_key TEXT, side TEXT, card_id INTEGER,
             evolution_level INTEGER, player_tag TEXT, battle_time TEXT);
-        CREATE TABLE battle_enrichment (battle_dedup_key TEXT, our_deck_hash TEXT);
-        CREATE TABLE battle_events (dedup_key TEXT, player_tag TEXT);
+        CREATE TABLE battle_enrichment (battle_dedup_key TEXT, player_tag TEXT,
+            battle_time TEXT, our_deck_hash TEXT, their_deck_hash TEXT);
+        CREATE TABLE matchup_expectation (our_family TEXT, their_family TEXT,
+            advantage INTEGER, measured_win_rate REAL, n INTEGER);
+        CREATE TABLE battle_events (dedup_key TEXT, player_tag TEXT, outcome TEXT);
         CREATE TABLE deck_profile (deck_hash TEXT PRIMARY KEY, family TEXT, archetype TEXT,
             avg_elixir REAL, cards_json TEXT, air_answer_count INTEGER, tank_answer_count INTEGER,
             splash_answer_count INTEGER, has_big_spell INTEGER, has_small_spell INTEGER,
@@ -307,8 +310,10 @@ def test_air_coverage_distinguishes_troops_from_spells(rich):
 def test_a_deck_the_member_already_plays_is_flagged_at_archetype_level(rich):
     """Exact-hash novelty told a member he had never fielded an archetype he ran 21
     times that month."""
-    rich.execute("INSERT INTO battle_events VALUES ('b9', ?)", (TAG,))
-    rich.execute("INSERT INTO battle_enrichment VALUES ('b9', 'H_OK')")
+    rich.execute("INSERT INTO battle_events VALUES ('b9', ?, 'W')", (TAG,))
+    rich.execute(
+        "INSERT INTO battle_enrichment VALUES ('b9', ?, '2026-07-01', 'H_OK', NULL)", (TAG,)
+    )
     r = get_deck_recommendations(view="build", member_tag=TAG, anchors=["Legend"], conn=rich)
     played = [d for d in r["decks"] if d["archetype"] == "Test Cycle"]
     assert played and played[0]["you_play_this_archetype"] is True
@@ -415,3 +420,51 @@ def test_a_message_with_no_deck_link_is_not_a_deck(rich):
     r = read_deck_link(link="what should I upgrade next?", conn=rich)
     assert r["available"] is False
     assert r["error"] == "no_deck_link_found"
+
+
+def test_recommendations_read_the_field_this_member_actually_meets(rich):
+    """Two members of the same clan do not face the same field — one meets beatdown
+    in 43% of his games, another bridge spam in 51%, against a ~27% clan average.
+    A deck ranked only on card levels cannot know it is being handed to someone who
+    loses to bait."""
+    rich.execute(
+        "INSERT INTO deck_profile VALUES ('H_OPP','bait','Log Bait',3.2,?,2,1,1,1,1,1)",
+        (_deck([(9, 0)] * 8),),  # an opponent deck built from a card the member lacks
+    )
+    for i in range(14):
+        rich.execute("INSERT INTO battle_events VALUES (?, ?, 'L')", (f"x{i}", TAG))
+        rich.execute(
+            "INSERT INTO battle_enrichment VALUES (?, ?, '2026-07-20', 'H_OK', 'H_OPP')",
+            (f"x{i}", TAG),
+        )
+    r = get_deck_recommendations(view="discover", member_tag=TAG, conn=rich)
+    field = r["your_field"]
+    assert field["battles"] == 14
+    assert field["faced"]["bait"]["losses"] == 14
+    assert field["worst_matchup"] == "bait", "0-14 is the matchup worth naming"
+
+
+def test_no_battle_history_removes_the_matchup_read_and_nothing_else(conn):
+    """The field is an enrichment. A member with no history still gets decks."""
+    r = get_deck_recommendations(view="discover", member_tag=TAG, conn=conn)
+    assert r["available"] is True
+    assert r["suggestions"], "recommendations are gated on ownership, not on history"
+    assert r["your_field"]["worst_matchup"] is None
+    assert all("matchup_fit" not in d for d in r["suggestions"])
+
+
+def test_a_thin_field_earns_no_matchup_claim(rich):
+    """Three games is not a field, and a confident number off it reads as a finding."""
+    rich.execute(
+        "INSERT INTO deck_profile VALUES ('H_OPP','bait','Log Bait',3.2,?,2,1,1,1,1,1)",
+        (_deck([(9, 0)] * 8),),  # an opponent deck built from a card the member lacks
+    )
+    for i in range(3):
+        rich.execute("INSERT INTO battle_events VALUES (?, ?, 'L')", (f"y{i}", TAG))
+        rich.execute(
+            "INSERT INTO battle_enrichment VALUES (?, ?, '2026-07-20', 'H_OK', 'H_OPP')",
+            (f"y{i}", TAG),
+        )
+    r = get_deck_recommendations(view="discover", member_tag=TAG, conn=rich)
+    assert r["your_field"]["worst_matchup"] is None
+    assert all("matchup_fit" not in d for d in r["suggestions"])

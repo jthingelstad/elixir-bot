@@ -209,3 +209,69 @@ def test_deck_profile_cards_json_preserves_card_form(tmp_path):
     assert stored == _identity_pairs(deck), "cards_json must match deck_hash identity"
     assert (26000000, 1) in stored, "Evolution form was dropped"
     assert (26000001, 2) in stored, "Hero form was dropped"
+
+
+def test_coaching_describes_the_deck_the_way_deck_intelligence_does(tmp_path):
+    """The seam. "Why do I lose to beatdown?" used to be answered with three bare
+    integers while the recommendation views next door named cards and gaps."""
+    conn = _db(tmp_path)
+    for i, oc in enumerate(["W", "L", "L", "L"]):
+        _battle(conn, f"b{i}", HOGS, GOLEM, oc)
+    for i, oc in enumerate(["W", "W", "L", "W"]):
+        _battle(conn, f"c{i}", GOLEM, HOGS, oc)
+    conn.commit()
+    enrich_battles(100, conn=conn)
+    rebuild_deck_intel(conn=conn)
+
+    r = get_battle_intelligence(view="coaching", member_tag="#M", conn=conn)
+    shape = r["primary_deck_shape"]
+    assert shape["archetype"]
+    assert shape["family"]
+    # Either real coverage, or nothing — never a fabricated critique.
+    coverage = shape.get("role_coverage")
+    if coverage is not None:
+        assert "gaps" in coverage
+
+
+def test_a_matchup_record_is_graded_against_what_the_matchup_is_worth(tmp_path):
+    """A bare tally cannot say whether five losses to beatdown is a problem. Five in
+    eight is; five in forty is not; and if the matchup is even, the deck is not the
+    story."""
+    conn = _db(tmp_path)
+    for i in range(20):
+        _battle(conn, f"b{i}", HOGS, GOLEM, "W" if i % 4 else "L")
+    for i in range(20):
+        _battle(conn, f"c{i}", GOLEM, HOGS, "L" if i % 4 else "W")
+    conn.commit()
+    enrich_battles(100, conn=conn)
+    rebuild_deck_intel(conn=conn)
+
+    # limit=100: the view samples 20 battles by default, which would split 40 games
+    # into two families of 10 and fall under the grading floor by construction.
+    r = get_battle_intelligence(view="coaching", member_tag="#M", limit=100, conn=conn)
+    rec = {m["their_family"]: m for m in r["matchup_record"]}
+    assert set(rec) == {"beatdown", "bridge spam"}
+    for m in rec.values():
+        assert m["wins"] + m["losses"] >= _MATCHUP_FLOOR_FOR_TEST
+        assert m["expected_win_rate"] is not None
+        assert m["vs_expected"] is not None, "with enough games the grade must be stated"
+
+
+def test_a_thin_matchup_is_reported_without_a_grade(tmp_path):
+    """Three games against an archetype is not a pattern, and a delta computed off
+    it reads as a finding."""
+    conn = _db(tmp_path)
+    for i, oc in enumerate(["W", "L", "L"]):
+        _battle(conn, f"b{i}", HOGS, GOLEM, oc)
+    conn.commit()
+    enrich_battles(100, conn=conn)
+    rebuild_deck_intel(conn=conn)
+
+    r = get_battle_intelligence(view="coaching", member_tag="#M", conn=conn)
+    thin = r["matchup_record"][0]
+    assert thin["enough_games"] is False
+    assert "vs_expected" not in thin
+    assert "structural_notes" not in thin
+
+
+_MATCHUP_FLOOR_FOR_TEST = 12

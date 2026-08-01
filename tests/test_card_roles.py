@@ -12,6 +12,7 @@ from engine.card_roles import (
     is_splash_answer,
     is_tank_answer,
     level_validity,
+    matchup_notes,
     min_air_answers,
     spell_bait_exposed,
     wincon_pressure,
@@ -295,3 +296,58 @@ def test_a_structurally_complete_deck_reports_no_gaps():
     assert cov["gaps"] == [], cov["gaps"]
     assert cov["win_conditions"] == ["Hog Rider"]
     assert "Skeletons" in cov["cycle_cards"]
+
+
+# ── matchup notes: the mechanism behind a tendency, never a cause ────────────
+
+
+def _covered(**over):
+    base = {
+        "facts_complete": True,
+        "win_conditions": ["Hog Rider"],
+        "air_answers": {"troops": ["Musketeer"], "spells": ["Arrows"], "heavy": ["Musketeer"]},
+        "tank_answers": ["Mini P.E.K.K.A"],
+        "splash_answers": ["Valkyrie"],
+        "small_spells": ["The Log", "Zap"],
+        "big_spells": ["Fireball"],
+    }
+    base.update(over)
+    return base
+
+
+def test_one_small_spell_against_bait_is_named():
+    """The cleanest quantifiable line in the game: a bait deck runs more fragile
+    cards than one small spell can answer."""
+    notes = matchup_notes(_covered(small_spells=["The Log"]), "bait")
+    assert any("one small spell" in n for n in notes)
+    assert matchup_notes(_covered(), "bait") == [], "two small spells closes the exploit"
+
+
+def test_no_tank_answer_against_beatdown_is_named():
+    notes = matchup_notes(_covered(tank_answers=[]), "beatdown")
+    assert any("melts a tank" in n for n in notes)
+
+
+def test_a_structurally_sound_deck_gets_no_notes_for_any_archetype():
+    """Empty is the common and correct answer. Inventing a weakness to look useful
+    is the failure this whole layer exists to prevent."""
+    for fam in ("beatdown", "bridge spam", "control", "cycle", "bait", "siege"):
+        assert matchup_notes(_covered(), fam) == [], fam
+
+
+def test_notes_need_complete_facts_and_a_named_opponent():
+    assert matchup_notes(_covered(facts_complete=False, small_spells=[]), "bait") == []
+    assert matchup_notes(_covered(small_spells=[]), None) == []
+    assert matchup_notes({}, "bait") == []
+
+
+def test_small_spells_are_counted_not_just_flagged():
+    """has_small_spell is a boolean and cannot express one-versus-two, which is the
+    whole distinction that decides the bait matchup."""
+    log = {"name": "The Log", "spell_tier": "small", "targets": "none", "elixir_cost": 2}
+    zap = {"name": "Zap", "spell_tier": "small", "targets": "none", "elixir_cost": 2}
+    one = deck_facts([log] + [KNIGHT] * 7)
+    two = deck_facts([log, zap] + [KNIGHT] * 6)
+    assert one["has_small_spell"] == two["has_small_spell"] == 1
+    assert one["small_spell_count"] == 1
+    assert two["small_spell_count"] == 2
