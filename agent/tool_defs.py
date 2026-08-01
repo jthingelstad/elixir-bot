@@ -80,6 +80,41 @@ TOOLS = [
         },
     },
     {
+        "name": "read_deck_link",
+        "description": (
+            "Read a Clash Royale deck that a member PASTED into chat. The game's "
+            "'Copy Deck' button produces a link like 'https://link.clashroyale.com/en?"
+            "clashroyale://copyDeck?deck=26000007;28000015;...&tt=...' — usually inside a "
+            "sentence such as '<name> wants to share a Clash Royale deck: <link>'. Pass "
+            "the member's whole message as 'link' and this resolves the eight cards, "
+            "their elixir costs, the roles each one fills, the deck's role_coverage and "
+            "gaps, and the tower troop.\n\n"
+            "USE THIS whenever a message contains a deck link — never try to read the "
+            "card ids yourself.\n\n"
+            "CRITICAL: the share format carries BASE CARDS ONLY. It cannot express "
+            "Evolution or Hero forms — a deck shared by a player running Evo Witch comes "
+            "through as plain Witch. Never tell a member which of their cards are "
+            "evolved based on a pasted link; ask if it matters to the advice."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "link": {
+                    "type": "string",
+                    "description": "The member's message text containing the deck link.",
+                },
+                "member_tag": {
+                    "type": "string",
+                    "description": (
+                        "Optional. Fills in this member's own card levels. A pasted deck "
+                        "may be someone else's, so unowned cards are reported as unowned."
+                    ),
+                },
+            },
+            "required": ["link"],
+        },
+    },
+    {
         "name": "get_battle_intelligence",
         "description": (
             "Computed battle intelligence from BOTH sides of Elixir's observed 1v1 "
@@ -1420,7 +1455,7 @@ TOOLS = [
 ]
 
 # Definitions kept above the export preserve direct-executor compatibility while
-# the LLM sees one canonical owner per question. Only this 14-tool block is ever
+# the LLM sees one canonical owner per question. Only this 17-tool block is ever
 # offered to shared workflows.
 _SHARED_TOOL_NAMES = (
     "resolve_member",
@@ -1431,6 +1466,7 @@ _SHARED_TOOL_NAMES = (
     "get_elixir_state",
     "get_deck_intelligence",
     "get_deck_recommendations",
+    "read_deck_link",
     "get_battle_intelligence",
     "lookup_cards",
     "get_member_cards",

@@ -55,12 +55,14 @@ def test_empty_toolsets_stay_empty():
         assert elixir_agent.TOOLSETS_BY_WORKFLOW[workflow] == []
 
 
-def test_shared_tool_block_has_sixteen_non_overlapping_owners():
+def test_shared_tool_block_has_seventeen_non_overlapping_owners():
     shared = get_workflow_spec("clanops").tools
     names = _names(shared)
 
-    assert len(names) == len(set(names)) == 16
+    assert len(names) == len(set(names)) == 17
     assert "get_battle_intelligence" in names
+    # read_deck_link: members paste decks back after Elixir shares one.
+    assert "read_deck_link" in names
     assert "get_deck_recommendations" in names
     assert "get_member_cards" in names
     assert "record_leadership_followup" in names

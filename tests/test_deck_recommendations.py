@@ -364,3 +364,54 @@ def test_the_air_floor_filters_a_deck_that_answers_air_with_one_spell(rich):
     rich.execute("UPDATE deck_profile SET avg_elixir = 2.6 WHERE deck_hash = 'H_OK'")
     r = get_deck_recommendations(view="discover", member_tag=TAG, conn=rich)
     assert "Test Cycle" in {d["archetype"] for d in r["suggestions"]}
+
+
+def test_every_suggested_deck_comes_with_a_copy_link(rich):
+    """A member should not have to retype eight card names to try a suggestion."""
+    from engine.deck_links import parse_deck_link
+
+    r = get_deck_recommendations(view="discover", member_tag=TAG, conn=rich)
+    deck = r["suggestions"][0]
+    parsed = parse_deck_link(deck["copy_link"])
+    assert parsed is not None
+    assert len(parsed["card_ids"]) == 8
+
+
+def test_a_deck_relying_on_a_special_form_says_the_link_will_drop_it(rich):
+    """The share format is base-cards-only, proven against a real link whose deck ran
+    three special forms and still reported all-zero slots. Silently handing over a
+    link that pastes the base deck would be worse than not sharing one."""
+    rich.execute("UPDATE player_card_collection SET evolution_level = 1 WHERE card_id = 2")
+    rich.execute(
+        "INSERT INTO battle_card_plays VALUES ('b2','member',2,1,?,'2026-07-01T00:00:00Z')",
+        (TAG,),
+    )
+    r = get_deck_recommendations(view="discover", member_tag=TAG, limit=12, conn=rich)
+    evo_deck = next(d for d in r["suggestions"] if d["archetype"] == "Test Control")
+    assert evo_deck["link_omits_forms"] == ["Common"]
+    plain = next(d for d in r["suggestions"] if d["archetype"] == "Test Cycle")
+    assert plain["link_omits_forms"] == []
+
+
+def test_a_pasted_deck_is_read_with_the_same_role_vocabulary(rich):
+    """The inbound half of the loop. A deck the member brought and a deck Elixir
+    proposed must be analysed by one code path, or the two answers disagree."""
+    from capabilities.deck_intel import read_deck_link
+
+    ids = ";".join(str(i) for i in range(1, 9))
+    r = read_deck_link(
+        link=f"paste: ...copyDeck?deck={ids}&tt=159000000", member_tag=TAG, conn=rich
+    )
+    assert r["available"] is True
+    assert [c["name"] for c in r["cards"]][:2] == ["Legend", "Common"]
+    assert r["cards"][0]["their_level"] == 8, "the member's own level fills in"
+    assert r["role_coverage"]["win_conditions"] == ["Rare"]
+    assert "BASE CARDS" in r["note"], "must never claim to know the forms"
+
+
+def test_a_message_with_no_deck_link_is_not_a_deck(rich):
+    from capabilities.deck_intel import read_deck_link
+
+    r = read_deck_link(link="what should I upgrade next?", conn=rich)
+    assert r["available"] is False
+    assert r["error"] == "no_deck_link_found"
