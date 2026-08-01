@@ -106,7 +106,25 @@ TOOLS = [
                 },
                 "require": {
                     "type": "array",
-                    "items": {"type": "string"},
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "win_condition",
+                            "big_spell",
+                            "small_spell",
+                            "spell",
+                            "reset",
+                            "knockback",
+                            "air_troop",
+                            "heavy_air",
+                            "tank_answer",
+                            "splash",
+                            "swarm",
+                            "building",
+                            "tank",
+                            "cycle",
+                        ],
+                    },
                     "description": (
                         "Deck PROPERTIES the member asked for, for 'build' and "
                         "'anchored': win_condition, big_spell, small_spell, spell, "
@@ -243,11 +261,17 @@ TOOLS = [
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Max battles for the 'battle' view (default 20).",
+                    "description": (
+                        "Means different things per view. For 'battle' it is how many "
+                        "battles come back. For 'coaching' it is the SAMPLE SIZE the "
+                        "aggregate is computed over, so a small limit narrows the read "
+                        "rather than shortening a list — leave it alone unless you mean "
+                        "to. Default 20."
+                    ),
                     "default": 20,
                 },
             },
-            "required": [],
+            "required": ["view"],
         },
     },
     # ── MEMBER DOMAIN ──────────────────────────────────────────────────────
