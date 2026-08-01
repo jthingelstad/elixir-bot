@@ -49,6 +49,10 @@ TOOLS = [
             "adjusted for who plays what, archetype matchup is worth about 3 points "
             "against 22 for card levels, so a member's own lopsided record is about them "
             "and their deck, never proof an archetype is strong.\n\n"
+            "Card levels: EVERY card maxes at 16, so a level is a single number. Say "
+            '"Wall Breakers are level 15" or "one off max" or "maxed" — never '
+            '"15/16", and never mention a second scale. Use levels_from_max for how '
+            "far off they are.\n\n"
             "SOUND LIKE A PLAYER. Call decks by their archetype the way the game's players "
             "do — 'your Hog cycle', 'Royal Hogs bridge spam', 'LavaLoon', 'log bait', "
             "'X-Bow siege' — never by reciting eight card names, which is the clearest tell "

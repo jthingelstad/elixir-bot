@@ -401,7 +401,7 @@ def test_a_pasted_deck_is_read_with_the_same_role_vocabulary(rich):
     assert [c["name"] for c in r["cards"]][:2] == ["Legend", "Common"]
     # 8 of 8 on the API's rarity-relative scale is 16 of 16 on the member's screen.
     assert r["cards"][0]["their_level"] == 16, "levels are reported as the member sees them"
-    assert r["cards"][0]["their_max_level"] == 16
+    assert "their_max_level" not in r["cards"][0], "every card maxes at 16; do not ship a constant"
     assert r["role_coverage"]["win_conditions"] == ["Rare"]
     assert "BASE CARDS" in r["note"], "must never claim to know the forms"
 
@@ -626,20 +626,23 @@ def test_levels_are_reported_the_way_the_game_shows_them(rich):
     rich.execute("UPDATE player_card_collection SET level = 7 WHERE card_id = 1")  # legendary 8
     r = get_deck_recommendations(view="anchored", member_tag=TAG, card="Legend", conn=rich)
     card = next(c for c in r["decks"][0]["cards"] if c["name"] == "Legend")
-    assert (card["level"], card["max_level"]) == (15, 16), "legendary 7/8 shows as 15/16"
+    assert card["level"] == 15, "a legendary at 7 of 8 is level 15 on the player's screen"
     assert card["levels_from_max"] == 1, "the GAP is identical on either scale"
-    assert (r["anchor_level"], r["anchor_max_level"]) == (15, 16)
+    assert r["anchor_level"] == 15
+    assert "max_level" not in card and "anchor_max_level" not in r
 
 
-def test_every_rarity_tops_out_displayed_at_sixteen(rich):
-    """The trap this class of bug lives in: 'maxed' looks different per rarity on
-    the API scale and identical on screen."""
+def test_a_card_level_is_one_number(rich):
+    """Every card in the game maxes at 16, so a max is a constant and shipping it
+    per card is a constant dressed as data. It is also what produced "Lv15/16" in
+    front of a member — no Clash player writes that. They say "level 15", or
+    "maxed", or "one off max", which levels_from_max carries."""
     r = get_deck_recommendations(view="discover", member_tag=TAG, limit=12, conn=rich)
     for deck in r["suggestions"]:
         for card in deck["cards"]:
-            assert card["max_level"] == 16, f"{card['name']} reported max {card['max_level']}"
-            if card["levels_from_max"] == 0:
-                assert card["level"] == 16, "a maxed card of any rarity shows as 16"
+            assert "max_level" not in card, f"{card['name']} still ships a max"
+            assert isinstance(card["level"], int) and card["level"] <= 16
+            assert isinstance(card["levels_from_max"], int)
 
 
 def test_no_raw_api_level_can_escape_the_loaders(rich):
@@ -667,14 +670,14 @@ def test_no_raw_api_level_can_escape_the_loaders(rich):
         ("upgrades", {}),
     ):
         r = get_deck_recommendations(view=view, member_tag=TAG, conn=rich, **kwargs)
-        if r.get("anchor_max_level") is not None:
-            assert r["anchor_max_level"] == 16
+        assert "anchor_max_level" not in r
         for deck in r.get("decks") or r.get("suggestions") or []:
             for card in deck["cards"]:
-                assert card["max_level"] == 16, f"{view}: {card['name']} max {card['max_level']}"
-                assert card["level"] <= 16
+                assert "max_level" not in card, f"{view}: {card['name']} ships a max"
+                assert card["level"] <= 16, f"{view}: {card['name']} level {card['level']}"
                 seen += 1
         for row in (r.get("upgrades") or []) + (r.get("unlocks") or []):
-            assert row["max_level"] == 16, f"{view}: {row['card']} max {row['max_level']}"
+            assert "max_level" not in row, f"{view}: {row['card']} ships a max"
+            assert row["level"] <= 16
             seen += 1
     assert seen > 0, "the guard must actually have inspected something"

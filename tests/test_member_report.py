@@ -387,7 +387,7 @@ def test_upgrades_are_ranked_by_what_they_actually_field():
         }
     )
     rendered = member_report._render_deck(ctx)
-    assert "| Fireball | 8/14 | 6 | 8% |" in rendered
+    assert "| Fireball | 8 | 6 | 8% |" in rendered, "a level is one number; 16 is a constant"
     assert "how much you actually field the card" in rendered
 
 
@@ -447,8 +447,8 @@ def test_card_forms_survive_into_the_email():
     point at a card the member may not own."""
     ctx = _intel_ctx(discover={"available": True, "suggestions": [_SUGGESTION]})
     rendered = member_report._render_deck(ctx)
-    assert "**Hero Mini P.E.K.K.A** (14/14)" in rendered
-    assert "**Hog Rider** (13/14)" in rendered, "base form takes no prefix"
+    assert "**Hero Mini P.E.K.K.A** (lvl 14)" in rendered
+    assert "**Hog Rider** (lvl 13)" in rendered, "base form takes no prefix"
 
 
 def test_too_few_battles_gets_no_matchup_read_rather_than_a_compliment():
