@@ -13,8 +13,8 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 31
-EXPECTED_TABLE_COUNT = 65
+CURRENT_SCHEMA_VERSION = 32
+EXPECTED_TABLE_COUNT = 64
 
 
 def initialize_empty_database(
@@ -332,7 +332,6 @@ REQUIRED_SCHEMA = {
     },
     "deck_profile": {"deck_hash", "family", "archetype", "avg_elixir", "cards_json"},
     "card_facts": {"card_id", "evolution_level", "targets", "role", "is_win_condition"},
-    "matchup_expectation": {"our_family", "their_family", "advantage", "n"},
 }
 
 
@@ -1916,7 +1915,64 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+    if version < 32:
+        try:
+            _apply_v32(conn)
+            conn.execute("PRAGMA user_version = 32")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
+
+
+# Columns cut in v32. Named here rather than inline so the list is auditable and a
+# re-run is a no-op: DROP COLUMN raises if the column is already gone.
+_V32_DROPPED_COLUMNS = (
+    # The archetype-matchup verdict. Player-adjusted, family matchup is worth ~3
+    # points of win rate against 22 for card levels, and the one apparent standout
+    # (siege) turned out to be who plays siege. Nothing member-facing consumes it.
+    "expected_advantage",
+    "performance",
+    # The retired per-battle LLM prose layer (Feature 3). Its job, its feature flag
+    # and its grading script are already gone; only the columns were left behind,
+    # holding 97 rows of commentary out of 13,348 and a tool note describing an
+    # allowlist that no longer exists. coaching_note and verdict never held a single
+    # row in their entire lifetime.
+    "commentary",
+    "coaching_note",
+    "verdict",
+    "loss_nature",
+    "notable",
+    "confidence",
+    "model",
+    "prompt_version",
+    "input_hash",
+    # Write-only structural tags: computed on every battle, stored, selected by the
+    # coaching query, and deliberately never reported, because both are measurably
+    # flat against outcome. Cutting the column also cuts the per-battle computation.
+    "air_matchup",
+    "wincon_pressure",
+    "spell_bait_exposed",
+)
+
+
+def _apply_v32(conn: sqlite3.Connection) -> None:
+    """Delete Battle Intelligence v1's vestigial surface.
+
+    Two things accumulated here. The archetype matchup machinery, which measured out
+    at ~3 points once adjusted for who plays which archetype and is no longer read by
+    anything a member sees. And the remains of the per-battle prose feature, which was
+    removed without taking its schema with it.
+
+    Deferring either is what turns a known dead column into an hour of archaeology in
+    six months, so both go now rather than being carried as "harmless".
+    """
+    conn.execute("DROP TABLE IF EXISTS matchup_expectation")
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(battle_enrichment)")}
+    for column in _V32_DROPPED_COLUMNS:
+        if column in existing:
+            conn.execute(f"ALTER TABLE battle_enrichment DROP COLUMN {column}")
 
 
 def assert_current_schema(conn: sqlite3.Connection) -> None:
@@ -2105,7 +2161,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "27e288e720a1abf56692de8d48ec7e27c1e00704f0975d6c20fd0c6d97560b6d"
+CURRENT_SCHEMA_FINGERPRINT = "19cc48d733fa5066ffeea7a4065e02e652ab20f81b1b5cb3557ab00e153dca1a"
 
 
 __all__ = [

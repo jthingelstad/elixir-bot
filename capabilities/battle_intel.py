@@ -6,9 +6,13 @@ nemesis cards, a battle's closeness/margin read, and a member rollup. Everything
 is form-aware — grouped on ``(card_id, evolution_level)`` so "Evo Knight" and
 "Knight" are different cards.
 
-Statistical floors live HERE, not in the prompt: a card/matchup win-rate claim
-needs n>=30, else the view returns ``insufficient_sample`` with the real n and no
-weak number. Features 2-3 extend the same tool with deck/matchup/prose views.
+Statistical floors live HERE, not in the prompt: a card win-rate claim needs n>=30,
+else the view returns ``insufficient_sample`` with the real n and no weak number.
+
+Two things v1 shipped are gone. The family matchup matrix measured ~3 points of
+advantage once adjusted for who plays which archetype (card levels span 22), and the
+per-battle LLM prose layer was retired without taking its schema with it -- both
+were removed in schema v32 rather than carried as harmless.
 """
 
 from __future__ import annotations
@@ -288,8 +292,7 @@ def _battle_view(conn, tag, limit) -> dict[str, Any]:
     rows = conn.execute(
         "SELECT e.battle_time, b.outcome, b.opponent_name, b.game_mode_name, "
         "e.hp_margin, e.closeness, e.discipline_delta, e.level_gap, "
-        "e.our_deck_hash, e.their_deck_hash, e.expected_advantage, e.performance, "
-        "e.commentary, e.loss_nature, e.notable, e.confidence, "
+        "e.our_deck_hash, e.their_deck_hash, "
         "op.archetype our_archetype, tp.archetype their_archetype, b.is_ranked "
         "FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
         "LEFT JOIN deck_profile op ON op.deck_hash = e.our_deck_hash "
@@ -298,7 +301,6 @@ def _battle_view(conn, tag, limit) -> dict[str, Any]:
         (tag, max(1, min(int(limit or 20), 100))),
     ).fetchall()
     closeness_word = {0: "stomp", 1: "clear", 2: "close", 3: "squeaker"}
-    perf_word = {1: "upset win", -1: "underperformed", 0: "as expected"}
     battles = []
     for r in rows:
         battles.append(
@@ -316,13 +318,6 @@ def _battle_view(conn, tag, limit) -> dict[str, Any]:
                 "discipline_delta": r["discipline_delta"],
                 "level_gap": None if r["is_ranked"] else r["level_gap"],
                 "level_note": "levels_normalized" if r["is_ranked"] else None,
-                "expected_advantage": r["expected_advantage"],
-                "vs_expectation": perf_word.get(r["performance"])
-                if r["performance"] is not None
-                else None,
-                "commentary": r["commentary"],
-                "loss_nature": r["loss_nature"],
-                "notable": bool(r["notable"]) if r["notable"] is not None else None,
                 "our_deck_hash": r["our_deck_hash"],
                 "their_deck_hash": r["their_deck_hash"],
             }
@@ -332,9 +327,8 @@ def _battle_view(conn, tag, limit) -> dict[str, Any]:
         available=bool(battles),
         subject=tag,
         battles=battles,
-        note="commentary is present only for allowlisted members (gated); NULL means "
-        "prose was not generated for this member, not that the battle was unremarkable. "
-        "closeness/hp_margin need both sides' tower data.",
+        note="closeness/hp_margin need both sides' tower data. Archetypes are here to "
+        "name the decks ('their LavaLoon'), never to claim one archetype beats another.",
     )
 
 
@@ -430,44 +424,6 @@ def _member_summary_view(conn, tag, days=None) -> dict[str, Any]:
     )
 
 
-_FAMILIES = {"beatdown", "control", "cycle", "bait", "bridge spam", "siege"}
-
-
-def _matchup_view(conn, our_family, their_family) -> dict[str, Any]:
-    """Measured family matchup advantages (-2..+2 from clan win rates, n-gated)."""
-    where, params = [], []
-    for col, val in (("our_family", our_family), ("their_family", their_family)):
-        if val:
-            if val not in _FAMILIES:
-                return _envelope("matchup", available=False, error="unknown_family", value=val)
-            where.append(f"{col} = ?")
-            params.append(val)
-    sql = (
-        "SELECT our_family, their_family, advantage, measured_win_rate, n FROM matchup_expectation"
-    )
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY advantage DESC, n DESC"
-    cells = [
-        {
-            "our_family": r["our_family"],
-            "their_family": r["their_family"],
-            "advantage": r["advantage"],
-            "measured_win_rate": r["measured_win_rate"],
-            "n": r["n"],
-            "low_confidence": r["n"] < _N_FLOOR,
-        }
-        for r in conn.execute(sql, tuple(params)).fetchall()
-    ]
-    return _envelope(
-        "matchup",
-        available=bool(cells),
-        cells=cells,
-        note="advantage: +2 strongly favored .. -2 strongly against, from MEASURED "
-        "clan outcomes (member perspective). low_confidence flags n<30.",
-    )
-
-
 def _deck_view(conn, tag) -> dict[str, Any]:
     """A member's observed decks: rules archetype/family, avg elixir, record."""
     if not tag:
@@ -539,8 +495,6 @@ def get_battle_intelligence(
     view: str = "battle",
     member_tag: Optional[str] = None,
     card: Optional[str] = None,
-    our_family: Optional[str] = None,
-    their_family: Optional[str] = None,
     scope: str = "all",
     limit: int = 20,
     days: Optional[int] = None,
@@ -549,14 +503,18 @@ def get_battle_intelligence(
 ) -> dict[str, Any]:
     """Computed battle intelligence. Views: ``card`` (needs ``card``, optional
     ``member_tag`` else clan-wide), ``nemesis`` (optional ``member_tag``),
-    ``battle``/``member_summary``/``deck`` (need ``member_tag``), ``matchup``
-    (optional ``our_family``/``their_family`` else the full matrix). Read-only."""
+    ``battle``/``member_summary``/``deck``/``coaching``/``newcomer`` (need
+    ``member_tag``). Read-only.
+
+    The ``matchup`` view is gone. It reported a family-vs-family advantage measured
+    at ~3 points once adjusted for who plays which archetype, against 22 for card
+    levels — a confident number that said almost nothing.
+    """
     if view not in {
         "card",
         "nemesis",
         "battle",
         "member_summary",
-        "matchup",
         "deck",
         "coaching",
         "newcomer",
@@ -574,8 +532,6 @@ def get_battle_intelligence(
             return _nemesis_view(conn, tag, scope, days)
         if view == "battle":
             return _battle_view(conn, tag, limit)
-        if view == "matchup":
-            return _matchup_view(conn, our_family, their_family)
         if view == "deck":
             return _deck_view(conn, tag)
         if view == "coaching":
@@ -675,9 +631,9 @@ def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
     # "last 7 days" and "last 30 days" return the identical most-recent 20 battles.
     n = 500 if days else max(5, min(int(limit or 40), 200))
     rows = conn.execute(
-        "SELECT e.battle_time, b.outcome, e.closeness, e.performance, e.level_gap, "
-        "e.level_validity, e.air_matchup, e.wincon_pressure, e.spell_bait_exposed, "
-        "e.decisive_factor, e.our_deck_hash, op.archetype our_archetype, op.family our_family, "
+        "SELECT e.battle_time, b.outcome, e.closeness, e.level_gap, "
+        "e.level_validity, e.decisive_factor, e.our_deck_hash, "
+        "op.archetype our_archetype, op.family our_family, "
         "op.air_answer_count, op.tank_answer_count, op.splash_answer_count, "
         "tp.archetype their_archetype, tp.family their_family "
         "FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
@@ -760,7 +716,6 @@ def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
         primary_deck_shape=deck_shape,
         lost_to_archetypes=dict(sorted(lost_to.items(), key=lambda kv: -kv[1])[:5]),
         matchup_record=graded,
-        spell_bait_exposed_battles=sum(1 for r in rows if r["spell_bait_exposed"]),
         level_normalized_battles=sum(1 for r in rows if r["level_validity"] == "normalized"),
         note="EXPLAIN THE WHY, not just the record. matchup_record is THIS MEMBER'S own "
         "result against each archetype — never evidence that an archetype is strong or "

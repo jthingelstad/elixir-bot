@@ -32,37 +32,6 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _advantage_from_win_rate(win_rate: float) -> int:
-    """Map a SYMMETRIC matchup win rate to a -2..+2 advantage band (0.5 = even;
-    ~7 points per band).
-
-    0.5 is the correct anchor only for a symmetrized rate (see _symmetrize). Fed a
-    raw clan win rate it is wrong by however much the clan outperforms the field,
-    which was 3.5 points and enough to hand every mirror matchup a free +1.
-    """
-    return max(-2, min(2, round((win_rate - 0.5) / 0.07)))
-
-
-def _symmetrize(forward: float, reverse: float) -> float:
-    """A matchup rate with the clan's own skill edge cancelled out.
-
-    ``forward`` is our-A vs their-B; ``reverse`` is our-B vs their-A. Both are
-    measured from OUR side, so both carry the same clan-strength term with opposite
-    sign relative to the matchup. Averaging the forward rate with the complement of
-    the reverse cancels it and leaves the matchup.
-
-    The test is the mirror: A vs A must come out at exactly 0.500, because a deck
-    family cannot be favoured against itself. Before this, control-vs-control was
-    stored at 58.4% and banded +1 -- the clan is simply better than the opponents it
-    meets, and the matrix was reading that as a property of control. Worse, cycle vs
-    control and control vs cycle were BOTH stored +1, which cannot be true of any
-    pair. That advantage fed expected_advantage -> performance -> decisive_factor,
-    so 781 losses in mirror matchups were flagged as underperformance against an
-    expectation that is 50/50 by construction.
-    """
-    return (forward + (1.0 - reverse)) / 2.0
-
-
 def _parse_deck(deck_json) -> list[dict]:
     """The stored 8-card deck as card dicts, or [] if unparseable / not 8 cards.
     A 1v1 ``deck_json`` is always exactly 8 cards; 16/24 are duel concatenations
@@ -288,111 +257,15 @@ def _profile_new_decks(conn) -> int:
     return written
 
 
-def _rebuild_matchup_matrix(conn) -> int:
-    """Recompute the whole 6x6 family matrix from measured clan outcomes
-    (INSERT OR REPLACE). Weekly calibration is just re-running this. Returns cells."""
-    now = _now()
-    rows = conn.execute(
-        """
-        SELECT op.family our_f, tp.family their_f,
-               SUM(b.outcome = 'W') w, SUM(b.outcome = 'L') l, COUNT(*) n
-          FROM battle_enrichment e
-          JOIN battle_events b   ON b.dedup_key = e.battle_dedup_key
-          JOIN deck_profile op   ON op.deck_hash = e.our_deck_hash
-          JOIN deck_profile tp   ON tp.deck_hash = e.their_deck_hash
-         WHERE op.family <> 'unclassified' AND tp.family <> 'unclassified'
-         GROUP BY op.family, tp.family
-        """
-    ).fetchall()
-    # Raw rates first, so each cell can be paired with its opposite direction.
-    raw = {}
-    total_w = total_n = 0
-    for our_f, their_f, w, losses, n in rows:
-        decided = w + losses
-        if decided:
-            raw[(our_f, their_f)] = (w / decided, n)
-            total_w += w
-            total_n += decided
-    # How much the clan beats the field overall. This is the term symmetrization
-    # cancels, and the fallback below subtracts directly when it cannot.
-    baseline = (total_w / total_n) if total_n else 0.5
-
-    cells = 0
-    for (our_f, their_f), (wr, n) in raw.items():
-        reverse = raw.get((their_f, our_f))
-        if reverse is None:
-            # Only one direction observed, so there is no opposite cell to cancel
-            # against. Subtract the clan's overall edge instead — a first-order
-            # version of the same correction. Not as good as symmetrizing (it uses
-            # the clan-wide edge rather than this pairing's), but far better than
-            # banding a rate we know carries the edge whole.
-            symmetric = min(1.0, max(0.0, wr - (baseline - 0.5)))
-            basis = f"baseline-adjusted (one direction); raw {wr:.3f} over {n}, base {baseline:.3f}"
-        else:
-            symmetric = _symmetrize(wr, reverse[0])
-            basis = (
-                f"symmetrized; raw {wr:.3f} over {n}, reverse {reverse[0]:.3f} over {reverse[1]}"
-            )
-        conn.execute(
-            "INSERT OR REPLACE INTO matchup_expectation "
-            "(our_family, their_family, advantage, measured_win_rate, n, basis, computed_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                our_f,
-                their_f,
-                _advantage_from_win_rate(symmetric),
-                round(symmetric, 3),
-                n,
-                basis,
-                now,
-            ),
-        )
-        cells += 1
-    return cells
-
-
-def _fill_expected_advantage(conn, *, restate: bool = True) -> int:
-    """Snapshot each battle's matchup-cell advantage into
-    battle_enrichment.expected_advantage and set performance (the upset detector:
-    +1 = won when disadvantaged, -1 = lost when advantaged, else 0). Only battles
-    whose both decks are profiled and whose cell exists. Returns rows updated.
-
-    ``restate`` re-derives every battle rather than only the unset ones, and is the
-    default because the matrix is recomputed on the same pass: a battle's stored
-    expectation is a snapshot of a cell that has just moved, and leaving old
-    snapshots in place is how a corrected matrix fails to correct anything. It
-    matters here -- the symmetrization moved cells by up to 8.8 points, and every
-    mirror matchup from +/-1 to 0.
-    """
-    cur = conn.execute(
-        """
-        UPDATE battle_enrichment AS e
-           SET expected_advantage = m.advantage,
-               performance = CASE
-                   WHEN b.outcome = 'W' AND m.advantage < 0 THEN 1
-                   WHEN b.outcome = 'L' AND m.advantage > 0 THEN -1
-                   ELSE 0 END
-          FROM battle_events b, deck_profile op, deck_profile tp, matchup_expectation m
-         WHERE b.dedup_key = e.battle_dedup_key
-           AND op.deck_hash = e.our_deck_hash
-           AND tp.deck_hash = e.their_deck_hash
-           AND m.our_family = op.family
-           AND m.their_family = tp.family
-        """
-        + ("" if restate else " AND e.expected_advantage IS NULL")
-    )
-    return cur.rowcount
-
-
 @managed_connection
 def rebuild_deck_intel(*, conn: Optional[sqlite3.Connection] = None) -> dict:
-    """Feature 2 Stage-B (all $0): profile new decks, recompute the measured
-    matchup matrix, and fill expected_advantage/performance. Returns work-set
-    counts for telemetry."""
+    """Feature 2 Stage-B (all $0): profile any deck seen in battle but not yet
+    classified. The matchup matrix that used to be rebuilt here is gone -- family
+    matchup measured ~3 points once adjusted for who plays which archetype, against
+    22 for card levels, so it was a confident number in front of members that said
+    almost nothing."""
     profiled = _profile_new_decks(conn)
-    cells = _rebuild_matchup_matrix(conn)
-    filled = _fill_expected_advantage(conn)
-    return {"profiled": profiled, "matchup_cells": cells, "expected_filled": filled}
+    return {"profiled": profiled}
 
 
 # ── v2 Layers 2-3: deck facts + per-battle structural tags (computed, $0) ──────
@@ -495,13 +368,7 @@ def _fill_battle_tags(conn, limit: Optional[int] = 5000, force: bool = False) ->
     ``force`` re-tags every battle (see ``rebuild_interpreted``); ``limit=None`` lifts
     the batch cap so a forced sweep completes in one pass.
     """
-    from engine.card_roles import (
-        air_matchup,
-        decisive_factor,
-        level_validity,
-        spell_bait_exposed,
-        wincon_pressure,
-    )
+    from engine.card_roles import decisive_factor, level_validity
 
     facts = _card_facts_map(conn)
     if not facts:
@@ -518,7 +385,7 @@ def _fill_battle_tags(conn, limit: Optional[int] = 5000, force: bool = False) ->
     )
     sql = (
         "SELECT e.battle_dedup_key, e.our_deck_hash, e.their_deck_hash, e.level_gap, "
-        "e.closeness, e.discipline_delta, e.performance, b.game_mode_name, b.is_ranked "
+        "e.closeness, e.discipline_delta, b.game_mode_name, b.is_ranked "
         "FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
         f"WHERE {where}"
     )
@@ -527,36 +394,19 @@ def _fill_battle_tags(conn, limit: Optional[int] = 5000, force: bool = False) ->
         sql += " LIMIT ?"
         params = (limit,)
     rows = conn.execute(sql, params).fetchall()
-    cache: dict = {}
     updated = 0
     for r in rows:
-
-        def summary(h):
-            if h not in cache:
-                cache[h] = _deck_summary(conn, h, facts) if h else {}
-            return cache[h]
-
-        ours, theirs = summary(r["our_deck_hash"]), summary(r["their_deck_hash"])
         validity = level_validity(r["game_mode_name"], r["is_ranked"])
-        air = air_matchup(ours, theirs)
-        wincon = wincon_pressure(ours, theirs)
         conn.execute(
-            "UPDATE battle_enrichment SET air_matchup=?, wincon_pressure=?, "
-            "spell_bait_exposed=?, level_validity=?, decisive_factor=? "
+            "UPDATE battle_enrichment SET level_validity=?, decisive_factor=? "
             "WHERE battle_dedup_key=?",
             (
-                air,
-                wincon,
-                spell_bait_exposed(ours, theirs),
                 validity,
                 decisive_factor(
                     level_gap=r["level_gap"],
                     level_ok=(validity == "real"),
                     closeness=r["closeness"],
                     discipline_delta=r["discipline_delta"],
-                    performance=r["performance"],
-                    air=air,
-                    wincon=wincon,
                 ),
                 r["battle_dedup_key"],
             ),

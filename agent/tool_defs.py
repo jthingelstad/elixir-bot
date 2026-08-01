@@ -149,13 +149,10 @@ TOOLS = [
             "with (named archetype), Evolutions unlocked, collection depth, peak trophies. "
             "Use it to write a welcome that shows you actually looked.\n"
             "- coaching: THE view for 'how have I been playing?' / 'what should I work on?' — "
-            "an aggregated structural read of a member's recent battles: record, upsets, what "
-            "decided their games (decisive_factors), whether their deck has an air hole, which "
-            "archetypes they keep losing to, and their deck's answer counts. Requires "
-            "'member_tag'. Ground coaching advice in THIS, not in single battles.\n"
-            "- matchup: measured advantage (-2..+2) for a deck FAMILY vs family "
-            "(beatdown/control/cycle/bait/bridge spam/siege), from clan outcomes. Pass "
-            "our_family and/or their_family, or omit for the whole 6x6 matrix.\n\n"
+            "an aggregated read of a member's recent battles: record, what decided their games "
+            "(decisive_factors), their own record against each opposing archetype, their deck's "
+            "role coverage, and the structural mechanism behind any matchup they lose. Requires "
+            "'member_tag'. Ground coaching advice in THIS, not in single battles.\n\n"
             "Time: pass 'days' for a window ('this week' = 7); every view reports the "
             "window it used. To answer 'am I improving?', call twice with different windows "
             "and compare. member_summary also returns clan_standing (percentile vs active "
@@ -178,7 +175,6 @@ TOOLS = [
                         "battle",
                         "member_summary",
                         "deck",
-                        "matchup",
                         "coaching",
                         "newcomer",
                     ],
@@ -192,16 +188,6 @@ TOOLS = [
                 "card": {
                     "type": "string",
                     "description": "Card name for the 'card' view (e.g. 'Bats', 'Royal Hogs').",
-                },
-                "our_family": {
-                    "type": "string",
-                    "enum": ["beatdown", "control", "cycle", "bait", "bridge spam", "siege"],
-                    "description": "Deck family for the 'matchup' view (attacker perspective).",
-                },
-                "their_family": {
-                    "type": "string",
-                    "enum": ["beatdown", "control", "cycle", "bait", "bridge spam", "siege"],
-                    "description": "Opponent deck family for the 'matchup' view.",
                 },
                 "scope": {
                     "type": "string",

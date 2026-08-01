@@ -320,63 +320,18 @@ def level_validity(game_mode_name: Optional[str], is_ranked) -> str:
     return "normalized" if any(m in mode for m in _LEVEL_NORMALIZED_MODES) else "real"
 
 
-def air_matchup(our: dict, their: dict) -> Optional[str]:
-    """Did we bring answers to what they fly? ``stressed`` is the read that matters:
-    they had real air pressure and we had ~nothing to shoot it down."""
-    if not our or not their:
-        return None
-    their_air = their.get("air_threat_count", 0)
-    our_answers = our.get("air_answer_count", 0)
-    if their_air == 0:
-        return "untested"
-    # Thresholds are calibrated to the observed spread (0-6, median 4): "stressed"
-    # is the bottom tail, "favored" the top, so each tag means something.
-    if our_answers <= 1 or (our_answers == 2 and their_air >= 3):
-        return "stressed"
-    return "favored" if our_answers >= 5 else "even"
-
-
-def wincon_pressure(our: dict, their: dict) -> Optional[str]:
-    """Could their defense actually handle our win condition?"""
-    if our is None or their is None:
-        return None
-    if not our.get("win_condition_count"):
-        return "no_wincon"  # checked before `their`: a deck with no win-con is the story
-    if not their:
-        return None
-    defense = their.get("tank_answer_count", 0) + their.get("splash_answer_count", 0)
-    # Observed spread is 2-8 with median 5, so "countered" is the top tail (>=7) and
-    # "clear" the bottom (<=3). An earlier >=4 cut tagged 92% of decks "countered".
-    if defense <= 3:
-        return "clear"
-    return "countered" if defense >= 7 else "contested"
-
-
-def spell_bait_exposed(our: dict, their: dict) -> Optional[int]:
-    """Did we bring a pile of spell-fragile units into a deck holding a small spell?"""
-    if not our or not their:
-        return None
-    return 1 if our.get("bait_unit_count", 0) >= 3 and their.get("has_small_spell") else 0
-
-
 def decisive_factor(
     *,
     level_gap: Optional[float],
     level_ok: bool,
     closeness: Optional[int],
     discipline_delta: Optional[float],
-    performance: Optional[int],
-    air: Optional[str],
-    wincon: Optional[str],
 ) -> str:
     """The single biggest driver of this battle's result, ranked.
 
     Every rank below is a factor MEASURED to separate outcome across 12,687 clan
-    battles (53.6% baseline). ``air``, ``wincon`` and ``performance`` are accepted
-    for signature compatibility but deliberately unused: at complete card-facts
-    coverage the first two are flat, and ``performance`` derives from the archetype
-    matchup matrix, which is worth ~3 points once adjusted for who plays which
-    archetype. All three describe a deck without diagnosing a battle.
+    battles (53.6% baseline). Nothing else is accepted: air coverage, opponent
+    defense and archetype matchup were all tried, all measured, and all cut.
 
         card_levels   level_gap -3 -> 48.7%, +2 -> 61.4%, +4 -> 71.1% (monotonic)
         elixir_mgmt   |delta| >= 3.5 splits 41.1% / 65.1%
