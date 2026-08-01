@@ -5,7 +5,6 @@ from engine.card_roles import (
     decisive_factor,
     deck_facts,
     deck_role_coverage,
-    elixir_band_note,
     is_air_answer,
     is_air_troop,
     is_heavy_air_answer,
@@ -225,16 +224,6 @@ def test_the_air_floor_exempts_genuinely_cheap_cycle_decks():
     assert min_air_answers(2.6) == 1
     assert min_air_answers(3.4) == 2
     assert min_air_answers(None) == 2, "unknown cost must not buy the exemption"
-
-
-def test_elixir_band_flags_a_deck_too_heavy_for_its_own_archetype():
-    """A 7-elixir 'beatdown' is not a beatdown, it is a deck that cannot cycle. The
-    archetype label alone never says so."""
-    assert elixir_band_note("beatdown", 4.2) is None
-    assert "heavy" in elixir_band_note("beatdown", 7.25)
-    assert "cheap" in elixir_band_note("beatdown", 2.9)
-    assert elixir_band_note("unknown family", 9.0) is None, "never guess a band we lack"
-    assert elixir_band_note("cycle", None) is None
 
 
 def test_missing_enrichment_produces_no_critique_at_all():

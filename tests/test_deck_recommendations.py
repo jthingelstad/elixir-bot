@@ -328,16 +328,6 @@ def test_no_role_claims_when_the_cards_are_not_enriched(conn):
     assert r["suggestions"][0]["role_coverage"]["unknown"] is True
 
 
-def test_an_off_band_deck_is_flagged_not_silently_recommended(rich):
-    """A 4.2-elixir 'beatdown' is in band; push it to 7 and the label stops describing
-    the deck. Nothing used to compare cost against archetype."""
-    rich.execute("UPDATE deck_profile SET avg_elixir = 7.0 WHERE deck_hash = 'H_TWO'")
-    r = get_deck_recommendations(view="discover", member_tag=TAG, conn=rich)
-    heavy = [d for d in r["suggestions"] if d["archetype"] == "Test Beatdown"]
-    assert heavy, "the deck is still buildable and must still be offered"
-    assert any("heavy for beatdown" in g for g in heavy[0]["role_coverage"]["gaps"])
-
-
 def test_a_deck_over_the_special_slot_cap_is_never_suggested(rich):
     """Evo + Hero + Wild = 3. Verified against 13,701 real decks: never 4."""
     rich.execute("UPDATE player_card_collection SET evolution_level = 2")

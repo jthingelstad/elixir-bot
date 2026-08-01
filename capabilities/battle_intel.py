@@ -606,13 +606,23 @@ def _deck_coverage(conn, deck_hash) -> Optional[dict]:
 
 
 def _graded_matchups(conn, rows, deck_shape) -> list[dict]:
-    """Per-opposing-family record, with what that matchup is worth and why.
+    """This member's own record against each opposing family, and why a bad one is bad.
 
-    The grade is the member's own record against the family compared to the
-    symmetrized matchup expectation — not to 50%, because some matchups are not
-    supposed to be 50%. `structural_notes` explains the mechanism, and is only
-    ever attached to a family the member is actually losing to: a structural note
-    next to a winning record is a solution to a problem nobody has.
+    Deliberately NOT graded against an archetype expectation. Measured with a
+    player-adjustment (each player's rate in a matchup minus their own baseline),
+    archetype matchup effects average 3.2 points across 20 cells and top out near 6
+    — against 22 points for card levels and a 34-point spread in player skill. The
+    apparent standouts were selection: siege read 40% into beatdown and then failed
+    to clear a four-player floor at all, because that number was who plays siege.
+    Supercell balances cards, so a durable archetype edge is not a thing that gets
+    to exist.
+
+    What survives is personal and much larger: one member is 25-44 into bait over
+    69 games, ~15 points below his own baseline. That is a fact about him and his
+    deck, not a claim that bait is strong, and it is the only kind of matchup claim
+    made here. `structural_notes` explains the mechanism behind a losing record and
+    is attached only where the member is actually losing — a structural note next
+    to a winning record is a solution to a problem nobody has.
     """
     from engine.card_roles import matchup_notes
 
@@ -630,12 +640,6 @@ def _graded_matchups(conn, rows, deck_shape) -> list[dict]:
         if r["our_family"]:
             t["ours"][r["our_family"]] = t["ours"].get(r["our_family"], 0) + 1
 
-    cells = {
-        (r["our_family"], r["their_family"]): r["measured_win_rate"]
-        for r in conn.execute(
-            "SELECT our_family, their_family, measured_win_rate FROM matchup_expectation"
-        )
-    }
     primary_family = (deck_shape or {}).get("family")
     coverage = (deck_shape or {}).get("role_coverage")
 
@@ -643,27 +647,13 @@ def _graded_matchups(conn, rows, deck_shape) -> list[dict]:
     for fam, t in sorted(tallies.items(), key=lambda kv: -(kv[1]["wins"] + kv[1]["losses"])):
         n = t["wins"] + t["losses"]
         actual = t["wins"] / n
-        # Weighted by how often each of their own decks was the one in the matchup.
-        weighted = [
-            (cells[(ours, fam)], count) for ours, count in t["ours"].items() if (ours, fam) in cells
-        ]
-        expected = (
-            round(sum(v * c for v, c in weighted) / sum(c for _, c in weighted), 3)
-            if weighted
-            else None
-        )
         entry = {
             "their_family": fam,
             "wins": t["wins"],
             "losses": t["losses"],
             "win_rate": round(actual, 3),
-            "expected_win_rate": expected,
             "enough_games": n >= _MATCHUP_FLOOR,
         }
-        # "Below expectation" only means something once the sample can carry it and
-        # the gap is bigger than the noise a dozen games produce.
-        if expected is not None and n >= _MATCHUP_FLOOR:
-            entry["vs_expected"] = round(actual - expected, 3)
         # Structural notes describe the PRIMARY deck, so only attach them where that
         # deck is the one that actually played the matchup. Otherwise the note
         # explains a list the member was not holding when they lost those games.
@@ -760,8 +750,6 @@ def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
         sample_truncated=in_window > len(rows),
         record={"wins": wins, "losses": losses},
         win_rate=_win_rate(wins, losses),
-        upsets=sum(1 for r in rows if r["performance"] == 1),
-        underperformances=sum(1 for r in rows if r["performance"] == -1),
         decisive_factors=tally("decisive_factor"),
         # air_matchup and wincon_pressure are deliberately NOT reported here. Measured
         # across 12,687 clan battles they are flat against outcome (opponent defense
@@ -774,18 +762,22 @@ def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
         matchup_record=graded,
         spell_bait_exposed_battles=sum(1 for r in rows if r["spell_bait_exposed"]),
         level_normalized_battles=sum(1 for r in rows if r["level_validity"] == "normalized"),
-        note="EXPLAIN THE WHY, not just the record. matchup_record is the evidence — a "
-        "member's own result against each archetype next to what that matchup is worth "
-        "(expected_win_rate; 0.500 is even, and it is symmetrized so it is a matchup "
-        "read and not a restatement of how strong the clan is). structural_notes is the "
-        "MECHANISM behind a losing matchup, drawn from their own deck's role coverage. "
-        "Pair them: the record is what happened, the note is why that matchup is hard "
-        "for this list. NEVER present a structural note as the cause of a single "
-        "battle — deck composition explains about seven points of win rate and the rest "
-        "is how people play, and air/tank/splash counts are measurably flat against "
-        "outcome here. Say 'this matchup is hard for your deck because...', never 'you "
-        "lost because you had one tank answer'. Where a matchup has no note, the deck is "
-        "not the problem and the honest answer is that they were outplayed or unlucky.\n"
+        note="EXPLAIN THE WHY, not just the record. matchup_record is THIS MEMBER'S own "
+        "result against each archetype — never evidence that an archetype is strong or "
+        "weak in general. Archetype matchup effects are ~3 points once you adjust for who "
+        "plays what, against 22 points for card levels; do not tell anyone a matchup is "
+        "favourable or unfavourable. A member being 15 points below their OWN baseline "
+        "against one archetype is real and worth saying; 'bait beats beatdown' is not. "
+        "structural_notes is the MECHANISM behind a losing record, from their own deck's "
+        "role coverage — a card-interaction fact, not a win-rate claim. NEVER present it "
+        "as the cause of a single battle: deck composition explains about seven points of "
+        "win rate and the rest is how people play, and air/tank/splash counts are "
+        "measurably flat against outcome here. Say 'this matchup is hard for your deck "
+        "because...', never 'you lost because you had one tank answer'. Where a matchup "
+        "has no note, the deck is not the problem and the honest answer is that they were "
+        "outplayed or unlucky.\n"
+        "What actually decides games, in order: card levels, then how the player plays. "
+        "Lead there.\n"
         "Talk like a player: name decks by archetype ('your Hog cycle', 'their LavaLoon'), "
         "not by listing cards, and never quote a rate without the games behind it.\n"
         "Structural aggregate over recent battles. level_gap claims are valid only "
