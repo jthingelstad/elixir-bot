@@ -127,6 +127,18 @@ the external bucket because local member/observed-player tools can answer them.
 Use `--save-corpus` once and `--corpus` on later builds to run the exact same
 versioned question set for a before/after comparison.
 
+### `eval_deck_conversations.py`
+**Deck-conversation guarantees.** Runs fixed war-set, anchored, discovery,
+upgrade, and honesty turns for eligible members. The persisted summary defines
+and scores zero-error/non-empty output, required tool views, win-rate leakage,
+honest refusal evidence, and four-deck/32-distinct-card war-set output.
+
+```bash
+uv run --locked python scripts/eval_deck_conversations.py --members 3 --strict
+```
+
+Use `--strict` in acceptance runs so any failed threshold exits non-zero.
+
 ## Adding a new script
 
 - Put operational utilities (anything that mutates prod state or is called by
