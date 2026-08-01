@@ -640,3 +640,41 @@ def test_every_rarity_tops_out_displayed_at_sixteen(rich):
             assert card["max_level"] == 16, f"{card['name']} reported max {card['max_level']}"
             if card["levels_from_max"] == 0:
                 assert card["level"] == 16, "a maxed card of any rarity shows as 16"
+
+
+def test_no_raw_api_level_can_escape_the_loaders(rich):
+    """The structural guard. The first fix converted at five emission sites, which
+    is the same shape as the bug it fixed — the next field to report a level would
+    have been wrong again. Normalization now lives in _catalog and _collection, so
+    no raw level exists downstream to leak.
+
+    This walks every level-ish number in every view and asserts it is on the
+    display scale, which for an owned card means a max of 16.
+    """
+    from capabilities.deck_intel import _catalog, _collection
+
+    cat = _catalog(rich)
+    own = _collection(rich, TAG)
+    assert all(c["max_level"] == 16 for c in cat.values()), "the catalog is display-scale"
+    assert all(c["api_max_level"] <= 16 for c in cat.values()), "...and keeps the API scale"
+    assert all(lvl <= 16 for lvl in own.values())
+
+    seen = 0
+    for view, kwargs in (
+        ("discover", {"limit": 12}),
+        ("build", {"anchors": ["Legend"]}),
+        ("anchored", {"card": "Legend"}),
+        ("upgrades", {}),
+    ):
+        r = get_deck_recommendations(view=view, member_tag=TAG, conn=rich, **kwargs)
+        if r.get("anchor_max_level") is not None:
+            assert r["anchor_max_level"] == 16
+        for deck in r.get("decks") or r.get("suggestions") or []:
+            for card in deck["cards"]:
+                assert card["max_level"] == 16, f"{view}: {card['name']} max {card['max_level']}"
+                assert card["level"] <= 16
+                seen += 1
+        for row in (r.get("upgrades") or []) + (r.get("unlocks") or []):
+            assert row["max_level"] == 16, f"{view}: {row['card']} max {row['max_level']}"
+            seen += 1
+    assert seen > 0, "the guard must actually have inspected something"
