@@ -37,12 +37,12 @@ import sqlite3
 from typing import Any, Optional
 
 import db as db_facade
+from engine import card_roles
 
 CAPABILITY_ID = "deck_recommendations"
 CONTRACT_VERSION = 1
 
 _WAR_DECKS = 4  # a war set is four decks with no card reused
-_MIN_AIR_ANSWERS = 1  # structural floor: a deck with no air answer loses on structure
 _USAGE_SINCE = "2026-06-01"  # window for "cards you actually field"
 _FAMILIARITY_SLACK = 1.0  # levels_from_max a KNOWN deck may concede and still be picked
 _MIN_USAGE_SHARE = 0.04  # a card must be ~1 slot in 1 of 3 decks before an upgrade is advice
@@ -111,6 +111,41 @@ def _owned_forms(conn, tag: str) -> dict[int, int]:
     return forms
 
 
+def _card_facts(conn, cat: dict) -> dict[tuple[int, int], dict]:
+    """``{(card_id, form): fact}`` with ``name``/``elixir_cost`` merged in.
+
+    177 rows — loaded once per call and read from memory. This is deliberately NOT a
+    schema change: the role counts could be columns on deck_profile, but a migration
+    applies itself to whichever database the first process touches, and the running
+    build then fails every tick until it is restarted. Computing here costs nothing
+    measurable and cannot take production down.
+    """
+    out: dict[tuple[int, int], dict] = {}
+    try:
+        rows = conn.execute("SELECT * FROM card_facts").fetchall()
+    except sqlite3.OperationalError:  # hygiene: absent table is a state, not an outage
+        # No enrichment yet. Every other field this capability returns still stands;
+        # role_coverage reports itself incomplete rather than taking the view down.
+        return out
+    for r in rows:
+        fact = dict(r)
+        meta = cat.get(fact["card_id"]) or {}
+        fact["name"] = meta.get("name")
+        fact["elixir_cost"] = meta.get("elixir_cost")
+        out[(fact["card_id"], fact["evolution_level"] or 0)] = fact
+    return out
+
+
+def _facts_for(deck_cards, facts: dict) -> list[Optional[dict]]:
+    """Facts for a deck's 8 (card_id, form) pairs, falling back to the base form.
+
+    An Evo/Hero form inherits its base card's role — evolution amplifies a role, it
+    does not create a new one — so a missing form row is filled from base rather than
+    dropping the card and silently understating the deck's coverage.
+    """
+    return [facts.get((cid, form)) or facts.get((cid, 0)) for cid, form in deck_cards]
+
+
 def _fielded_by(conn) -> dict[str, int]:
     """Distinct clan members who field each deck. Context, never a quality claim."""
     return {
@@ -135,6 +170,22 @@ def _their_decks(conn, tag: str) -> dict[str, int]:
     }
 
 
+def _played_archetypes(conn, tag: str) -> frozenset:
+    """Archetypes this member has actually fielded — the grain at which a suggestion
+    reads as new to them. Deck-hash novelty is invisible to a player: two lists that
+    differ by one card are the same deck as far as anyone piloting it is concerned."""
+    return frozenset(
+        r["archetype"]
+        for r in conn.execute(
+            "SELECT DISTINCT dp.archetype FROM battle_enrichment e "
+            "JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
+            "JOIN deck_profile dp ON dp.deck_hash = e.our_deck_hash "
+            "WHERE b.player_tag = ? AND e.our_deck_hash IS NOT NULL",
+            (tag,),
+        )
+    )
+
+
 def _candidates(conn, cat, own, forms, *, require_structure=True) -> list[dict]:
     """Every buildable deck: owns all 8 cards, owns each required Evo/Hero form, and
     (optionally) clears the structural floor. ``from_max`` is the rarity-independent
@@ -150,9 +201,19 @@ def _candidates(conn, cat, own, forms, *, require_structure=True) -> list[dict]:
             continue
         if any(f and forms.get(cid, 0) < f for cid, f in pairs):
             continue
+        # The air floor scales with the deck's own cost: guides ask for 2-3 air answers
+        # and exempt very cheap cycle decks, which defend by rotating rather than by
+        # holding. The old flat floor of 1 passed decks whose only air answer was a
+        # single spell. Cost of the tighter floor, measured over the corpus: 1.0%.
         if require_structure and (
-            r["air_answer_count"] < _MIN_AIR_ANSWERS or not r["has_small_spell"]
+            r["air_answer_count"] < card_roles.min_air_answers(r["avg_elixir"])
+            or not r["has_small_spell"]
         ):
+            continue
+        # Slot legality (Evo + Hero + Wild = 3). Every profiled deck was observed in a
+        # real battle so this cannot fire today; it exists so that a deck assembled by
+        # any future code path can never be recommended in an unfieldable shape.
+        if sum(1 for _, f in pairs if f) > card_roles.MAX_SPECIAL_SLOTS:
             continue
         gaps = [cat[cid]["max_level"] - own[cid] for cid, _ in pairs]
         out.append(
@@ -174,13 +235,33 @@ def _candidates(conn, cat, own, forms, *, require_structure=True) -> list[dict]:
     return out
 
 
-def _describe(d: dict, cat: dict, own: dict, fielded: dict, played: set) -> dict:
+def _describe(
+    d: dict,
+    cat: dict,
+    own: dict,
+    fielded: dict,
+    played: set,
+    facts: dict,
+    played_archetypes: frozenset = frozenset(),
+) -> dict:
+    """One deck, with the reason each card is in it.
+
+    The role fields are the point of this function. Every one of them was already
+    being computed and then dropped before it reached the reader, which left the
+    model to narrate deck construction from its own memory — ungrounded, and it
+    taught the player nothing they could reuse.
+    """
+    deck_facts = _facts_for(d["cards"], facts)
+    coverage = card_roles.deck_role_coverage(
+        deck_facts, family=d["family"], avg_elixir=d["avg_elixir"]
+    )
     return {
         "archetype": d["archetype"],
         "family": d["family"],
         "avg_elixir": d["avg_elixir"],
         "levels_from_max": d["levels_from_max"],
         "air_answers": d["air_answers"],
+        "role_coverage": coverage,
         "cards": [
             {
                 "name": cat[cid]["name"],
@@ -188,12 +269,49 @@ def _describe(d: dict, cat: dict, own: dict, fielded: dict, played: set) -> dict
                 "level": own[cid],
                 "max_level": cat[cid]["max_level"],
                 "levels_from_max": cat[cid]["max_level"] - own[cid],
+                "elixir_cost": cat[cid].get("elixir_cost"),
+                "roles": _card_roles(fact),
+                "note": (fact or {}).get("note"),
             }
-            for cid, f in d["cards"]
+            for (cid, f), fact in zip(d["cards"], deck_facts, strict=True)
         ],
         "fielded_by_members": fielded.get(d["deck_hash"], 0),
         "you_play_this": d["deck_hash"] in played,
+        # Exact-hash novelty answers the wrong question. A member was told he had
+        # "not fielded this exact combo yet" about Royal Hogs — an archetype he had
+        # played 21 times that month. Novelty a player recognizes lives at the
+        # archetype level, so report both and let the caller say the true one.
+        "you_play_this_archetype": d["archetype"] in played_archetypes,
     }
+
+
+def _card_roles(fact: Optional[dict]) -> list[str]:
+    """Every formula slot this card fills — plural by design. Valkyrie is a mini-tank
+    AND a splash answer AND an anti-swarm card, and a single label hides two of the
+    three reasons she might be in the list."""
+    if not fact:
+        return []
+    roles = []
+    if fact.get("is_win_condition"):
+        roles.append("win condition")
+    if card_roles.is_air_troop(fact):
+        roles.append("heavy air answer" if card_roles.is_heavy_air_answer(fact) else "air answer")
+    elif card_roles.is_air_answer(fact):
+        roles.append("air answer (spell)")
+    if card_roles.is_tank_answer(fact):
+        roles.append("tank answer")
+    if card_roles.is_splash_answer(fact):
+        roles.append("splash")
+    if card_roles.is_swarm(fact):
+        roles.append("swarm")
+    if card_roles.is_cycle_card(fact, fact.get("elixir_cost")):
+        roles.append("cycle")
+    if fact.get("spell_tier") in ("big", "small", "medium"):
+        roles.append(f"{fact['spell_tier']} spell")
+    base = fact.get("role")
+    if base in ("tank", "mini_tank", "building", "spawner", "support") and base not in roles:
+        roles.append(base.replace("_", "-"))
+    return roles
 
 
 # ── mode A: upgrades ─────────────────────────────────────────────────────────
@@ -316,6 +434,8 @@ def _discover_view(conn, tag, limit) -> dict[str, Any]:
     forms = _owned_forms(conn, tag)
     played = set(_their_decks(conn, tag))
     fielded = _fielded_by(conn)
+    facts = _card_facts(conn, cat)
+    played_arch = _played_archetypes(conn, tag)
     cands = _candidates(conn, cat, own, forms)
 
     # One deck per archetype: a list of 8 near-identical lists is not a set of options.
@@ -325,7 +445,7 @@ def _discover_view(conn, tag, limit) -> dict[str, Any]:
         if d["deck_hash"] in played or d["family"] in seen:
             continue
         seen.add(d["family"])
-        picks.append(_describe(d, cat, own, fielded, played))
+        picks.append(_describe(d, cat, own, fielded, played, facts, played_arch))
         if len(picks) >= max(1, min(int(limit or 6), 12)):
             break
     meta = _meta_overlay(conn, cat, own, forms)
@@ -381,6 +501,101 @@ def _pick_disjoint(cands, count, *, pinned=None, played=frozenset()) -> list[dic
     return picks
 
 
+def _resolve_card(cat, own, name) -> tuple[Optional[int], Optional[dict]]:
+    """``(card_id, None)`` or ``(None, error_fields)``. Exact name first, then substring."""
+    want = str(name or "").strip().lower()
+    cid = next((k for k, v in cat.items() if v["name"].lower() == want), None)
+    if cid is None:
+        cid = next((k for k, v in cat.items() if want and want in v["name"].lower()), None)
+    if cid is None:
+        return None, {"error": "unknown_card", "card": name}
+    if cid not in own:
+        return None, {"error": "card_not_owned", "card": cat[cid]["name"]}
+    return cid, None
+
+
+def _build_view(conn, tag, anchors, count) -> dict[str, Any]:
+    """Exactly the decks the player asked for — one per anchor card, no war constraint.
+
+    This view exists because we had no way to answer "build me 2 decks, one around
+    Bowler and one around Balloon". The request routed to ``war_set``, which returned
+    four decks sharing no cards, and the 32-card disjointness DOWNGRADED both decks the
+    player actually wanted: the best Bowler deck available to that member sat at 0.12
+    levels from max with four air answers, and what he was handed instead was 0.25 from
+    max with three, two of them spells. Cards were removed from his deck to make room
+    for decks he never asked about.
+
+    War is a specific request. Nothing here is disjoint unless the caller asks for a
+    war set, and ``war_set`` remains the view that does.
+    """
+    cat = _catalog(conn)
+    own = _collection(conn, tag)
+    if not own:
+        return _envelope("build", available=False, error="no_collection", member_tag=tag)
+    names = [a for a in (anchors or []) if str(a or "").strip()]
+    resolved: list[int] = []
+    unresolved: list[dict] = []
+    for name in names:
+        cid, err = _resolve_card(cat, own, name)
+        if err is not None or cid is None:
+            unresolved.append(err or {"error": "unknown_card", "card": name})
+        elif cid not in resolved:
+            resolved.append(cid)
+    forms = _owned_forms(conn, tag)
+    played = set(_their_decks(conn, tag))
+    fielded = _fielded_by(conn)
+    facts = _card_facts(conn, cat)
+    played_arch = _played_archetypes(conn, tag)
+    cands = _candidates(conn, cat, own, forms)
+    if not cands:
+        return _envelope(
+            "build", available=False, error="no_buildable_decks", member_tag=tag, decks=[]
+        )
+
+    wanted = max(1, min(int(count or len(resolved) or 1), 6))
+    picks: list[dict] = []
+    used_hashes: set[str] = set()
+    # One deck per anchor, best-first. Anchors are honoured in the order asked.
+    for cid in resolved:
+        best = next(
+            (d for d in cands if cid in d["card_ids"] and d["deck_hash"] not in used_hashes),
+            None,
+        )
+        if best is None:
+            unresolved.append({"error": "no_buildable_deck_with_card", "card": cat[cid]["name"]})
+            continue
+        used_hashes.add(best["deck_hash"])
+        picks.append(
+            _describe(best, cat, own, fielded, played, facts, played_arch)
+            | {"anchor_card": cat[cid]["name"]}
+        )
+    # Only fill past the anchors when MORE decks were asked for than cards named.
+    seen_fams = {p["family"] for p in picks}
+    for d in cands:
+        if len(picks) >= wanted:
+            break
+        if d["deck_hash"] in used_hashes or d["family"] in seen_fams:
+            continue
+        used_hashes.add(d["deck_hash"])
+        seen_fams.add(d["family"])
+        picks.append(_describe(d, cat, own, fielded, played, facts, played_arch))
+    return _envelope(
+        "build",
+        available=True,
+        member_tag=tag,
+        requested_count=wanted,
+        anchors=[cat[c]["name"] for c in resolved],
+        unresolved=unresolved,
+        decks=picks[:wanted],
+        buildable_deck_count=len(cands),
+        note=(
+            "Decks built to the request. These are NOT a war set — they may share cards, "
+            "which is fine everywhere except Clan Wars. Offer war_set only if the player "
+            "asks for war decks."
+        ),
+    )
+
+
 def _war_set_view(conn, tag) -> dict[str, Any]:
     cat = _catalog(conn)
     own = _collection(conn, tag)
@@ -389,6 +604,8 @@ def _war_set_view(conn, tag) -> dict[str, Any]:
     forms = _owned_forms(conn, tag)
     played = set(_their_decks(conn, tag))
     fielded = _fielded_by(conn)
+    facts = _card_facts(conn, cat)
+    played_arch = _played_archetypes(conn, tag)
     cands = _candidates(conn, cat, own, forms)
     picks = _pick_disjoint(cands, _WAR_DECKS, played=frozenset(played))
     if len(picks) < _WAR_DECKS:
@@ -405,7 +622,7 @@ def _war_set_view(conn, tag) -> dict[str, Any]:
         "war_set",
         available=True,
         member_tag=tag,
-        decks=[_describe(d, cat, own, fielded, played) for d in picks],
+        decks=[_describe(d, cat, own, fielded, played, facts, played_arch) for d in picks],
         distinct_cards=len(cards),
         worst_deck_from_max=max(p["levels_from_max"] for p in picks),
         buildable_deck_count=len(cands),
@@ -423,23 +640,19 @@ def _anchored_view(conn, tag, card, limit) -> dict[str, Any]:
         return _envelope("anchored", available=False, error="no_collection", member_tag=tag)
     if isinstance(card, (list, tuple)):
         card = card[0] if card else ""
-    want = str(card or "").strip().lower()
-    cid = next((k for k, v in cat.items() if v["name"].lower() == want), None)
-    if cid is None:
-        cid = next((k for k, v in cat.items() if want and want in v["name"].lower()), None)
-    if cid is None:
-        return _envelope("anchored", available=False, error="unknown_card", card=card)
-    if cid not in own:
+    cid, err = _resolve_card(cat, own, card)
+    if err is not None or cid is None:
         return _envelope(
             "anchored",
             available=False,
-            error="card_not_owned",
-            card=cat[cid]["name"],
             member_tag=tag,
+            **(err or {"error": "unknown_card", "card": card}),
         )
     forms = _owned_forms(conn, tag)
     played = set(_their_decks(conn, tag))
     fielded = _fielded_by(conn)
+    facts = _card_facts(conn, cat)
+    played_arch = _played_archetypes(conn, tag)
     cands = [d for d in _candidates(conn, cat, own, forms) if cid in d["card_ids"]]
     seen: set[str] = set()
     picks: list[dict] = []
@@ -447,7 +660,7 @@ def _anchored_view(conn, tag, card, limit) -> dict[str, Any]:
         if d["family"] in seen and len(seen) >= 3:
             continue
         seen.add(d["family"])
-        picks.append(_describe(d, cat, own, fielded, played))
+        picks.append(_describe(d, cat, own, fielded, played, facts, played_arch))
         if len(picks) >= max(1, min(int(limit or 5), 10)):
             break
     return _envelope(
@@ -468,6 +681,8 @@ def get_deck_recommendations(
     view: str = "discover",
     member_tag: Optional[str] = None,
     card: Optional[str] = None,
+    anchors: Optional[list] = None,
+    count: Optional[int] = None,
     limit: int = 6,
     source: Any = None,
     conn: Optional[sqlite3.Connection] = None,
@@ -475,14 +690,22 @@ def get_deck_recommendations(
     """Deck recommendations bound by what a member owns and can field at level.
 
     Views: ``upgrades`` (improve the deck they play), ``discover`` (new decks worth
-    considering, including ones nobody here plays), ``war_set`` (four decks, 32 distinct
-    cards), ``anchored`` (best deck around ``card``). All need ``member_tag``. Read-only.
+    considering, including ones nobody here plays), ``build`` (exactly N decks, one per
+    card in ``anchors`` — the right view for "build me 2 decks around X and Y"),
+    ``war_set`` (four decks, 32 distinct cards — ONLY when war is asked for),
+    ``anchored`` (best deck around a single ``card``). All need ``member_tag``.
+    Read-only.
     """
-    if view not in {"upgrades", "discover", "war_set", "anchored"}:
+    if view not in {"upgrades", "discover", "war_set", "anchored", "build"}:
         return _envelope(view, available=False, error="unsupported_view")
     if not member_tag:
         return _envelope(view, available=False, error="member_tag_required")
     tag = _tag(member_tag)
+    # Several cards named for one deck-shaped question is a `build`, not an `anchored`.
+    # `anchored` used to take card[0] and silently drop the rest, so "a Bowler deck and
+    # a Balloon deck" quietly became a Bowler deck.
+    if view == "anchored" and isinstance(card, (list, tuple)) and len(card) > 1:
+        view, anchors = "build", list(card)
     own_conn = conn is None
     if conn is None:
         provider = source or db_facade
@@ -493,6 +716,8 @@ def get_deck_recommendations(
             return _upgrades_view(conn, tag)
         if view == "war_set":
             return _war_set_view(conn, tag)
+        if view == "build":
+            return _build_view(conn, tag, anchors or ([card] if card else []), count)
         if view == "anchored":
             return _anchored_view(conn, tag, card, limit)
         return _discover_view(conn, tag, limit)
