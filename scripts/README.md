@@ -117,10 +117,15 @@ rate on tag prompts, and output previews.
 ```bash
 uv run --locked python scripts/eval_all_requests.py --rounds 2 --per-bucket 4
 uv run --locked python scripts/eval_all_requests.py --rounds 1 --per-bucket 2 --seed 1   # smoke test
+uv run --locked python scripts/eval_all_requests.py --rounds 1 --per-bucket 2 --save-corpus /tmp/all-requests-corpus.json
+uv run --locked python scripts/eval_all_requests.py --corpus /tmp/all-requests-corpus.json
 ```
 
-Tag fixtures (external clans, external players, our members) are sampled from
-the local DB — no external seed files needed.
+Tag fixtures (external clans, truly external players, our members) are sampled
+from the local DB. Opponent tags already known in `players` are excluded from
+the external bucket because local member/observed-player tools can answer them.
+Use `--save-corpus` once and `--corpus` on later builds to run the exact same
+versioned question set for a before/after comparison.
 
 ## Adding a new script
 

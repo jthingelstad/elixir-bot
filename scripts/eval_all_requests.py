@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -45,6 +46,10 @@ from runtime.helpers._members import (
 )
 
 # ── Real-data tag fixtures ────────────────────────────────────────────────
+
+CORPUS_SCHEMA_VERSION = 1
+BUCKETS = ("regular", "deck", "cr_api")
+_CR_TAG_RE = re.compile(r"#[0-9A-Z]{3,}", re.IGNORECASE)
 
 
 def _connect_db():
@@ -85,8 +90,13 @@ def sample_real_tags() -> dict:
         external_players = [
             (r["opponent_tag"], r["opponent_tag"])
             for r in conn.execute(
-                "SELECT DISTINCT opponent_tag FROM battle_events "
-                "WHERE opponent_tag IS NOT NULL AND opponent_tag != '' "
+                "SELECT DISTINCT be.opponent_tag FROM battle_events be "
+                "WHERE be.opponent_tag IS NOT NULL AND be.opponent_tag != '' "
+                "AND NOT EXISTS ("
+                "SELECT 1 FROM players p "
+                "WHERE UPPER(REPLACE(p.player_tag, '#', '')) = "
+                "UPPER(REPLACE(be.opponent_tag, '#', ''))"
+                ") "
                 "ORDER BY RANDOM() LIMIT 8",
             )
             if r["opponent_tag"]
@@ -186,6 +196,58 @@ def generate_requests(bucket: str, count: int, fixtures: dict, round_idx: int) -
     return [{"bucket": bucket, "question": s} for s in items if isinstance(s, str) and s.strip()]
 
 
+def _validated_corpus_requests(raw_requests) -> list[dict]:
+    if not isinstance(raw_requests, list) or not raw_requests:
+        raise ValueError("corpus requests must be a non-empty list")
+
+    requests = []
+    for index, raw in enumerate(raw_requests, 1):
+        if not isinstance(raw, dict):
+            raise ValueError(f"corpus request {index} must be an object")
+        bucket = raw.get("bucket")
+        question = raw.get("question")
+        round_idx = raw.get("round", 1)
+        if bucket not in BUCKETS:
+            raise ValueError(f"corpus request {index} has invalid bucket: {bucket!r}")
+        if not isinstance(question, str) or not question.strip():
+            raise ValueError(f"corpus request {index} must have a non-empty question")
+        if not isinstance(round_idx, int) or isinstance(round_idx, bool) or round_idx < 1:
+            raise ValueError(f"corpus request {index} must have a positive integer round")
+        requests.append(
+            {
+                "round": round_idx,
+                "bucket": bucket,
+                "question": question.strip(),
+            }
+        )
+    return requests
+
+
+def load_request_corpus(path: str | Path) -> list[dict]:
+    """Load a fixed, versioned request corpus for an identical-question replay."""
+    corpus_path = Path(path)
+    try:
+        payload = json.loads(corpus_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid corpus JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("corpus root must be an object")
+    if payload.get("schema_version") != CORPUS_SCHEMA_VERSION:
+        raise ValueError(f"unsupported corpus schema_version: {payload.get('schema_version')!r}")
+    return _validated_corpus_requests(payload.get("requests"))
+
+
+def save_request_corpus(path: str | Path, requests: list[dict]) -> None:
+    """Persist only replay inputs, never stochastic generation responses/results."""
+    corpus_path = Path(path)
+    corpus_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": CORPUS_SCHEMA_VERSION,
+        "requests": _validated_corpus_requests(requests),
+    }
+    corpus_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
 # ── Tool-call capture ─────────────────────────────────────────────────────
 
 _tool_calls_for_turn: list[tuple[str, dict]] = []
@@ -240,18 +302,25 @@ def _fake_clan_ctx() -> tuple[dict, dict]:
 
 
 def _resolve_target_member(question: str, intent: dict) -> dict | None:
-    """Best-effort member resolution for deck routes: use router-provided target
-    or the first active member matched by name substring."""
+    """Resolve deck targets without turning an explicit unknown tag into a member."""
     target = intent.get("target_member")
     members = db.list_members("active")
-    if target:
-        low = str(target).lower()
-        for m in members:
-            name = (m.get("current_name") or "").lower()
-            if low in name or m["player_tag"] == target:
-                return m
+    explicit_tags = {tag.upper() for tag in _CR_TAG_RE.findall(question)}
+    if explicit_tags:
+        for member in members:
+            if str(member["player_tag"]).upper() in explicit_tags:
+                return member
+        return None
+
     ql = question.lower()
-    if any(w in ql for w in (" my ", "my deck", "my war", "i have", "i'm", "i am")):
+    for member in members:
+        name = (member.get("current_name") or "").strip().lower()
+        if name and name in ql:
+            return member
+
+    if target == "self" or any(
+        w in ql for w in (" my ", "my deck", "my war", "i have", "i'm", "i am")
+    ):
         # use a deterministic "self" stand-in — pick a regular-war member
         from storage.war_analytics import war_player_types_by_tag
 
@@ -264,6 +333,9 @@ def _resolve_target_member(question: str, intent: dict) -> dict | None:
         for m in members:
             if types_by_tag.get(m["player_tag"]) == "regular":
                 return m
+        return members[0] if members else None
+    if target == "other":
+        return None
     return members[0] if members else None
 
 
@@ -451,6 +523,14 @@ def main() -> None:
     parser.add_argument("--rounds", type=int, default=1)
     parser.add_argument("--per-bucket", type=int, default=4, help="Questions per bucket per round")
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument(
+        "--corpus",
+        help="Replay requests from a versioned JSON corpus instead of generating questions",
+    )
+    parser.add_argument(
+        "--save-corpus",
+        help="Write generated replay inputs to this JSON path before running them",
+    )
     parser.add_argument("--out", default="scripts/eval_all_requests_results.json")
     args = parser.parse_args()
 
@@ -462,22 +542,38 @@ def main() -> None:
         random.seed(args.seed)
 
     install_tool_capture()
-    fixtures = sample_real_tags()
     clan, war = _fake_clan_ctx()
 
-    print("Fixtures:")
-    print(f"  our members: {len(fixtures['our_member_tags'])}")
-    print(f"  external clans: {len(fixtures['external_clan_tags'])}")
-    print(f"  external players: {len(fixtures['external_player_tags'])}")
+    if args.corpus:
+        try:
+            requests = load_request_corpus(args.corpus)
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
+        print(f"Replaying {len(requests)} fixed requests from {args.corpus}")
+    else:
+        fixtures = sample_real_tags()
+        print("Fixtures:")
+        print(f"  our members: {len(fixtures['our_member_tags'])}")
+        print(f"  external clans: {len(fixtures['external_clan_tags'])}")
+        print(f"  external players: {len(fixtures['external_player_tags'])}")
+
+        requests = []
+        for round_idx in range(1, args.rounds + 1):
+            print(f"\n── Round {round_idx}/{args.rounds}: generating prompts ──")
+            for bucket in BUCKETS:
+                batch = generate_requests(bucket, args.per_bucket, fixtures, round_idx)
+                print(f"  {bucket:7s} → {len(batch)} prompts")
+                requests.extend({**req, "round": round_idx} for req in batch)
+
+    if args.save_corpus:
+        save_request_corpus(args.save_corpus, requests)
+        print(f"Saved {len(requests)} replay inputs → {args.save_corpus}")
 
     all_rows: list[dict] = []
-    for round_idx in range(1, args.rounds + 1):
-        print(f"\n── Round {round_idx}/{args.rounds}: generating prompts ──")
-        reqs: list[dict] = []
-        for bucket in ("regular", "deck", "cr_api"):
-            batch = generate_requests(bucket, args.per_bucket, fixtures, round_idx)
-            print(f"  {bucket:7s} → {len(batch)} prompts")
-            reqs.extend(batch)
+    round_order = list(dict.fromkeys(req["round"] for req in requests))
+    for round_idx in round_order:
+        reqs = [req for req in requests if req["round"] == round_idx]
+        print(f"\n── Round {round_idx}: running {len(reqs)} requests ──")
 
         for i, req in enumerate(reqs, 1):
             print(f"  [{i}/{len(reqs)}] ({req['bucket']}) running…", flush=True)
@@ -489,7 +585,7 @@ def main() -> None:
         print_round_summary(round_idx, round_rows)
 
     # Final rollup across rounds
-    if args.rounds > 1:
+    if len(round_order) > 1:
         print(f"\n{'#' * 72}\nACROSS-ROUNDS ROLLUP\n{'#' * 72}")
         print_round_summary(0, all_rows)
 
