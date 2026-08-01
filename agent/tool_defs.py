@@ -57,10 +57,16 @@ TOOLS = [
             "IMPORTANT: this tool deliberately reports NO win rates for a deck. Clan deck "
             "win rates are skill-confounded and do not transfer between members, so ranking "
             "is level readiness and structural soundness. 'fielded_by_members' is context "
-            "only — never present it as evidence a deck is good. For 'have they played "
-            "this?' use 'you_play_this_archetype', not 'you_play_this' — the latter is an "
-            "exact 8-card match, so a deck one card different from their daily driver reads "
-            "as brand new."
+            "only — never present it as evidence a deck is good.\n\n"
+            "'you_play_this' true means these are the EXACT eight cards they already run. "
+            "Say so in the first line — 'this is the deck you are already on' — then either "
+            "explain why it is still the best answer to what they asked, or offer something "
+            "different. Softening that to 'close to your existing deck' wastes their time "
+            "and reads as though you did not check. 'you_play_this_archetype' is the looser "
+            "signal: same archetype, different eight cards.\n\n"
+            "Each deck's 'copy_link' loads it into the game — give the raw URL. When "
+            "'link_omits_forms' is non-empty, name those cards and say the link brings them "
+            "in as base cards, because the share format cannot carry Evo or Hero."
         ),
         "input_schema": {
             "type": "object",

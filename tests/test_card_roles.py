@@ -283,3 +283,119 @@ def test_small_spells_are_counted_not_just_flagged():
     assert one["has_small_spell"] == two["has_small_spell"] == 1
     assert one["small_spell_count"] == 1
     assert two["small_spell_count"] == 2
+
+
+# ── regressions from real #ask-elixir answers (2026-08-01) ───────────────────
+
+_ROCKET = {
+    "name": "Rocket",
+    "spell_tier": "big",
+    "targets": "air_and_ground",
+    "splash_hits_air": 1,
+    "dps_tier": "high",
+    "attack_style": "splash_large",
+    "elixir_cost": 6,
+}
+_ZAP = {
+    "name": "Zap",
+    "spell_tier": "small",
+    "targets": "air_and_ground",
+    "splash_hits_air": 1,
+    "dps_tier": "low",
+    "attack_style": "splash_small",
+    "elixir_cost": 2,
+}
+_DART = {
+    "name": "Dart Goblin",
+    "targets": "air_and_ground",
+    "hp_tier": "low",
+    "unit_count": "one",
+    "dps_tier": "high",
+    "attack_style": "single",
+    "spell_tier": "none",
+    "role": "support",
+    "elixir_cost": 3,
+}
+_SKARMY = {
+    "name": "Skeleton Army",
+    "targets": "ground",
+    "hp_tier": "low",
+    "unit_count": "many",
+    "dps_tier": "high",
+    "attack_style": "single",
+    "spell_tier": "none",
+    "role": "swarm",
+    "elixir_cost": 3,
+}
+_GOB_BARREL = {
+    "name": "Goblin Barrel",
+    "targets": "ground",
+    "hp_tier": "low",
+    "unit_count": "few",
+    "dps_tier": "high",
+    "attack_style": "single",
+    "spell_tier": "none",
+    "role": "win_condition",
+    "is_win_condition": 1,
+    "elixir_cost": 3,
+}
+_BALLOON = {
+    "name": "Balloon",
+    "targets": "buildings_only",
+    "hp_tier": "medium",
+    "unit_count": "one",
+    "dps_tier": "high",
+    "attack_style": "single",
+    "spell_tier": "none",
+    "role": "win_condition",
+    "is_win_condition": 1,
+    "elixir_cost": 5,
+}
+
+
+def test_a_big_spell_is_never_an_air_answer():
+    """The live failure: a member was told his deck had "4 air answers (Witch, Dart
+    Goblin, Rocket, Zap)". Nobody defends a Lava Hound with a Rocket.
+
+    The bug was ordering. Every damaging spell is enriched targets='air_and_ground'
+    (a Rocket does hit an air unit), so a leading targets check returned True and the
+    big-spell exclusion under it was unreachable. It inflated the air count on 10% of
+    the deck corpus, and that count also gates the candidate filter."""
+    assert is_air_answer(_ROCKET) is False
+    assert is_air_answer(_ZAP) is True, "a cheap spell that hits air is still an answer"
+    assert is_air_answer(_DART) is True
+    assert is_air_troop(_ROCKET) is False
+
+
+def test_a_card_that_only_hits_buildings_cannot_defend():
+    """Balloon, Battle Ram, Ram Rider and Hog Rider walk straight past whatever you
+    are trying to stop, however hard they hit."""
+    assert is_tank_answer(_BALLOON) is False
+
+
+def test_a_fragile_card_is_only_a_tank_answer_in_numbers():
+    """Skeleton Army melts a Golem precisely because there are fifteen of them; one
+    Dart Goblin does not. The member's reported tank answers were "Dart Goblin and
+    Goblin Barrel", and the deck was called structurally sound with no gaps."""
+    assert is_tank_answer(_SKARMY) is True
+    assert is_tank_answer(_DART) is False
+    assert is_tank_answer(_GOB_BARREL) is False, "a barrel is thrown at a tower, not a Golem"
+
+
+def test_the_deck_with_no_real_tank_answer_now_says_so():
+    """Same eight cards that came back with 'Gaps: none'."""
+    deck = [
+        _ROCKET,
+        _ZAP,
+        _DART,
+        _GOB_BARREL,
+        _SKARMY.copy(),
+        _BALLOON,
+        dict(_ZAP, name="Barbarian Barrel"),
+        dict(_DART, name="Witch"),
+    ]
+    deck[4] = dict(_SKARMY, unit_count="one", name="Valkyrie")  # no swarm reprieve
+    cov = deck_role_coverage(deck, avg_elixir=3.5)
+    assert cov["tank_answers"] == []
+    assert any("melts a tank" in g or "tank answer" in g for g in cov["gaps"])
+    assert "Rocket" not in cov["air_answers"]["spells"]

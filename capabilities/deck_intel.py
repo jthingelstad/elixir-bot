@@ -60,6 +60,7 @@ CONTRACT_VERSION = 1
 
 _WAR_DECKS = 4  # a war set is four decks with no card reused
 _USAGE_SINCE = "2026-06-01"  # window for "cards you actually field"
+_TOWER_TROOP_SINCE = "2026-07-01"  # window for "which tower troop do they run"
 _FAMILIARITY_SLACK = 1.0  # levels_from_max a KNOWN deck may concede and still be picked
 _MIN_USAGE_SHARE = 0.04  # a card must be ~1 slot in 1 of 3 decks before an upgrade is advice
 
@@ -186,6 +187,32 @@ def _their_decks(conn, tag: str) -> dict[str, int]:
     }
 
 
+def _tower_troop(conn, tag: str) -> Optional[int]:
+    """The tower troop this member actually runs — the one they use MOST, recently.
+
+    A deck link carries a tower troop and it is part of the deck: 21 members run
+    something other than Tower Princess, so defaulting everyone would hand a Dagger
+    Duchess player a deck that is not theirs.
+
+    Most-used rather than most-recent, because the single latest battle is a coin
+    flip. Vijay's last game used Tower Princess; over the trailing month he played
+    Tower Princess 647 times, Dagger Duchess 76 and Royal Chef 8. One battle is not
+    a preference.
+    """
+    try:
+        row = conn.execute(
+            "SELECT json_extract(support_cards_json, '$[0].id') tt, COUNT(*) n "
+            "FROM battle_events WHERE player_tag = ? AND support_cards_json IS NOT NULL "
+            "AND battle_time >= ? GROUP BY 1 ORDER BY n DESC LIMIT 1",
+            (tag, _TOWER_TROOP_SINCE),
+        ).fetchone()
+    except sqlite3.OperationalError:  # hygiene: absent history is a state, not an outage
+        # No support-card history. The link still needs a tower troop to open, so the
+        # caller falls back to the default rather than emitting an incomplete deck.
+        return None
+    return int(row["tt"]) if row and row["tt"] else None
+
+
 def _played_archetypes(conn, tag: str) -> frozenset:
     """Archetypes this member has actually fielded — the grain at which a suggestion
     reads as new to them. Deck-hash novelty is invisible to a player: two lists that
@@ -264,6 +291,7 @@ def _describe(
     played: set,
     facts: dict,
     played_archetypes: frozenset = frozenset(),
+    tower_troop: Optional[int] = None,
 ) -> dict:
     """One deck, with the reason each card is in it.
 
@@ -300,7 +328,9 @@ def _describe(
         # carries base cards only — the game's own share format cannot express Evo or
         # Hero form — so `link_omits_forms` tells the caller when the deck it is
         # describing depends on a form the link will silently drop.
-        "copy_link": deck_links.build_deck_link(cid for cid, _ in d["cards"]),
+        "copy_link": deck_links.build_deck_link(
+            (cid for cid, _ in d["cards"]), tower_troop_id=tower_troop
+        ),
         "link_omits_forms": [cat[cid]["name"] for cid, form in d["cards"] if form and cid in cat],
         "fielded_by_members": fielded.get(d["deck_hash"], 0),
         "you_play_this": d["deck_hash"] in played,
@@ -463,6 +493,7 @@ def _discover_view(conn, tag, limit) -> dict[str, Any]:
     fielded = _fielded_by(conn)
     facts = _card_facts(conn, cat)
     played_arch = _played_archetypes(conn, tag)
+    tower = _tower_troop(conn, tag)
     cands = _candidates(conn, cat, own, forms)
 
     # One deck per archetype: a list of 8 near-identical lists is not a set of options.
@@ -472,7 +503,7 @@ def _discover_view(conn, tag, limit) -> dict[str, Any]:
         if d["deck_hash"] in played or d["family"] in seen:
             continue
         seen.add(d["family"])
-        picks.append(_describe(d, cat, own, fielded, played, facts, played_arch))
+        picks.append(_describe(d, cat, own, fielded, played, facts, played_arch, tower))
         if len(picks) >= max(1, min(int(limit or 6), 12)):
             break
     meta = _meta_overlay(conn, cat, own, forms)
@@ -575,6 +606,7 @@ def _build_view(conn, tag, anchors, count) -> dict[str, Any]:
     fielded = _fielded_by(conn)
     facts = _card_facts(conn, cat)
     played_arch = _played_archetypes(conn, tag)
+    tower = _tower_troop(conn, tag)
     cands = _candidates(conn, cat, own, forms)
     if not cands:
         return _envelope(
@@ -595,7 +627,7 @@ def _build_view(conn, tag, anchors, count) -> dict[str, Any]:
             continue
         used_hashes.add(best["deck_hash"])
         picks.append(
-            _describe(best, cat, own, fielded, played, facts, played_arch)
+            _describe(best, cat, own, fielded, played, facts, played_arch, tower)
             | {"anchor_card": cat[cid]["name"]}
         )
     # Only fill past the anchors when MORE decks were asked for than cards named.
@@ -607,7 +639,7 @@ def _build_view(conn, tag, anchors, count) -> dict[str, Any]:
             continue
         used_hashes.add(d["deck_hash"])
         seen_fams.add(d["family"])
-        picks.append(_describe(d, cat, own, fielded, played, facts, played_arch))
+        picks.append(_describe(d, cat, own, fielded, played, facts, played_arch, tower))
     field = _threat_profile(conn, tag)
     return _envelope(
         "build",
@@ -637,6 +669,7 @@ def _war_set_view(conn, tag) -> dict[str, Any]:
     fielded = _fielded_by(conn)
     facts = _card_facts(conn, cat)
     played_arch = _played_archetypes(conn, tag)
+    tower = _tower_troop(conn, tag)
     cands = _candidates(conn, cat, own, forms)
     picks = _pick_disjoint(cands, _WAR_DECKS, played=frozenset(played))
     if len(picks) < _WAR_DECKS:
@@ -653,7 +686,7 @@ def _war_set_view(conn, tag) -> dict[str, Any]:
         "war_set",
         available=True,
         member_tag=tag,
-        decks=[_describe(d, cat, own, fielded, played, facts, played_arch) for d in picks],
+        decks=[_describe(d, cat, own, fielded, played, facts, played_arch, tower) for d in picks],
         distinct_cards=len(cards),
         worst_deck_from_max=max(p["levels_from_max"] for p in picks),
         buildable_deck_count=len(cands),
@@ -684,6 +717,7 @@ def _anchored_view(conn, tag, card, limit) -> dict[str, Any]:
     fielded = _fielded_by(conn)
     facts = _card_facts(conn, cat)
     played_arch = _played_archetypes(conn, tag)
+    tower = _tower_troop(conn, tag)
     cands = [d for d in _candidates(conn, cat, own, forms) if cid in d["card_ids"]]
     seen: set[str] = set()
     picks: list[dict] = []
@@ -691,7 +725,7 @@ def _anchored_view(conn, tag, card, limit) -> dict[str, Any]:
         if d["family"] in seen and len(seen) >= 3:
             continue
         seen.add(d["family"])
-        picks.append(_describe(d, cat, own, fielded, played, facts, played_arch))
+        picks.append(_describe(d, cat, own, fielded, played, facts, played_arch, tower))
         if len(picks) >= max(1, min(int(limit or 5), 10)):
             break
     return _envelope(
