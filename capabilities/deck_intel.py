@@ -54,6 +54,7 @@ from typing import Any, Optional
 
 import db as db_facade
 from engine import card_roles, deck_links
+from engine.normalize import card_display_level, card_display_max_level
 
 CAPABILITY_ID = "deck_recommendations"
 CONTRACT_VERSION = 1
@@ -63,6 +64,24 @@ _USAGE_SINCE = "2026-06-01"  # window for "cards you actually field"
 _TOWER_TROOP_SINCE = "2026-07-01"  # window for "which tower troop do they run"
 _FAMILIARITY_SLACK = 1.0  # levels_from_max a KNOWN deck may concede and still be picked
 _MIN_USAGE_SHARE = 0.04  # a card must be ~1 slot in 1 of 3 decks before an upgrade is advice
+
+
+def _display(level, api_max) -> tuple:
+    """API level/max -> what the member sees in-game.
+
+    Card levels from the API are RARITY-RELATIVE: a maxed epic is level 11 of 11,
+    and the game shows it as 16 of 16. Every rarity tops out displayed at 16, so
+    the shift is `16 - api_max`. storage.cards already does this for
+    get_member_cards; Deck Intelligence never did, and told a member his Wall
+    Breakers were "Lv10, 1 from max" when his screen says 15, and his Ice Golem
+    "Lv9" against an actual 11.
+
+    All the internal arithmetic stays on the API scale on purpose — a gap
+    (max - level) is identical on both scales, and rarity-relative levels are the
+    only cross-rarity-comparable quantity. This converts at the OUTPUT boundary
+    only, which is where the mismatch with the member's screen actually matters.
+    """
+    return card_display_level(level, api_max), card_display_max_level(api_max)
 
 
 def _tag(value) -> str:
@@ -372,8 +391,8 @@ def _describe(
             {
                 "name": cat[cid]["name"],
                 "form": ("Evo" if f == 1 else "Hero") if f else "base",
-                "level": own[cid],
-                "max_level": cat[cid]["max_level"],
+                "level": _display(own[cid], cat[cid]["max_level"])[0],
+                "max_level": _display(own[cid], cat[cid]["max_level"])[1],
                 "levels_from_max": cat[cid]["max_level"] - own[cid],
                 "elixir_cost": cat[cid].get("elixir_cost"),
                 "roles": _card_roles(fact),
@@ -467,8 +486,8 @@ def _upgrades_view(conn, tag) -> dict[str, Any]:
         rows.append(
             {
                 "card": cat[cid]["name"],
-                "level": own[cid],
-                "max_level": cat[cid]["max_level"],
+                "level": _display(own[cid], cat[cid]["max_level"])[0],
+                "max_level": _display(own[cid], cat[cid]["max_level"])[1],
                 "levels_from_max": gap,
                 "usage_share": round(share, 3),
                 "impact": round(share * gap, 3),
@@ -573,8 +592,8 @@ def _unlock_analysis(conn, cat, own, forms, tag) -> dict[str, Any]:
         "unlocks": [
             {
                 "card": cat[cid]["name"],
-                "level": own[cid],
-                "max_level": cat[cid]["max_level"],
+                "level": _display(own[cid], cat[cid]["max_level"])[0],
+                "max_level": _display(own[cid], cat[cid]["max_level"])[1],
                 "levels_to_max": cat[cid]["max_level"] - own[cid],
                 "decks_opened": e["decks_opened"],
                 "archetypes_opened": len(e["archetypes"]),
@@ -929,8 +948,8 @@ def _anchored_view(conn, tag, card, limit, require=None) -> dict[str, Any]:
         available=True,
         member_tag=tag,
         anchor_card=cat[cid]["name"],
-        anchor_level=own[cid],
-        anchor_max_level=cat[cid]["max_level"],
+        anchor_level=_display(own[cid], cat[cid]["max_level"])[0],
+        anchor_max_level=_display(own[cid], cat[cid]["max_level"])[1],
         buildable_decks_with_anchor=len(cands),
         required=required,
         unrecognized_requirements=unknown_props,
@@ -1054,7 +1073,12 @@ def read_deck_link(
                     "rarity": cat[cid].get("rarity"),
                     "roles": _card_roles(fact),
                     "note": (fact or {}).get("note"),
-                    "their_level": own.get(cid),
+                    "their_level": (
+                        _display(own[cid], cat[cid]["max_level"])[0] if cid in own else None
+                    ),
+                    "their_max_level": (
+                        _display(own[cid], cat[cid]["max_level"])[1] if cid in own else None
+                    ),
                     "owned_by_them": cid in own if tag else None,
                     "levels_from_max": (cat[cid]["max_level"] - own[cid]) if cid in own else None,
                 }
