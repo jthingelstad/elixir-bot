@@ -32,6 +32,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _card_max_levels(conn) -> dict:
+    """``{card_id: rarity max level}`` — what turns a rarity-relative API level
+    into one that two decks can be compared on. See engine.battle_metrics.level_gap.
+    """
+    return {r[0]: r[1] for r in conn.execute("SELECT card_id, max_level FROM card_catalog")}
+
+
 def _parse_deck(deck_json) -> list[dict]:
     """The stored 8-card deck as card dicts, or [] if unparseable / not 8 cards.
     A 1v1 ``deck_json`` is always exactly 8 cards; 16/24 are duel concatenations
@@ -95,6 +102,7 @@ def enrich_battles(limit: int = 500, *, conn: Optional[sqlite3.Connection] = Non
     broken one. Runs in one transaction (the decorator commits)."""
     limit = max(1, min(int(limit or 500), 20000))
     rows = conn.execute(_UNENRICHED_SQL, (limit,)).fetchall()
+    max_levels = _card_max_levels(conn)
 
     _CP_SQL = (
         "INSERT OR IGNORE INTO battle_card_plays "
@@ -128,7 +136,12 @@ def enrich_battles(limit: int = 500, *, conn: Optional[sqlite3.Connection] = Non
                 margin,
                 closeness_band(margin),
                 discipline_delta(r["opponent_elixir_leaked"], r["elixir_leaked"]),
-                level_gap(member_cards, their_cards, is_ranked=bool(r["is_ranked"])),
+                level_gap(
+                    member_cards,
+                    their_cards,
+                    is_ranked=bool(r["is_ranked"]),
+                    max_levels=max_levels,
+                ),
                 deck_hash(member_cards),
                 deck_hash(their_cards) if their_cards else None,
             )
@@ -305,6 +318,37 @@ def _deck_card_facts(conn, deck_hash: str, facts: dict) -> list[dict]:
     return out
 
 
+def _restate_level_gaps(conn) -> int:
+    """Recompute battle_enrichment.level_gap for every enriched battle.
+
+    level_gap is a stored snapshot of a formula that changed: it used to average
+    rarity-relative API levels, which measured a deck's rarity mix as much as its
+    strength. Without a restatement the correction reaches only battles enriched
+    from here on, leaving 13,000 rows carrying a number that decisive_factor ranks
+    above every other explanation.
+    """
+    max_levels = _card_max_levels(conn)
+    updated = 0
+    rows = conn.execute(
+        "SELECT e.battle_dedup_key, b.deck_json, b.opponent_deck_json, b.is_ranked "
+        "FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
+        "WHERE b.opponent_deck_json IS NOT NULL"
+    ).fetchall()
+    for r in rows:
+        mine, theirs = _parse_deck(r["deck_json"]), _parse_deck(r["opponent_deck_json"])
+        if len(mine) != 8 or len(theirs) != 8:
+            continue
+        conn.execute(
+            "UPDATE battle_enrichment SET level_gap = ? WHERE battle_dedup_key = ?",
+            (
+                level_gap(mine, theirs, is_ranked=bool(r["is_ranked"]), max_levels=max_levels),
+                r["battle_dedup_key"],
+            ),
+        )
+        updated += 1
+    return updated
+
+
 def _fill_deck_facts(conn, *, restate: bool = False) -> int:
     """Compute each deck's completeness counts from its cards' enriched facts.
 
@@ -435,6 +479,7 @@ def rebuild_interpreted(*, force: bool = False, conn: Optional[sqlite3.Connectio
     table gains coverage, because a battle tagged against partial facts looks settled:
     its decks are complete now, so the incremental guard would skip it.
     """
+    gaps = _restate_level_gaps(conn) if force else 0
     decks = _fill_deck_facts(conn, restate=force)
     if force:
         battles = _fill_battle_tags(conn, limit=None, force=True)
@@ -445,4 +490,4 @@ def rebuild_interpreted(*, force: bool = False, conn: Optional[sqlite3.Connectio
             battles += n
             if not n:
                 break
-    return {"deck_facts": decks, "battle_tags": battles}
+    return {"deck_facts": decks, "battle_tags": battles, "level_gaps": gaps}
