@@ -6,7 +6,7 @@ one reads the decks you *could* play. Distinct from ``get_deck_intelligence``
 tool is forward-looking and recommends decks they have never played. Everything is gated by what the member OWNS and
 can field at level, so no view can suggest a deck they cannot actually build.
 
-Four modes, because members ask four different questions:
+Five modes, because members ask five different questions:
 
   ``upgrades``  "What can I do to improve my deck?" — ranked by usage x level gap over
                 the cards they ACTUALLY field. Ranking upgrades across the whole clan
@@ -16,10 +16,26 @@ Four modes, because members ask four different questions:
   ``discover``  "What decks should I consider?" — for a player in a rut or one whose
                 main deck is already maxed. Deliberately includes decks NOBODY in the
                 clan plays; filtering to locally-played decks would recycle the ruts.
+  ``build``     "Build me N decks, one around each of these cards." Exactly what was
+                asked for, nothing disjoint. This request used to be answered with a
+                war set, and the constraint cost the member the deck he wanted: his
+                best Bowler deck (0.12 from max, four air answers, three of them
+                troops) was replaced by one at 0.25 with three, two of them spells.
   ``war_set``   Four war decks with 32 distinct cards. Confirmed against real battles:
                 89% of pairwise comparisons between a member's war decks share zero
                 cards. A constraint-satisfaction problem members solve badly by hand.
+                ONLY for an explicit war request — the no-overlap rule makes every
+                individual deck weaker, so it is never the helpful default.
   ``anchored``  "What is my best deck around <card>?" — same solver, one card pinned.
+
+Plus ``read_deck_link`` for the inbound direction: a deck the member pasted, read
+through the same role vocabulary a suggestion gets.
+
+**What each deck explains about itself.** Every returned deck carries role_coverage
+(which card fills each slot of the community deck formula, air answers separated into
+troops vs spells vs heavy) and per-card roles, so the answer can teach the formula
+rather than hand over eight names. These were computed and discarded for months while
+the model narrated deck construction from its own memory.
 
 **Why deck win rates are absent here.** Measured over 12,687 clan battles: player skill
 spans 36.4%-70.2%, as wide as the deck spread, and only 2 shared-deck observations exist
