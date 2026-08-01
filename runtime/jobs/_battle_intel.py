@@ -49,9 +49,7 @@ async def _battle_intel_stage_a() -> None:
 
 
 async def _battle_intel_stage_b() -> None:
-    """Feature 2 (all $0, no model): profile new decks with the rules classifier,
-    recompute the measured family matchup matrix, and fill expected_advantage /
-    performance (the upset detector). Cheap enough to run hourly."""
+    """Profile new decks and refresh derived deck facts and battle tags hourly."""
     runtime_status.mark_job_start("battle_intel_stage_b")
     try:
         result = await asyncio.to_thread(battle_intel.rebuild_deck_intel)
@@ -59,9 +57,8 @@ async def _battle_intel_stage_b() -> None:
         interpreted = await asyncio.to_thread(battle_intel.rebuild_interpreted)
         runtime_status.mark_job_success(
             "battle_intel_stage_b",
-            f"profiled +{result['profiled']}, matchup_cells {result['matchup_cells']}, "
-            f"expected_filled +{result['expected_filled']}, "
-            f"deck_facts +{interpreted['deck_facts']}, battle_tags +{interpreted['battle_tags']}",
+            f"profiled +{result['profiled']}, deck_facts +{interpreted['deck_facts']}, "
+            f"battle_tags +{interpreted['battle_tags']}",
         )
     except Exception as exc:
         log.error("Battle intel Stage B failed: %s", exc, exc_info=True)
