@@ -1,11 +1,13 @@
-"""Feature 2 end-to-end: deck_profile (rules), measured matchup matrix,
-expected_advantage/performance fill, and the matchup/deck tool views."""
+"""Feature 2 end-to-end: deck profiles, derived facts, and battle-intel views."""
 
+import asyncio
 import json
 import sqlite3
+from unittest.mock import patch
 
 from capabilities.battle_intel import get_battle_intelligence
 from db.schema import build_database
+from runtime.jobs._battle_intel import _battle_intel_stage_b
 from storage.battle_intel import enrich_battles, rebuild_deck_intel
 
 _IDS = {}  # stable, distinct card id per name (real decks have distinct ids)
@@ -190,6 +192,33 @@ def test_stage_b_is_deck_profiling_only(tmp_path):
 
     d = get_battle_intelligence(view="deck", member_tag="#M", conn=conn)
     assert d["decks"][0]["archetype"] == "Royal Hogs Bridge Spam"
+
+
+def test_scheduled_stage_b_accepts_deck_profile_only_result():
+    """The hourly wrapper must match rebuild_deck_intel's post-matrix contract."""
+    with (
+        patch(
+            "runtime.jobs._battle_intel.battle_intel.rebuild_deck_intel",
+            return_value={"profiled": 2},
+        ) as mock_profiles,
+        patch(
+            "runtime.jobs._battle_intel.battle_intel.rebuild_interpreted",
+            return_value={"deck_facts": 3, "battle_tags": 4},
+        ) as mock_interpreted,
+        patch("runtime.jobs._battle_intel.runtime_status.mark_job_start") as mock_start,
+        patch("runtime.jobs._battle_intel.runtime_status.mark_job_success") as mock_success,
+        patch("runtime.jobs._battle_intel.runtime_status.mark_job_failure") as mock_failure,
+    ):
+        asyncio.run(_battle_intel_stage_b())
+
+    mock_profiles.assert_called_once_with()
+    mock_interpreted.assert_called_once_with()
+    mock_start.assert_called_once_with("battle_intel_stage_b")
+    mock_success.assert_called_once_with(
+        "battle_intel_stage_b",
+        "profiled +2, deck_facts +3, battle_tags +4",
+    )
+    mock_failure.assert_not_called()
 
 
 def test_the_matchup_matrix_is_gone_for_good(tmp_path):
