@@ -66,24 +66,6 @@ _FAMILIARITY_SLACK = 1.0  # levels_from_max a KNOWN deck may concede and still b
 _MIN_USAGE_SHARE = 0.04  # a card must be ~1 slot in 1 of 3 decks before an upgrade is advice
 
 
-def _display(level, api_max) -> tuple:
-    """API level/max -> what the member sees in-game.
-
-    Card levels from the API are RARITY-RELATIVE: a maxed epic is level 11 of 11,
-    and the game shows it as 16 of 16. Every rarity tops out displayed at 16, so
-    the shift is `16 - api_max`. storage.cards already does this for
-    get_member_cards; Deck Intelligence never did, and told a member his Wall
-    Breakers were "Lv10, 1 from max" when his screen says 15, and his Ice Golem
-    "Lv9" against an actual 11.
-
-    All the internal arithmetic stays on the API scale on purpose — a gap
-    (max - level) is identical on both scales, and rarity-relative levels are the
-    only cross-rarity-comparable quantity. This converts at the OUTPUT boundary
-    only, which is where the mismatch with the member's screen actually matters.
-    """
-    return card_display_level(level, api_max), card_display_max_level(api_max)
-
-
 def _tag(value) -> str:
     # str() coercion, not `value or ""`: a model can hand back a bare numeric tag, and
     # an AttributeError here surfaces as a dead tool call rather than a clean answer.
@@ -101,23 +83,49 @@ def _envelope(view: str, **extra: Any) -> dict[str, Any]:
 
 
 def _catalog(conn) -> dict[int, dict]:
-    return {
-        r["card_id"]: dict(r)
-        for r in conn.execute(
-            "SELECT card_id, name, elixir_cost, rarity, max_level, max_evolution_level "
-            "FROM card_catalog"
-        )
-    }
+    """The card catalog with levels already on the DISPLAY scale.
+
+    This is THE normalization boundary for this capability, and it is at the
+    loader on purpose. API card levels are rarity-relative — a maxed epic is 11 of
+    11, a maxed legendary 8 of 8, and the game shows both as 16 of 16 — so a level
+    that reaches a member without the `16 - maxLevel` shift is simply wrong. It
+    reached one: "Wall Breakers (Lv10, 1 from max)" against a screen reading 15.
+
+    Converting here rather than at each emission is the whole point. The previous
+    fix patched five call sites, which is the same shape as the bug: the next field
+    that reports a level would have been wrong again. Nothing downstream can now
+    emit a raw level, because no raw level exists past this function.
+
+    Gap arithmetic is unaffected. Both level and max shift by the same constant, so
+    `max_level - level` is identical on either scale, and `levels_from_max` — the
+    only cross-rarity-comparable quantity — keeps its exact previous values.
+    ``api_max_level`` is retained for anything that must speak the API's scale.
+    """
+    out = {}
+    for r in conn.execute(
+        "SELECT card_id, name, elixir_cost, rarity, max_level, max_evolution_level "
+        "FROM card_catalog"
+    ):
+        card = dict(r)
+        card["api_max_level"] = card["max_level"]
+        card["max_level"] = card_display_max_level(card["max_level"]) or card["max_level"]
+        out[r["card_id"]] = card
+    return out
 
 
 def _collection(conn, tag: str) -> dict[int, int]:
-    """``{card_id: level}``. Level is RARITY-RELATIVE (legendary maxes at 8, common at
-    16), so callers must compare ``max_level - level``, never the raw level."""
+    """``{card_id: level}`` on the DISPLAY scale, matching _catalog.
+
+    Joined to the catalog because the shift depends on the card's rarity max. Both
+    sides of every comparison are therefore on one scale, and a gap means the same
+    thing it always did.
+    """
     return {
-        r["card_id"]: r["level"]
+        r["card_id"]: card_display_level(r["level"], r["max_level"])
         for r in conn.execute(
-            "SELECT card_id, level FROM player_card_collection "
-            "WHERE player_tag = ? AND level IS NOT NULL",
+            "SELECT pc.card_id, pc.level, cc.max_level FROM player_card_collection pc "
+            "JOIN card_catalog cc ON cc.card_id = pc.card_id "
+            "WHERE pc.player_tag = ? AND pc.level IS NOT NULL",
             (tag,),
         )
     }
@@ -391,8 +399,8 @@ def _describe(
             {
                 "name": cat[cid]["name"],
                 "form": ("Evo" if f == 1 else "Hero") if f else "base",
-                "level": _display(own[cid], cat[cid]["max_level"])[0],
-                "max_level": _display(own[cid], cat[cid]["max_level"])[1],
+                "level": own[cid],
+                "max_level": cat[cid]["max_level"],
                 "levels_from_max": cat[cid]["max_level"] - own[cid],
                 "elixir_cost": cat[cid].get("elixir_cost"),
                 "roles": _card_roles(fact),
@@ -486,8 +494,8 @@ def _upgrades_view(conn, tag) -> dict[str, Any]:
         rows.append(
             {
                 "card": cat[cid]["name"],
-                "level": _display(own[cid], cat[cid]["max_level"])[0],
-                "max_level": _display(own[cid], cat[cid]["max_level"])[1],
+                "level": own[cid],
+                "max_level": cat[cid]["max_level"],
                 "levels_from_max": gap,
                 "usage_share": round(share, 3),
                 "impact": round(share * gap, 3),
@@ -592,8 +600,8 @@ def _unlock_analysis(conn, cat, own, forms, tag) -> dict[str, Any]:
         "unlocks": [
             {
                 "card": cat[cid]["name"],
-                "level": _display(own[cid], cat[cid]["max_level"])[0],
-                "max_level": _display(own[cid], cat[cid]["max_level"])[1],
+                "level": own[cid],
+                "max_level": cat[cid]["max_level"],
                 "levels_to_max": cat[cid]["max_level"] - own[cid],
                 "decks_opened": e["decks_opened"],
                 "archetypes_opened": len(e["archetypes"]),
@@ -948,8 +956,8 @@ def _anchored_view(conn, tag, card, limit, require=None) -> dict[str, Any]:
         available=True,
         member_tag=tag,
         anchor_card=cat[cid]["name"],
-        anchor_level=_display(own[cid], cat[cid]["max_level"])[0],
-        anchor_max_level=_display(own[cid], cat[cid]["max_level"])[1],
+        anchor_level=own[cid],
+        anchor_max_level=cat[cid]["max_level"],
         buildable_decks_with_anchor=len(cands),
         required=required,
         unrecognized_requirements=unknown_props,
@@ -1073,12 +1081,8 @@ def read_deck_link(
                     "rarity": cat[cid].get("rarity"),
                     "roles": _card_roles(fact),
                     "note": (fact or {}).get("note"),
-                    "their_level": (
-                        _display(own[cid], cat[cid]["max_level"])[0] if cid in own else None
-                    ),
-                    "their_max_level": (
-                        _display(own[cid], cat[cid]["max_level"])[1] if cid in own else None
-                    ),
+                    "their_level": own.get(cid),
+                    "their_max_level": cat[cid]["max_level"] if cid in own else None,
                     "owned_by_them": cid in own if tag else None,
                     "levels_from_max": (cat[cid]["max_level"] - own[cid]) if cid in own else None,
                 }
