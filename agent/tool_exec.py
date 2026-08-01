@@ -509,6 +509,7 @@ def _execute_get_deck_recommendations(arguments):
         card=arguments.get("card"),
         anchors=arguments.get("anchors"),
         count=arguments.get("count"),
+        require=arguments.get("require"),
         limit=arguments.get("limit", 6),
     )
 

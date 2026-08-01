@@ -149,6 +149,11 @@ def _card_facts(conn, cat: dict) -> dict[tuple[int, int], dict]:
         meta = cat.get(fact["card_id"]) or {}
         fact["name"] = meta.get("name")
         fact["elixir_cost"] = meta.get("elixir_cost")
+        # special_json is stored as a JSON string; the role predicates read a list.
+        try:
+            fact["special"] = tuple(json.loads(fact.get("special_json") or "[]"))
+        except TypeError, ValueError:
+            fact["special"] = ()
         out[(fact["card_id"], fact["evolution_level"] or 0)] = fact
     return out
 
@@ -227,6 +232,23 @@ def _played_archetypes(conn, tag: str) -> frozenset:
             (tag,),
         )
     )
+
+
+def _requirements(values) -> tuple[list[str], list[str]]:
+    """Split requested deck properties into (recognized, unrecognized)."""
+    known: list[str] = []
+    unknown: list[str] = []
+    for value in values or []:
+        prop = card_roles.normalize_property(value)
+        (known if prop else unknown).append(prop or str(value))
+    return known, unknown
+
+
+def _meets(deck, facts: dict, required: list[str]) -> bool:
+    if not required:
+        return True
+    deck_facts = [f for f in _facts_for(deck["cards"], facts) if f]
+    return all(card_roles.deck_has_property(deck_facts, p) for p in required)
 
 
 def _candidates(conn, cat, own, forms, *, require_structure=True) -> list[dict]:
@@ -574,7 +596,7 @@ def _resolve_card(cat, own, name) -> tuple[Optional[int], Optional[dict]]:
     return cid, None
 
 
-def _build_view(conn, tag, anchors, count) -> dict[str, Any]:
+def _build_view(conn, tag, anchors, count, require=None) -> dict[str, Any]:
     """Exactly the decks the player asked for — one per anchor card, no war constraint.
 
     This view exists because we had no way to answer "build me 2 decks, one around
@@ -612,6 +634,14 @@ def _build_view(conn, tag, anchors, count) -> dict[str, Any]:
         return _envelope(
             "build", available=False, error="no_buildable_decks", member_tag=tag, decks=[]
         )
+    required, unknown_props = _requirements(require)
+    # Requirements NARROW the pool; they never replace the anchor. A member asking
+    # to fix the spell gap in his Ronin deck got a deck with no Ronin in it, because
+    # the only way to express "with a big spell" was to anchor on a spell instead.
+    pool = [d for d in cands if _meets(d, facts, required)] if required else cands
+    requirements_met = bool(pool)
+    if not requirements_met:
+        pool = cands  # keep the anchor, report the miss
 
     wanted = max(1, min(int(count or len(resolved) or 1), 6))
     picks: list[dict] = []
@@ -619,9 +649,18 @@ def _build_view(conn, tag, anchors, count) -> dict[str, Any]:
     # One deck per anchor, best-first. Anchors are honoured in the order asked.
     for cid in resolved:
         best = next(
-            (d for d in cands if cid in d["card_ids"] and d["deck_hash"] not in used_hashes),
+            (d for d in pool if cid in d["card_ids"] and d["deck_hash"] not in used_hashes),
             None,
         )
+        if best is None and required:
+            # The anchor cannot be combined with everything asked for. Say which
+            # half gave way instead of quietly returning a deck without their card.
+            best = next(
+                (d for d in cands if cid in d["card_ids"] and d["deck_hash"] not in used_hashes),
+                None,
+            )
+            if best is not None:
+                requirements_met = False
         if best is None:
             unresolved.append({"error": "no_buildable_deck_with_card", "card": cat[cid]["name"]})
             continue
@@ -632,7 +671,7 @@ def _build_view(conn, tag, anchors, count) -> dict[str, Any]:
         )
     # Only fill past the anchors when MORE decks were asked for than cards named.
     seen_fams = {p["family"] for p in picks}
-    for d in cands:
+    for d in pool:
         if len(picks) >= wanted:
             break
         if d["deck_hash"] in used_hashes or d["family"] in seen_fams:
@@ -648,13 +687,18 @@ def _build_view(conn, tag, anchors, count) -> dict[str, Any]:
         your_field=field,
         requested_count=wanted,
         anchors=[cat[c]["name"] for c in resolved],
+        required=required,
+        unrecognized_requirements=unknown_props,
+        requirements_met=requirements_met,
         unresolved=unresolved,
         decks=picks[:wanted],
         buildable_deck_count=len(cands),
         note=(
             "Decks built to the request. These are NOT a war set — they may share cards, "
             "which is fine everywhere except Clan Wars. Offer war_set only if the player "
-            "asks for war decks."
+            "asks for war decks. When requirements_met is false, no buildable deck "
+            "combines the anchor card with everything asked for: SAY THAT, name what "
+            "gave way, and never quietly return a deck missing the card they named."
         ),
     )
 
@@ -697,7 +741,7 @@ def _war_set_view(conn, tag) -> dict[str, Any]:
     )
 
 
-def _anchored_view(conn, tag, card, limit) -> dict[str, Any]:
+def _anchored_view(conn, tag, card, limit, require=None) -> dict[str, Any]:
     cat = _catalog(conn)
     own = _collection(conn, tag)
     if not own:
@@ -718,7 +762,12 @@ def _anchored_view(conn, tag, card, limit) -> dict[str, Any]:
     facts = _card_facts(conn, cat)
     played_arch = _played_archetypes(conn, tag)
     tower = _tower_troop(conn, tag)
+    required, unknown_props = _requirements(require)
     cands = [d for d in _candidates(conn, cat, own, forms) if cid in d["card_ids"]]
+    narrowed = [d for d in cands if _meets(d, facts, required)] if required else cands
+    requirements_met = bool(narrowed)
+    if requirements_met:
+        cands = narrowed
     seen: set[str] = set()
     picks: list[dict] = []
     for d in cands:
@@ -736,8 +785,15 @@ def _anchored_view(conn, tag, card, limit) -> dict[str, Any]:
         anchor_level=own[cid],
         anchor_max_level=cat[cid]["max_level"],
         buildable_decks_with_anchor=len(cands),
+        required=required,
+        unrecognized_requirements=unknown_props,
+        requirements_met=requirements_met,
         decks=picks,
-        note="Every deck contains the anchor card and is buildable at this member's levels.",
+        note=(
+            "Every deck contains the anchor card and is buildable at this member's "
+            "levels. requirements_met=false means nothing combines the anchor with "
+            "everything asked for — say so rather than dropping the anchor."
+        ),
     )
 
 
@@ -748,6 +804,7 @@ def get_deck_recommendations(
     card: Optional[str] = None,
     anchors: Optional[list] = None,
     count: Optional[int] = None,
+    require: Optional[list] = None,
     limit: int = 6,
     source: Any = None,
     conn: Optional[sqlite3.Connection] = None,
@@ -782,9 +839,9 @@ def get_deck_recommendations(
         if view == "war_set":
             return _war_set_view(conn, tag)
         if view == "build":
-            return _build_view(conn, tag, anchors or ([card] if card else []), count)
+            return _build_view(conn, tag, anchors or ([card] if card else []), count, require)
         if view == "anchored":
-            return _anchored_view(conn, tag, card, limit)
+            return _anchored_view(conn, tag, card, limit, require)
         return _discover_view(conn, tag, limit)
     finally:
         if own_conn:

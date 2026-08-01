@@ -260,6 +260,62 @@ def deck_role_coverage(facts: Iterable[dict], *, family=None, avg_elixir=None) -
     return coverage
 
 
+# ── deck property requirements ("a deck with a reset card and a big spell") ──
+#
+# Members describe decks by what is IN them, not by card name: "a reset card and a
+# big spell", "something with a building", "more air defence". Without a way to
+# express that, the model has to guess specific cards and anchor on those one at a
+# time — which is how a request to fix the spell gap in a RONIN deck came back as a
+# deck with no Ronin in it. 88 decks he could build had Ronin and a big spell.
+
+DECK_PROPERTIES = {
+    "win_condition": lambda f: bool(f.get("is_win_condition")),
+    "big_spell": lambda f: f.get("spell_tier") == "big",
+    "small_spell": lambda f: f.get("spell_tier") == "small",
+    "spell": lambda f: f.get("spell_tier") not in (None, "none"),
+    "reset": lambda f: "reset" in (f.get("special") or ()),
+    "knockback": lambda f: "knockback" in (f.get("special") or ()),
+    "air_troop": is_air_troop,
+    "heavy_air": is_heavy_air_answer,
+    "tank_answer": is_tank_answer,
+    "splash": is_splash_answer,
+    "swarm": is_swarm,
+    "building": lambda f: f.get("role") in ("building", "spawner"),
+    "tank": lambda f: f.get("role") in ("tank", "mini_tank"),
+    "cycle": lambda f: is_cycle_card(f, f.get("elixir_cost")),
+}
+
+_PROPERTY_ALIASES = {
+    "reset_card": "reset",
+    "stun": "reset",
+    "bigspell": "big_spell",
+    "heavy_spell": "big_spell",
+    "cheap_spell": "small_spell",
+    "anti_air": "air_troop",
+    "air": "air_troop",
+    "air_defense": "air_troop",
+    "air_defence": "air_troop",
+    "anti_tank": "tank_answer",
+    "tank_killer": "tank_answer",
+    "defensive_building": "building",
+    "wincon": "win_condition",
+    "win_con": "win_condition",
+}
+
+
+def normalize_property(name) -> Optional[str]:
+    """Map what a member (or the model) says onto a known deck property."""
+    key = str(name or "").strip().lower().replace(" ", "_").replace("-", "_")
+    key = _PROPERTY_ALIASES.get(key, key)
+    return key if key in DECK_PROPERTIES else None
+
+
+def deck_has_property(facts: Iterable[dict], prop: str) -> bool:
+    """Does any card in this deck satisfy ``prop``?"""
+    test = DECK_PROPERTIES.get(prop)
+    return bool(test) and any(test(f) for f in facts if f)
+
+
 # ── why a matchup goes the way it does ───────────────────────────────────────
 #
 # The line this code has to hold: deck STRUCTURE does not predict a single battle.

@@ -458,3 +458,60 @@ def test_a_thin_field_earns_no_matchup_claim(rich):
     r = get_deck_recommendations(view="discover", member_tag=TAG, conn=rich)
     assert r["your_field"]["worst_matchup"] is None
     assert all("matchup_fit" not in d for d in r["suggestions"])
+
+
+def test_a_property_request_keeps_the_card_they_named(rich):
+    """The live failure: asked to recommend a deck with Ronin, then asked for "a new
+    deck that has a reset card and a big spell" — meaning fix the spell gap in THAT
+    deck. Six tool calls followed and Ronin appeared in none of them, because the
+    only way to express "with a big spell" was to anchor on a spell instead. 88 decks
+    he could build had Ronin and a big spell."""
+    rich.execute("UPDATE card_facts SET spell_tier='big' WHERE card_id=6")
+    r = get_deck_recommendations(
+        view="build", member_tag=TAG, anchors=["Legend"], require=["big spell"], conn=rich
+    )
+    assert r["required"] == ["big_spell"]
+    assert r["requirements_met"] is True
+    deck = r["decks"][0]
+    assert deck["anchor_card"] == "Legend"
+    assert any(c["name"] == "Legend" for c in deck["cards"]), "the anchor must survive"
+    assert any(c["name"] == "Spell" for c in deck["cards"])
+
+
+def test_an_impossible_combination_says_so_instead_of_dropping_the_anchor(rich):
+    """When nothing combines the anchor with everything asked for, the honest answer
+    names the miss. Silently returning a deck without their card is what happened."""
+    r = get_deck_recommendations(
+        view="build", member_tag=TAG, anchors=["Legend"], require=["knockback"], conn=rich
+    )
+    assert r["requirements_met"] is False
+    assert any(c["name"] == "Legend" for c in r["decks"][0]["cards"]), "anchor still kept"
+
+
+def test_property_names_accept_how_people_say_them(rich):
+    rich.execute("UPDATE card_facts SET spell_tier='big' WHERE card_id=6")
+    for spoken in ("big spell", "big_spell", "BIG SPELL", "heavy-spell"):
+        r = get_deck_recommendations(
+            view="build", member_tag=TAG, anchors=["Legend"], require=[spoken], conn=rich
+        )
+        assert r["required"] == ["big_spell"], spoken
+
+
+def test_an_unknown_property_is_reported_not_silently_ignored(rich):
+    """A requirement we cannot evaluate must not read as satisfied."""
+    r = get_deck_recommendations(
+        view="build", member_tag=TAG, anchors=["Legend"], require=["vibes"], conn=rich
+    )
+    assert r["unrecognized_requirements"] == ["vibes"]
+    assert r["required"] == []
+
+
+def test_anchored_narrows_on_properties_too(rich):
+    rich.execute("UPDATE card_facts SET spell_tier='big' WHERE card_id=6")
+    r = get_deck_recommendations(
+        view="anchored", member_tag=TAG, card="Legend", require=["big_spell"], conn=rich
+    )
+    assert r["requirements_met"] is True
+    for deck in r["decks"]:
+        assert any(c["name"] == "Legend" for c in deck["cards"])
+        assert any(c["name"] == "Spell" for c in deck["cards"])
