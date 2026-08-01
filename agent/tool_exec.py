@@ -536,8 +536,6 @@ def _execute_get_battle_intelligence(arguments):
         view=view,
         member_tag=member_tag,
         card=arguments.get("card"),
-        our_family=arguments.get("our_family"),
-        their_family=arguments.get("their_family"),
         scope=arguments.get("scope", "all"),
         limit=arguments.get("limit", 20),
         days=arguments.get("days"),

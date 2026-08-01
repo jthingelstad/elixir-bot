@@ -1,5 +1,14 @@
 # Battle Intelligence — v1 Overview
 
+> **Feature 3 (per-battle prose) is RETIRED, and as of schema v32 its storage is
+> gone too** — `commentary`, `coaching_note`, `verdict`, `loss_nature`, `notable`,
+> `confidence`, `model`, `prompt_version`, `input_hash`. The job, the feature flag
+> and the grading script had already been removed; the columns outlived them holding
+> 97 rows of commentary out of 13,348, while `coaching_note` and `verdict` never
+> held a single row. Coaching is aggregate now (`view="coaching"`), which is also
+> where the evidence points: per-battle causation mostly is not knowable from a
+> battle log.
+
 Status: **designed, being built in features** (2026-07-30). Owner: Jamie.
 Design partner: Claude.
 

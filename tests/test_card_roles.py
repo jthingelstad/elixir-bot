@@ -1,7 +1,6 @@
 """Derived card/deck roles + per-battle structural tags (Battle Intelligence v2)."""
 
 from engine.card_roles import (
-    air_matchup,
     decisive_factor,
     deck_facts,
     deck_role_coverage,
@@ -13,8 +12,6 @@ from engine.card_roles import (
     level_validity,
     matchup_notes,
     min_air_answers,
-    spell_bait_exposed,
-    wincon_pressure,
 )
 
 MUSKETEER = {"targets": "air_and_ground", "dps_tier": "high", "attack_style": "single"}
@@ -69,48 +66,6 @@ def test_level_validity_catches_normalized_modes():
     assert level_validity("CW_Battle_1v1", 0) == "real"
 
 
-def test_air_matchup_flags_an_air_hole():
-    no_air = {"air_answer_count": 0}
-    flying = {"air_threat_count": 2}
-    assert air_matchup(no_air, flying) == "stressed"
-    assert air_matchup({"air_answer_count": 5}, flying) == "favored"
-    assert air_matchup({"air_answer_count": 4}, flying) == "even"  # the common case
-    assert air_matchup(no_air, {"air_threat_count": 0}) == "untested"
-
-
-def test_wincon_pressure():
-    ours = {"win_condition_count": 1}
-    # Calibrated to the real spread (2-8, median 5): 5 is typical, not "countered".
-    assert wincon_pressure(ours, {"tank_answer_count": 3, "splash_answer_count": 2}) == "contested"
-    assert wincon_pressure(ours, {"tank_answer_count": 4, "splash_answer_count": 3}) == "countered"
-    assert wincon_pressure(ours, {"tank_answer_count": 1, "splash_answer_count": 1}) == "clear"
-    assert wincon_pressure({"win_condition_count": 0}, {}) == "no_wincon"
-
-
-def test_spell_bait_exposed():
-    baity = {"bait_unit_count": 3}
-    assert spell_bait_exposed(baity, {"has_small_spell": 1}) == 1
-    assert spell_bait_exposed(baity, {"has_small_spell": 0}) == 0
-
-
-def test_decisive_factor_ignores_unpredictive_structure():
-    """air/wincon must NEVER drive the read: measured against 12,687 clan battles
-    both are flat vs outcome, so citing them would narrate noise as a cause."""
-    for air, wincon in (("stressed", "countered"), ("favored", "clear")):
-        assert (
-            decisive_factor(
-                level_gap=0.1,
-                level_ok=True,
-                closeness=1,
-                discipline_delta=0.0,
-                performance=0,
-                air=air,
-                wincon=wincon,
-            )
-            == "even_game"
-        )
-
-
 def test_decisive_factor_ranks_levels_over_elixir():
     """Card levels outrank elixir: levels are monotonic vs outcome AND actionable,
     while elixir leak is partly an effect of already losing."""
@@ -120,9 +75,6 @@ def test_decisive_factor_ranks_levels_over_elixir():
             level_ok=True,
             closeness=1,
             discipline_delta=9.0,
-            performance=-1,
-            air="stressed",
-            wincon="clear",
         )
         == "card_levels"
     )
@@ -133,9 +85,6 @@ def test_decisive_factor_ranks_levels_over_elixir():
             level_ok=True,
             closeness=1,
             discipline_delta=9.0,
-            performance=0,
-            air="even",
-            wincon="clear",
         )
         == "elixir_management"
     )
@@ -149,9 +98,6 @@ def test_decisive_factor_ignores_levels_when_normalized():
             level_ok=False,
             closeness=1,
             discipline_delta=0.1,
-            performance=0,
-            air="even",
-            wincon="clear",
         )
         != "card_levels"
     )
@@ -161,9 +107,6 @@ def test_decisive_factor_ignores_levels_when_normalized():
             level_ok=True,
             closeness=1,
             discipline_delta=0.1,
-            performance=0,
-            air="even",
-            wincon="clear",
         )
         == "card_levels"
     )

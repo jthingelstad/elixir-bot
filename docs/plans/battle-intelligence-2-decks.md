@@ -1,5 +1,18 @@
 # Battle Intelligence — Feature 2: Deck & matchup intelligence
 
+> **SUPERSEDED IN PART (2026-08-01, schema v32): the matchup matrix is gone.**
+> `matchup_expectation`, `battle_enrichment.expected_advantage` / `performance`,
+> the `matchup` tool view and `decisive_factor`'s matchup branch were all removed.
+> Two measurements killed it. Symmetrizing revealed the stored advantages were
+> largely the clan's own strength (control-vs-control read 58.4% and banded +1; a
+> mirror is 50/50 by construction). Then a player-adjustment — each player's rate in
+> a matchup minus their own baseline — put family matchup at a mean 3.2 points
+> across 20 cells, against 22 points for card levels and a 34-point spread in player
+> skill. Siege, the one apparent standout at 40.5% into beatdown, could not clear a
+> four-player floor: that number was who plays siege. Deck PROFILING (this doc's
+> other half) is alive and load-bearing. The archetype-vs-archetype half is not.
+
+
 Status: **draft, re-scoped 2026-07-30**. Part of [Battle Intelligence
 v1](battle-intelligence.md). **Depends on Feature 1** (form-aware `deck_hash`,
 `battle_card_plays`, the `get_battle_intelligence` tool). Unblocks Feature 3
