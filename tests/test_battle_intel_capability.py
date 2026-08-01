@@ -198,3 +198,36 @@ def test_no_view_reports_a_rarity_relative_card_level(tmp_path):
             assert "api_max_level" not in blob, view
     finally:
         conn.close()
+
+
+def test_one_key_never_means_two_things_across_views(tmp_path):
+    """QA sweep. `battles` was an integer count in coaching and member_summary and
+    a LIST of battles in the battle view — one key, two types, same tool. And
+    primary_deck_shape carried scalar air_answers/tank_answers/splash_answers
+    beside a role_coverage that used the SAME names for lists of card names.
+
+    A model that learns one shape reads the other wrong, and two sources for one
+    fact is how they silently drift apart."""
+    from db.schema import build_database
+
+    path = tmp_path / "shapes.db"
+    build_database(str(path))
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        for view in ("coaching", "member_summary"):
+            r = get_battle_intelligence(view=view, member_tag="#M", conn=conn)
+            if "battles" in r:
+                assert isinstance(r["battles"], int), f"{view}: battles must be a count"
+
+        battle = get_battle_intelligence(view="battle", member_tag="#M", conn=conn)
+        assert "battles" not in battle, "the list is recent_battles, not battles"
+        assert isinstance(battle.get("recent_battles", []), list)
+
+        coaching = get_battle_intelligence(view="coaching", member_tag="#M", conn=conn)
+        shape = coaching.get("primary_deck_shape")
+        if shape:
+            for scalar in ("air_answers", "tank_answers", "splash_answers"):
+                assert scalar not in shape, f"{scalar} duplicates role_coverage under one name"
+    finally:
+        conn.close()

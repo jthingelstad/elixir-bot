@@ -326,7 +326,10 @@ def _battle_view(conn, tag, limit) -> dict[str, Any]:
         "battle",
         available=bool(battles),
         subject=tag,
-        battles=battles,
+        # `recent_battles`, not `battles`: coaching and member_summary both return
+        # `battles` as a COUNT, and the same key holding a list in one view and an
+        # integer in two others is a shape a model will confidently misread.
+        recent_battles=battles,
         note="closeness/hp_margin need both sides' tower data. Archetypes are here to "
         "name the decks ('their LavaLoon'), never to claim one archetype beats another.",
     )
@@ -660,12 +663,14 @@ def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
     primary = next((r for r in rows if r["our_archetype"]), None)
     deck_shape = None
     if primary:
+        # Only the archetype and the role coverage. The three scalar counts that
+        # used to sit here duplicated role_coverage with the SAME key names and a
+        # different type — tank_answers was an int here and a list of card names
+        # one level down, in the same object. Two sources for one fact is how they
+        # drift, and a model reading both has no way to know which is meant.
         deck_shape = {
             "archetype": primary["our_archetype"],
             "family": primary["our_family"],
-            "air_answers": primary["air_answer_count"],
-            "tank_answers": primary["tank_answer_count"],
-            "splash_answers": primary["splash_answer_count"],
         }
         coverage = _deck_coverage(conn, primary["our_deck_hash"])
         if coverage:
@@ -681,7 +686,7 @@ def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
         available=True,
         subject=tag,
         window_days=days,
-        battles=len(rows),
+        battles=len(rows),  # the SAMPLE size; battles_in_window is the real total
         battles_in_window=in_window,
         sample_truncated=in_window > len(rows),
         record={"wins": wins, "losses": losses},
