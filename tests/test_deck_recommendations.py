@@ -515,3 +515,52 @@ def test_anchored_narrows_on_properties_too(rich):
     for deck in r["decks"]:
         assert any(c["name"] == "Legend" for c in deck["cards"])
         assert any(c["name"] == "Spell" for c in deck["cards"])
+
+
+def test_a_maxed_player_is_told_what_would_open_new_decks(rich):
+    """ "What should I be upgrading?" returned nothing because the cards he plays
+    are maxed. True, and a dead end exactly when the question gets interesting:
+    a maxed player wants to know what would let them play something ELSE."""
+    # Everything they field is maxed; one unplayed card sits below max.
+    rich.execute("UPDATE player_card_collection SET level = 6 WHERE card_id = 7")
+    for i in range(30):
+        rich.execute(
+            "INSERT INTO battle_card_plays VALUES (?, 'member', 1, 0, ?, '2026-07-20')",
+            (f"u{i}", TAG),
+        )
+    rich.execute("INSERT INTO battle_events VALUES ('u0', ?, 'W')", (TAG,))
+    rich.execute(
+        "INSERT INTO battle_enrichment VALUES ('u0', ?, '2026-07-20', 'H_OK', NULL)", (TAG,)
+    )
+    r = get_deck_recommendations(view="upgrades", member_tag=TAG, conn=rich)
+    assert r["no_material_upgrades"] is True, "nothing worth upgrading in what they play"
+    assert "unlocks" in r, "...and that is exactly when unlocks must carry the answer"
+    assert r["readiness_tolerance"] is not None
+
+
+def test_unlocks_are_ranked_by_what_they_open_not_by_ubiquity(rich):
+    """A common card appears in hundreds of near-identical lists, so counting decks
+    rewards ubiquity rather than reach."""
+    r = get_deck_recommendations(view="upgrades", member_tag=TAG, conn=rich)
+    opened = [u["archetypes_opened"] for u in r["unlocks"]]
+    assert opened == sorted(opened, reverse=True), "archetype breadth leads the ranking"
+    for u in r["unlocks"]:
+        assert u["level"] < u["max_level"], "never suggest a card already at max"
+        assert u["levels_to_max"] == u["max_level"] - u["level"]
+        assert u["archetypes_opened"] >= 1
+
+
+def test_the_readiness_bar_is_the_members_own_not_a_constant(rich):
+    """Members field decks at the top of their collection. A fixed bar would tell a
+    maxed player everything is unlocked and a newer one that nothing is."""
+    r = get_deck_recommendations(view="upgrades", member_tag=TAG, conn=rich)
+    if r["readiness_standard"] is not None:
+        assert r["readiness_tolerance"] > r["readiness_standard"]
+
+
+def test_a_member_with_no_played_decks_gets_no_invented_bar(conn):
+    """With no history there is no standard to measure against, and guessing one
+    would rank upgrades against a number we made up."""
+    r = get_deck_recommendations(view="upgrades", member_tag=TAG, conn=conn)
+    assert r["unlocks"] == []
+    assert r["readiness_standard"] is None
