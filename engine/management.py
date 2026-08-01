@@ -42,8 +42,8 @@ SCORE_W_DONATION = 0.35  # "lead by example" — the lighter half
 # competitive = war_pct + RANKED_WEIGHT * ranked_pct * (1 - war_pct). War-primary,
 # ranked-secondary, doing-both rewarded, bounded 0-1 (no saturation).
 RANKED_WEIGHT = 0.40
-ELDER_BAND_FLOOR = 0.15  # elder share of the non-leadership roster ...
-ELDER_BAND_CEIL = 0.20  # ... a range to maintain, NOT a quota to fill
+ELDER_BAND_FLOOR = 0.20  # elder share of the WHOLE active roster, leadership included ...
+ELDER_BAND_CEIL = 0.30  # ... a range to maintain, NOT a quota to fill
 WORTHINESS_MIN_PERCENTILE = 0.50  # below-floor promotions still need ≥ median score
 PROMOTE_QUALIFYING_WEEKS = 3  # sustained weeks in the promotable set
 DEMOTE_WEEKS = 2  # abandonment demotion cadence (easier than promotion)
@@ -586,15 +586,29 @@ def _elder_scores(conn, now: str, week_anchor: str) -> dict:
 
 def _elder_band(conn, scores: dict, now: str) -> dict:
     """The elder corps TRACKS THE RANKING (§3.3–3.4, ratified 2026-07-05): the
-    Elders should be the top-K of the eligible roster, K sized to the 15–20%
+    Elders should be the top-K of the eligible roster, K sized to the 20–30%
     band. An elder loses the seat by being outranked (a swap) or by abandoning
     the competitive floor. Swaps are guarded by SWAP_MARGIN + sustained weeks so
-    they never flap. Deterministic ranking: score desc, tenure desc, tag asc."""
-    n = len(scores)
+    they never flap. Deterministic ranking: score desc, tenure desc, tag asc.
+
+    Two populations, deliberately different. The band is a share of the WHOLE
+    active clan including leadership (2026-08-01, Jamie): "one in four or five
+    people here wears a badge" is a statement about the clan you see in-game, and
+    excluding the four leaders from the denominator quietly shrank it. Everything
+    else — rank, median, who can be promoted — runs over the RANKED population,
+    which excludes leadership because a co-leader cannot be promoted to elder and
+    should not dilute the median that decides whether a member is worthy.
+    """
+    n = len(scores)  # ranked population: members + elders, for rank and median
+    roster = conn.execute(
+        "SELECT COUNT(*) FROM member_management mm WHERE EXISTS ("
+        "SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = mm.player_tag "
+        "AND cm.left_at IS NULL)"
+    ).fetchone()[0]
     order = sorted(scores.items(), key=lambda kv: (-kv[1]["score"], -kv[1]["tenure"], kv[0]))
     rank = {tag: i + 1 for i, (tag, _) in enumerate(order)}
-    floor = round(ELDER_BAND_FLOOR * n)
-    ceil = round(ELDER_BAND_CEIL * n)
+    floor = round(ELDER_BAND_FLOOR * roster)
+    ceil = round(ELDER_BAND_CEIL * roster)
     current_elders = sum(1 for r in scores.values() if r["role"] == "elder")
     score_vals = sorted(r["score"] for r in scores.values())
     median = (
@@ -621,12 +635,23 @@ def _elder_band(conn, scores: dict, now: str) -> dict:
     }
     eligible_order = [tag for tag, _ in order if _eligible(tag)]
 
-    # K = the target corps size, clamped into the band around the current count
-    # (grow toward the floor, shrink toward the ceiling, otherwise hold + swap).
+    # K = the target corps size, clamped into the band around the CURRENT count.
+    # The asymmetry is the whole design: the corps grows only to the FLOOR and
+    # shrinks only to the CEILING, and holds anywhere between.
+    #
+    #   below floor  -> k = floor    grow to the minimum, never toward the max
+    #   inside band  -> k = current  hold; the only movement is a swap, which is
+    #                                count-neutral, so the number never drifts up
+    #   above ceiling-> k = ceil     shrink to the maximum
+    #
+    # So the ceiling is a SHRINK TRIGGER, not a target — nothing in here ever
+    # promotes toward it. Raising the floor is the only change that creates
+    # promotions; raising the ceiling only widens how many badges the clan may
+    # keep if leaders hand them out in-game.
     k = min(max(current_elders, floor), ceil)
     should_be = set(eligible_order[:k])
     # Below-floor growth still requires worthiness (≥ median) so a thin/weak
-    # clan promotes nobody rather than elevating the undeserving to hit 15%.
+    # clan promotes nobody rather than elevating the undeserving to hit the floor.
     if current_elders < floor:
         should_be = {
             t for t in should_be if scores[t]["role"] == "elder" or scores[t]["score"] >= median
@@ -676,6 +701,7 @@ def _elder_band(conn, scores: dict, now: str) -> dict:
 
     return {
         "n": n,
+        "roster": roster,
         "floor": floor,
         "ceil": ceil,
         "current_elders": current_elders,
