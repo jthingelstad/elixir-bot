@@ -330,6 +330,145 @@ def test_eval_card_conversations_builds_context_from_canonical_db_path(tmp_path,
     assert clan["members"] == [{"tag": "#AAA111", "name": "Eval Alice"}]
 
 
+def _deck_eval_results(*, duplicate_war_card=False, anchored_view="anchored"):
+    from scripts import eval_deck_conversations
+
+    decks = []
+    for deck_index in range(4):
+        cards = [{"name": f"Card {deck_index * 8 + card_index + 1}"} for card_index in range(8)]
+        decks.append({"cards": cards})
+    if duplicate_war_card:
+        decks[1]["cards"][0]["name"] = "Card 1"
+    war_trace = [
+        {
+            "name": "get_deck_recommendations",
+            "arguments": {"view": "war_set", "member_tag": "#AAA111"},
+            "result": {"available": True, "view": "war_set", "decks": decks},
+        }
+    ]
+    honesty_trace = [
+        {
+            "name": "lookup_cards",
+            "arguments": {"name": "Mega Wizard Supreme"},
+            "result": [],
+        }
+    ]
+    turns = [
+        {
+            "bucket": "war_set",
+            "content": "Four war decks.",
+            "tool_calls": eval_deck_conversations._tool_calls(war_trace),
+            "tool_trace": war_trace,
+            "win_rate_in_answer": False,
+            "war_set_check": eval_deck_conversations._war_set_check(war_trace),
+        },
+        {
+            "bucket": "anchored",
+            "content": "An anchored deck.",
+            "tool_calls": [("get_deck_recommendations", {"view": anchored_view, "card": "Witch"})],
+            "tool_trace": [],
+            "win_rate_in_answer": False,
+        },
+        {
+            "bucket": "discover",
+            "content": "A discovery deck.",
+            "tool_calls": [("get_deck_recommendations", {"view": "discover"})],
+            "tool_trace": [],
+            "win_rate_in_answer": False,
+        },
+        {
+            "bucket": "upgrade",
+            "content": "An upgrade recommendation.",
+            "tool_calls": [("get_deck_recommendations", {"view": "upgrades"})],
+            "tool_trace": [],
+            "win_rate_in_answer": False,
+        },
+        {
+            "bucket": "honesty",
+            "content": "I can't find that card, so I can't build a deck around it.",
+            "tool_calls": eval_deck_conversations._tool_calls(honesty_trace),
+            "tool_trace": honesty_trace,
+            "win_rate_in_answer": False,
+        },
+    ]
+    turns[-1]["honesty_check"] = eval_deck_conversations._honesty_check(turns[-1])
+    return [{"member": {"player_tag": "#AAA111"}, "turns": turns}]
+
+
+def test_eval_deck_conversations_fails_a_duplicated_war_card():
+    from scripts import eval_deck_conversations
+
+    results = _deck_eval_results(duplicate_war_card=True)
+    summary = eval_deck_conversations.score_results(results)
+
+    war_turn = results[0]["turns"][0]
+    assert war_turn["war_set_check"]["passed"] is False
+    assert war_turn["war_set_check"]["duplicates"] == ["card 1"]
+    assert summary["metrics"]["war_set_card_uniqueness_rate"]["value"] == 0.0
+    assert summary["metrics"]["war_set_card_uniqueness_rate"]["passed"] is False
+    assert summary["passed"] is False
+
+
+def test_eval_deck_conversations_fails_a_required_view_mismatch():
+    from scripts import eval_deck_conversations
+
+    summary = eval_deck_conversations.score_results(_deck_eval_results(anchored_view="discover"))
+
+    metric = summary["metrics"]["required_tool_view_rate"]
+    assert metric["value"] == 0.75
+    assert metric["threshold"] == {">=": 1.0}
+    assert metric["passed"] is False
+    assert metric["definition"]
+    assert summary["passed"] is False
+
+
+def test_eval_deck_conversations_accepts_explicit_refusal_without_a_tool_call():
+    from scripts import eval_deck_conversations
+
+    responses = [
+        '"Mega Wizard Supreme" isn\'t a card that exists in Clash Royale.',
+        'Checked the catalog: "Mega Wizard Supreme" doesn\'t exist — no card by that name.',
+        "There's no card called Mega Wizard Supreme — that's not a real Clash Royale card.",
+    ]
+
+    for content in responses:
+        check = eval_deck_conversations._honesty_check(
+            {
+                "bucket": "honesty",
+                "content": content,
+                "tool_calls": [],
+                "tool_trace": [],
+            }
+        )
+        assert check == {
+            "passed": True,
+            "negative_tool_evidence": False,
+            "refusal_language": True,
+            "successful_deck_result": False,
+        }
+
+
+def test_eval_deck_conversations_counts_tool_execution_errors():
+    from scripts import eval_deck_conversations
+
+    results = _deck_eval_results()
+    turn = results[0]["turns"][2]
+    turn["tool_trace"] = [
+        {
+            "name": "get_deck_recommendations",
+            "arguments": {"view": "discover", "member_tag": "28"},
+            "result": {"error": "Could not resolve member reference: 28"},
+        }
+    ]
+    turn["tool_error_count"] = eval_deck_conversations._tool_error_count(turn["tool_trace"])
+
+    summary = eval_deck_conversations.score_results(results)
+
+    assert summary["metrics"]["error_count"]["value"] == 1
+    assert summary["metrics"]["error_count"]["passed"] is False
+    assert summary["passed"] is False
+
+
 def test_eval_leader_actions_scores_exact_artifacts(tmp_path):
     from scripts import eval_leader_actions
 
