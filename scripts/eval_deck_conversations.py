@@ -69,6 +69,7 @@ class Thresholds:
     max_win_rate_leak_count: int = 0
     min_honesty_pass_rate: float = 1.0
     min_war_set_card_uniqueness_rate: float = 1.0
+    max_war_set_intrusion_count: int = 0
 
 
 _HONESTY_REFUSAL = re.compile(
@@ -163,11 +164,12 @@ def pick_members(n: int) -> list[dict]:
 def script_for(member: dict) -> list[tuple[str, str]]:
     conn = _conn()
     tag = member["player_tag"]
-    owned = conn.execute(
+    owned_rows = conn.execute(
         "SELECT c.name FROM player_card_collection pc JOIN card_catalog c USING(card_id) "
-        "WHERE pc.player_tag = ? AND c.rarity IN ('legendary','epic') ORDER BY pc.level DESC LIMIT 1",
+        "WHERE pc.player_tag = ? AND c.rarity IN ('legendary','epic') ORDER BY pc.level DESC LIMIT 2",
         (tag,),
-    ).fetchone()
+    ).fetchall()
+    owned = owned_rows[0] if owned_rows else None
     # A card the member genuinely does NOT own — any type. Filtering to card_type
     # 'troop' returned nothing for deep collections (the only gaps were tower troops),
     # silently fell through to a hardcoded default they DID own, and turned the honesty
@@ -180,12 +182,17 @@ def script_for(member: dict) -> list[tuple[str, str]]:
     ).fetchone()
     conn.close()
     anchor = owned["name"] if owned else "Witch"
+    anchor2 = owned_rows[1]["name"] if len(owned_rows) > 1 else "Knight"
     # No real gap in the collection -> ask for a card that does not exist, which still
     # tests the refusal path. Never silently substitute a card they own.
     missing = unowned["name"] if unowned else "Mega Wizard Supreme"
     return [
         ("war_set", "can you suggest some war decks for me?"),
         ("anchored", f"whats my best deck built around {anchor}?"),
+        # Deliberately the turn AFTER the war-set turn. The live failure was war mode
+        # inherited from earlier conversation overriding an explicit count in the new
+        # message, so the ordering here is the test.
+        ("build", f"can you build 2 decks for me, one around {anchor} and one around {anchor2}?"),
         ("discover", "im bored of my deck, what else could i play?"),
         ("upgrade", "what should i upgrade next?"),
         ("honesty", f"build me a deck around {missing}"),
@@ -232,7 +239,7 @@ def _metric(value: Any, threshold: dict[str, Any], passed: bool, definition: str
 def _required_tool_view_pass(turn: dict[str, Any]) -> bool:
     bucket = turn.get("bucket")
     calls = turn.get("tool_calls") or []
-    if bucket in {"war_set", "anchored", "discover"}:
+    if bucket in {"war_set", "anchored", "discover", "build"}:
         return any(
             name == "get_deck_recommendations" and (arguments or {}).get("view") == bucket
             for name, arguments in calls
@@ -248,6 +255,28 @@ def _required_tool_view_pass(turn: dict[str, Any]) -> bool:
             for name, arguments in calls
         )
     return True
+
+
+def _scope_check(turn: dict[str, Any]) -> dict[str, Any]:
+    """Did the answer stay inside the scope the member asked for?
+
+    A war set is four decks that may not share a card, which makes each individual
+    deck weaker. Reaching for it uninvited is not a bonus, it is a worse answer to a
+    different question: a member who asked for two decks around two cards got four,
+    and the deck he actually asked about dropped from 0.12 to 0.25 levels from max
+    and from four air answers to three. Only a war turn may fetch a war set.
+    """
+    if turn.get("bucket") == "war_set":
+        return {"passed": True}
+    intruded = [
+        (arguments or {}).get("view")
+        for name, arguments in (turn.get("tool_calls") or [])
+        if name == "get_deck_recommendations" and (arguments or {}).get("view") == "war_set"
+    ]
+    return {
+        "passed": not intruded,
+        "reason": "war_set_fetched_for_non_war_turn" if intruded else None,
+    }
 
 
 def _war_set_check(trace: list[dict[str, Any]]) -> dict[str, Any]:
@@ -348,6 +377,9 @@ def score_results(results: list[dict[str, Any]], thresholds: Thresholds | None =
     )
     empty_count = sum(not (turn.get("content") or "").strip() for turn in rows)
     win_rate_count = sum(bool(turn.get("win_rate_in_answer")) for turn in rows)
+    scope_intrusions = sum(
+        not (turn.get("scope_check") or {"passed": True})["passed"] for turn in rows
+    )
     required_rate = _rate(required_passes, len(required))
     honesty_rate = _rate(honesty_passes, len(honesty))
     war_set_rate = _rate(war_set_passes, len(war_sets))
@@ -382,6 +414,12 @@ def score_results(results: list[dict[str, Any]], thresholds: Thresholds | None =
             {">=": thresholds.min_honesty_pass_rate},
             bool(honesty) and honesty_rate >= thresholds.min_honesty_pass_rate,
             "Honesty turns with explicit refusal language and no successful deck recommendation; negative structured tool evidence is recorded when available.",
+        ),
+        "war_set_intrusion_count": _metric(
+            scope_intrusions,
+            {"<=": thresholds.max_war_set_intrusion_count},
+            scope_intrusions <= thresholds.max_war_set_intrusion_count,
+            "Non-war turns that fetched a four-deck war set anyway. The no-overlap rule makes each individual deck weaker, so an uninvited war set is a worse answer to a different question.",
         ),
         "war_set_card_uniqueness_rate": _metric(
             war_set_rate,
@@ -430,6 +468,7 @@ def run_turn(member, bucket, question, history):
             row["war_set_check"] = _war_set_check(trace)
         if bucket == "honesty":
             row["honesty_check"] = _honesty_check(row)
+        row["scope_check"] = _scope_check(row)
         return row
     trace = reset_tool_capture()
     calls = _tool_calls(trace)
@@ -448,6 +487,7 @@ def run_turn(member, bucket, question, history):
         row["war_set_check"] = _war_set_check(trace)
     if bucket == "honesty":
         row["honesty_check"] = _honesty_check(row)
+    row["scope_check"] = _scope_check(row)
     return row
 
 

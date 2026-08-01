@@ -507,6 +507,8 @@ def _execute_get_deck_recommendations(arguments):
         view=view,
         member_tag=_resolve_member_tag(member_tag),
         card=arguments.get("card"),
+        anchors=arguments.get("anchors"),
+        count=arguments.get("count"),
         limit=arguments.get("limit", 6),
     )
 
