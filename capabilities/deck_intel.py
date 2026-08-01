@@ -85,6 +85,12 @@ def _envelope(view: str, **extra: Any) -> dict[str, Any]:
 def _catalog(conn) -> dict[int, dict]:
     """The card catalog with levels already on the DISPLAY scale.
 
+    ``max_level`` is kept HERE for the gap arithmetic and is deliberately never
+    emitted: on the display scale every card in the game maxes at 16, so shipping
+    it per card is a constant dressed as data. It is also what produced "Lv15/16"
+    in front of a member — no Clash player says that. They say "level 15", or
+    "maxed", or "one off max", which is what levels_from_max carries.
+
     This is THE normalization boundary for this capability, and it is at the
     loader on purpose. API card levels are rarity-relative — a maxed epic is 11 of
     11, a maxed legendary 8 of 8, and the game shows both as 16 of 16 — so a level
@@ -400,7 +406,6 @@ def _describe(
                 "name": cat[cid]["name"],
                 "form": ("Evo" if f == 1 else "Hero") if f else "base",
                 "level": own[cid],
-                "max_level": cat[cid]["max_level"],
                 "levels_from_max": cat[cid]["max_level"] - own[cid],
                 "elixir_cost": cat[cid].get("elixir_cost"),
                 "roles": _card_roles(fact),
@@ -495,7 +500,6 @@ def _upgrades_view(conn, tag) -> dict[str, Any]:
             {
                 "card": cat[cid]["name"],
                 "level": own[cid],
-                "max_level": cat[cid]["max_level"],
                 "levels_from_max": gap,
                 "usage_share": round(share, 3),
                 "impact": round(share * gap, 3),
@@ -601,7 +605,6 @@ def _unlock_analysis(conn, cat, own, forms, tag) -> dict[str, Any]:
             {
                 "card": cat[cid]["name"],
                 "level": own[cid],
-                "max_level": cat[cid]["max_level"],
                 "levels_to_max": cat[cid]["max_level"] - own[cid],
                 "decks_opened": e["decks_opened"],
                 "archetypes_opened": len(e["archetypes"]),
@@ -957,7 +960,6 @@ def _anchored_view(conn, tag, card, limit, require=None) -> dict[str, Any]:
         member_tag=tag,
         anchor_card=cat[cid]["name"],
         anchor_level=own[cid],
-        anchor_max_level=cat[cid]["max_level"],
         buildable_decks_with_anchor=len(cands),
         required=required,
         unrecognized_requirements=unknown_props,
@@ -1082,7 +1084,6 @@ def read_deck_link(
                     "roles": _card_roles(fact),
                     "note": (fact or {}).get("note"),
                     "their_level": own.get(cid),
-                    "their_max_level": cat[cid]["max_level"] if cid in own else None,
                     "owned_by_them": cid in own if tag else None,
                     "levels_from_max": (cat[cid]["max_level"] - own[cid]) if cid in own else None,
                 }

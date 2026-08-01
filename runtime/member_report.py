@@ -964,7 +964,7 @@ def _intel_brief(ctx: dict) -> list[str]:
             "UPGRADES WORTH MAKING (ranked by how much they FIELD the card x how far "
             "it is from max; cards below the usage floor are excluded as incidental): "
             + ", ".join(
-                f"{r['card']} lvl {r['level']}/{r['max_level']} "
+                f"{r['card']} lvl {r['level']} "
                 f"({r['levels_from_max']} from max, in {_pct(r['usage_share'])}% of their decks)"
                 for r in rows[:_UPGRADE_LINES]
             )
@@ -1239,7 +1239,10 @@ def _deck_card_list(cards: list[dict]) -> str:
     for c in cards:
         form = c.get("form")
         label = c["name"] if form in (None, "base") else f"{form} {c['name']}"
-        out.append(f"**{label}** ({c['level']}/{c['max_level']})")
+        # Level alone: every card maxes at 16, so "15/16" is a constant bolted to a
+        # number and no Clash player writes it.
+        maxed = c.get("levels_from_max") == 0
+        out.append(f"**{label}** ({'maxed' if maxed else 'lvl ' + str(c['level'])})")
     return ", ".join(out)
 
 
@@ -1313,8 +1316,7 @@ def _render_deck(ctx: dict) -> str | None:
             "|---|---|---|---|",
         ]
         block += [
-            f"| {r['card']} | {r['level']}/{r['max_level']} | {r['levels_from_max']} | "
-            f"{_pct(r['usage_share'])}% |"
+            f"| {r['card']} | {r['level']} | {r['levels_from_max']} | {_pct(r['usage_share'])}% |"
             for r in rows[:_UPGRADE_LINES]
         ]
         block.append("")

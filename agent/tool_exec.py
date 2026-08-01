@@ -184,7 +184,10 @@ def _slim_card_for_llm(card):
     if not isinstance(card, dict):
         return card
     slim = {}
-    for field in ("name", "level", "maxLevel", "rarity", "elixirCost", "levels_to_max"):
+    # maxLevel is omitted: every card maxes at 16 on the display scale, so it is a
+    # constant, and printing it is how "Lv15/16" reached a member. levels_to_max
+    # carries the part that varies.
+    for field in ("name", "level", "rarity", "elixirCost", "levels_to_max"):
         value = card.get(field)
         if value is not None:
             slim[field] = value
