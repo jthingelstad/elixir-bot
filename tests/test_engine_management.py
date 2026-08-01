@@ -624,8 +624,8 @@ def test_worthiness_floor_blocks_weak_promotion(engine_conn):
 
 
 def test_inside_band_no_moves(engine_conn):
-    # 13 members, 2 elders → floor round(1.95)=2, ceil round(2.6)=3: in band.
-    for i in range(11):
+    # 10 on the roster, 2 elders → floor round(.20*10)=2, ceil round(.30*10)=3: in band.
+    for i in range(8):
         _seed_ranked(engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200)
     _seed_ranked(
         engine_conn,
@@ -698,9 +698,9 @@ def _topup_week(conn, tag, anchor_dt, war_used, war_avail, donations):
 
 
 def test_above_ceiling_demotes_lowest_participating(engine_conn):
-    # 10 members + 3 elders → N=13, ceiling round(2.6)=3. Four participating
+    # 6 members + 4 elders → roster 10, ceiling round(.30*10)=3. Four participating
     # elders is one over the ceiling → the single lowest-ranked one is demotable.
-    for i in range(10):
+    for i in range(6):
         _seed_ranked(engine_conn, f"#P{i}", war_used=6, war_avail=16, war_days=2, donations=150)
     _seed_ranked(
         engine_conn,
@@ -844,10 +844,10 @@ def test_manual_leadership_action_survives_reconciliation(engine_conn):
 
 
 def test_swap_member_outranks_elder_by_margin(engine_conn):
-    # 13 members, 2 elders (in band 2-3). A strong member clearly out-scores a
+    # roster 10, 2 elders (in band 2-3). A strong member clearly out-scores a
     # weak elder by > SWAP_MARGIN → the member is promotable, the elder demotable
     # with reason 'outranked' (a swap, count-neutral).
-    for i in range(11):
+    for i in range(7):
         _seed_ranked(engine_conn, f"#P{i}", war_used=4, war_avail=16, war_days=2, donations=100)
     # strong member: UC ranked + high war → top of the roster
     _seed_ranked(
@@ -887,8 +887,9 @@ def test_swap_member_outranks_elder_by_margin(engine_conn):
 
 
 def test_swap_deadband_blocks_hair_lead(engine_conn):
-    # A member out-scores an elder by LESS than SWAP_MARGIN → no swap (anti-flap).
-    for i in range(11):
+    # roster 10, 2 elders (in band 2-3). A member out-scores an elder by LESS
+    # than SWAP_MARGIN → no swap (anti-flap).
+    for i in range(7):
         _seed_ranked(engine_conn, f"#P{i}", war_used=4, war_avail=16, war_days=2, donations=100)
     # near-tie: member and elder with almost identical output
     _seed_ranked(engine_conn, "#NEAR_M", war_used=12, war_avail=16, war_days=3, donations=300)
