@@ -513,6 +513,16 @@ def _execute_get_deck_recommendations(arguments):
     )
 
 
+def _execute_read_deck_link(arguments):
+    """Resolve a deck-share link a member pasted into chat."""
+    return deck_reco_capability.read_deck_link(
+        link=arguments.get("link"),
+        member_tag=(
+            _resolve_member_tag(arguments["member_tag"]) if arguments.get("member_tag") else None
+        ),
+    )
+
+
 def _execute_get_battle_intelligence(arguments):
     """Computed battle intelligence (Feature 1). Reads the enriched tables the
     Stage-A worker fills; member_tag is required only for the per-member views."""
@@ -1746,6 +1756,7 @@ ADVERTISED_TOOL_EXECUTOR_NAMES = frozenset(
         "get_elixir_state",
         "get_deck_intelligence",
         "get_deck_recommendations",
+        "read_deck_link",
         "get_battle_intelligence",
         "lookup_cards",
         "get_member_cards",
@@ -1814,6 +1825,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_deck_intelligence(arguments, workflow=workflow)
         elif name == "get_deck_recommendations":
             result = _execute_get_deck_recommendations(arguments)
+        elif name == "read_deck_link":
+            result = _execute_read_deck_link(arguments)
         elif name == "get_battle_intelligence":
             result = _execute_get_battle_intelligence(arguments)
         elif name == "lookup_cards":

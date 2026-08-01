@@ -37,7 +37,7 @@ import sqlite3
 from typing import Any, Optional
 
 import db as db_facade
-from engine import card_roles
+from engine import card_roles, deck_links
 
 CAPABILITY_ID = "deck_recommendations"
 CONTRACT_VERSION = 1
@@ -275,6 +275,12 @@ def _describe(
             }
             for (cid, f), fact in zip(d["cards"], deck_facts, strict=True)
         ],
+        # A tappable link beats eight card names the member has to find by hand. It
+        # carries base cards only — the game's own share format cannot express Evo or
+        # Hero form — so `link_omits_forms` tells the caller when the deck it is
+        # describing depends on a form the link will silently drop.
+        "copy_link": deck_links.build_deck_link(cid for cid, _ in d["cards"]),
+        "link_omits_forms": [cat[cid]["name"] for cid, form in d["cards"] if form and cid in cat],
         "fielded_by_members": fielded.get(d["deck_hash"], 0),
         "you_play_this": d["deck_hash"] in played,
         # Exact-hash novelty answers the wrong question. A member was told he had
@@ -721,6 +727,83 @@ def get_deck_recommendations(
         if view == "anchored":
             return _anchored_view(conn, tag, card, limit)
         return _discover_view(conn, tag, limit)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+# ── inbound: a deck the member pasted ────────────────────────────────────────
+def read_deck_link(
+    *,
+    link: Optional[str] = None,
+    member_tag: Optional[str] = None,
+    source: Any = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
+    """Resolve a deck a member pasted into the same read a suggestion gets.
+
+    The other half of the share loop: Elixir hands out links, so members will hand
+    them back, and "here's my deck" should not require typing eight card names.
+    Deliberately the SAME role_coverage the recommendation views return, so a deck
+    the member brought and a deck Elixir proposed are analysed by one code path and
+    describe themselves in the same vocabulary.
+
+    Card levels are filled in when ``member_tag`` is given and the member owns the
+    card; a pasted deck may well be someone else's, so an unowned card is reported
+    as unowned rather than as a gap in their collection.
+    """
+    parsed = deck_links.parse_deck_link(link)
+    if not parsed:
+        return _envelope("pasted_deck", available=False, error="no_deck_link_found")
+    own_conn = conn is None
+    if conn is None:
+        provider = source or db_facade
+        conn = provider.get_connection()
+    try:
+        conn.row_factory = sqlite3.Row
+        cat = _catalog(conn)
+        facts = _card_facts(conn, cat)
+        unknown = [cid for cid in parsed["card_ids"] if cid not in cat]
+        if unknown:
+            return _envelope(
+                "pasted_deck", available=False, error="unknown_card_ids", card_ids=unknown
+            )
+        tag = _tag(member_tag) if member_tag else None
+        own = _collection(conn, tag) if tag else {}
+        pairs = [(cid, 0) for cid in parsed["card_ids"]]
+        deck_facts = _facts_for(pairs, facts)
+        elixirs = [cat[cid].get("elixir_cost") or 0 for cid in parsed["card_ids"]]
+        avg_elixir = round(sum(elixirs) / len(elixirs), 2) if all(elixirs) else None
+        coverage = card_roles.deck_role_coverage(deck_facts, family=None, avg_elixir=avg_elixir)
+        tt = parsed["tower_troop_id"]
+        return _envelope(
+            "pasted_deck",
+            available=True,
+            member_tag=tag,
+            avg_elixir=avg_elixir,
+            role_coverage=coverage,
+            tower_troop=(cat.get(tt) or {}).get("name") if tt else None,
+            shared_by_tag=parsed["shared_by_tag"],
+            cards=[
+                {
+                    "name": cat[cid]["name"],
+                    "elixir_cost": cat[cid].get("elixir_cost"),
+                    "rarity": cat[cid].get("rarity"),
+                    "roles": _card_roles(fact),
+                    "note": (fact or {}).get("note"),
+                    "their_level": own.get(cid),
+                    "owned_by_them": cid in own if tag else None,
+                    "levels_from_max": (cat[cid]["max_level"] - own[cid]) if cid in own else None,
+                }
+                for cid, fact in zip(parsed["card_ids"], deck_facts, strict=True)
+            ],
+            note=(
+                "Read from a Clash Royale share link. The link format carries BASE CARDS "
+                "ONLY — it cannot express Evolution or Hero forms, so do not state which "
+                "cards are evolved and ask if it matters. Card levels shown are this "
+                "member's own; a pasted deck may belong to someone else."
+            ),
+        )
     finally:
         if own_conn:
             conn.close()
