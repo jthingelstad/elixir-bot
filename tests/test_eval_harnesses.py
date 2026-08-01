@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 
@@ -40,6 +41,8 @@ def _seed_eval_fixture_db(path):
             "INSERT INTO players "
             "(player_tag, current_name, first_seen_at, last_seen_at) VALUES "
             "('#AAA111', 'Eval Alice', '2026-06-25T17:00:00Z', "
+            "'2026-06-25T17:00:00Z'), "
+            "('#KNOWN333', 'Observed Opponent', '2026-06-25T17:00:00Z', "
             "'2026-06-25T17:00:00Z')"
         )
         conn.execute(
@@ -51,7 +54,9 @@ def _seed_eval_fixture_db(path):
             "INSERT INTO battle_events "
             "(dedup_key, player_tag, battle_time, observed_at, opponent_tag) "
             "VALUES ('eval-battle', '#AAA111', '20260625T170000.000Z', "
-            "'2026-06-25T17:00:00Z', '#OPP222')"
+            "'2026-06-25T17:00:00Z', '#OPP222'), "
+            "('known-opponent', '#AAA111', '20260625T180000.000Z', "
+            "'2026-06-25T18:00:00Z', '#known333')"
         )
         conn.commit()
     finally:
@@ -233,6 +238,84 @@ def test_eval_all_requests_samples_from_canonical_db_path(tmp_path, monkeypatch)
     assert fixtures["external_clan_tags"] == [("Outside Clan", "#EXT999")]
     assert fixtures["external_player_tags"] == [("#OPP222", "#OPP222")]
     assert clan["members"] == [{"tag": "#AAA111", "name": "Eval Alice"}]
+
+
+def test_eval_all_requests_does_not_resolve_unknown_explicit_tag_to_member(tmp_path, monkeypatch):
+    from scripts import eval_all_requests
+
+    db_path = tmp_path / "elixir-v5-fixture.db"
+    _seed_eval_fixture_db(db_path)
+    monkeypatch.setenv("ELIXIR_DB_PATH", str(db_path))
+
+    assert (
+        eval_all_requests._resolve_target_member(
+            "show me the deck for #8RC82LUC0", {"target_member": "other"}
+        )
+        is None
+    )
+    matched = eval_all_requests._resolve_target_member(
+        "show me #aaa111's deck", {"target_member": "other"}
+    )
+    assert matched["player_tag"] == "#AAA111"
+
+
+def test_eval_all_requests_cli_replays_saved_corpus(tmp_path, monkeypatch):
+    from scripts import eval_all_requests
+
+    corpus_path = tmp_path / "requests.json"
+    result_path = tmp_path / "results.json"
+    requests = [
+        {"round": 1, "bucket": "regular", "question": "How is our clan?"},
+        {"round": 2, "bucket": "cr_api", "question": "Scout #8RC82LUC0"},
+    ]
+    eval_all_requests.save_request_corpus(corpus_path, requests)
+
+    seen = []
+
+    def fake_run_request(request, _clan, _war):
+        seen.append(dict(request))
+        return {
+            "bucket": request["bucket"],
+            "question": request["question"],
+            "route": "llm_chat",
+            "tool_calls": [],
+        }
+
+    monkeypatch.setenv("CLAUDE_API_KEY", "test-key")
+    monkeypatch.setattr(eval_all_requests, "install_tool_capture", lambda: None)
+    monkeypatch.setattr(eval_all_requests, "_fake_clan_ctx", lambda: ({}, {}))
+    monkeypatch.setattr(eval_all_requests, "run_request", fake_run_request)
+    monkeypatch.setattr(
+        eval_all_requests,
+        "sample_real_tags",
+        lambda: (_ for _ in ()).throw(AssertionError("replay sampled new fixtures")),
+    )
+    monkeypatch.setattr(
+        eval_all_requests,
+        "generate_requests",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("replay generated new questions")
+        ),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "eval_all_requests.py",
+            "--corpus",
+            str(corpus_path),
+            "--out",
+            str(result_path),
+        ],
+    )
+
+    eval_all_requests.main()
+
+    assert seen == requests
+    results = json.loads(result_path.read_text())
+    assert [(row["round"], row["question"]) for row in results] == [
+        (1, "How is our clan?"),
+        (2, "Scout #8RC82LUC0"),
+    ]
 
 
 def test_eval_card_conversations_builds_context_from_canonical_db_path(tmp_path, monkeypatch):
