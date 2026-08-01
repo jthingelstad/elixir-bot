@@ -259,7 +259,7 @@ def test_the_retired_prose_layer_left_nothing_behind(tmp_path):
     assert columns.isdisjoint({"expected_advantage", "performance"})
     assert columns.isdisjoint({"air_matchup", "wincon_pressure", "spell_bait_exposed"})
 
-    battle = get_battle_intelligence(view="battle", member_tag="#M", conn=conn)["battles"][0]
+    battle = get_battle_intelligence(view="battle", member_tag="#M", conn=conn)["recent_battles"][0]
     assert not ({"commentary", "vs_expectation", "expected_advantage", "notable"} & set(battle))
 
 

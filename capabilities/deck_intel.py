@@ -399,7 +399,10 @@ def _describe(
         "family": d["family"],
         "avg_elixir": d["avg_elixir"],
         "levels_from_max": d["levels_from_max"],
-        "air_answers": d["air_answers"],
+        # No scalar air_answers here: role_coverage carries the same fact under the
+        # same name with more in it, and two fields of one name in one object is
+        # exactly the ambiguity that put "display Lv15/16, normalized 10/11" in
+        # front of a member.
         "role_coverage": coverage,
         "cards": [
             {
@@ -706,7 +709,7 @@ def _discover_view(conn, tag, limit) -> dict[str, Any]:
         suggestions=picks,
         meta_snapshot=meta[:8],
         meta_snapshot_available=bool(meta),
-        evidence_limits=(
+        note=(
             "Ranked by level readiness and structural soundness, NOT by win rate: clan "
             "deck win rates are skill-confounded and do not transfer between members. "
             "fielded_by_members is context, not a quality claim. Decks nobody here plays "
