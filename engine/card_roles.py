@@ -418,7 +418,10 @@ def decisive_factor(
     battles (53.6% baseline). Nothing else is accepted: air coverage, opponent
     defense and archetype matchup were all tried, all measured, and all cut.
 
-        card_levels   level_gap -3 -> 48.7%, +2 -> 61.4%, +4 -> 71.1% (monotonic)
+        card_levels   level_gap -2 -> 10.2%, 0 -> 53.0%, +2 -> 80.0% (monotonic,
+                      n=9,492; restated 2026-08-01 once level_gap stopped
+                      averaging rarity-relative levels — the old rarity-naive
+                      figures spanned only 48.7%-71.1%)
         elixir_mgmt   |delta| >= 3.5 splits 41.1% / 65.1%
         coin_flip     closeness band 3 is the measured toss-up
         (dropped)     opponent defense 4..8 -> 52.7/53.1/53.7/52.8/53.7%, flat
