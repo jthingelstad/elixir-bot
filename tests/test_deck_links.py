@@ -93,3 +93,21 @@ def test_a_bad_deck_size_generates_nothing():
 def test_looks_like_a_deck_link_is_the_routing_precheck():
     assert looks_like_a_deck_link(REAL) is True
     assert looks_like_a_deck_link("what should I upgrade next?") is False
+
+
+def test_slot_hungry_cards_are_listed_first():
+    """A deck copied with a Champion sixth in the list arrived with only seven
+    cards. The game equips evolutions the player owns as it walks the deck, and by
+    the time it reached the Champion there was no slot left. Cards that need one of
+    the three special slots now claim their seats first."""
+    link = build_deck_link(CARDS, slot_first=[CARDS[5], CARDS[7]])
+    ids = [int(x) for x in link.split("?deck=")[1].split("&")[0].split(";")]
+    assert ids[:2] == [CARDS[5], CARDS[7]]
+    assert sorted(ids) == sorted(CARDS), "reordering must never change the deck"
+    assert len(ids) == 8
+
+
+def test_ordering_is_untouched_when_nothing_needs_a_slot():
+    link = build_deck_link(CARDS)
+    ids = [int(x) for x in link.split("?deck=")[1].split("&")[0].split(";")]
+    assert ids == CARDS

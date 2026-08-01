@@ -64,6 +64,7 @@ def build_deck_link(
     card_ids: Iterable[int],
     *,
     tower_troop_id: Optional[int] = None,
+    slot_first: Iterable[int] = (),
 ) -> Optional[str]:
     """A shareable link for these eight cards, or ``None`` if that is not 8 ids.
 
@@ -81,6 +82,15 @@ def build_deck_link(
     ids = [int(c) for c in card_ids]
     if len(ids) != DECK_SIZE or any(c <= 0 for c in ids):
         return None
+    # Cards that need one of the three special slots (Evo / Hero / Wild) go FIRST.
+    # A deck copied with a Champion sixth in the list came through with only seven
+    # cards: the game equips evolutions for cards the player owns as it walks the
+    # list, and by the time it reached the Champion there was no slot left for it.
+    # Ordering the slot-hungry cards to the front means they claim their seats
+    # before an auto-equipped evolution can take one. Order is otherwise preserved.
+    priority = {int(c) for c in slot_first}
+    if priority:
+        ids = [c for c in ids if c in priority] + [c for c in ids if c not in priority]
     link = f"{_SHARE_BASE}?deck={';'.join(str(c) for c in ids)}"
     link += "&slots=" + ";".join(["0"] * DECK_SIZE)
     link += f"&tt={int(tower_troop_id or DEFAULT_TOWER_TROOP)}"
