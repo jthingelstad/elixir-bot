@@ -158,6 +158,25 @@ def _card_facts(conn, cat: dict) -> dict[tuple[int, int], dict]:
     return out
 
 
+def _champion_ids(conn) -> frozenset:
+    """Cards that consume a Hero-type slot at base form.
+
+    A Champion carries evolution_level 0, so counting only Evo/Hero forms misses
+    it — and it still needs one of the three slots. Verified against 13,000+ real
+    8-card decks: evo/hero forms PLUS champions never exceeds 3 in a deck anyone
+    actually played (1+2, 2+1 and 3+0 all appear; nothing sums to 4).
+    """
+    try:
+        return frozenset(
+            r[0]
+            for r in conn.execute(
+                "SELECT card_id FROM card_facts WHERE role = 'champion' AND evolution_level = 0"
+            )
+        )
+    except sqlite3.OperationalError:  # hygiene: absent table is a state, not an outage
+        return frozenset()
+
+
 def _facts_for(deck_cards, facts: dict) -> list[Optional[dict]]:
     """Facts for a deck's 8 (card_id, form) pairs, falling back to the base form.
 
@@ -251,10 +270,11 @@ def _meets(deck, facts: dict, required: list[str]) -> bool:
     return all(card_roles.deck_has_property(deck_facts, p) for p in required)
 
 
-def _candidates(conn, cat, own, forms, *, require_structure=True) -> list[dict]:
+def _candidates(conn, cat, own, forms, *, require_structure=True) -> list[dict]:  # noqa: C901
     """Every buildable deck: owns all 8 cards, owns each required Evo/Hero form, and
     (optionally) clears the structural floor. ``from_max`` is the rarity-independent
     readiness measure — the only cross-rarity-comparable level quantity."""
+    champions = _champion_ids(conn)
     out = []
     for r in conn.execute(
         "SELECT deck_hash, archetype, family, avg_elixir, cards_json, air_answer_count, "
@@ -283,7 +303,8 @@ def _candidates(conn, cat, own, forms, *, require_structure=True) -> list[dict]:
         # Slot legality (Evo + Hero + Wild = 3). Every profiled deck was observed in a
         # real battle so this cannot fire today; it exists so that a deck assembled by
         # any future code path can never be recommended in an unfieldable shape.
-        if sum(1 for _, f in pairs if f) > card_roles.MAX_SPECIAL_SLOTS:
+        # Evo/Hero forms AND champions both draw on the same three slots.
+        if sum(1 for cid, f in pairs if f or cid in champions) > card_roles.MAX_SPECIAL_SLOTS:
             continue
         gaps = [cat[cid]["max_level"] - own[cid] for cid, _ in pairs]
         out.append(
@@ -314,6 +335,8 @@ def _describe(
     facts: dict,
     played_archetypes: frozenset = frozenset(),
     tower_troop: Optional[int] = None,
+    forms_owned: Optional[dict] = None,
+    champions: frozenset = frozenset(),
 ) -> dict:
     """One deck, with the reason each card is in it.
 
@@ -322,6 +345,18 @@ def _describe(
     model to narrate deck construction from its own memory — ungrounded, and it
     taught the player nothing they could reuse.
     """
+    # Slot pressure. The three special slots are claimed by Evo/Hero forms AND by
+    # Champions, and the game equips evolutions for cards the player owns as it
+    # reads a pasted deck. A deck already using all three slots, which also
+    # contains another card this member owns an evolution for, can therefore
+    # arrive one card short — the game runs out of slots and silently drops one.
+    # Confirmed live: a Champion sixth in the list came through as an empty slot.
+    slot_users = [cid for cid, form in d["cards"] if form or cid in champions]
+    auto_evo_risk = [
+        cat[cid]["name"]
+        for cid, form in d["cards"]
+        if not form and cid not in champions and (forms_owned or {}).get(cid, 0) > 0
+    ]
     deck_facts = _facts_for(d["cards"], facts)
     coverage = card_roles.deck_role_coverage(
         deck_facts, family=d["family"], avg_elixir=d["avg_elixir"]
@@ -351,9 +386,22 @@ def _describe(
         # Hero form — so `link_omits_forms` tells the caller when the deck it is
         # describing depends on a form the link will silently drop.
         "copy_link": deck_links.build_deck_link(
-            (cid for cid, _ in d["cards"]), tower_troop_id=tower_troop
+            (cid for cid, _ in d["cards"]),
+            tower_troop_id=tower_troop,
+            slot_first=[
+                cid
+                for cid, form in d["cards"]
+                if form or (facts.get((cid, 0)) or {}).get("role") == "champion"
+            ],
         ),
         "link_omits_forms": [cat[cid]["name"] for cid, form in d["cards"] if form and cid in cat],
+        "slots_used": len(slot_users),
+        # Non-empty means the paste may arrive a card SHORT: all three slots are
+        # already spoken for and the game may still auto-equip an evolution for one
+        # of these, leaving nothing for the last slot-hungry card in the list.
+        "link_slot_risk": (
+            auto_evo_risk if len(slot_users) >= card_roles.MAX_SPECIAL_SLOTS else []
+        ),
         "fielded_by_members": fielded.get(d["deck_hash"], 0),
         "you_play_this": d["deck_hash"] in played,
         # Exact-hash novelty answers the wrong question. A member was told he had
@@ -602,6 +650,7 @@ def _discover_view(conn, tag, limit) -> dict[str, Any]:
     facts = _card_facts(conn, cat)
     played_arch = _played_archetypes(conn, tag)
     tower = _tower_troop(conn, tag)
+    champs = _champion_ids(conn)
     cands = _candidates(conn, cat, own, forms)
 
     # One deck per archetype: a list of 8 near-identical lists is not a set of options.
@@ -611,7 +660,9 @@ def _discover_view(conn, tag, limit) -> dict[str, Any]:
         if d["deck_hash"] in played or d["family"] in seen:
             continue
         seen.add(d["family"])
-        picks.append(_describe(d, cat, own, fielded, played, facts, played_arch, tower))
+        picks.append(
+            _describe(d, cat, own, fielded, played, facts, played_arch, tower, forms, champs)
+        )
         if len(picks) >= max(1, min(int(limit or 6), 12)):
             break
     meta = _meta_overlay(conn, cat, own, forms)
@@ -715,6 +766,7 @@ def _build_view(conn, tag, anchors, count, require=None) -> dict[str, Any]:
     facts = _card_facts(conn, cat)
     played_arch = _played_archetypes(conn, tag)
     tower = _tower_troop(conn, tag)
+    champs = _champion_ids(conn)
     cands = _candidates(conn, cat, own, forms)
     if not cands:
         return _envelope(
@@ -752,7 +804,7 @@ def _build_view(conn, tag, anchors, count, require=None) -> dict[str, Any]:
             continue
         used_hashes.add(best["deck_hash"])
         picks.append(
-            _describe(best, cat, own, fielded, played, facts, played_arch, tower)
+            _describe(best, cat, own, fielded, played, facts, played_arch, tower, forms, champs)
             | {"anchor_card": cat[cid]["name"]}
         )
     # Only fill past the anchors when MORE decks were asked for than cards named.
@@ -764,7 +816,9 @@ def _build_view(conn, tag, anchors, count, require=None) -> dict[str, Any]:
             continue
         used_hashes.add(d["deck_hash"])
         seen_fams.add(d["family"])
-        picks.append(_describe(d, cat, own, fielded, played, facts, played_arch, tower))
+        picks.append(
+            _describe(d, cat, own, fielded, played, facts, played_arch, tower, forms, champs)
+        )
     field = _threat_profile(conn, tag)
     return _envelope(
         "build",
@@ -800,6 +854,7 @@ def _war_set_view(conn, tag) -> dict[str, Any]:
     facts = _card_facts(conn, cat)
     played_arch = _played_archetypes(conn, tag)
     tower = _tower_troop(conn, tag)
+    champs = _champion_ids(conn)
     cands = _candidates(conn, cat, own, forms)
     picks = _pick_disjoint(cands, _WAR_DECKS, played=frozenset(played))
     if len(picks) < _WAR_DECKS:
@@ -816,7 +871,10 @@ def _war_set_view(conn, tag) -> dict[str, Any]:
         "war_set",
         available=True,
         member_tag=tag,
-        decks=[_describe(d, cat, own, fielded, played, facts, played_arch, tower) for d in picks],
+        decks=[
+            _describe(d, cat, own, fielded, played, facts, played_arch, tower, forms, champs)
+            for d in picks
+        ],
         distinct_cards=len(cards),
         worst_deck_from_max=max(p["levels_from_max"] for p in picks),
         buildable_deck_count=len(cands),
@@ -848,6 +906,7 @@ def _anchored_view(conn, tag, card, limit, require=None) -> dict[str, Any]:
     facts = _card_facts(conn, cat)
     played_arch = _played_archetypes(conn, tag)
     tower = _tower_troop(conn, tag)
+    champs = _champion_ids(conn)
     required, unknown_props = _requirements(require)
     cands = [d for d in _candidates(conn, cat, own, forms) if cid in d["card_ids"]]
     narrowed = [d for d in cands if _meets(d, facts, required)] if required else cands
@@ -860,7 +919,9 @@ def _anchored_view(conn, tag, card, limit, require=None) -> dict[str, Any]:
         if d["family"] in seen and len(seen) >= 3:
             continue
         seen.add(d["family"])
-        picks.append(_describe(d, cat, own, fielded, played, facts, played_arch, tower))
+        picks.append(
+            _describe(d, cat, own, fielded, played, facts, played_arch, tower, forms, champs)
+        )
         if len(picks) >= max(1, min(int(limit or 5), 10)):
             break
     return _envelope(

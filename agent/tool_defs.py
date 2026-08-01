@@ -66,7 +66,14 @@ TOOLS = [
             "signal: same archetype, different eight cards.\n\n"
             "Each deck's 'copy_link' loads it into the game — give the raw URL. When "
             "'link_omits_forms' is non-empty, name those cards and say the link brings them "
-            "in as base cards, because the share format cannot carry Evo or Hero."
+            "in as base cards, because the share format cannot carry Evo or Hero.\n\n"
+            "When 'link_slot_risk' is non-empty the paste may arrive ONE CARD SHORT. All "
+            "three special slots (Evo / Hero / Wild) are already spoken for, and the game "
+            "auto-equips evolutions the player owns as it reads the deck — so an "
+            "evolution for one of the named cards can take the last slot and leave a gap. "
+            "Tell them to check the deck after pasting and un-equip that evolution if a "
+            "card is missing. This is observed behaviour, not a guess: a Champion came "
+            "through as an empty slot exactly this way."
         ),
         "input_schema": {
             "type": "object",

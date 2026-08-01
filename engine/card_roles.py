@@ -166,10 +166,12 @@ def deck_facts(facts: Iterable[dict]) -> dict:
 
 # One Evolution slot + one Hero slot + one Wild slot (Evo OR Hero OR Champion) since
 # the March 2026 update. Verified first-party against 13,701 real 8-card decks played
-# in July 2026: the special-form count is 0, 1, 2, or 3 and NEVER 4+. Every deck we
-# profile is one somebody actually played, so nothing violates this today — but the
-# invariant lives nowhere else, and the first deck built combinatorially rather than
-# observed would be unfieldable with no test to catch it.
+# in July 2026: the count is 0-3 and NEVER 4+.
+#
+# CHAMPIONS COUNT. A Champion sits at evolution_level 0, so tallying only Evo/Hero
+# forms misses it while the game still charges it a slot — and the same 13,000-deck
+# sweep confirms it: evo/hero forms PLUS champions reaches 3 (as 1+2, 2+1 and 3+0)
+# and never 4. Counting forms alone would pass a deck the game cannot field.
 MAX_SPECIAL_SLOTS = 3
 
 # Guides converge on 2-3 air answers, with an explicit exemption for very cheap cycle

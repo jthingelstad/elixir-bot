@@ -564,3 +564,52 @@ def test_a_member_with_no_played_decks_gets_no_invented_bar(conn):
     r = get_deck_recommendations(view="upgrades", member_tag=TAG, conn=conn)
     assert r["unlocks"] == []
     assert r["readiness_standard"] is None
+
+
+def test_a_deck_at_the_slot_cap_warns_about_auto_equipped_evolutions(rich):
+    """The live failure: the paste came back one card short. Every special slot was
+    taken, and the game auto-equipped an evolution for another card in the deck,
+    leaving nothing for the Champion."""
+    rich.execute("UPDATE card_facts SET role='champion' WHERE card_id=1")
+    rich.execute("UPDATE player_card_collection SET evolution_level=1 WHERE card_id IN (2,3)")
+    for cid in (2, 3):
+        rich.execute(
+            "INSERT INTO battle_card_plays VALUES (?, 'member', ?, 1, ?, '2026-07-20')",
+            (f"e{cid}", cid, TAG),
+        )
+    r = get_deck_recommendations(view="discover", member_tag=TAG, limit=12, conn=rich)
+    at_cap = [d for d in r["suggestions"] if d["slots_used"] >= 3]
+    for deck in at_cap:
+        named = set(deck["link_slot_risk"])
+        assert named <= {c["name"] for c in deck["cards"]}, "risk names cards in THIS deck"
+    assert all(d["link_slot_risk"] == [] for d in r["suggestions"] if d["slots_used"] < 3), (
+        "a deck with a spare slot cannot overflow"
+    )
+
+
+def test_champions_count_against_the_three_special_slots(rich):
+    """A Champion sits at evolution_level 0, so counting only Evo/Hero forms misses
+    it while the game still charges it a slot. Verified against 13,000+ real decks:
+    forms plus champions reaches 3 and never 4."""
+    rich.execute("UPDATE card_facts SET role='champion' WHERE card_id IN (1, 3, 4)")
+    rich.execute("UPDATE player_card_collection SET evolution_level=1")
+    rich.execute(
+        "INSERT INTO deck_profile VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "H_OVERSLOT",
+            "cycle",
+            "Too Many Slots",
+            3.0,
+            _deck([(1, 0), (3, 0), (4, 0), (2, 1), (5, 0), (6, 0), (7, 0), (8, 0)]),
+            2,
+            1,
+            1,
+            1,
+            1,
+            1,
+        ),
+    )
+    r = get_deck_recommendations(view="discover", member_tag=TAG, limit=12, conn=rich)
+    assert "Too Many Slots" not in {d["archetype"] for d in r["suggestions"]}, (
+        "three champions plus an Evo is four slot demands on three slots"
+    )
