@@ -2118,3 +2118,33 @@ def test_execute_tool_update_member_note():
         )
         assert result["success"] is True
         mock_db.set_member_note.assert_called_once_with("#ABC123", name=None, note="War Machine")
+
+
+def test_no_card_tool_hands_the_model_the_api_level_scale():
+    """The leak that produced "display Lv15/16, normalized 10/11" in front of a
+    member. _slim_card_for_llm has always dropped api_level/api_max_level, but it
+    was only ever wired to get_member's current deck — the card tool itself never
+    called it, so every card it returned carried both scales. The model read them
+    as two meaningful numbers and invented an authority for the internal one.
+
+    Asserted on the scrubber directly so it holds for any shape a tool returns."""
+    from agent.tool_exec import _scrub_api_scale
+
+    payload = {
+        "cards": [
+            {
+                "name": "Wall Breakers",
+                "level": 15,
+                "maxLevel": 16,
+                "api_level": 10,
+                "api_max_level": 11,
+            }
+        ],
+        "nested": {"deep": [{"api_level": 3, "level": 11}]},
+    }
+    clean = _scrub_api_scale(payload)
+    blob = json.dumps(clean)
+    assert "api_level" not in blob and "api_max_level" not in blob
+    assert clean["cards"][0]["level"] == 15, "the number the player sees survives"
+    assert clean["cards"][0]["maxLevel"] == 16
+    assert clean["nested"]["deep"][0]["level"] == 11, "scrubbing is recursive, not top-level"

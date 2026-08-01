@@ -208,6 +208,32 @@ def _slim_card_list(cards):
     return [_slim_card_for_llm(card) for card in cards]
 
 
+# The API's rarity-relative scale. Internal only: a maxed epic is 11 of 11 there
+# and 16 of 16 on the player's screen, and the player has never seen the former.
+_API_SCALE_FIELDS = ("api_level", "api_max_level")
+
+
+def _scrub_api_scale(value):
+    """Remove the rarity-relative level fields from anything bound for the model.
+
+    _slim_card_for_llm has always dropped these, but it was only ever wired to
+    get_member's current deck — the card tool itself never called it, so every
+    card it returned carried api_level/api_max_level beside the display values.
+    The model read the pair as two meaningful scales and told a member his Wall
+    Breakers were "display Lv15/16, normalized 10/11", then invented an authority
+    for it ("the normalized level Supercell uses to compare across rarities").
+    His Wall Breakers are level 15. There is one number and the player knows it.
+
+    Recursive rather than field-by-field on purpose: the leak happened because a
+    projection had to be remembered at each call site, and one was not.
+    """
+    if isinstance(value, dict):
+        return {k: _scrub_api_scale(v) for k, v in value.items() if k not in _API_SCALE_FIELDS}
+    if isinstance(value, list):
+        return [_scrub_api_scale(v) for v in value]
+    return value
+
+
 def _enrich_war_player_type(result, tag):
     """Add war_player_type classification to a result dict by player tag."""
     from db import get_connection
@@ -467,7 +493,7 @@ def _execute_get_member(arguments, workflow=None):
     if "awards" in include:
         result["awards"] = member_read.get("awards")
 
-    return result
+    return _scrub_api_scale(result)
 
 
 def _execute_get_deck_intelligence(arguments, workflow=None):
@@ -571,7 +597,7 @@ def _execute_get_member_cards(arguments):
             limit=arguments.get("limit", 20),
         )
         _annotate_roster_status(result, member_tag)
-        return result
+        return _scrub_api_scale(result)
 
     _refresh_member_cache(member_tag, include_battles=False)
     result = db.get_member_card_profile(member_tag)
@@ -588,7 +614,7 @@ def _execute_get_member_cards(arguments):
             "card-cost table, not live game state; treat them as close "
             "estimates, and gold to actually upgrade is unknown."
         )
-    return result
+    return _scrub_api_scale(result)
 
 
 def _execute_get_awards(arguments):
