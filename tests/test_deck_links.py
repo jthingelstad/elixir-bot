@@ -72,7 +72,10 @@ def test_generated_links_match_the_shape_a_real_client_emits():
     link = build_deck_link(CARDS)
     assert link.startswith("https://link.clashroyale.com/en?clashroyale://copyDeck?deck=")
     assert "&slots=0;0;0;0;0;0;0;0" in link
-    assert "&tt=" not in link, "no tower troop was given; do not invent one"
+    # tt is ALWAYS emitted. Links without it arrived intact and did nothing when
+    # tapped: a tower troop is part of a deck, so an 8-card payload without one is
+    # an incomplete deck. Tower Princess is the fallback every account owns.
+    assert "&tt=159000000" in link
 
 
 def test_we_never_claim_to_be_the_sharer():

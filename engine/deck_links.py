@@ -53,6 +53,13 @@ _TT_RE = re.compile(r"[?&]tt=([0-9]+)")
 _ID_RE = re.compile(r"[?&]id=([0-9A-Za-z]+)")
 
 
+# Every account has Tower Princess, so it is the safe stand-in when we do not know
+# which tower troop a member runs. It is a fallback, never a preference: 21 members
+# run Dagger Duchess, Cannoneer or Royal Chef, and handing one of them a Tower
+# Princess link silently changes their deck.
+DEFAULT_TOWER_TROOP = 159000000
+
+
 def build_deck_link(
     card_ids: Iterable[int],
     *,
@@ -60,18 +67,23 @@ def build_deck_link(
 ) -> Optional[str]:
     """A shareable link for these eight cards, or ``None`` if that is not 8 ids.
 
+    ``tt`` is ALWAYS emitted. Links generated without it reached members intact and
+    then did nothing when tapped, and a tower troop is part of a deck in 2026 — an
+    eight-card payload with no tower troop is an incomplete deck, so the client
+    appears to reject it. Both real client links captured from the game carry it.
+
     ``slots`` is emitted as all zeros because that is the only value ever observed
     and its meaning is not established; it is NOT a place to smuggle Evo/Hero forms.
     ``id`` is deliberately omitted — it identifies the human doing the sharing, and
-    Elixir is not one.
+    Elixir is not one. If a link with ``tt`` still fails to open, ``id`` is the only
+    remaining difference from a known-good payload.
     """
     ids = [int(c) for c in card_ids]
     if len(ids) != DECK_SIZE or any(c <= 0 for c in ids):
         return None
     link = f"{_SHARE_BASE}?deck={';'.join(str(c) for c in ids)}"
     link += "&slots=" + ";".join(["0"] * DECK_SIZE)
-    if tower_troop_id:
-        link += f"&tt={int(tower_troop_id)}"
+    link += f"&tt={int(tower_troop_id or DEFAULT_TOWER_TROOP)}"
     return link
 
 

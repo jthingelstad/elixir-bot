@@ -305,8 +305,16 @@ def _deck_card_facts(conn, deck_hash: str, facts: dict) -> list[dict]:
     return out
 
 
-def _fill_deck_facts(conn) -> int:
-    """Compute each deck's completeness counts from its cards' enriched facts."""
+def _fill_deck_facts(conn, *, restate: bool = False) -> int:
+    """Compute each deck's completeness counts from its cards' enriched facts.
+
+    ``restate`` recomputes every profiled deck rather than only the incomplete ones,
+    and is what a ROLE DEFINITION change needs. The counts are a snapshot of rules
+    that do change: is_air_answer was fixed on 2026-08-01 after big spells were
+    found to be counted as air answers on 10% of the corpus, and without a restate
+    those decks would have carried the inflated count forever behind their own
+    facts_complete=1 stamp. The same trap as the expected_advantage IS NULL guard.
+    """
     from engine.card_roles import deck_facts
 
     facts = _card_facts_map(conn)
@@ -318,7 +326,9 @@ def _fill_deck_facts(conn) -> int:
     # this it would keep those wrong counts forever, because its own `facts_complete=0`
     # stamp excluded it from the next pass.
     rows = conn.execute(
-        "SELECT deck_hash FROM deck_profile WHERE facts_complete IS NULL OR facts_complete = 0"
+        "SELECT deck_hash FROM deck_profile"
+        if restate
+        else "SELECT deck_hash FROM deck_profile WHERE facts_complete IS NULL OR facts_complete = 0"
     ).fetchall()
     for r in rows:
         card_facts = _deck_card_facts(conn, r["deck_hash"], facts)
@@ -418,13 +428,14 @@ def _fill_battle_tags(conn, limit: Optional[int] = 5000, force: bool = False) ->
 @managed_connection
 def rebuild_interpreted(*, force: bool = False, conn: Optional[sqlite3.Connection] = None) -> dict:
     """v2 Layers 2-3 (all $0): deck facts from enriched card facts, then per-battle
-    structural tags. Safe to re-run; only fills what is missing.
+    structural tags. Safe to re-run; fills what is missing, and with ``force`` also
+    RESTATES what is already there — which is what a role-definition change needs.
 
     ``force`` re-tags every battle regardless of state. Needed after the card-facts
     table gains coverage, because a battle tagged against partial facts looks settled:
     its decks are complete now, so the incremental guard would skip it.
     """
-    decks = _fill_deck_facts(conn)
+    decks = _fill_deck_facts(conn, restate=force)
     if force:
         battles = _fill_battle_tags(conn, limit=None, force=True)
     else:

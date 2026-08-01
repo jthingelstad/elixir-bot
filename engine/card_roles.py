@@ -28,12 +28,23 @@ CYCLE_MAX_ELIXIR = 2  # "cheap cycle card" per the deck formula
 
 def is_air_answer(fact: dict) -> bool:
     """Can this card shoot down air? The single most load-bearing derived role —
-    a deck with none of these loses to Balloon/Lava/Minion decks on structure alone."""
-    if fact.get("targets") == "air_and_ground":
-        return True
-    # A cheap spell that hits air counts as a (limited) answer: Arrows/Zap/Fireball.
-    # Big spells (Rocket/Lightning) do NOT — nobody defends a Lava push with Rocket.
-    return bool(fact.get("spell_tier") in ("small", "medium") and fact.get("splash_hits_air"))
+    a deck with none of these loses to Balloon/Lava/Minion decks on structure alone.
+
+    Spells are decided FIRST, and that ordering is the whole correctness of this
+    function. Every damaging spell is enriched with ``targets='air_and_ground'``
+    (true — a Rocket does hit an air unit), so a leading targets check returns True
+    for Rocket and Lightning and the big-spell exclusion below it never runs. It
+    read as dead code for weeks: measured over the corpus, 10% of decks carried an
+    inflated air count, and one member was told a deck had "4 air answers (Witch,
+    Dart Goblin, Rocket, Zap)" — nobody defends a Lava Hound with a Rocket.
+    """
+    tier = fact.get("spell_tier")
+    if tier == "big":
+        return False
+    if tier in ("small", "medium"):
+        # A cheap spell that hits air is a real, if limited, answer: Arrows/Zap/Fireball.
+        return bool(fact.get("splash_hits_air"))
+    return fact.get("targets") == "air_and_ground"
 
 
 def is_air_troop(fact: dict) -> bool:
@@ -58,8 +69,24 @@ def is_heavy_air_answer(fact: dict) -> bool:
 
 
 def is_tank_answer(fact: dict) -> bool:
-    """High single-target DPS — what actually melts a big tank. Splash units chew
-    swarms but bounce off a Golem, so attack_style matters as much as dps."""
+    """High single-target DPS that can actually be put in front of a tank.
+
+    Splash chews swarms but bounces off a Golem, so attack_style matters as much as
+    dps — and two more things have to be true before high-dps means anything:
+
+    A building-targeting card cannot defend at all. Balloon, Battle Ram, Ram Rider
+    and Hog Rider walk straight past whatever you are trying to stop.
+
+    A fragile card dies before it finishes the job, UNLESS it comes in numbers —
+    that is precisely how Skeleton Army and Goblins melt a tank while a lone Dart
+    Goblin does not. Without this, a member was told his tank answers were "Dart
+    Goblin and Goblin Barrel", and the deck was reported as having no gaps at all
+    when the truth was that it had no tank answer.
+    """
+    if fact.get("targets") == "buildings_only":
+        return False
+    if fact.get("hp_tier") == "low" and fact.get("unit_count") != "many":
+        return False
     return fact.get("dps_tier") == "high" and fact.get("attack_style") in ("single", "chain")
 
 
@@ -179,11 +206,11 @@ def deck_role_coverage(facts: Iterable[dict], *, family=None, avg_elixir=None) -
         return {"facts_complete": False, "gaps": [], "unknown": True}
 
     def named(pred) -> list[str]:
-        return [f.get("name") for f in rows if pred(f) and f.get("name")]
+        return [str(f["name"]) for f in rows if pred(f) and f.get("name")]
 
     air_troops = named(is_air_troop)
     air_spells = named(lambda f: is_air_answer(f) and not is_air_troop(f))
-    coverage = {
+    coverage: dict = {
         "win_conditions": named(lambda f: f.get("is_win_condition")),
         "air_answers": {
             "troops": air_troops,
