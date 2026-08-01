@@ -134,3 +134,57 @@ class TestCardCatalogLookup:
         assert "cost_filter_note" in out
         # No cost filter → no note.
         assert "cost_filter_note" not in lookup_cards(name="Knight", conn=catalog_db)
+
+
+@pytest.fixture
+def roles_db(catalog_db):
+    """A catalog plus the enriched role facts the tools read."""
+    cards = [
+        (26000021, "Hog Rider", "win_condition"),
+        (26000006, "Balloon", "win_condition"),
+        (26000005, "Goblin Barrel", "win_condition"),
+        (26000004, "P.E.K.K.A", "tank"),
+        (26000014, "Musketeer", "support"),
+        (28000001, "Arrows", "spell"),
+    ]
+    for card_id, name, role in cards:
+        catalog_db.execute(
+            "INSERT INTO card_catalog (card_id, name, elixir_cost, rarity, max_level, "
+            "card_type, synced_at) VALUES (?, ?, 4, 'common', 14, 'troop', '2026-08-01')",
+            (card_id, name),
+        )
+        catalog_db.execute(
+            "INSERT INTO card_facts (card_id, evolution_level, role) VALUES (?, 0, ?)",
+            (card_id, role),
+        )
+    catalog_db.commit()
+    return catalog_db
+
+
+def test_cards_can_be_looked_up_by_what_they_are_for(roles_db):
+    """A member asked "what cards are win cons?" and got the two in the deck he had
+    just been shown — because nothing could ask the catalog that question. The role
+    facts had been enriched for 122 cards and no tool could filter on them."""
+    wincons = lookup_cards(role="win_condition", limit=50, conn=roles_db)
+    names = {c["name"] for c in wincons["cards"]}
+    assert names == {"Hog Rider", "Balloon", "Goblin Barrel"}
+    assert "Musketeer" not in names, "support is not a win condition"
+
+    tanks = {c["name"] for c in lookup_cards(role="tank", limit=50, conn=roles_db)["cards"]}
+    assert tanks == {"P.E.K.K.A"}
+    assert tanks.isdisjoint(names), "a tank and a win condition are different slots"
+
+
+def test_role_lookup_accepts_the_words_members_actually_use(roles_db):
+    """ "win cons" is what a person types. Demanding the exact enum returns zero
+    cards, which reads as "there are none" rather than "say it differently"."""
+    canonical = lookup_cards(role="win_condition", limit=50, conn=roles_db)["total_matched"]
+    assert canonical == 3
+    for spoken in ("win cons", "wincons", "Win Conditions", "win-condition"):
+        got = lookup_cards(role=spoken, limit=50, conn=roles_db)["total_matched"]
+        assert got == canonical, spoken
+    assert lookup_cards(role="spells", limit=50, conn=roles_db)["total_matched"] == 1
+
+
+def test_an_unknown_role_returns_nothing_rather_than_everything(roles_db):
+    assert lookup_cards(role="nonsense", limit=50, conn=roles_db)["total_matched"] == 0

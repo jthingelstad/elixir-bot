@@ -867,6 +867,25 @@ TOOLS = [
                     "type": "string",
                     "description": "Filter by type: troop, building, spell, tower_troop.",
                 },
+                "role": {
+                    "type": "string",
+                    "enum": [
+                        "win_condition",
+                        "tank",
+                        "mini_tank",
+                        "support",
+                        "swarm",
+                        "building",
+                        "spawner",
+                        "spell",
+                        "champion",
+                    ],
+                    "description": (
+                        "Filter by what the card is FOR. THE answer to 'what cards are "
+                        "win conditions?', 'what tanks are there?', 'which spells do I "
+                        "have?' — questions that are about the role, not the name."
+                    ),
+                },
                 "has_evolution": {
                     "type": "boolean",
                     "description": "Filter to cards with (true) or without (false) evolution capability.",

@@ -1834,6 +1834,7 @@ def _execute_tool(name, arguments, workflow=None):
                 min_cost=arguments.get("min_cost"),
                 max_cost=arguments.get("max_cost"),
                 card_type=arguments.get("card_type"),
+                role=arguments.get("role"),
                 has_evolution=arguments.get("has_evolution"),
                 limit=arguments.get("limit", 25),
             )

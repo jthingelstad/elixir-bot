@@ -179,10 +179,18 @@ def lookup_cards(
     max_cost=None,
     card_type=None,
     has_evolution=None,
+    role=None,
     limit=25,
     conn=None,
 ) -> list[dict]:
     """Flexible card lookup for the LLM tool.
+
+    ``role`` filters on the enriched behaviour facts rather than the catalog:
+    win_condition, tank, mini_tank, support, swarm, building, spawner, spell,
+    champion. A member asked "what cards are win cons?" and got the two in the deck
+    he had just been shown, because there was no way to ask the catalog that
+    question — the facts had been enriched for 122 cards and nothing could query
+    them. Base forms only; an Evo does not change what a card is FOR.
 
     All parameters are optional filters. Returns
     ``{cards, total_matched, returned, truncated}`` so the caller can tell a
@@ -212,6 +220,19 @@ def lookup_cards(
         clauses.append("max_evolution_level IS NOT NULL")
     elif has_evolution is False:
         clauses.append("max_evolution_level IS NULL")
+    if role:
+        want = str(role).strip().lower().replace(" ", "_").replace("-", "_")
+        if want.endswith("s"):
+            want = want[:-1]  # "spells" -> "spell", "win_cons" -> "win_con"
+        # Members say "win cons", the model may send "win_conditions" or "wincon".
+        # Normalising here rather than demanding the exact enum keeps a real
+        # question from silently returning zero cards.
+        if want.startswith("win"):
+            want = "win_condition"
+        clauses.append(
+            "card_id IN (SELECT card_id FROM card_facts WHERE evolution_level = 0 AND role = ?)"
+        )
+        params.append(want)
 
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     total_matched = conn.execute(f"SELECT COUNT(*) FROM card_catalog{where}", params).fetchone()[0]
