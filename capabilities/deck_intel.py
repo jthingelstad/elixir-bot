@@ -477,10 +477,6 @@ def _discover_view(conn, tag, limit) -> dict[str, Any]:
             break
     meta = _meta_overlay(conn, cat, own, forms)
     field = _threat_profile(conn, tag)
-    for p_ in picks:
-        fit = _matchup_fit(conn, p_["family"], field)
-        if fit:
-            p_["matchup_fit"] = fit
     return _envelope(
         "discover",
         available=True,
@@ -613,10 +609,6 @@ def _build_view(conn, tag, anchors, count) -> dict[str, Any]:
         seen_fams.add(d["family"])
         picks.append(_describe(d, cat, own, fielded, played, facts, played_arch))
     field = _threat_profile(conn, tag)
-    for p_ in picks:
-        fit = _matchup_fit(conn, p_["family"], field)
-        if fit:
-            p_["matchup_fit"] = fit
     return _envelope(
         "build",
         available=True,
@@ -918,38 +910,4 @@ def _threat_profile(conn, tag: str, days: int = 60) -> dict:
         "faced": dict(sorted(faced.items(), key=lambda kv: -kv[1]["battles"])),
         "worst_matchup": losing[0][0] if losing else None,
         "worst_matchup_record": losing[0][1] if losing else None,
-    }
-
-
-def _matchup_fit(conn, family: str, field: dict) -> Optional[dict]:
-    """How a candidate deck's family fares against the field THIS member meets.
-
-    Weighted by how often they actually meet each archetype, using the symmetrized
-    matchup table — so this is a matchup claim, not a restatement of how good the
-    clan is. Returns None when there is no field to weigh against, because a
-    confident number off four battles is worse than no number.
-    """
-    faced = (field or {}).get("faced") or {}
-    if not faced or (field or {}).get("battles", 0) < _FIELD_FLOOR:
-        return None
-    cells = {
-        r["their_family"]: r["measured_win_rate"]
-        for r in conn.execute(
-            "SELECT their_family, measured_win_rate FROM matchup_expectation WHERE our_family = ?",
-            (family,),
-        )
-    }
-    if not cells:
-        return None
-    weighted = sum(cells.get(f, 0.5) * v["battles"] for f, v in faced.items())
-    total = sum(v["battles"] for v in faced.values())
-    worst = (field or {}).get("worst_matchup")
-    return {
-        "vs_your_field": round(weighted / total, 3),
-        "vs_your_worst_matchup": cells.get(worst) if worst else None,
-        "basis": (
-            "symmetrized family matchup, weighted by how often this member actually "
-            "meets each archetype. 0.500 is even; this is a matchup read, not a "
-            "prediction of how they personally will do with the deck."
-        ),
     }

@@ -233,10 +233,11 @@ def test_coaching_describes_the_deck_the_way_deck_intelligence_does(tmp_path):
         assert "gaps" in coverage
 
 
-def test_a_matchup_record_is_graded_against_what_the_matchup_is_worth(tmp_path):
-    """A bare tally cannot say whether five losses to beatdown is a problem. Five in
-    eight is; five in forty is not; and if the matchup is even, the deck is not the
-    story."""
+def test_a_matchup_record_is_the_members_own_not_an_archetype_verdict(tmp_path):
+    """Adjusted for who plays which archetype, matchup effects average 3.2 points
+    against 22 for card levels — so a record here is a fact about this member and
+    their deck, never evidence that an archetype is strong. No expectation is
+    attached, because there is no honest one to attach."""
     conn = _db(tmp_path)
     for i in range(20):
         _battle(conn, f"b{i}", HOGS, GOLEM, "W" if i % 4 else "L")
@@ -246,15 +247,15 @@ def test_a_matchup_record_is_graded_against_what_the_matchup_is_worth(tmp_path):
     enrich_battles(100, conn=conn)
     rebuild_deck_intel(conn=conn)
 
-    # limit=100: the view samples 20 battles by default, which would split 40 games
-    # into two families of 10 and fall under the grading floor by construction.
     r = get_battle_intelligence(view="coaching", member_tag="#M", limit=100, conn=conn)
     rec = {m["their_family"]: m for m in r["matchup_record"]}
     assert set(rec) == {"beatdown", "bridge spam"}
     for m in rec.values():
         assert m["wins"] + m["losses"] >= _MATCHUP_FLOOR_FOR_TEST
-        assert m["expected_win_rate"] is not None
-        assert m["vs_expected"] is not None, "with enough games the grade must be stated"
+        assert m["enough_games"] is True
+        assert "expected_win_rate" not in m, "no archetype expectation may be stated"
+        assert "vs_expected" not in m
+    assert "upsets" not in r and "underperformances" not in r
 
 
 def test_a_thin_matchup_is_reported_without_a_grade(tmp_path):
@@ -270,8 +271,58 @@ def test_a_thin_matchup_is_reported_without_a_grade(tmp_path):
     r = get_battle_intelligence(view="coaching", member_tag="#M", conn=conn)
     thin = r["matchup_record"][0]
     assert thin["enough_games"] is False
-    assert "vs_expected" not in thin
     assert "structural_notes" not in thin
 
 
 _MATCHUP_FLOOR_FOR_TEST = 12
+
+
+def test_no_view_states_an_archetype_matchup_verdict_to_a_member(tmp_path):
+    """The finding this whole layer was cut down to respect.
+
+    Player-adjusted (each player's rate in a matchup minus their own baseline), the
+    20 family cells with enough players average 3.2 points of lift and top out near
+    6. Card levels span 22 points and player skill 34. Siege looked like the one
+    real archetype effect at 40.5% into beatdown, then failed to clear a four-player
+    floor at all — that number was who plays siege, not siege. Supercell balances
+    cards, so a durable archetype edge does not get to persist.
+
+    So: a member's own record against an archetype is fair game, and 'this archetype
+    beats that one' is not. If a future change reintroduces an expectation or an
+    advantage into a member-facing view, this test is the argument it has to beat.
+    """
+    conn = _db(tmp_path)
+    for i in range(20):
+        _battle(conn, f"b{i}", HOGS, GOLEM, "W" if i % 4 else "L")
+    for i in range(20):
+        _battle(conn, f"c{i}", GOLEM, HOGS, "L" if i % 4 else "W")
+    conn.commit()
+    enrich_battles(100, conn=conn)
+    rebuild_deck_intel(conn=conn)
+
+    coaching = get_battle_intelligence(view="coaching", member_tag="#M", limit=100, conn=conn)
+    banned = {"expected_win_rate", "vs_expected", "expected_advantage", "advantage"}
+    for entry in coaching["matchup_record"]:
+        assert not (banned & set(entry)), f"archetype verdict leaked: {entry}"
+    assert banned.isdisjoint(coaching)
+
+    # ...and no battle is explained BY the matchup any more.
+    factors = set(coaching["decisive_factors"])
+    assert "matchup" not in factors
+
+
+def test_decisive_factor_no_longer_blames_the_matchup():
+    from engine.card_roles import decisive_factor
+
+    assert (
+        decisive_factor(
+            level_gap=0.0,
+            level_ok=True,
+            closeness=1,
+            discipline_delta=0.0,
+            performance=-1,  # would previously have returned "matchup"
+            air="stressed",
+            wincon="countered",
+        )
+        == "even_game"
+    )

@@ -137,21 +137,6 @@ def deck_facts(facts: Iterable[dict]) -> dict:
 # functions below answer "why is each card here, and what is missing?", which is the
 # half a player can actually learn from. Same predicates, reported instead of consumed.
 
-# Published archetype elixir bands, cross-checked against our own corpus (11,775
-# profiled decks): our observed means land inside every band we could check — cycle
-# 2.98 (band <3.0), bait 3.41 (3.0-3.5), beatdown 4.07 (4.0-4.5+). The tails are the
-# problem the check exists for: "beatdown" decks up to 7.25 elixir and "siege" up to
-# 6.75 are all real decks somebody played, and all terrible things to recommend.
-# Ranges are (low, high); None = unbounded on that side.
-ELIXIR_BANDS = {
-    "cycle": (None, 3.0),
-    "control": (3.0, 3.6),
-    "siege": (3.0, 3.6),
-    "bait": (3.0, 3.6),
-    "bridge spam": (3.4, 3.9),
-    "beatdown": (4.0, 4.6),
-}
-
 # One Evolution slot + one Hero slot + one Wild slot (Evo OR Hero OR Champion) since
 # the March 2026 update. Verified first-party against 13,701 real 8-card decks played
 # in July 2026: the special-form count is 0, 1, 2, or 3 and NEVER 4+. Every deck we
@@ -174,27 +159,11 @@ def min_air_answers(avg_elixir: Optional[float]) -> int:
     return 2
 
 
-def elixir_band_note(family: Optional[str], avg_elixir: Optional[float]) -> Optional[str]:
-    """``None`` when the deck's cost fits its archetype, else a plain-language note.
-
-    A 7-elixir "beatdown" is not a beatdown deck, it is a deck that cannot cycle. The
-    archetype label alone never says that, so nothing downstream could warn about it.
-    """
-    if family is None or avg_elixir is None:
-        return None
-    band = ELIXIR_BANDS.get(family)
-    if not band:
-        return None
-    low, high = band
-    if low is not None and avg_elixir < low:
-        return f"{avg_elixir:.2f} elixir is cheap for {family} (typical {low:.1f}-{high:.1f})"
-    if high is not None and avg_elixir > high:
-        return f"{avg_elixir:.2f} elixir is heavy for {family} (typical {low or 0:.1f}-{high:.1f})"
-    return None
-
-
 def deck_role_coverage(facts: Iterable[dict], *, family=None, avg_elixir=None) -> dict:
     """Which formula slot each card fills, and what the deck is missing.
+
+    ``family`` is accepted and unused: it once drove an elixir-band check that fired
+    on 61% of decks and was worth 2.5 points of win rate. See matchup_notes.
 
     ``facts`` items are card_facts rows carrying ``name`` and ``elixir_cost``. Cards
     are listed under EVERY role they fill — Valkyrie is a mini-tank and a splash answer
@@ -260,9 +229,6 @@ def deck_role_coverage(facts: Iterable[dict], *, family=None, avg_elixir=None) -
         gaps.append("no small spell")
     if not coverage["big_spells"]:
         gaps.append("no big spell")
-    band = elixir_band_note(family, avg_elixir)
-    if band:
-        gaps.append(band)
     coverage["gaps"] = gaps
     return coverage
 
@@ -406,15 +372,19 @@ def decisive_factor(
     """The single biggest driver of this battle's result, ranked.
 
     Every rank below is a factor MEASURED to separate outcome across 12,687 clan
-    battles (53.6% baseline). ``air`` and ``wincon`` are accepted for signature
-    compatibility but deliberately unused: at complete card-facts coverage their
-    win rates are flat, so they describe a deck without diagnosing a battle.
+    battles (53.6% baseline). ``air``, ``wincon`` and ``performance`` are accepted
+    for signature compatibility but deliberately unused: at complete card-facts
+    coverage the first two are flat, and ``performance`` derives from the archetype
+    matchup matrix, which is worth ~3 points once adjusted for who plays which
+    archetype. All three describe a deck without diagnosing a battle.
 
         card_levels   level_gap -3 -> 48.7%, +2 -> 61.4%, +4 -> 71.1% (monotonic)
         elixir_mgmt   |delta| >= 3.5 splits 41.1% / 65.1%
         coin_flip     closeness band 3 is the measured toss-up
         (dropped)     opponent defense 4..8 -> 52.7/53.1/53.7/52.8/53.7%, flat
         (dropped)     air deficit -5..-2 -> all within 1.5% of baseline
+        (dropped)     archetype matchup -> mean |player-adjusted lift| 3.2% over 20
+                      cells; siege's apparent -10 was selection, not the deck
 
     Card levels outrank elixir because levels are the thing a player can act on,
     and because elixir leak is partly an EFFECT of losing rather than a cause.
@@ -425,6 +395,4 @@ def decisive_factor(
         return "elixir_management"
     if closeness == 3:
         return "coin_flip"
-    if performance:
-        return "matchup"
     return "even_game"
