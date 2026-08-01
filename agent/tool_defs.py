@@ -93,6 +93,21 @@ TOOLS = [
                         "number of anchors. Never inflate this to four."
                     ),
                 },
+                "require": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Deck PROPERTIES the member asked for, for 'build' and "
+                        "'anchored': win_condition, big_spell, small_spell, spell, "
+                        "reset, knockback, air_troop, heavy_air, tank_answer, splash, "
+                        "swarm, building, tank, cycle. THE way to answer 'a deck with a "
+                        "reset card and a big spell' — pass require=['reset','big_spell'] "
+                        "and KEEP the anchor. Do not guess a specific card that has the "
+                        "property and anchor on that instead: a member asking to fix the "
+                        "spell gap in his Ronin deck got back a deck with no Ronin, while "
+                        "88 decks he could build had both."
+                    ),
+                },
                 "limit": {"type": "integer", "description": "Max decks to return (default 6)."},
             },
             "required": ["view", "member_tag"],
