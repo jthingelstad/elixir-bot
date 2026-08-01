@@ -213,6 +213,11 @@ def _candidates(conn, cat, own, forms, *, require_structure=True) -> list[dict]:
         "FROM deck_profile WHERE facts_complete = 1"
     ):
         pairs = [(p[0], p[1] or 0) for p in json.loads(r["cards_json"])]
+        # A deck is eight cards. Anything else is a malformed profile row, and it
+        # used to reach `max(gaps)` on an empty list and take down every
+        # recommendation for every member rather than skipping one bad row.
+        if len(pairs) != 8:
+            continue
         if any(cid not in own or cid not in cat for cid, _ in pairs):
             continue
         if any(f and forms.get(cid, 0) < f for cid, f in pairs):
@@ -471,11 +476,17 @@ def _discover_view(conn, tag, limit) -> dict[str, Any]:
         if len(picks) >= max(1, min(int(limit or 6), 12)):
             break
     meta = _meta_overlay(conn, cat, own, forms)
+    field = _threat_profile(conn, tag)
+    for p_ in picks:
+        fit = _matchup_fit(conn, p_["family"], field)
+        if fit:
+            p_["matchup_fit"] = fit
     return _envelope(
         "discover",
         available=True,
         member_tag=tag,
         buildable_deck_count=len(cands),
+        your_field=field,
         suggestions=picks,
         meta_snapshot=meta[:8],
         meta_snapshot_available=bool(meta),
@@ -601,10 +612,16 @@ def _build_view(conn, tag, anchors, count) -> dict[str, Any]:
         used_hashes.add(d["deck_hash"])
         seen_fams.add(d["family"])
         picks.append(_describe(d, cat, own, fielded, played, facts, played_arch))
+    field = _threat_profile(conn, tag)
+    for p_ in picks:
+        fit = _matchup_fit(conn, p_["family"], field)
+        if fit:
+            p_["matchup_fit"] = fit
     return _envelope(
         "build",
         available=True,
         member_tag=tag,
+        your_field=field,
         requested_count=wanted,
         anchors=[cat[c]["name"] for c in resolved],
         unresolved=unresolved,
@@ -823,3 +840,116 @@ def read_deck_link(
     finally:
         if own_conn:
             conn.close()
+
+
+def deck_coverage_for_hash(conn, deck_hash: str) -> Optional[dict]:
+    """Role coverage for an already-profiled deck, by hash.
+
+    The seam Battle Intelligence reaches through. It knows which deck a member
+    played from ``battle_enrichment.our_deck_hash`` but had no way to describe it,
+    so "why do I lose to beatdown?" was answered with three bare integers while the
+    recommendation views next door named cards and gaps. One vocabulary, one
+    implementation, two questions.
+    """
+    row = conn.execute(
+        "SELECT cards_json, family, avg_elixir, facts_complete FROM deck_profile "
+        "WHERE deck_hash = ?",
+        (deck_hash,),
+    ).fetchone()
+    if not row or not row["facts_complete"]:
+        return None
+    cat = _catalog(conn)
+    facts = _card_facts(conn, cat)
+    pairs = [(p[0], p[1] or 0) for p in json.loads(row["cards_json"])]
+    return card_roles.deck_role_coverage(
+        _facts_for(pairs, facts), family=row["family"], avg_elixir=row["avg_elixir"]
+    )
+
+
+# ── the seam: what this member actually runs into ────────────────────────────
+_FIELD_FLOOR = 12  # below this a family record is anecdote, not a pattern
+
+
+def _threat_profile(conn, tag: str, days: int = 60) -> dict:
+    """The archetypes this member actually meets, and how they do against each.
+
+    Recommendations were being made blind to this. Two members of the same clan do
+    not face the same field — measured over July, one meets beatdown in 43% of his
+    games and another meets bridge spam in 51%, against a clan average near 27% —
+    and their weak matchups differ with real samples behind them. A deck ranked
+    only on card levels cannot know it is being handed to someone who loses to bait.
+    """
+    cutoff = f"date('now','-{int(days)} days')"
+    try:
+        rows = conn.execute(
+            f"SELECT tp.family fam, SUM(b.outcome='W') w, SUM(b.outcome='L') l "  # noqa: S608
+            "FROM battle_enrichment e "
+            "JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
+            "JOIN deck_profile tp ON tp.deck_hash = e.their_deck_hash "
+            "WHERE e.player_tag = ? AND b.outcome IN ('W','L') "
+            f"AND substr(e.battle_time,1,10) >= {cutoff} "
+            "GROUP BY 1",
+            (tag,),
+        ).fetchall()
+    except sqlite3.OperationalError:  # hygiene: absent history is a state, not an outage
+        # No battle history available. Recommendations are gated on ownership and
+        # structure, not on this — the field is an enrichment, so its absence
+        # removes the matchup read and leaves every other field standing.
+        return {"battles": 0, "window_days": days, "faced": {}, "worst_matchup": None}
+    faced: dict[str, dict] = {}
+    total = 0
+    for r in rows:
+        n = (r["w"] or 0) + (r["l"] or 0)
+        if not n:
+            continue
+        total += n
+        faced[r["fam"]] = {"battles": n, "wins": r["w"], "losses": r["l"], "win_rate": r["w"] / n}
+    for v in faced.values():
+        v["share"] = round(v["battles"] / total, 3) if total else None
+        v["win_rate"] = round(v["win_rate"], 3)
+    # The worst matchup they actually play often enough for it to mean something.
+    losing = [
+        (f, v) for f, v in faced.items() if v["battles"] >= _FIELD_FLOOR and v["win_rate"] < 0.5
+    ]
+    losing.sort(key=lambda kv: kv[1]["win_rate"])
+    return {
+        "battles": total,
+        "window_days": days,
+        "faced": dict(sorted(faced.items(), key=lambda kv: -kv[1]["battles"])),
+        "worst_matchup": losing[0][0] if losing else None,
+        "worst_matchup_record": losing[0][1] if losing else None,
+    }
+
+
+def _matchup_fit(conn, family: str, field: dict) -> Optional[dict]:
+    """How a candidate deck's family fares against the field THIS member meets.
+
+    Weighted by how often they actually meet each archetype, using the symmetrized
+    matchup table — so this is a matchup claim, not a restatement of how good the
+    clan is. Returns None when there is no field to weigh against, because a
+    confident number off four battles is worse than no number.
+    """
+    faced = (field or {}).get("faced") or {}
+    if not faced or (field or {}).get("battles", 0) < _FIELD_FLOOR:
+        return None
+    cells = {
+        r["their_family"]: r["measured_win_rate"]
+        for r in conn.execute(
+            "SELECT their_family, measured_win_rate FROM matchup_expectation WHERE our_family = ?",
+            (family,),
+        )
+    }
+    if not cells:
+        return None
+    weighted = sum(cells.get(f, 0.5) * v["battles"] for f, v in faced.items())
+    total = sum(v["battles"] for v in faced.values())
+    worst = (field or {}).get("worst_matchup")
+    return {
+        "vs_your_field": round(weighted / total, 3),
+        "vs_your_worst_matchup": cells.get(worst) if worst else None,
+        "basis": (
+            "symmetrized family matchup, weighted by how often this member actually "
+            "meets each archetype. 0.500 is even; this is a matchup read, not a "
+            "prediction of how they personally will do with the deck."
+        ),
+    }

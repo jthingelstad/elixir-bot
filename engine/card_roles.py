@@ -97,6 +97,7 @@ def deck_facts(facts: Iterable[dict]) -> dict:
         "bait_unit_count": 0,
         "has_big_spell": 0,
         "has_small_spell": 0,
+        "small_spell_count": 0,
         "win_condition_count": 0,
         "cycle_card_count": 0,
     }
@@ -115,6 +116,13 @@ def deck_facts(facts: Iterable[dict]) -> dict:
             counts["has_big_spell"] = 1
         if f.get("spell_tier") == "small":
             counts["has_small_spell"] = 1
+            # COUNT, not just presence. One small spell versus two is the cleanest
+            # quantifiable matchup line in the game: a bait deck runs more
+            # spell-fragile cards than a one-spell opponent can answer, so the
+            # opponent must pick which threat to eat. `has_small_spell` cannot
+            # express that, and the whole reason competent players run a second
+            # small spell is to close it.
+            counts["small_spell_count"] = counts.get("small_spell_count", 0) + 1
         if f.get("is_win_condition"):
             counts["win_condition_count"] += 1
         if is_cycle_card(f, f.get("elixir_cost")):
@@ -257,6 +265,74 @@ def deck_role_coverage(facts: Iterable[dict], *, family=None, avg_elixir=None) -
         gaps.append(band)
     coverage["gaps"] = gaps
     return coverage
+
+
+# ── why a matchup goes the way it does ───────────────────────────────────────
+#
+# The line this code has to hold: deck STRUCTURE does not predict a single battle.
+# Measured here across 9,481 real-level battles, air coverage is flat-to-inverted
+# against outcome (0 air answers 62.3%, 3 answers 56.8%), and tank answers look
+# monotonic pooled but fall apart inside an elixir band. An independent study on
+# 70,200 battles puts deck composition at ~57% predictive accuracy versus 50%
+# chance — about seven points total, with the rest being how people play.
+#
+# So these notes are NOT causes of a loss. They are the mechanism behind a
+# TENDENCY, and they are only worth saying next to a measured pattern: "you are
+# 4-11 into beatdown this month, and here is the structural reason that matchup is
+# hard for this list." The pattern is the evidence; the note is the explanation.
+# Each one below is list-diagnosable — checkable from eight cards, no gameplay.
+
+_BAIT_CARD_FLOOR = 3  # a bait deck is one running enough fragile cards to force a choice
+
+
+def matchup_notes(coverage: dict, their_family: Optional[str]) -> list[str]:
+    """Structural reasons THIS deck tends to struggle against ``their_family``.
+
+    Empty is a real answer and the common one: most decks have no structural
+    problem with most archetypes, and inventing one to look useful is the failure
+    mode this whole layer exists to avoid.
+    """
+    if not coverage or not coverage.get("facts_complete") or not their_family:
+        return []
+    air = coverage.get("air_answers") or {}
+    notes: list[str] = []
+
+    if their_family == "bait":
+        # The cleanest quantifiable line in the game: a bait deck runs more
+        # spell-fragile cards than one small spell can answer, so the defender has
+        # to pick which threat to eat. Measured here: 0 spells 52.7%, 1 spell
+        # 53.8%, 2+ 55.5% (n=1,144) — monotonic and in the predicted direction,
+        # though only ~3 points, so this is deck advice and not a loss diagnosis.
+        spells = len(coverage.get("small_spells") or [])
+        if spells <= 1:
+            have = "one small spell" if spells else "no small spell"
+            notes.append(
+                f"{have} against a bait deck — they run more spell-bait cards than "
+                "you have answers, so something gets through every rotation"
+            )
+    if their_family == "beatdown":
+        if not coverage.get("tank_answers"):
+            notes.append(
+                "nothing here melts a tank — swarming a Golem is not the same as "
+                "answering it, and beatdown wins the long game if the tank survives"
+            )
+        elif not air.get("heavy") and not coverage.get("big_spells"):
+            notes.append(
+                "no heavy air answer and no big spell, which is the shape that loses "
+                "to a Lava Hound specifically"
+            )
+    if their_family in ("bridge spam", "cycle"):
+        if not coverage.get("splash_answers"):
+            notes.append(
+                "no splash, and fast decks bring cheap units in numbers — you spend "
+                "more per answer than they spend per threat"
+            )
+    if their_family == "siege" and not coverage.get("big_spells"):
+        notes.append(
+            "no big spell to remove a siege building, so you have to win the race "
+            "rather than end it"
+        )
+    return notes
 
 
 # ── per-battle structural tags (v2 Layer 3) ──────────────────────────────────

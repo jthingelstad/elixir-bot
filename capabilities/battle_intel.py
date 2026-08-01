@@ -588,6 +588,94 @@ def get_battle_intelligence(
             conn.close()
 
 
+_MATCHUP_FLOOR = 12  # below this a family record is anecdote, not a pattern
+
+
+def _deck_coverage(conn, deck_hash) -> Optional[dict]:
+    """A deck's role coverage, from the same code Deck Intelligence renders.
+
+    Imported rather than duplicated deliberately: a member asking "why do I lose to
+    beatdown?" and a member asking "what deck should I run?" were getting two
+    different vocabularies for the same eight cards.
+    """
+    if not deck_hash:
+        return None
+    from capabilities.deck_intel import deck_coverage_for_hash
+
+    return deck_coverage_for_hash(conn, deck_hash)
+
+
+def _graded_matchups(conn, rows, deck_shape) -> list[dict]:
+    """Per-opposing-family record, with what that matchup is worth and why.
+
+    The grade is the member's own record against the family compared to the
+    symmetrized matchup expectation — not to 50%, because some matchups are not
+    supposed to be 50%. `structural_notes` explains the mechanism, and is only
+    ever attached to a family the member is actually losing to: a structural note
+    next to a winning record is a solution to a problem nobody has.
+    """
+    from engine.card_roles import matchup_notes
+
+    # Tally by the PAIR actually played. Expectation depends on which deck they
+    # brought, and most members bring several: grading every matchup against one
+    # "primary" family reported a member's Hog-cycle games against a beatdown
+    # expectation computed for the beatdown deck he also owns.
+    tallies: dict[str, dict] = {}
+    for r in rows:
+        fam = r["their_family"]
+        if not fam or r["outcome"] not in ("W", "L"):
+            continue
+        t = tallies.setdefault(fam, {"wins": 0, "losses": 0, "ours": {}})
+        t["wins" if r["outcome"] == "W" else "losses"] += 1
+        if r["our_family"]:
+            t["ours"][r["our_family"]] = t["ours"].get(r["our_family"], 0) + 1
+
+    cells = {
+        (r["our_family"], r["their_family"]): r["measured_win_rate"]
+        for r in conn.execute(
+            "SELECT our_family, their_family, measured_win_rate FROM matchup_expectation"
+        )
+    }
+    primary_family = (deck_shape or {}).get("family")
+    coverage = (deck_shape or {}).get("role_coverage")
+
+    out = []
+    for fam, t in sorted(tallies.items(), key=lambda kv: -(kv[1]["wins"] + kv[1]["losses"])):
+        n = t["wins"] + t["losses"]
+        actual = t["wins"] / n
+        # Weighted by how often each of their own decks was the one in the matchup.
+        weighted = [
+            (cells[(ours, fam)], count) for ours, count in t["ours"].items() if (ours, fam) in cells
+        ]
+        expected = (
+            round(sum(v * c for v, c in weighted) / sum(c for _, c in weighted), 3)
+            if weighted
+            else None
+        )
+        entry = {
+            "their_family": fam,
+            "wins": t["wins"],
+            "losses": t["losses"],
+            "win_rate": round(actual, 3),
+            "expected_win_rate": expected,
+            "enough_games": n >= _MATCHUP_FLOOR,
+        }
+        # "Below expectation" only means something once the sample can carry it and
+        # the gap is bigger than the noise a dozen games produce.
+        if expected is not None and n >= _MATCHUP_FLOOR:
+            entry["vs_expected"] = round(actual - expected, 3)
+        # Structural notes describe the PRIMARY deck, so only attach them where that
+        # deck is the one that actually played the matchup. Otherwise the note
+        # explains a list the member was not holding when they lost those games.
+        played_primary = t["ours"].get(primary_family, 0)
+        if coverage and n >= _MATCHUP_FLOOR and actual < 0.5 and played_primary > n / 2:
+            notes = matchup_notes(coverage, fam)
+            if notes:
+                entry["structural_notes"] = notes
+        out.append(entry)
+    return out
+
+
 def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
     """Aggregated structural read of a member's recent play — the input the Layer-4
     summarizer reasons over. All computed; no per-battle model call."""
@@ -599,7 +687,7 @@ def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
     rows = conn.execute(
         "SELECT e.battle_time, b.outcome, e.closeness, e.performance, e.level_gap, "
         "e.level_validity, e.air_matchup, e.wincon_pressure, e.spell_bait_exposed, "
-        "e.decisive_factor, op.archetype our_archetype, op.family our_family, "
+        "e.decisive_factor, e.our_deck_hash, op.archetype our_archetype, op.family our_family, "
         "op.air_answer_count, op.tank_answer_count, op.splash_answer_count, "
         "tp.archetype their_archetype, tp.family their_family "
         "FROM battle_enrichment e JOIN battle_events b ON b.dedup_key = e.battle_dedup_key "
@@ -640,18 +728,28 @@ def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
     for r in rows:
         if r["outcome"] == "L" and r["their_archetype"]:
             lost_to[r["their_archetype"]] = lost_to.get(r["their_archetype"], 0) + 1
-    # Their own decks' structural gaps (from the most-played deck).
+    # Their own deck, described the way Deck Intelligence describes one. This used
+    # to be three bare integers, which could not name a card and so could not
+    # explain anything: "air_answers: 3" is not a sentence anyone learns from.
     primary = next((r for r in rows if r["our_archetype"]), None)
-    deck_shape = (
-        {
+    deck_shape = None
+    if primary:
+        deck_shape = {
             "archetype": primary["our_archetype"],
+            "family": primary["our_family"],
             "air_answers": primary["air_answer_count"],
             "tank_answers": primary["tank_answer_count"],
             "splash_answers": primary["splash_answer_count"],
         }
-        if primary
-        else None
-    )
+        coverage = _deck_coverage(conn, primary["our_deck_hash"])
+        if coverage:
+            deck_shape["role_coverage"] = coverage
+
+    # Losses graded against what the matchup is actually worth. A bare tally cannot
+    # tell a member whether five losses to beatdown is a problem: five in eight is,
+    # five in forty is not, and if the matchup is even then the deck is not the
+    # story at all. `expected` is the symmetrized family matchup (0.500 = even).
+    graded = _graded_matchups(conn, rows, deck_shape)
     return _envelope(
         "coaching",
         available=True,
@@ -673,9 +771,24 @@ def _coaching_view(conn, tag, limit, days=None) -> dict[str, Any]:
         # available as DECK descriptions via the deck view; they are not coaching.
         primary_deck_shape=deck_shape,
         lost_to_archetypes=dict(sorted(lost_to.items(), key=lambda kv: -kv[1])[:5]),
+        matchup_record=graded,
         spell_bait_exposed_battles=sum(1 for r in rows if r["spell_bait_exposed"]),
         level_normalized_battles=sum(1 for r in rows if r["level_validity"] == "normalized"),
-        note="Structural aggregate over recent battles. level_gap claims are valid only "
+        note="EXPLAIN THE WHY, not just the record. matchup_record is the evidence — a "
+        "member's own result against each archetype next to what that matchup is worth "
+        "(expected_win_rate; 0.500 is even, and it is symmetrized so it is a matchup "
+        "read and not a restatement of how strong the clan is). structural_notes is the "
+        "MECHANISM behind a losing matchup, drawn from their own deck's role coverage. "
+        "Pair them: the record is what happened, the note is why that matchup is hard "
+        "for this list. NEVER present a structural note as the cause of a single "
+        "battle — deck composition explains about seven points of win rate and the rest "
+        "is how people play, and air/tank/splash counts are measurably flat against "
+        "outcome here. Say 'this matchup is hard for your deck because...', never 'you "
+        "lost because you had one tank answer'. Where a matchup has no note, the deck is "
+        "not the problem and the honest answer is that they were outplayed or unlucky.\n"
+        "Talk like a player: name decks by archetype ('your Hog cycle', 'their LavaLoon'), "
+        "not by listing cards, and never quote a rate without the games behind it.\n"
+        "Structural aggregate over recent battles. level_gap claims are valid only "
         "where level_validity='real'; normalized modes (ranked, Showdown) cap card levels. "
         "decisive_factors carries only factors measured to separate outcome — do not "
         "coach on deck-composition tallies, which are flat against winning. When "
