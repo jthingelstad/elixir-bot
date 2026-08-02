@@ -34,63 +34,6 @@
   </table>
 </div>
 
-<h2>How Elder works</h2>
-<p class="muted">Written for members. Every number below is read live from the engine
-constants and today&rsquo;s roster &mdash; if the rules change, this changes with them.</p>
-
-<div class="card">
-  <p><strong>Elder is participation, not prestige.</strong> Every input is something you
-  control by playing. None of it rewards trophies, card levels or how long you&rsquo;ve
-  been here.</p>
-
-  <h3>1. Hard filters &mdash; who is even considered</h3>
-  <ul>
-    <li><strong>{{ elder.tenure_min }}+ days in the clan.</strong></li>
-    <li><strong>Still playing competitively</strong>, war <em>or</em> ranked:
-      at least {{ elder.war_days }} war day with a deck played in the last
-      {{ elder.war_window }} days, <em>or</em> {{ elder.ranked_battles }}+ ranked
-      battles in the last {{ elder.war_window }}.</li>
-  </ul>
-
-  <h3>2. The score &mdash; three things, ranked against the clan</h3>
-  <ul>
-    <li><strong>War rate</strong> &mdash; decks used &divide; decks available, last
-      {{ elder.war_rate_window }} days.</li>
-    <li><strong>Ranked battles played</strong>, last {{ elder.war_rate_window }} days.</li>
-    <li><strong>Donations</strong>, averaged over four weeks so one big week
-      doesn&rsquo;t carry you and one quiet week doesn&rsquo;t sink you.</li>
-  </ul>
-  <p class="muted">War counts for {{ elder.war_weight }}% and donations
-  {{ elder.donation_weight }}%. Ranked fills part of the gap war leaves, so doing both
-  is worth more than either alone. Ranked counts <em>participation</em>, not the league
-  you reach &mdash; a strong account doesn&rsquo;t earn Elder by sitting on an old climb.</p>
-
-  <h3>3. The band &mdash; how many Elders there are</h3>
-  <p>Elders should be <strong>{{ elder.floor_pct }}&ndash;{{ elder.ceil_pct }}% of the
-  clan</strong>. Right now that is
-  <strong>{{ elder.floor }}&ndash;{{ elder.ceil }}</strong> of {{ elder.roster }} members,
-  and we have <strong>{{ elder.elders }}</strong>.</p>
-  <ul>
-    <li>The clan aims at the <strong>middle of that range ({{ elder.target }})</strong>,
-      not the bottom.</li>
-    <li>Two people too close to separate can both get in, up to {{ elder.ceil }}.</li>
-    <li>If nobody has earned it, the count simply sits lower. Nobody is promoted to
-      hit a number.</li>
-    <li>Being past the target is safe. You only lose the badge by stopping playing, or
-      by being clearly out-ranked &mdash; and a near-tie always keeps the incumbent.</li>
-  </ul>
-
-  <h3>4. Sustained, not a snapshot</h3>
-  <p>Qualifying once does nothing. It takes <strong>{{ elder.qualifying_weeks }} qualifying
-  weeks in a row</strong> before a promotion even reaches leadership, who make the call.
-  Going the other way, walking away from war and ranked entirely costs the badge in
-  {{ elder.demote_weeks }} weeks; being out-ranked takes {{ elder.qualifying_weeks }}, so
-  a swap lands as one move.</p>
-
-  <p class="muted">Short version: play war, play ranked, donate steadily, and keep doing
-  it for a month. That is the whole thing.</p>
-</div>
-
 <h2>Recent leavers</h2>
 <div class="card">
   <table>

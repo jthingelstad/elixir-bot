@@ -527,31 +527,3 @@ def test_role_action_card_gets_clan_chat_copy(monkeypatch):
         assert persisted and "Xavier" in persisted  # persisted, not just in-memory
     finally:
         conn.close()
-
-
-def test_elder_explainer_reads_the_engine_not_a_copy(engine_conn):
-    """The members page explains Elder to members. A hand-written version of this
-    went out in Discord and was stale inside a week — the band moved from 15-20% of
-    the non-leadership roster to 20-30% of the whole clan, and promotion changed
-    from filling the floor to aiming at the midpoint.
-
-    Anything a member can check against the game has to be generated from the same
-    constants the engine decides with, or it becomes a confident lie."""
-    from engine import management as mg
-    from runtime.webapp.queries import _elder_explainer
-
-    e = _elder_explainer(engine_conn)
-    assert e["floor_pct"] == round(mg.ELDER_BAND_FLOOR * 100)
-    assert e["ceil_pct"] == round(mg.ELDER_BAND_CEIL * 100)
-    assert e["tenure_min"] == mg.PROMOTE_TENURE_MIN
-    assert e["ranked_battles"] == mg.RANKED_FLOOR_BATTLES
-    assert e["war_weight"] == round(mg.SCORE_W_WAR * 100)
-    assert e["donation_weight"] == round(mg.SCORE_W_DONATION * 100)
-    assert e["qualifying_weeks"] == mg.PROMOTE_QUALIFYING_WEEKS
-    assert e["demote_weeks"] == mg.DEMOTE_WEEKS
-    # The band is derived from the live roster, and the target is its midpoint —
-    # the number the corps is actually pulled toward.
-    assert e["floor"] == round(mg.ELDER_BAND_FLOOR * e["roster"])
-    assert e["ceil"] == round(mg.ELDER_BAND_CEIL * e["roster"])
-    assert e["target"] == round((e["floor"] + e["ceil"]) / 2)
-    assert e["floor"] <= e["target"] <= e["ceil"]
