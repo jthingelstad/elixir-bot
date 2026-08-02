@@ -6,6 +6,27 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
 cd "$(dirname "$0")/.."
 PROJECT_DIR="$(pwd)"
+CONTROL_LOG="${ELIXIR_CONTROL_LOG:-$PROJECT_DIR/logs/elixir-control.log}"
+
+record_control_action() {
+    local action="$1"
+    local timestamp revision tty_name
+
+    if ! mkdir -p "$(dirname "$CONTROL_LOG")"; then
+        echo "Warning: unable to create control-log directory; continuing without audit record." >&2
+        return
+    fi
+    timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    revision="$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
+    tty_name="$(tty 2>/dev/null || printf 'none')"
+    # This is intentionally recorded before a stop.  A later SIGTERM receipt
+    # without a nearby line is external to the supported control path.
+    if ! printf '%s action=%s uid=%s user=%q pid=%s ppid=%s tty=%q revision=%s reason=%q\n' \
+        "$timestamp" "$action" "$(id -u)" "${USER:-unknown}" "$$" "$PPID" \
+        "$tty_name" "$revision" "${ELIXIR_RESTART_REASON:-unspecified}" >> "$CONTROL_LOG"; then
+        echo "Warning: unable to write control-log record; continuing without audit record." >&2
+    fi
+}
 
 status() {
     if launchctl list | grep -q "$LABEL"; then
@@ -99,10 +120,10 @@ run_activity() {
 }
 
 case "${1:-}" in
-    stop)     stop_bot ;;
-    start)    start_bot ;;
-    restart)  restart_bot ;;
-    upgrade)  upgrade_bot ;;
+    stop)     record_control_action stop; stop_bot ;;
+    start)    record_control_action start; start_bot ;;
+    restart)  record_control_action restart; restart_bot ;;
+    upgrade)  record_control_action upgrade; upgrade_bot ;;
     install)  install_bot ;;
     status)   status ;;
     backup)   backup_db ;;

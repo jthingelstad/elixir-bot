@@ -68,10 +68,13 @@ def test_restart_backs_up_before_stopping_service(tmp_path):
 
     assert result.returncode == 0, result.stderr
     calls = log_path.read_text(encoding="utf-8").splitlines()
+    control_log = admin_script.parents[1] / "logs" / "elixir-control.log"
+    control_line = control_log.read_text(encoding="utf-8").strip()
     backup_index = next(i for i, line in enumerate(calls) if line.startswith("python "))
     stop_index = next(i for i, line in enumerate(calls) if " bootout " in line)
     start_index = next(i for i, line in enumerate(calls) if " bootstrap " in line)
     assert backup_index < stop_index < start_index
+    assert "action=restart" in control_line
 
 
 def test_restart_aborts_without_stopping_when_backup_fails(tmp_path):

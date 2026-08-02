@@ -14,6 +14,7 @@ import atexit
 import json
 import logging
 import os
+import signal
 import subprocess
 from datetime import datetime, timezone
 
@@ -115,9 +116,30 @@ def _cleanup_pid_file(pid_file: str | None = None) -> None:
         pass
 
 
+def _handle_termination(signum: int, _frame) -> None:
+    """Leave evidence when launchd or an operator terminates this process."""
+    try:
+        signal_name = signal.Signals(signum).name
+    except ValueError:
+        signal_name = str(signum)
+    log.warning(
+        "termination signal received signal=%s pid=%s ppid=%s cwd=%s",
+        signal_name,
+        os.getpid(),
+        os.getppid(),
+        os.getcwd(),
+    )
+    raise SystemExit(128 + signum)
+
+
+def _install_termination_handler() -> None:
+    signal.signal(signal.SIGTERM, _handle_termination)
+
+
 def main(token, bot):
     if not token:
         raise ValueError("DISCORD_TOKEN not set in .env")
     _acquire_pid_file()
     atexit.register(_cleanup_pid_file)
+    _install_termination_handler()
     bot.run(token, log_handler=None)

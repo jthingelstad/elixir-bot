@@ -1644,6 +1644,27 @@ def test_acquire_pid_file_refuses_when_live_elixir_holds_it(tmp_path):
     assert json.loads(pid_file.read_text())["pid"] == 999
 
 
+def test_sigterm_handler_logs_termination_and_exits():
+    from runtime import process as runtime_process
+
+    with (
+        patch("runtime.process.os.getpid", return_value=1234),
+        patch("runtime.process.os.getppid", return_value=1),
+        patch("runtime.process.os.getcwd", return_value="/repo"),
+        patch("runtime.process.log.warning") as mock_warning,
+        pytest.raises(SystemExit, match="143"),
+    ):
+        runtime_process._handle_termination(15, None)
+
+    mock_warning.assert_called_once_with(
+        "termination signal received signal=%s pid=%s ppid=%s cwd=%s",
+        "SIGTERM",
+        1234,
+        1,
+        "/repo",
+    )
+
+
 def test_startup_channel_audit_reports_missing_or_unwritable_channels():
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
     writable = SimpleNamespace(id=300, name="ask-elixir", type="text")
