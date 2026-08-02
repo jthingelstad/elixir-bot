@@ -10,7 +10,9 @@ aspect baselines so each aspect diffs (and dedups) independently.
 
 from __future__ import annotations
 
+from engine import normalize
 from engine.emitters import insert_stream_event
+from storage import card_catalog
 
 CARD_UNLOCK_RARITIES = {"legendary", "champion"}  # detectors.py:239 UNLOCK_RARITIES
 CARD_LEVEL_MIN = 16  # detectors.py:187 MIN_LEVEL
@@ -140,18 +142,30 @@ def emit_profile(conn, tag, old, new, observed_at, window_start) -> int:
             {"boundary": b, "best_trophies": new.get("best_trophies")},
         )
     # badge_earned — newly-present badge (BadgeEarnedDetector; keyed by name)
+    #
+    # The payload carries the RESOLVED badge alongside the raw key: badge_label,
+    # and for a Card Mastery badge the card_name and card_id it refers to. The raw
+    # key stays because it is what the API said and the dedup key is built from it,
+    # but no reader should ever have to decode it — `MasteryDarkWitch` is Night
+    # Witch, and a reader that guesses gets a real-but-wrong card. Resolved here,
+    # once, against the live catalog.
     old_badges = old.get("badges") or {}
-    for name, info in (new.get("badges") or {}).items():
-        if name not in old_badges:
-            n += _emit(
-                conn,
-                tag,
-                observed_at,
-                window_start,
-                "badge_earned",
-                name,
-                {"badge_name": name, "level": (info or {}).get("level")},
-            )
+    new_badges = {k: v for k, v in (new.get("badges") or {}).items() if k not in old_badges}
+    catalog = card_catalog.card_index(conn=conn) if new_badges else {}
+    for name, info in new_badges.items():
+        n += _emit(
+            conn,
+            tag,
+            observed_at,
+            window_start,
+            "badge_earned",
+            name,
+            {
+                "badge_name": name,
+                "level": (info or {}).get("level"),
+                **normalize.badge_facts(name, catalog),
+            },
+        )
     # arena_changed — §11's profile-side arena-up confirmation (new in v5.1)
     old_arena, new_arena = old.get("arena_id"), new.get("arena_id")
     if new_arena is not None and old_arena is not None and new_arena != old_arena:

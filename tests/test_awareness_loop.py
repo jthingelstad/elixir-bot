@@ -44,7 +44,11 @@ def test_compact_signal_tiers_badges_and_arena():
             "payload": {"badge_name": "Chaos_S2", "level": None},
         }
     )
-    assert leg["badge_tier"] == "legendary" and leg["badge_name"] == "Chaos_S2"
+    # Language and identity are separate fields: the brain reads badge_label,
+    # badge_key exists only for dedup. A single `badge_name` holding a raw API
+    # string is what let "MasteryDarkWitch" be echoed as a card name.
+    assert leg["badge_tier"] == "legendary"
+    assert leg["badge_label"] == "Chaos S2" and leg["badge_key"] == "Chaos_S2"
 
     routine = _compact_signal(
         {
@@ -54,6 +58,8 @@ def test_compact_signal_tiers_badges_and_arena():
         }
     )
     assert routine["badge_tier"] == "routine"
+    assert routine["badge_label"] == "Card Mastery: The Log"
+    assert routine["card_name"] == "The Log"
 
     arena = _compact_signal(
         {

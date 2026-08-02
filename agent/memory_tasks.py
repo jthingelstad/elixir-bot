@@ -278,7 +278,8 @@ def _card_unlocked_fact(signal: dict) -> dict | None:
 def _badge_earned_fact(signal: dict) -> dict | None:
     name = signal.get("name", "Unknown")
     badge_label = signal.get("badge_label") or signal.get("badge_name")
-    badge_name = signal.get("badge_name")
+    # The raw API key, kept only as the dedup identity — never as language.
+    badge_key = signal.get("badge_key") or signal.get("badge_name")
     tag = signal.get("tag")
     if not badge_label or not tag:
         return None
@@ -286,7 +287,7 @@ def _badge_earned_fact(signal: dict) -> dict | None:
         "title": f"{name}: {badge_label}",
         "body": f"{name} earned the {badge_label} badge",
         "event_type": "badge_earned",
-        "event_id": f"badge:{tag}:{badge_name or badge_label}",
+        "event_id": f"badge:{tag}:{badge_key or badge_label}",
         "scope": "public",
         "tags": ["badge", "observation"],
     }

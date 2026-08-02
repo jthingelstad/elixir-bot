@@ -214,3 +214,63 @@ def test_an_unknown_mastery_key_is_never_given_an_invented_card_name():
     assert humanize_badge("MasteryRonin", catalog) == "Card Mastery: Ronin"
     # Non-mastery badges are untouched by any of this.
     assert humanize_badge("Chaos_S2", catalog) == "Chaos S2"
+
+
+def test_badge_facts_resolves_the_card_and_its_foreign_key():
+    """The upstream form: one raw key in, everything a reader needs out. The
+    card_id comes from the catalog index, never from a hand-written table, so the
+    foreign key cannot drift from the catalog it points at."""
+    from engine.normalize import badge_facts
+
+    catalog = {"Night Witch": 26000023, "Ronin": 26000106, "Chaos": 1}
+    assert badge_facts("MasteryDarkWitch", catalog) == {
+        "badge_label": "Card Mastery: Night Witch",
+        "card_name": "Night Witch",
+        "card_id": 26000023,
+    }
+    # A non-mastery badge carries a label and no card — there is no card to point at.
+    assert badge_facts("Chaos_S2", catalog) == {"badge_label": "Chaos S2"}
+    # Unresolvable: no card_name, so no card_id, so nothing downstream can name it.
+    assert badge_facts("MasteryNotARealCard", catalog) == {
+        "badge_label": "a new Card Mastery badge"
+    }
+
+
+def test_the_brain_never_sees_a_raw_badge_key_as_language():
+    """On 2026-07-03 Elixir told the clan a member had mastered "Dark Witch" and
+    "Archer". Both came from the awareness read handing the brain the raw badge
+    key while the weekly email resolved it — one surface fixed, the other not.
+    The compact signal now separates language (badge_label) from identity
+    (badge_key), so there is no field a reader can mistake for a card name."""
+    from runtime.awareness.read import _compact_signal
+
+    catalog = {"Night Witch": 26000023, "Archers": 26000001}
+    compact = _compact_signal(
+        {
+            "event_type": "badge_earned",
+            "stream": "player",
+            "payload": {"badge_name": "MasteryDarkWitch", "level": 3},
+        },
+        catalog,
+    )
+    assert compact["badge_label"] == "Card Mastery: Night Witch"
+    assert compact["card_name"] == "Night Witch"
+    assert compact["badge_key"] == "MasteryDarkWitch"
+    assert "Dark Witch" not in compact["badge_label"]
+    # An event written by the current emitter carries the label already; the read
+    # must prefer the stamped value over re-deriving it.
+    stamped = _compact_signal(
+        {
+            "event_type": "badge_earned",
+            "stream": "player",
+            "payload": {
+                "badge_name": "MasteryArcher",
+                "badge_label": "Card Mastery: Archers",
+                "card_name": "Archers",
+                "level": 1,
+            },
+        },
+        catalog,
+    )
+    assert stamped["badge_label"] == "Card Mastery: Archers"
+    assert stamped["card_name"] == "Archers"

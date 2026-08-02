@@ -23,9 +23,10 @@ from capabilities import awards as awards_capability
 from capabilities import game_modes as game_mode_capability
 from capabilities import management as management_capability
 from capabilities import war as war_capability
+from engine import normalize
 from engine.event_contracts import hard_post_event_types, lane_by_event_type
 from runtime.activities import AWARENESS_LOOP_HOURS_DEFAULT
-from storage import events_read, leader_actions, revisits
+from storage import card_catalog, events_read, leader_actions, revisits
 
 log = logging.getLogger("elixir")
 
@@ -337,7 +338,7 @@ def _category_for(event: dict) -> str:
     return _LANE_BY_STREAM.get(event.get("stream") or "", "system")
 
 
-def _compact_signal(event: dict) -> dict:
+def _compact_signal(event: dict, catalog: dict | None = None) -> dict:
     compact = {
         "signal_key": _signal_key(event),
         "event_type": event.get("event_type"),
@@ -353,7 +354,21 @@ def _compact_signal(event: dict) -> dict:
     payload = event.get("payload") or {}
     et = event.get("event_type")
     if et == "badge_earned":
-        compact["badge_name"] = payload.get("badge_name") or payload.get("name")
+        raw = payload.get("badge_name") or payload.get("name")
+        # The brain gets the RESOLVED badge, never the raw key. It used to get
+        # `MasteryDarkWitch` and wrote the clan a post congratulating a member on
+        # mastering "Dark Witch" — a card that does not exist (it is Night Witch),
+        # alongside "Archer" for Archers. Emitters stamp badge_label now; older
+        # events are resolved here on the way past.
+        facts = normalize.badge_facts(raw, catalog) if raw else {}
+        # `badge_label` is the language; `badge_key` is the identity. Splitting them
+        # is the point — one key named `badge_name` holding a raw API string is what
+        # invited a reader to say it out loud.
+        compact["badge_label"] = payload.get("badge_label") or facts.get("badge_label") or raw
+        compact["badge_key"] = raw
+        card = payload.get("card_name") or facts.get("card_name")
+        if card:
+            compact["card_name"] = card
         compact["badge_tier"] = "legendary" if payload.get("level") is None else "routine"
     elif et in ("arena_changed", "arena_up"):
         compact["arena_name"] = payload.get("arena_name")
@@ -846,9 +861,14 @@ def build_read(conn=None) -> dict:
         events = _signals(conn, pending.get("events") or [])
         signals_by_category: dict[str, list[dict]] = {key: [] for key in _CATEGORY_KEYS}
         hard_post_signals: list[dict] = []
+        badge_catalog = (
+            card_catalog.card_index(conn=conn)
+            if any(e.get("event_type") == "badge_earned" for e in events)
+            else {}
+        )
         for event in events:
             lane = _category_for(event)
-            compact = _compact_signal(event)
+            compact = _compact_signal(event, badge_catalog)
             signals_by_category.setdefault(lane, []).append(compact)
             if (event.get("event_type") or "") in HARD_POST_EVENT_TYPES:
                 hard_post_signals.append(compact)

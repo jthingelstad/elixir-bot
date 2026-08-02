@@ -461,3 +461,44 @@ def test_join_anniversary_flags_annual_marks(engine_conn):
     assert payloads["#A"]["months"] == 12 and payloads["#A"]["years"] == 1
     assert payloads["#C"]["is_annual"] is False
     assert payloads["#C"]["months"] == 3
+
+
+def test_badge_earned_payload_carries_the_resolved_card_and_id(engine_conn):
+    """Resolve once, at the source. Every reader that decoded the raw key itself
+    got a vote on whether to do it right, and the awareness brain voted wrong —
+    it posted "Dark Witch" (there is no such card; it is Night Witch) to the clan
+    on 2026-07-03. The emitter now stamps the label, the card, and the catalog's
+    own card_id into the payload, so no later reader has to know the mapping."""
+    engine_conn.execute(
+        "INSERT INTO card_catalog (card_id, name, rarity, card_type, synced_at) VALUES (?,?,?,?,?)",
+        (26000023, "Night Witch", "legendary", "troop", NOW),
+    )
+    _emit_profile(engine_conn, _profile(badges={}), NOW)
+    _emit_profile(engine_conn, _profile(badges={"MasteryDarkWitch": 3}), LATER)
+
+    payload = json.loads(
+        engine_conn.execute(
+            "SELECT payload_json FROM player_events WHERE event_type='badge_earned'"
+        ).fetchone()[0]
+    )
+    assert payload["badge_label"] == "Card Mastery: Night Witch"
+    assert payload["card_name"] == "Night Witch"
+    assert payload["card_id"] == 26000023
+    # The raw key stays — it is what the API said, and the dedup key is built on
+    # it — but it is now identity only, never the words anyone reads.
+    assert payload["badge_name"] == "MasteryDarkWitch"
+
+
+def test_badge_earned_never_invents_a_card_absent_from_the_catalog(engine_conn):
+    """A card released after the key map was written must yield no card at all,
+    not a plausible camelCase guess. Fail closed: no card_name, so no card_id."""
+    _emit_profile(engine_conn, _profile(badges={}), NOW)
+    _emit_profile(engine_conn, _profile(badges={"MasteryNotARealCard": 1}), LATER)
+
+    payload = json.loads(
+        engine_conn.execute(
+            "SELECT payload_json FROM player_events WHERE event_type='badge_earned'"
+        ).fetchone()[0]
+    )
+    assert payload["badge_label"] == "a new Card Mastery badge"
+    assert "card_name" not in payload and "card_id" not in payload
