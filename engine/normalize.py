@@ -212,14 +212,53 @@ def _split_camel(s: str) -> str:
     return s.strip()
 
 
-def mastery_card(badge_name) -> str | None:
-    """The card name behind a `Mastery<Card>` badge key, else None. Pure
-    camelCase split — `MasteryRonin` → `Ronin`, `MasterySuspiciousBush` →
-    `Suspicious Bush`. Catalog canonicalization is the caller's job (this module
-    stays DB-free); the split alone is human-readable for every current value."""
-    if isinstance(badge_name, str) and badge_name.startswith("Mastery") and len(badge_name) > 7:
-        return _split_camel(badge_name[7:]) or None
-    return None
+# Supercell's INTERNAL card keys, which the badge API uses and the card API does
+# not. A camelCase split turns these into confident-looking card names that do not
+# exist -- a member's weekly email announced "Card Mastery: Witch Mother" and
+# "Moving Cannon", read it as badges he had never earned, and was right to.
+# 18 of 56 mastery keys we have observed split into a non-card. Values below come
+# from Supercell's own `sc_key` -> name mapping, not from guesswork; internal keys
+# are stable across balance patches even though stats are not.
+_MASTERY_CARD_KEYS = {
+    "Archer": "Archers",
+    "Assassin": "Bandit",
+    "AxeMan": "Executioner",
+    "BarbLog": "Barbarian Barrel",
+    "BlowdartGoblin": "Dart Goblin",
+    "DarkWitch": "Night Witch",
+    "FireSpirits": "Fire Spirit",
+    "FirespiritHut": "Furnace",
+    "IceSpirits": "Ice Spirit",
+    "Log": "The Log",
+    "MovingCannon": "Cannon Cart",
+    "Pekka": "P.E.K.K.A",
+    "SkeletonBalloon": "Skeleton Barrel",
+    "Wallbreakers": "Wall Breakers",
+    "WitchMother": "Mother Witch",
+    "Xbow": "X-Bow",
+}
+
+
+def mastery_card(badge_name, known_cards=None) -> str | None:
+    """The card name behind a `Mastery<Card>` badge key, else None.
+
+    Resolution order: Supercell's internal key map, then a camelCase split.
+
+    ``known_cards`` -- pass the catalog's card names to make this FAIL CLOSED. A
+    key we cannot resolve to a real card (a card released after the key map was
+    built) returns None rather than a plausible invention, so the caller can say
+    "a new Card Mastery badge" instead of naming a card that does not exist.
+    Without it the split is returned unchecked, which is how the bad names shipped.
+    """
+    if not (
+        isinstance(badge_name, str) and badge_name.startswith("Mastery") and len(badge_name) > 7
+    ):
+        return None
+    key = badge_name[7:]
+    card = _MASTERY_CARD_KEYS.get(key) or _split_camel(key) or None
+    if card and known_cards is not None and card not in known_cards:
+        return None
+    return card
 
 
 def _humanize_badge_token(tok: str) -> str:
@@ -237,17 +276,21 @@ def _humanize_badge_token(tok: str) -> str:
     return _split_camel(tok)
 
 
-def humanize_badge(badge_name) -> str:
+def humanize_badge(badge_name, known_cards=None) -> str:
     """Raw API badge key → member-facing label (#167). `MasteryRonin` →
     `Card Mastery: Ronin`; known one-offs via the label map; event badges carry
     underscores and version/season suffixes (`Chaos_S2` → `Chaos S2`,
     `RoyalTournamentRank_v2` → `Royal Tournament Rank v2`), so split on `_` and
-    humanize each token — a raw key never surfaces."""
+    humanize each token — a raw key never surfaces.
+
+    Pass ``known_cards`` (the catalog's names) so an unresolvable Mastery key
+    degrades to "a new Card Mastery badge" rather than naming a nonexistent card."""
     if not isinstance(badge_name, str) or not badge_name:
         return "a new badge"
-    card = mastery_card(badge_name)
-    if card:
-        return f"Card Mastery: {card}"
+    if badge_name.startswith("Mastery"):
+        card = mastery_card(badge_name, known_cards)
+        # Unresolvable mastery key: name the achievement, never invent the card.
+        return f"Card Mastery: {card}" if card else "a new Card Mastery badge"
     if badge_name in _BADGE_LABELS:
         return _BADGE_LABELS[badge_name]
     label = " ".join(_humanize_badge_token(t) for t in badge_name.split("_") if t).strip()

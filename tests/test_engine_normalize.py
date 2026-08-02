@@ -157,3 +157,35 @@ def test_tool_annotation_wraps_dispatch():
     assert hasattr(cr_api_tool, "_execute_cr_api_inner")
     src = Path(REPO, "agent", "cr_api_tool.py").read_text()
     assert re.search(r"from engine\.normalize import annotate", src)
+
+
+def test_mastery_badges_use_the_card_name_not_supercells_internal_key():
+    """The badge API uses internal card keys the card API never returns. A plain
+    camelCase split turns them into confident non-cards: a member's weekly email
+    announced "Card Mastery: Witch Mother" and "Moving Cannon" and he read it as
+    badges he had never earned, correctly, because no such cards exist. 18 of the
+    56 mastery keys observed split into something that is not a card."""
+    from engine.normalize import humanize_badge
+
+    assert humanize_badge("MasteryWitchMother") == "Card Mastery: Mother Witch"
+    assert humanize_badge("MasteryMovingCannon") == "Card Mastery: Cannon Cart"
+    assert humanize_badge("MasteryAssassin") == "Card Mastery: Bandit"
+    assert humanize_badge("MasteryDarkWitch") == "Card Mastery: Night Witch"
+    assert humanize_badge("MasteryXbow") == "Card Mastery: X-Bow"
+    # Keys that were already correct must not regress.
+    assert humanize_badge("MasteryRonin") == "Card Mastery: Ronin"
+    assert humanize_badge("MasterySuspiciousBush") == "Card Mastery: Suspicious Bush"
+
+
+def test_an_unknown_mastery_key_is_never_given_an_invented_card_name():
+    """Cards released after the key map was built resolve to nothing. Naming a
+    card we cannot verify is the exact failure being fixed, so with the catalog
+    supplied the label degrades to the achievement rather than inventing a card."""
+    from engine.normalize import humanize_badge, mastery_card
+
+    catalog = {"Ronin", "Mother Witch", "Cannon Cart"}
+    assert humanize_badge("MasteryGiantBuffer", catalog) == "a new Card Mastery badge"
+    assert mastery_card("MasteryGiantBuffer", catalog) is None
+    assert humanize_badge("MasteryRonin", catalog) == "Card Mastery: Ronin"
+    # Non-mastery badges are untouched by any of this.
+    assert humanize_badge("Chaos_S2", catalog) == "Chaos S2"
