@@ -219,10 +219,33 @@ def _split_camel(s: str) -> str:
 # 18 of 56 mastery keys we have observed split into a non-card. Values below come
 # from Supercell's own `sc_key` -> name mapping, not from guesswork; internal keys
 # are stable across balance patches even though stats are not.
+#
+# Derived exhaustively from Supercell's sc_key -> name table rather than from the
+# keys we happened to observe: every card whose internal key does not split into
+# its display name is here, so a badge for a card nobody has mastered yet still
+# resolves the first time it appears. Event-only cards (Super*, GoblinParty*) are
+# omitted -- they are not in the catalog, and the fail-closed check covers them.
+#
+# AxeMan is Executioner, NOT Lumberjack. A community alias map states the latter;
+# Supercell's own data gives Executioner sc_key "AxeMan" and Lumberjack
+# "RageBarbarian". Note also that ZapMachine is Sparky while MiniSparkys is
+# Zappies -- near-swapped, and each would have named the wrong card.
 _MASTERY_CARD_KEYS = {
+    "AngryBarbarians": "Elite Barbarians",
     "Archer": "Archers",
     "Assassin": "Bandit",
     "AxeMan": "Executioner",
+    "DartBarrell": "Flying Machine",
+    "EliteArcher": "Magic Archer",
+    "Ghost": "Royal Ghost",
+    "Heal": "Heal Spirit",
+    "IceGolemite": "Ice Golem",
+    "MiniPekka": "Mini P.E.K.K.A",
+    "MiniSparkys": "Zappies",
+    "RageBarbarian": "Lumberjack",
+    "SkeletonWarriors": "Guards",
+    "Snowball": "Giant Snowball",
+    "ZapMachine": "Sparky",
     "BarbLog": "Barbarian Barrel",
     "BlowdartGoblin": "Dart Goblin",
     "DarkWitch": "Night Witch",
