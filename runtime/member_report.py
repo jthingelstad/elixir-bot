@@ -36,6 +36,8 @@ _DISCOVER_POOL = 8
 # How many losing matchups the email names. Six near-even records read as a list
 # of failings; the worst few are the story.
 _NEMESIS_SHOWN = 3
+_MATCHUP_SHOWN = 3  # opposing archetypes named in the "who beats you" read
+_UNLOCK_SHOWN = 3
 
 _CARD_EVENT_TYPES = (
     "card_unlocked",
@@ -1270,6 +1272,16 @@ def _render_deck(ctx: dict) -> str | None:
         )
         block += [line, ""]
 
+    # What the deck they ran is actually missing. The archetype line above names
+    # the deck; this says what it does NOT have, which is the half a member can do
+    # something about. Empty is a real answer and prints nothing.
+    gaps = ((coaching.get("primary_deck_shape") or {}).get("role_coverage") or {}).get("gaps")
+    if gaps:
+        block += [
+            "What that deck is missing: " + "; ".join(gaps[:2]) + ".",
+            "",
+        ]
+
     factors = coaching.get("decisive_factors") or {}
     decided = [(k, v) for k, v in factors.items() if k != "even_game" and v]
     if decided:
@@ -1280,6 +1292,31 @@ def _render_deck(ctx: dict) -> str | None:
             )
             + f", with **{factors.get('even_game', 0)}** genuinely even."
         )
+        block.append("")
+
+    # Who actually beats them, by ARCHETYPE, with the structural reason attached.
+    # decisive_factors above says HOW battles were decided; this says WHO decided
+    # them, and structural_notes says why that matchup is hard for the deck they
+    # run. Only matchups they are genuinely losing, and only with enough games to
+    # mean anything -- the capability gates both. This is the archetype-level
+    # companion to the per-card nemesis read below.
+    beating = [
+        m
+        for m in (coaching.get("matchup_record") or [])
+        if m.get("enough_games") and m.get("win_rate") is not None and m["win_rate"] < 0.5
+    ]
+    if beating:
+        beating.sort(key=lambda m: m["win_rate"])
+        block += ["**Who beats you**", ""]
+        for m in beating[:_MATCHUP_SHOWN]:
+            line = (
+                f"- **{m['their_family']} decks** — you're {m['wins']}-{m['losses']} "
+                f"against them ({_pct(m['win_rate'])}%)"
+            )
+            notes = m.get("structural_notes") or []
+            if notes:
+                line += f". {notes[0][0].upper()}{notes[0][1:]}"
+            block.append(line + ".")
         block.append("")
 
     nem = intel.get("nemesis")
@@ -1296,9 +1333,10 @@ def _render_deck(ctx: dict) -> str | None:
             )
         elif nem.get("cards_evaluated") and not nem.get("any_losing_matchup"):
             block.append(
-                f"Across the **{nem['cards_evaluated']}** cards you've faced enough times "
-                "to judge, there is **no card you actually lose to** — you beat every one "
-                "of them more often than not."
+                f"Across the **{nem['cards_evaluated']}** "
+                + ("card" if nem["cards_evaluated"] == 1 else "cards")
+                + " you've faced enough times to judge, there is **no card you actually "
+                "lose to** — you beat every one of them more often than not."
             )
         # cards_evaluated == 0 renders nothing: no card has been faced enough times,
         # so there is no standing matchup read to give in either direction.
@@ -1326,6 +1364,28 @@ def _render_deck(ctx: dict) -> str | None:
             "",
         ]
 
+    # Upgrades that OPEN something rather than improve what they already run. This
+    # is the useful half of "what should I upgrade?" once a member has maxed their
+    # deck, which is exactly when the list above goes empty and says nothing.
+    unlocks = up.get("unlocks") or []
+    if unlocks:
+        block += [
+            "**Upgrades that would open new decks**",
+            "",
+            "Not about your current deck — these are the cards standing between you and "
+            "decks you cannot field yet.",
+            "",
+        ]
+        for u in unlocks[:_UNLOCK_SHOWN]:
+            archs = ", ".join(u.get("archetypes") or [])
+            block.append(
+                f"- **{u['card']}** (lvl {u['level']}, {u['levels_to_max']} from max) — "
+                f"opens **{u['archetypes_opened']}** new archetypes"
+                + (f", including {archs}" if archs else "")
+                + "."
+            )
+        block.append("")
+
     disc = _fresh_suggestions(intel)
     if disc:
         played = _played_archetypes(intel)
@@ -1337,11 +1397,27 @@ def _render_deck(ctx: dict) -> str | None:
         ]
         for s in disc:
             tail = " — nobody in the clan runs it" if _novel(s, played) else ""
-            block.append(
+            line = (
                 f"- **{s['archetype']}** ({s['family']}, {s['avg_elixir']} elixir, "
                 f"{s['levels_from_max']} avg levels from max){tail}  \n  "
                 f"{_deck_card_list(s['cards'])}"
             )
+            # A deck in an email is a list to retype; a link is a deck you can try.
+            # The share format cannot carry Evo or Hero form, so a deck that depends
+            # on one says which cards arrive as base rather than letting the member
+            # discover it mid-battle.
+            link = s.get("copy_link")
+            if link:
+                line += f"  \n  [Load this deck in Clash Royale]({link})"
+                dropped = s.get("link_omits_forms") or []
+                if dropped:
+                    noun = "card" if len(dropped) == 1 else "cards"
+                    line += (
+                        "  \n  _The link brings "
+                        + ", ".join(f"**{c}**" for c in dropped)
+                        + f" in as base {noun} — set the Evo/Hero yourself in-game._"
+                    )
+            block.append(line)
         block.append("")
 
     war = intel.get("war_set") or {}
@@ -1354,7 +1430,7 @@ def _render_deck(ctx: dict) -> str | None:
         ]
         block += [
             f"{i}. **{d['archetype']}** ({d['family']}, {d['avg_elixir']} elixir)"
-            + (" — _the one you already run_" if d.get("you_play_this") else "")
+            + (" — _you already run this_" if d.get("you_play_this") else "")
             + f" — {_deck_card_list(d['cards'])}"
             for i, d in enumerate(war_decks, start=1)
         ]

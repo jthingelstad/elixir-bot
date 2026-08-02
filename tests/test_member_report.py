@@ -551,3 +551,116 @@ def test_only_the_worst_few_matchups_are_named_and_never_as_a_failing():
     assert "Card5" not in rendered
     assert "struggle" not in rendered.lower()
     assert "Close games, not lost ones" in rendered
+
+
+def _deck_section(ctx):
+    from runtime.member_report import _render_deck
+
+    return _render_deck(ctx) or ""
+
+
+def test_the_email_names_who_beats_them_and_why(monkeypatch):
+    """The email said HOW battles were decided (levels, elixir, even) and which
+    CARDS show up in losses, but never which archetype was beating them or why.
+    That is the read a member can act on: the record is the evidence, the
+    structural note is the mechanism."""
+    ctx = {
+        "intel": {
+            "coaching": {
+                "matchup_record": [
+                    {
+                        "their_family": "bait",
+                        "wins": 26,
+                        "losses": 44,
+                        "win_rate": 0.371,
+                        "enough_games": True,
+                        "structural_notes": ["no small spell against a bait deck"],
+                    },
+                    {
+                        "their_family": "beatdown",
+                        "wins": 40,
+                        "losses": 10,
+                        "win_rate": 0.8,
+                        "enough_games": True,
+                    },
+                    {
+                        "their_family": "siege",
+                        "wins": 1,
+                        "losses": 3,
+                        "win_rate": 0.25,
+                        "enough_games": False,
+                    },
+                ]
+            }
+        }
+    }
+    out = _deck_section(ctx)
+    assert "**bait decks**" in out and "26-44" in out
+    assert "No small spell against a bait deck" in out, "the mechanism, capitalised"
+    assert "beatdown" not in out, "a matchup they WIN is not who beats them"
+    assert "siege" not in out, "four games is not a pattern"
+
+
+def test_suggested_decks_are_loadable_and_admit_what_the_link_drops(monkeypatch):
+    """A deck in an email is a list to retype; a link is a deck you can try. The
+    share format cannot carry Evo or Hero, so a deck that depends on one has to
+    say which cards arrive as base rather than let the member find out mid-battle."""
+    ctx = {
+        "intel": {
+            "discover": {
+                "suggestions": [
+                    {
+                        "archetype": "Hog Cycle",
+                        "family": "cycle",
+                        "avg_elixir": 3.0,
+                        "levels_from_max": 0.5,
+                        "cards": [{"name": "Hog Rider", "form": "base", "level": 15}],
+                        "copy_link": "https://link.clashroyale.com/en?x",
+                        "link_omits_forms": ["Mini P.E.K.K.A"],
+                        "fielded_by_members": 0,
+                    }
+                ]
+            }
+        }
+    }
+    out = _deck_section(ctx)
+    assert "[Load this deck in Clash Royale](https://link.clashroyale.com/en?x)" in out
+    assert "in as base card " in out, "one card takes the singular"
+    assert "Mini P.E.K.K.A" in out
+
+
+def test_a_maxed_member_is_told_what_would_open_new_decks():
+    """ "Worth levelling next — nothing" is true and a dead end. The useful half for
+    someone who has maxed their deck is which upgrade opens a deck they cannot
+    field yet."""
+    ctx = {
+        "intel": {
+            "upgrades": {
+                "no_material_upgrades": True,
+                "unlocks": [
+                    {
+                        "card": "Fireball",
+                        "level": 13,
+                        "levels_to_max": 3,
+                        "archetypes_opened": 22,
+                        "archetypes": ["Balloon Beatdown", "Control"],
+                    }
+                ],
+            }
+        }
+    }
+    out = _deck_section(ctx)
+    assert "Worth levelling next** — nothing" in out
+    assert "Upgrades that would open new decks" in out
+    assert "**Fireball**" in out and "22" in out and "Balloon Beatdown" in out
+
+
+def test_the_deck_they_run_is_told_what_it_lacks():
+    ctx = {
+        "intel": {
+            "coaching": {
+                "primary_deck_shape": {"role_coverage": {"gaps": ["no big spell"]}},
+            }
+        }
+    }
+    assert "What that deck is missing: no big spell." in _deck_section(ctx)
