@@ -65,6 +65,13 @@ ENUMS = {
 }
 SPECIALS = [
     "knockback",
+    # Distinct from knockback and not interchangeable with it. Knockback pushes a
+    # unit away and interrupts a charge (Prince, Battle Ram); Tornado's pull drags
+    # units together and resets nothing. Tornado, Evo Valkyrie and Hero Wizard were
+    # all filed as knockback -- Tornado's own note read "displacement, not
+    # knockback" while its special said knockback -- and `knockback` is a property
+    # members can filter decks on, so the conflation reached a real surface.
+    "pull",
     "reset",
     "charge",
     "spawns_units",

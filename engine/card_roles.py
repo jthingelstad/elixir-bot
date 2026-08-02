@@ -47,8 +47,14 @@ def is_air_answer(fact: dict) -> bool:
     return fact.get("targets") == "air_and_ground"
 
 
-def is_air_troop(fact: dict) -> bool:
+def is_air_defender(fact: dict) -> bool:
     """An air answer you can DEPLOY, as opposed to one you cast once and lose.
+
+    Named "defender" rather than "troop" because three of the cards that satisfy it
+    are not troops: Tesla, Evo Tesla and Inferno Tower are buildings, and they are
+    among the best anti-air in the game. The old name was accurate for 58 of 61
+    cards and wrong for the three that matter most on defence -- and no Clash player
+    calls a Tesla a troop.
 
     is_air_answer() deliberately counts small spells, and that conflation shipped a
     real bad recommendation: a member was handed a deck whose "3 air answers" were
@@ -65,7 +71,7 @@ def is_heavy_air_answer(fact: dict) -> bool:
     """Can it kill a Lava Hound or a Balloon before the tower dies — deckshop.pro's
     "air tank killer" tier. Chip damage that merely *reaches* air is not the same
     answer, and a deck can satisfy a numeric air-count floor with none of this."""
-    return is_air_troop(fact) and fact.get("dps_tier") == "high"
+    return is_air_defender(fact) and fact.get("dps_tier") == "high"
 
 
 def is_tank_answer(fact: dict) -> bool:
@@ -210,15 +216,15 @@ def deck_role_coverage(facts: Iterable[dict], *, family=None, avg_elixir=None) -
     def named(pred) -> list[str]:
         return [str(f["name"]) for f in rows if pred(f) and f.get("name")]
 
-    air_troops = named(is_air_troop)
-    air_spells = named(lambda f: is_air_answer(f) and not is_air_troop(f))
+    air_defenders = named(is_air_defender)
+    air_spells = named(lambda f: is_air_answer(f) and not is_air_defender(f))
     coverage: dict = {
         "win_conditions": named(lambda f: f.get("is_win_condition")),
         "air_answers": {
-            "troops": air_troops,
+            "defenders": air_defenders,
             "spells": air_spells,
             "heavy": named(is_heavy_air_answer),
-            "count": len(air_troops) + len(air_spells),
+            "count": len(air_defenders) + len(air_spells),
         },
         "tank_answers": named(is_tank_answer),
         "splash_answers": named(is_splash_answer),
@@ -246,8 +252,8 @@ def deck_role_coverage(facts: Iterable[dict], *, family=None, avg_elixir=None) -
     floor = min_air_answers(avg_elixir)
     if coverage["air_answers"]["count"] < floor:
         gaps.append(f"only {coverage['air_answers']['count']} air answer(s); wants {floor}")
-    elif not air_troops:
-        gaps.append("air coverage is spells only — no unit here can shoot up")
+    elif not air_defenders:
+        gaps.append("air coverage is spells only — nothing you deploy can shoot up")
     elif not coverage["air_answers"]["heavy"]:
         gaps.append("can chip air but has no heavy air answer for a Balloon or Lava Hound")
     if not coverage["tank_answers"]:
@@ -277,7 +283,8 @@ DECK_PROPERTIES = {
     "spell": lambda f: f.get("spell_tier") not in (None, "none"),
     "reset": lambda f: "reset" in (f.get("special") or ()),
     "knockback": lambda f: "knockback" in (f.get("special") or ()),
-    "air_troop": is_air_troop,
+    "pull": lambda f: "pull" in (f.get("special") or ()),
+    "air_defender": is_air_defender,
     "heavy_air": is_heavy_air_answer,
     "tank_answer": is_tank_answer,
     "splash": is_splash_answer,
@@ -293,10 +300,10 @@ _PROPERTY_ALIASES = {
     "bigspell": "big_spell",
     "heavy_spell": "big_spell",
     "cheap_spell": "small_spell",
-    "anti_air": "air_troop",
-    "air": "air_troop",
-    "air_defense": "air_troop",
-    "air_defence": "air_troop",
+    "anti_air": "air_defender",
+    "air": "air_defender",
+    "air_defense": "air_defender",
+    "air_defence": "air_defender",
     "anti_tank": "tank_answer",
     "tank_killer": "tank_answer",
     "defensive_building": "building",
