@@ -296,3 +296,15 @@ def catalog_count(conn=None) -> int:
     """Return the number of cards in the catalog."""
     row = conn.execute("SELECT COUNT(*) AS cnt FROM card_catalog").fetchone()
     return row["cnt"] if row else 0
+
+
+@managed_connection
+def card_names(conn=None) -> set[str]:
+    """Every card name in the catalog.
+
+    Exists so label-building can FAIL CLOSED: Supercell's badge API uses internal
+    card keys the card API never returns, and a camelCase split of one produces a
+    confident non-card ("Witch Mother", "Moving Cannon"). Checking a resolved name
+    against the real catalog is what turns that into "a new Card Mastery badge".
+    """
+    return {r["name"] for r in conn.execute("SELECT name FROM card_catalog") if r["name"]}

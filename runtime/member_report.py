@@ -20,7 +20,7 @@ from capabilities import battle_intel, deck_intel
 from capabilities import members as member_capability
 from engine.normalize import humanize_badge, humanize_game_mode
 from engine.profiles import MODE_DISPLAY, playstyle_line
-from storage import game_events
+from storage import card_catalog, game_events
 from storage._formatting import preferred_display_name
 from storage.game_modes import mode_group_label
 from storage.player import NEAR_MISS_TOWER_HP
@@ -547,6 +547,9 @@ def build_member_report_context(
         prior = _battle_tally(_window_battles(conn, tag, prev_c, until=cutoff_c))
         botw = _battle_of_week(battles)
 
+        # Resolve mastery keys against the real catalog so an unknown key degrades
+        # to a generic label instead of naming a card that does not exist.
+        known_cards = card_catalog.card_names(conn=conn)
         events = db.list_recent_events(days=days, subject_key=tag, limit=200, conn=conn)
         badges, cards, ranked, other, arena_changes = [], [], [], [], []
         for e in events:
@@ -554,7 +557,7 @@ def build_member_report_context(
             if et == "badge_earned":
                 badges.append(
                     {
-                        "label": humanize_badge(payload.get("badge_name") or ""),
+                        "label": humanize_badge(payload.get("badge_name") or "", known_cards),
                         "level": payload.get("level"),
                         "observed_at": e.get("observed_at"),
                         "image_url": payload.get("image_url"),

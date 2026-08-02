@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 
 from engine.db import cursor_get, cursor_set
+from storage import card_catalog
 from storage import game_events as ge
 
 
@@ -73,7 +74,7 @@ def _event_badge(conn, obs, now: str) -> int:
         member_name = None
     payload = {
         "badge_name": name,
-        "badge_label": humanize_badge(name),
+        "badge_label": humanize_badge(name, card_catalog.card_names(conn=conn)),
         "member_name": member_name,
         "member_tag": subject_tag,
         "image_url": image_url,
