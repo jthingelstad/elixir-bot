@@ -36,6 +36,19 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+# Three catalog names carry punctuation a person does not type: `P.E.K.K.A`,
+# `Mini P.E.K.K.A` and `X-Bow`. A plain substring search for "pekka" or "xbow"
+# matches none of them and the tool answers "no such card" about three of the most
+# talked-about cards in the game. Comparing both sides with the punctuation removed
+# costs nothing and cannot create a false match — no two card names differ only by
+# a dot or a hyphen.
+_DEPUNCT_SQL = "REPLACE(REPLACE(REPLACE(LOWER({col}), '.', ''), '-', ''), ' ', '')"
+
+
+def _depunct(value: str) -> str:
+    return value.lower().replace(".", "").replace("-", "").replace(" ", "")
+
+
 # ---------------------------------------------------------------------------
 # Sync
 # ---------------------------------------------------------------------------
@@ -208,8 +221,13 @@ def lookup_cards(
     params = []
 
     if name:
-        clauses.append("name LIKE ? ESCAPE '\\'")
+        clauses.append(
+            "(name LIKE ? ESCAPE '\\' OR "
+            + _DEPUNCT_SQL.format(col="name")
+            + " LIKE ? ESCAPE '\\')"
+        )
         params.append(f"%{_escape_like(name)}%")
+        params.append(f"%{_escape_like(_depunct(name))}%")
     if rarity:
         clauses.append("rarity = ?")
         params.append(rarity.lower())
@@ -245,11 +263,22 @@ def lookup_cards(
 
     if name:
         # exact match, then prefix, then shortest (Knight before Golden Knight).
+        # The depunctuated rungs sit alongside their literal counterparts so
+        # "pekka" ranks P.E.K.K.A above Mini P.E.K.K.A, exactly as "P.E.K.K.A" does.
+        depunct_col = _DEPUNCT_SQL.format(col="name")
         order = (
             "ORDER BY (LOWER(name) = LOWER(?)) DESC, "
-            "(LOWER(name) LIKE LOWER(?) || '%') DESC, LENGTH(name) ASC, name"
+            f"({depunct_col} = ?) DESC, "
+            "(LOWER(name) LIKE LOWER(?) || '%') DESC, "
+            f"({depunct_col} LIKE ? || '%') DESC, "
+            "LENGTH(name) ASC, name"
         )
-        order_params = [name, _escape_like(name)]
+        order_params = [
+            name,
+            _depunct(name),
+            _escape_like(name),
+            _escape_like(_depunct(name)),
+        ]
     else:
         order = "ORDER BY name"
         order_params = []
@@ -283,10 +312,18 @@ def get_card_by_name(name: str, conn=None) -> dict | None:
     ).fetchone()
     if row:
         return _row_to_dict(row)
-    # Fall back to substring
+    # Fall back to substring, punctuation-insensitively — "pekka" and "xbow" are
+    # how people write P.E.K.K.A and X-Bow, and a literal LIKE finds neither.
+    depunct_col = _DEPUNCT_SQL.format(col="name")
     row = conn.execute(
-        "SELECT * FROM card_catalog WHERE name LIKE ? ESCAPE '\\' ORDER BY LENGTH(name) LIMIT 1",
-        (f"%{_escape_like(name)}%",),
+        "SELECT * FROM card_catalog WHERE name LIKE ? ESCAPE '\\' "
+        f"OR {depunct_col} LIKE ? ESCAPE '\\' "
+        f"ORDER BY ({depunct_col} = ?) DESC, LENGTH(name) LIMIT 1",
+        (
+            f"%{_escape_like(name)}%",
+            f"%{_escape_like(_depunct(name))}%",
+            _depunct(name),
+        ),
     ).fetchone()
     return _row_to_dict(row) if row else None
 

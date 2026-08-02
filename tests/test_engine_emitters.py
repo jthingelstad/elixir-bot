@@ -471,7 +471,7 @@ def test_badge_earned_payload_carries_the_resolved_card_and_id(engine_conn):
     own card_id into the payload, so no later reader has to know the mapping."""
     engine_conn.execute(
         "INSERT INTO card_catalog (card_id, name, rarity, card_type, synced_at) VALUES (?,?,?,?,?)",
-        (26000023, "Night Witch", "legendary", "troop", NOW),
+        (26000048, "Night Witch", "legendary", "troop", NOW),
     )
     _emit_profile(engine_conn, _profile(badges={}), NOW)
     _emit_profile(engine_conn, _profile(badges={"MasteryDarkWitch": 3}), LATER)
@@ -483,7 +483,7 @@ def test_badge_earned_payload_carries_the_resolved_card_and_id(engine_conn):
     )
     assert payload["badge_label"] == "Card Mastery: Night Witch"
     assert payload["card_name"] == "Night Witch"
-    assert payload["card_id"] == 26000023
+    assert payload["card_id"] == 26000048
     # The raw key stays — it is what the API said, and the dedup key is built on
     # it — but it is now identity only, never the words anyone reads.
     assert payload["badge_name"] == "MasteryDarkWitch"

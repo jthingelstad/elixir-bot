@@ -96,6 +96,20 @@ class TestCardCatalogLookup:
         # QA M17: an exact-name match ranks first, not alphabetically.
         assert results[0]["name"] == "Knight"
 
+    def test_lookup_by_name_ignores_punctuation_people_do_not_type(self, catalog_db):
+        """Three catalog names carry punctuation nobody types: P.E.K.K.A, Mini
+        P.E.K.K.A and X-Bow. A literal substring search for "pekka" matched none of
+        them, so the tool answered "no such card" about one of the most talked-about
+        cards in the game."""
+        sync_card_catalog(_SAMPLE_API_RESPONSE, conn=catalog_db)
+        for query in ("pekka", "PEKKA", "p.e.k.k.a"):
+            hits = [c["name"] for c in lookup_cards(name=query, conn=catalog_db)["cards"]]
+            assert hits == ["P.E.K.K.A"], query
+        # Punctuation-blindness must not blur genuinely different cards together.
+        assert [c["name"] for c in lookup_cards(name="Giant", conn=catalog_db)["cards"]] == [
+            "Giant"
+        ]
+
     def test_lookup_wildcards_in_name_do_not_expand(self, catalog_db):
         _seed_catalog(catalog_db)
         out = lookup_cards(name="%", conn=catalog_db)
