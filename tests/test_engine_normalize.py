@@ -187,6 +187,19 @@ def test_the_two_post_map_cards_resolve():
     assert humanize_badge("MasteryMergeMaiden") == "Card Mastery: Spirit Empress"
 
 
+def test_axeman_is_executioner_not_lumberjack():
+    """A community alias map has this backwards. Supercell's own data gives
+    Executioner the key "AxeMan" and Lumberjack "RageBarbarian". Also pinned:
+    ZapMachine is Sparky while MiniSparkys is Zappies -- near-swapped names where
+    getting it wrong names a real but wrong card, the hardest kind to notice."""
+    from engine.normalize import humanize_badge
+
+    assert humanize_badge("MasteryAxeMan") == "Card Mastery: Executioner"
+    assert humanize_badge("MasteryRageBarbarian") == "Card Mastery: Lumberjack"
+    assert humanize_badge("MasteryZapMachine") == "Card Mastery: Sparky"
+    assert humanize_badge("MasteryMiniSparkys") == "Card Mastery: Zappies"
+
+
 def test_an_unknown_mastery_key_is_never_given_an_invented_card_name():
     """Cards released after the key map was built resolve to nothing. Naming a
     card we cannot verify is the exact failure being fixed, so with the catalog
