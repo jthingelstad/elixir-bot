@@ -115,7 +115,8 @@ TOOLS = [
                             "spell",
                             "reset",
                             "knockback",
-                            "air_troop",
+                            "pull",
+                            "air_defender",
                             "heavy_air",
                             "tank_answer",
                             "splash",
@@ -128,7 +129,7 @@ TOOLS = [
                     "description": (
                         "Deck PROPERTIES the member asked for, for 'build' and "
                         "'anchored': win_condition, big_spell, small_spell, spell, "
-                        "reset, knockback, air_troop, heavy_air, tank_answer, splash, "
+                        "reset, knockback, pull, air_defender, heavy_air, tank_answer, splash, "
                         "swarm, building, tank, cycle. THE way to answer 'a deck with a "
                         "reset card and a big spell' — pass require=['reset','big_spell'] "
                         "and KEEP the anchor. Do not guess a specific card that has the "

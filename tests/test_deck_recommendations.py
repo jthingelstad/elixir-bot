@@ -299,10 +299,10 @@ def test_every_suggested_deck_explains_why_each_card_is_in_it(rich):
     assert by_name["Legend"]["elixir_cost"] == 4
 
 
-def test_air_coverage_distinguishes_troops_from_spells(rich):
+def test_air_coverage_distinguishes_defenders_from_spells(rich):
     r = get_deck_recommendations(view="discover", member_tag=TAG, conn=rich)
     air = r["suggestions"][0]["role_coverage"]["air_answers"]
-    assert set(air["troops"]) == {"Legend", "Air"}
+    assert set(air["defenders"]) == {"Legend", "Air"}
     assert air["spells"] == ["Common"]
     assert air["heavy"] == ["Legend"]
 

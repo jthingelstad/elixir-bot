@@ -456,7 +456,7 @@ def _card_roles(fact: Optional[dict]) -> list[str]:
     roles = []
     if fact.get("is_win_condition"):
         roles.append("win condition")
-    if card_roles.is_air_troop(fact):
+    if card_roles.is_air_defender(fact):
         roles.append("heavy air answer" if card_roles.is_heavy_air_answer(fact) else "air answer")
     elif card_roles.is_air_answer(fact):
         roles.append("air answer (spell)")

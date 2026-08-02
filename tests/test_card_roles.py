@@ -5,7 +5,7 @@ from engine.card_roles import (
     deck_facts,
     deck_role_coverage,
     is_air_answer,
-    is_air_troop,
+    is_air_defender,
     is_heavy_air_answer,
     is_splash_answer,
     is_tank_answer,
@@ -134,12 +134,12 @@ _SNOWBALL = {
 _MUSKETEER = dict(MUSKETEER, name="Musketeer", elixir_cost=4)
 
 
-def test_a_spell_is_an_air_answer_but_not_an_air_troop():
+def test_a_spell_is_an_air_answer_but_not_an_air_defender():
     """The conflation that shipped a bad deck: Arrows and a Musketeer both satisfy
     'has an air answer', and only one of them survives contact with a Balloon."""
     assert is_air_answer(_ARROWS) is True
-    assert is_air_troop(_ARROWS) is False
-    assert is_air_troop(_MUSKETEER) is True
+    assert is_air_defender(_ARROWS) is False
+    assert is_air_defender(_MUSKETEER) is True
     assert is_heavy_air_answer(_MUSKETEER) is True
     assert is_heavy_air_answer(_FURNACE) is False, "low dps is not an answer to an air tank"
 
@@ -149,14 +149,14 @@ def test_spell_only_air_coverage_is_called_out():
     deck = [_ARROWS, _SNOWBALL] + [dict(KNIGHT, name=f"Ground{i}", elixir_cost=3) for i in range(6)]
     cov = deck_role_coverage(deck, family="control", avg_elixir=3.4)
     assert cov["air_answers"]["count"] == 2
-    assert cov["air_answers"]["troops"] == []
+    assert cov["air_answers"]["defenders"] == []
     assert any("spells only" in g for g in cov["gaps"])
 
 
 def test_air_answers_present_but_none_heavy_is_its_own_warning():
     deck = [_FURNACE, _ARROWS] + [dict(KNIGHT, name=f"G{i}", elixir_cost=3) for i in range(6)]
     cov = deck_role_coverage(deck, family="control", avg_elixir=3.4)
-    assert cov["air_answers"]["troops"] == ["Furnace"]
+    assert cov["air_answers"]["defenders"] == ["Furnace"]
     assert any("no heavy air answer" in g for g in cov["gaps"])
     assert not any("spells only" in g for g in cov["gaps"])
 
@@ -190,7 +190,7 @@ def test_a_card_is_listed_under_every_role_it_fills():
     air answer AND its heavy air answer AND its tank answer at once; showing her under
     one heading hides two of the three reasons she is in the list."""
     cov = deck_role_coverage([_MUSKETEER] * 8, family="control", avg_elixir=4.0)
-    assert "Musketeer" in cov["air_answers"]["troops"]
+    assert "Musketeer" in cov["air_answers"]["defenders"]
     assert "Musketeer" in cov["air_answers"]["heavy"]
     assert "Musketeer" in cov["tank_answers"]
 
@@ -237,7 +237,7 @@ def _covered(**over):
     base = {
         "facts_complete": True,
         "win_conditions": ["Hog Rider"],
-        "air_answers": {"troops": ["Musketeer"], "spells": ["Arrows"], "heavy": ["Musketeer"]},
+        "air_answers": {"defenders": ["Musketeer"], "spells": ["Arrows"], "heavy": ["Musketeer"]},
         "tank_answers": ["Mini P.E.K.K.A"],
         "splash_answers": ["Valkyrie"],
         "small_spells": ["The Log", "Zap"],
@@ -364,7 +364,7 @@ def test_a_big_spell_is_never_an_air_answer():
     assert is_air_answer(_ROCKET) is False
     assert is_air_answer(_ZAP) is True, "a cheap spell that hits air is still an answer"
     assert is_air_answer(_DART) is True
-    assert is_air_troop(_ROCKET) is False
+    assert is_air_defender(_ROCKET) is False
 
 
 def test_a_card_that_only_hits_buildings_cannot_defend():
@@ -399,3 +399,30 @@ def test_the_deck_with_no_real_tank_answer_now_says_so():
     assert cov["tank_answers"] == []
     assert any("melts a tank" in g or "tank answer" in g for g in cov["gaps"])
     assert "Rocket" not in cov["air_answers"]["spells"]
+
+
+def test_a_defensive_building_counts_as_an_air_defender():
+    """Tesla and Inferno Tower are buildings, not troops, and are among the best
+    anti-air in the game. The predicate was once called is_air_troop, which was
+    accurate for 58 of the 61 cards satisfying it and wrong for the three that
+    matter most on defence. A deck holding Tesla has real, deployed air coverage
+    and must never be told its air answers are spells only."""
+    tesla = {
+        "name": "Tesla",
+        "targets": "air_and_ground",
+        "spell_tier": "none",
+        "role": "building",
+        "unit_domain": "none",
+        "dps_tier": "medium",
+    }
+    assert is_air_defender(tesla) is True
+    assert is_air_answer(tesla) is True
+
+    arrows = {
+        "name": "Arrows",
+        "targets": "air_and_ground",
+        "spell_tier": "small",
+        "splash_hits_air": True,
+    }
+    assert is_air_answer(arrows) is True
+    assert is_air_defender(arrows) is False, "a spell is cast once, not deployed"
