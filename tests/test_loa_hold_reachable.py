@@ -18,6 +18,7 @@ unit tests do not: advertised → executor → memory → kick clock.
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 
 import pytest
 
@@ -27,6 +28,12 @@ import db
 from engine.management import _has_leadership_hold
 
 TAG = "#LOAMEM"
+
+# Relative, not a literal. The hold is compared against SQLite's julianday('now'),
+# which no test clock can freeze, so a hardcoded date silently becomes a PAST date
+# and this assertion flips to False on that day — a green test that rots into a red
+# one with no code change. See elixir-game-mode-tests-flake-nightly.
+_AWAY_UNTIL = (date.today() + timedelta(days=1)).isoformat()
 
 
 @pytest.fixture
@@ -91,12 +98,12 @@ def test_hold_pauses_the_kick_clock_end_to_end(memdb):
             "topic": "Away next week",
             "recommendation": "Told leaders he's travelling; back the 3rd.",
             "member_tag": TAG,
-            "away_until": "2026-08-03",
+            "away_until": _AWAY_UNTIL,
         },
     )
     assert result.get("success"), result
     assert result["type"] == "leave_hold"
-    assert result["hold_until"].startswith("2026-08-03")
+    assert result["hold_until"].startswith(_AWAY_UNTIL)
 
     # The engine guard is the consumer that matters — it matches the `Hold:`
     # title prefix, not `Followup:` and not `Watch:`.

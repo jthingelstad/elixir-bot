@@ -7,7 +7,15 @@ and returns only real declines.
 
 from __future__ import annotations
 
+import datetime as _dt
+
 import db
+
+# get_trophy_drops(days=30) is a rolling window, so literal dates are a fuse: once
+# the oldest seeded day ages past 30 days the first and last reading collapse to
+# the same row, the computed drop becomes 0, and the test fails forever with no
+# code change. Anchor the series to today.
+_D0, _D1, _D2, _D3 = ((_dt.date.today() - _dt.timedelta(days=d)).isoformat() for d in (3, 2, 1, 0))
 
 
 def _seed(conn, tag, name, series):
@@ -43,14 +51,14 @@ def test_trophy_drops_excludes_climbers_and_reports_declines():
             "#CLIMB",
             "Andy",
             [
-                ("2026-07-08", 8700),
-                ("2026-07-09", 9100),
-                ("2026-07-10", 8900),
-                ("2026-07-11", 9004),
+                (_D0, 8700),
+                (_D1, 9100),
+                (_D2, 8900),
+                (_D3, 9004),
             ],
         )
         # Real dropper: net decline first->last.
-        _seed(conn, "#DROP", "Ditaka", [("2026-07-08", 12230), ("2026-07-11", 12037)])
+        _seed(conn, "#DROP", "Ditaka", [(_D0, 12230), (_D3, 12037)])
 
         drops = db.get_trophy_drops(days=30, min_drop=100, conn=conn)
         by_tag = {d["tag"]: d for d in drops}
