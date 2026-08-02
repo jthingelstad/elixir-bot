@@ -222,11 +222,11 @@ def test_badge_facts_resolves_the_card_and_its_foreign_key():
     foreign key cannot drift from the catalog it points at."""
     from engine.normalize import badge_facts
 
-    catalog = {"Night Witch": 26000023, "Ronin": 26000106, "Chaos": 1}
+    catalog = {"Night Witch": 26000048, "Ronin": 26000106, "Chaos": 1}
     assert badge_facts("MasteryDarkWitch", catalog) == {
         "badge_label": "Card Mastery: Night Witch",
         "card_name": "Night Witch",
-        "card_id": 26000023,
+        "card_id": 26000048,
     }
     # A non-mastery badge carries a label and no card — there is no card to point at.
     assert badge_facts("Chaos_S2", catalog) == {"badge_label": "Chaos S2"}
@@ -244,7 +244,7 @@ def test_the_brain_never_sees_a_raw_badge_key_as_language():
     (badge_key), so there is no field a reader can mistake for a card name."""
     from runtime.awareness.read import _compact_signal
 
-    catalog = {"Night Witch": 26000023, "Archers": 26000001}
+    catalog = {"Night Witch": 26000048, "Archers": 26000001}
     compact = _compact_signal(
         {
             "event_type": "badge_earned",
