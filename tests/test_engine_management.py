@@ -367,16 +367,26 @@ def test_watch_inference_does_not_suppress_kick(engine_conn):
 def test_leave_hold_suppresses_kick(engine_conn):
     # The LOA exception: an explicit `Hold:` memory (member told leaders they're
     # away) caps the card at at_risk — grace until the hold expires.
+    #
+    # The expiry is computed from the REAL clock, not from NOW. _has_leadership_hold
+    # compares against julianday('now') because a hold is about wall-clock leave, so
+    # a hardcoded future date is a fuse: this test was written with 2026-08-01 and
+    # started failing the moment UTC rolled past it, with a diff that reads like a
+    # kick-logic regression rather than a stale fixture.
+    future = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
     _seed_member(engine_conn, last_battle_days_ago=10)
-    _add_memory(engine_conn, "#A", title="Hold: #A", expires_at="2026-08-01")
+    _add_memory(engine_conn, "#A", title="Hold: #A", expires_at=future)
     management.run_tick_evaluators(engine_conn, now=NOW)
     assert _kick_state(engine_conn) == "at_risk"
 
 
 def test_expired_leave_hold_does_not_suppress(engine_conn):
-    # Once the leave window passes, the clock resumes and the card fires.
+    # Once the leave window passes, the clock resumes and the card fires. Also
+    # relative to the real clock — a past date only stays past by luck of never
+    # rewinding, and stating the intent beats relying on that.
+    past = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
     _seed_member(engine_conn, last_battle_days_ago=10)
-    _add_memory(engine_conn, "#A", title="Hold: #A", expires_at="2026-06-01")
+    _add_memory(engine_conn, "#A", title="Hold: #A", expires_at=past)
     management.run_tick_evaluators(engine_conn, now=NOW)
     assert _kick_state(engine_conn) == "recommended"
 
