@@ -177,6 +177,16 @@ def test_mastery_badges_use_the_card_name_not_supercells_internal_key():
     assert humanize_badge("MasterySuspiciousBush") == "Card Mastery: Suspicious Bush"
 
 
+def test_the_two_post_map_cards_resolve():
+    """GiantBuffer and MergeMaiden postdate Supercell's published key map. Both were
+    recovered from the game's own gamedata.json and then corroborated against play
+    data: every member holding the badge plays exactly that card."""
+    from engine.normalize import humanize_badge
+
+    assert humanize_badge("MasteryGiantBuffer") == "Card Mastery: Rune Giant"
+    assert humanize_badge("MasteryMergeMaiden") == "Card Mastery: Spirit Empress"
+
+
 def test_an_unknown_mastery_key_is_never_given_an_invented_card_name():
     """Cards released after the key map was built resolve to nothing. Naming a
     card we cannot verify is the exact failure being fixed, so with the catalog
@@ -184,8 +194,10 @@ def test_an_unknown_mastery_key_is_never_given_an_invented_card_name():
     from engine.normalize import humanize_badge, mastery_card
 
     catalog = {"Ronin", "Mother Witch", "Cannon Cart"}
-    assert humanize_badge("MasteryGiantBuffer", catalog) == "a new Card Mastery badge"
-    assert mastery_card("MasteryGiantBuffer", catalog) is None
+    # A key we have never seen, and one that resolves to a card this catalog lacks.
+    assert humanize_badge("MasteryNotARealCard", catalog) == "a new Card Mastery badge"
+    assert mastery_card("MasteryNotARealCard", catalog) is None
+    assert mastery_card("MasteryGiantBuffer", catalog) is None, "Rune Giant not in this catalog"
     assert humanize_badge("MasteryRonin", catalog) == "Card Mastery: Ronin"
     # Non-mastery badges are untouched by any of this.
     assert humanize_badge("Chaos_S2", catalog) == "Chaos S2"
