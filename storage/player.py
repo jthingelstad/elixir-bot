@@ -17,6 +17,7 @@ from db import (
     chicago_today,
     managed_connection,
 )
+from engine.normalize import humanize_badge
 from storage._enrichment import _member_reference_fields
 from storage.game_modes import (
     mode_group_label,
@@ -919,8 +920,11 @@ def _special_event_badge_completions(days: int, conn) -> dict[str, list[dict]]:
     )
     placeholders = ",".join("?" for _ in badge_names)
     rows = conn.execute(
+        # badge_label is the emitter-resolved label; it was selected from
+        # `$.badge_name` here, so it was the raw API key and always truthy — which
+        # meant the curated per-event label below could never win the `or`.
         "SELECT player_tag AS tag, json_extract(payload_json, '$.badge_name') AS badge_name, "
-        "json_extract(payload_json, '$.badge_name') AS badge_label, COUNT(*) AS badge_events, "
+        "json_extract(payload_json, '$.badge_label') AS badge_label, COUNT(*) AS badge_events, "
         "MAX(observed_at) AS latest_badge_event "
         "FROM player_events "
         "WHERE event_type = 'badge_earned' "
@@ -936,7 +940,11 @@ def _special_event_badge_completions(days: int, conn) -> dict[str, list[dict]]:
         item = {
             "tag": row["tag"],
             "badge_name": row["badge_name"],
-            "badge_label": row["badge_label"] or context.get("badge_label"),
+            "badge_label": (
+                context.get("badge_label")
+                or row["badge_label"]
+                or humanize_badge(row["badge_name"])
+            ),
             "badge_events": int(row["badge_events"] or 0),
             "latest_badge_event": row["latest_badge_event"],
         }

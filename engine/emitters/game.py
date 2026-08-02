@@ -74,7 +74,7 @@ def _event_badge(conn, obs, now: str) -> int:
         member_name = None
     payload = {
         "badge_name": name,
-        "badge_label": humanize_badge(name, card_catalog.card_names(conn=conn)),
+        "badge_label": humanize_badge(name, card_catalog.card_index(conn=conn)),
         "member_name": member_name,
         "member_tag": subject_tag,
         "image_url": image_url,

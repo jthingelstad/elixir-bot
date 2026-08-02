@@ -328,6 +328,34 @@ def humanize_badge(badge_name, known_cards=None) -> str:
     return label or badge_name
 
 
+def badge_facts(badge_name, catalog=None) -> dict:
+    """One raw badge key → every resolved fact about it, in one place.
+
+    Returns ``badge_label`` always, plus ``card_name``/``card_id`` when the badge
+    is a Card Mastery badge for a card we can identify.
+
+    This is the upstream form of `humanize_badge`. The badge key is the only place
+    Supercell's internal card names reach us, and every surface that re-derived the
+    card from the raw key got a vote on whether to do it right: the weekly email
+    did, and the awareness brain did not — which is how "Dark Witch" and "Archer"
+    went out to the clan on 2026-07-03 as cards a member had mastered. Resolve once
+    at the emitter, stamp the answer into the event payload, and no later reader
+    has to know that `MasteryDarkWitch` means Night Witch.
+
+    ``catalog`` is ``card_catalog.card_index()`` — name → card_id. It both fails the
+    resolution closed (an unknown card yields no name at all) and supplies the id,
+    so the foreign key is the catalog's, never one written by hand here.
+    """
+    facts = {"badge_label": humanize_badge(badge_name, catalog)}
+    card = mastery_card(badge_name, catalog)
+    if card:
+        facts["card_name"] = card
+        card_id = catalog.get(card) if isinstance(catalog, dict) else None
+        if card_id is not None:
+            facts["card_id"] = card_id
+    return facts
+
+
 # Game-mode keys the CR API returns as raw snake/camelCase identifiers
 # (`Crazy_Arena`, `CW_Battle_1v1`, `7xElixir_Ladder`). Same class of leak as
 # badges (#167): the API never sends a member-facing label, so a raw key like

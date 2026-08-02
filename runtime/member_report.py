@@ -547,9 +547,11 @@ def build_member_report_context(
         prior = _battle_tally(_window_battles(conn, tag, prev_c, until=cutoff_c))
         botw = _battle_of_week(battles)
 
-        # Resolve mastery keys against the real catalog so an unknown key degrades
-        # to a generic label instead of naming a card that does not exist.
-        known_cards = card_catalog.card_names(conn=conn)
+        # The emitter resolves the badge and stamps badge_label into the payload.
+        # Events written before that still carry only the raw key, so fall back to
+        # resolving here — against the real catalog, so an unknown key degrades to
+        # a generic label instead of naming a card that does not exist.
+        known_cards = card_catalog.card_index(conn=conn)
         events = db.list_recent_events(days=days, subject_key=tag, limit=200, conn=conn)
         badges, cards, ranked, other, arena_changes = [], [], [], [], []
         for e in events:
@@ -557,7 +559,8 @@ def build_member_report_context(
             if et == "badge_earned":
                 badges.append(
                     {
-                        "label": humanize_badge(payload.get("badge_name") or "", known_cards),
+                        "label": payload.get("badge_label")
+                        or humanize_badge(payload.get("badge_name") or "", known_cards),
                         "level": payload.get("level"),
                         "observed_at": e.get("observed_at"),
                         "image_url": payload.get("image_url"),

@@ -299,12 +299,21 @@ def catalog_count(conn=None) -> int:
 
 
 @managed_connection
-def card_names(conn=None) -> set[str]:
-    """Every card name in the catalog.
+def card_index(conn=None) -> dict[str, int]:
+    """Every card name in the catalog, mapped to its card_id.
 
     Exists so label-building can FAIL CLOSED: Supercell's badge API uses internal
     card keys the card API never returns, and a camelCase split of one produces a
     confident non-card ("Witch Mother", "Moving Cannon"). Checking a resolved name
     against the real catalog is what turns that into "a new Card Mastery badge".
+
+    A dict rather than a set because the same lookup answers both questions —
+    ``name in index`` validates, ``index[name]`` gives the id to store as the
+    foreign key. The catalog is the only source of card_ids; the badge key map in
+    engine/normalize.py deliberately holds names, so ids are never hand-written.
     """
-    return {r["name"] for r in conn.execute("SELECT name FROM card_catalog") if r["name"]}
+    return {
+        r["name"]: r["card_id"]
+        for r in conn.execute("SELECT name, card_id FROM card_catalog")
+        if r["name"]
+    }

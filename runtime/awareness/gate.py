@@ -293,7 +293,8 @@ def _compact_read_for_triage(read: dict) -> str:
                 "observed_at",
                 "signal_key",
                 "badge_tier",
-                "badge_name",
+                "badge_label",
+                "card_name",
                 "arena_name",
             )
             if s.get(k)
