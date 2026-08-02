@@ -228,6 +228,14 @@ _MASTERY_CARD_KEYS = {
     "DarkWitch": "Night Witch",
     "FireSpirits": "Fire Spirit",
     "FirespiritHut": "Furnace",
+    # Released after Supercell's published key map, so these two came from the
+    # game's own gamedata.json ("internally named GiantBuffer but displays as Rune
+    # Giant"; "MergeMaiden in codebase = Spirit Empress in game") and were then
+    # corroborated against our own play data: both members holding MasteryGiantBuffer
+    # play Rune Giant, and the only member holding MasteryMergeMaiden plays Spirit
+    # Empress. The badge-holders are exactly the card-players.
+    "GiantBuffer": "Rune Giant",
+    "MergeMaiden": "Spirit Empress",
     "IceSpirits": "Ice Spirit",
     "Log": "The Log",
     "MovingCannon": "Cannon Cart",
