@@ -175,11 +175,16 @@ def _utc_cutoff(days):
 
 
 def _cr_cutoff(days):
-    # battle_events stores battle_time in raw Clash Royale format
-    # (YYYYMMDDTHHMMSS.000Z). That sorts differently from the ISO cutoff used
-    # everywhere else — the 'T'-position char ('0' vs '-') makes every CR
-    # timestamp compare greater than an ISO cutoff, so an ISO comparison never
-    # deletes anything. This cutoff matches the stored format.
+    # battle_time is ISO-Z ("2026-08-02T12:25:30Z") since schema v25 — NOT the
+    # raw CR-compact form this once handled. The only thing separating this from
+    # _utc_cutoff is the trailing "Z", which the stored values carry and which a
+    # string comparison needs to line up. Verified against live data: a 730-day
+    # cutoff deletes 2024 rows and spares 2025+ ones, correctly.
+    #
+    # The old comment here claimed the stored format was YYYYMMDDTHHMMSS.000Z.
+    # It survived the v25 conversion and reads as a live warning about a format
+    # that no longer exists — do not reason from it (see the same trap in
+    # storage/trends.py, where the CODE, not just the comment, was left behind).
     return (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )

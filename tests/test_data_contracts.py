@@ -192,3 +192,25 @@ def test_management_holds_judgment_when_member_evidence_is_stale(engine_conn):
     assert summary["actionable"]["kick"] == []
     assert summary["readiness"]["counts"]["held"] == 1
     assert get_members_at_risk(conn=engine_conn)["members"] == []
+
+
+def test_the_awareness_prompt_enumerates_every_hard_post_event():
+    """The registry decides the floor; the prompt tells the brain what the floor
+    IS. They drifted: `tournament_finished` was added to the registry in #210 and
+    never reached the prompt's enumeration, so the brain was never told it was
+    mandatory.
+
+    That gap is not cosmetic. runtime/awareness/deliver.py fails the WHOLE tick on
+    an uncovered mandatory signal and does not advance the cursor, so the same
+    signal re-surfaces next loop — at the 4x/day cadence, a floor event the brain
+    doesn't know about can wedge the loop for a day before anyone notices."""
+    import pathlib
+
+    prompt = pathlib.Path("prompts/agents/awareness.md").read_text()
+    floor = hard_post_event_types()
+    missing = sorted(name for name in floor if f"`{name}`" not in prompt)
+    assert not missing, (
+        f"hard-post events absent from prompts/agents/awareness.md: {missing}. "
+        "Add each to the Hard-Post Floors enumeration AND give it a channel in "
+        "the leads_with routing rules, or the brain cannot cover it."
+    )

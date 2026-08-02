@@ -11,6 +11,10 @@ import db
 from db import managed_connection
 from storage import events_read
 
+# Inside a rolling list_recent_events(days=30) window, so a literal date is a fuse:
+# it passes until it ages out and then fails forever. Anchor to "now" instead.
+_RECENT = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 @managed_connection
 def _seed_player_event(dedup, event_type, observed_at, *, backfilled=0, conn=None):
@@ -43,14 +47,14 @@ def test_list_recent_events_can_include_game_and_drop_backfilled():
     _seed_game_event(
         "card_added:9",
         "card_added",
-        "2026-07-08T00:00:00Z",
+        _RECENT,
         {"name": "Ronin"},
         backfilled=1,
     )  # seeded history
     _seed_game_event(
         "event_started:x",
         "event_started",
-        "2026-07-08T00:00:00Z",
+        _RECENT,
         {"title": "Live Event"},
         backfilled=0,
     )  # real

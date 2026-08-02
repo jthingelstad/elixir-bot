@@ -30,7 +30,12 @@ def _seed_player(conn, tag, name="T"):
 
 
 def _seed_battles(conn, tag, day: date, wins, losses):
-    stamp = day.strftime("%Y%m%d")
+    # ISO-Z, matching what ingest actually writes since schema v25. This helper
+    # used to seed CR-compact ("20260711T120000.000Z"), which made these tests
+    # agree with a live bug instead of catching it: the window bounds were also
+    # left compact, so both sides were consistently wrong here and consistently
+    # zero in production. Seed what the real writer writes.
+    stamp = day.isoformat()
     for i in range(wins + losses):
         conn.execute(
             "INSERT INTO battle_events (dedup_key, player_tag, battle_time, observed_at, outcome, trophy_change) "
@@ -38,7 +43,7 @@ def _seed_battles(conn, tag, day: date, wins, losses):
             (
                 f"{tag}-{stamp}-{i}",
                 tag,
-                f"{stamp}T12{i:02d}00.000Z",
+                f"{stamp}T12:{i:02d}:00.000Z",
                 "2026-07-11T00:00:00Z",
                 "W" if i < wins else "L",
                 30 if i < wins else -30,

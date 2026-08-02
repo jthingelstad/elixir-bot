@@ -155,11 +155,14 @@ def _events_battle_window(
     """Battle W/L/volume for a member over a calendar window, read from the
     authoritative battle_events store (QA H2/M2: the daily rollups it replaced
     are lossy for new/backfilled members — e.g. a real 27-battle week showed up
-    as 2 tracked days / 10 battles). battle_time is UTC-compact
-    'YYYYMMDDTHHMMSS...'; compare on the 8-char date prefix. Because
-    battle_events is complete, the window coverage is authoritative — we surface
-    days_with_battles so a low-activity week reads as low activity, not missing
-    data."""
+    as 2 tracked days / 10 battles). ``battle_time`` is ISO-Z since schema v25, so
+    the day key is ``substr(battle_time, 1, 10)`` and the bounds must be ISO
+    'YYYY-MM-DD' too. They were left as CR-compact 'YYYYMMDD' by the v25
+    conversion, and since '-' (0x2D) sorts below '0' (0x30) BOTH bounds failed
+    for every row — this function returned zeros for a member with 523 battles in
+    the window. Because battle_events is complete, the window coverage is
+    authoritative — we surface days_with_battles so a low-activity week reads as
+    low activity, not missing data."""
     row = conn.execute(
         "SELECT COUNT(*) AS battles, "
         "SUM(outcome = 'W') AS wins, SUM(outcome = 'L') AS losses, SUM(outcome = 'D') AS draws, "
@@ -196,10 +199,10 @@ def compare_member_trend_windows(
     canon = _canon_tag(tag)
     today = datetime.fromisoformat(chicago_today()).date()
     win = max(window_days, 1)
-    cur_start = (today - timedelta(days=win - 1)).strftime("%Y%m%d")
-    cur_end = today.strftime("%Y%m%d")
-    prev_start = (today - timedelta(days=2 * win - 1)).strftime("%Y%m%d")
-    prev_end = (today - timedelta(days=win)).strftime("%Y%m%d")
+    cur_start = (today - timedelta(days=win - 1)).isoformat()
+    cur_end = today.isoformat()
+    prev_start = (today - timedelta(days=2 * win - 1)).isoformat()
+    prev_end = (today - timedelta(days=win)).isoformat()
     current_battle_window = _events_battle_window(conn, canon, cur_start, cur_end, win)
     previous_battle_window = _events_battle_window(conn, canon, prev_start, prev_end, win)
 
@@ -230,7 +233,10 @@ def _events_clan_battle_window(conn, start_ymd: str, end_ymd: str, window_days: 
     battle_events (current members only). QA H1: the clan_daily_battle_rollups
     this replaced were stale (data ended a week behind), so the previous week
     read as 0 battles / 0-0-0 — a false 'dead clan' signal — while battle_events
-    held thousands of real battles."""
+    held thousands of real battles. That exact signal came back for a different
+    reason: the v25 ISO conversion left these window bounds in CR-compact form,
+    so the string comparison against an ISO day key failed on every row. Bounds
+    here are ISO 'YYYY-MM-DD'."""
     row = conn.execute(
         "SELECT COUNT(*) AS battles, "
         "SUM(b.outcome = 'W') AS wins, SUM(b.outcome = 'L') AS losses, SUM(b.outcome = 'D') AS draws, "
@@ -279,10 +285,10 @@ def compare_clan_trend_windows(
 
     win = max(window_days, 1)
     today = datetime.fromisoformat(chicago_today()).date()
-    cur_start = (today - timedelta(days=win - 1)).strftime("%Y%m%d")
-    cur_end = today.strftime("%Y%m%d")
-    prev_start = (today - timedelta(days=2 * win - 1)).strftime("%Y%m%d")
-    prev_end = (today - timedelta(days=win)).strftime("%Y%m%d")
+    cur_start = (today - timedelta(days=win - 1)).isoformat()
+    cur_end = today.isoformat()
+    prev_start = (today - timedelta(days=2 * win - 1)).isoformat()
+    prev_end = (today - timedelta(days=win)).isoformat()
     current_battle_window = _events_clan_battle_window(conn, cur_start, cur_end, win)
     previous_battle_window = _events_clan_battle_window(conn, prev_start, prev_end, win)
 
