@@ -491,55 +491,9 @@ def members_page() -> dict:
             WHERE cm.left_at IS NOT NULL
             ORDER BY cm.left_at DESC LIMIT 10""",
         )
-        return {"rows": rows, "leavers": leavers, "elder": _elder_explainer(conn)}
+        return {"rows": rows, "leavers": leavers}
     finally:
         conn.close()
-
-
-def _elder_explainer(conn) -> dict:
-    """Numbers for the "How Elder works" section, read from the engine constants
-    and today's roster rather than written down.
-
-    A hand-written version of this went out in Discord and was stale within a
-    week: the band moved from 15-20% of the non-leadership roster to 20-30% of the
-    whole clan, and promotion changed from filling the floor to aiming at the
-    midpoint. Anything a member can check against the game has to be generated
-    from the same source the engine decides with, or it becomes a confident lie.
-    """
-    from engine import management as mg
-
-    roster = conn.execute(
-        "SELECT COUNT(*) FROM member_management mm WHERE EXISTS ("
-        "SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = mm.player_tag "
-        "AND cm.left_at IS NULL)"
-    ).fetchone()[0]
-    elders = conn.execute(
-        "SELECT COUNT(*) FROM member_management mm WHERE mm.role = 'elder' AND EXISTS ("
-        "SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = mm.player_tag "
-        "AND cm.left_at IS NULL)"
-    ).fetchone()[0]
-    floor = round(mg.ELDER_BAND_FLOOR * roster)
-    ceil = round(mg.ELDER_BAND_CEIL * roster)
-    return {
-        "roster": roster,
-        "elders": elders,
-        "floor": floor,
-        "ceil": ceil,
-        "target": round((floor + ceil) / 2),
-        "floor_pct": round(mg.ELDER_BAND_FLOOR * 100),
-        "ceil_pct": round(mg.ELDER_BAND_CEIL * 100),
-        "tenure_min": mg.PROMOTE_TENURE_MIN,
-        "war_days": mg.WAR_FLOOR_DAYS,
-        "war_window": mg.WAR_FLOOR_WINDOW,
-        "ranked_battles": mg.RANKED_FLOOR_BATTLES,
-        "war_weight": round(mg.SCORE_W_WAR * 100),
-        "donation_weight": round(mg.SCORE_W_DONATION * 100),
-        "ranked_weight": mg.RANKED_WEIGHT,
-        "war_rate_window": mg.WAR_RATE_WINDOW,
-        "qualifying_weeks": mg.PROMOTE_QUALIFYING_WEEKS,
-        "demote_weeks": mg.DEMOTE_WEEKS,
-        "swap_margin": mg.SWAP_MARGIN,
-    }
 
 
 def streams_page(stream: str | None, event_type: str | None, limit: int = 100) -> dict:

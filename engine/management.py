@@ -42,6 +42,11 @@ SCORE_W_DONATION = 0.35  # "lead by example" — the lighter half
 # competitive = war_pct + RANKED_WEIGHT * ranked_pct * (1 - war_pct). War-primary,
 # ranked-secondary, doing-both rewarded, bounded 0-1 (no saturation).
 RANKED_WEIGHT = 0.40
+# These four constants are EXPLAINED TO MEMBERS on poapkings.com/members/ ("How
+# Elder works"). The band there is derived from the live member count so it tracks
+# the roster on its own, but the percentages and the tenure/war/ranked thresholds
+# are copied prose — change them here and the website needs the same edit, or the
+# clan is reading rules the engine no longer applies.
 ELDER_BAND_FLOOR = 0.20  # elder share of the WHOLE active roster, leadership included ...
 ELDER_BAND_CEIL = 0.30  # ... a range to maintain, NOT a quota to fill
 WORTHINESS_MIN_PERCENTILE = 0.50  # below-floor promotions still need ≥ median score
