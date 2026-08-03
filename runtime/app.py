@@ -686,6 +686,12 @@ async def _engine_tick():
             counters["tournament_autowatch"] = auto
     except Exception:
         log.exception("engine tick post-steps failed")
+    try:  # A newcomer waiting to be welcomed; never fails the tick
+        triggered = await _maybe_trigger_awareness_for_joins()
+        if triggered:
+            counters["awareness_join_trigger"] = triggered
+    except Exception:
+        log.exception("engine tick: join trigger failed")
     log.info("engine tick: %s", counters)
     try:  # Observatory tick history (in-memory ring; never fails the tick)
         from runtime.webapp import ticks as webapp_ticks
@@ -695,6 +701,54 @@ async def _engine_tick():
         log.debug("webapp tick recording failed", exc_info=True)
     runtime_status.mark_job_success("engine_tick", json.dumps(counters, default=str)[:900])
     return counters
+
+
+async def _maybe_trigger_awareness_for_joins():
+    """Run the awareness loop now if a newcomer is waiting to be welcomed.
+
+    A join is the one hard-post where minutes matter: the newcomer is in the app
+    right now, and a welcome that lands at 3am to an empty room is a welcome that
+    didn't happen. Everything else about the loop is unchanged — same brain, same
+    coverage floor, same clan-chat sibling. See runtime/awareness/trigger.py for
+    why this triggers the existing author instead of adding a second one.
+
+    Runs the loop as a background task rather than awaiting it here: an awareness
+    turn takes minutes, and the engine tick is a 10-minute heartbeat that must not
+    be held open behind it.
+    """
+    from runtime.awareness import trigger as join_trigger
+
+    if not join_trigger.trigger_enabled():
+        return None
+
+    job = scheduler.get_job("awareness-loop") if scheduler.running else None
+    decision = await asyncio.to_thread(
+        join_trigger.evaluate,
+        next_scheduled_at=getattr(job, "next_run_time", None),
+    )
+    if not decision.get("run"):
+        if decision.get("joins"):
+            log.info("awareness join trigger: holding — %s", decision.get("reason"))
+        return None
+
+    tags = ", ".join(str(j.get("subject_tag")) for j in decision["joins"])
+    log.info("awareness join trigger: firing for %s (%s)", tags, decision["reason"])
+
+    async def _run():
+        try:
+            await _awareness_loop(trigger="join")
+        finally:
+            # Mark whether or not the run succeeded. The high-water mark bounds
+            # this to ONE extra run per join: a run that failed (or that the copy
+            # policy refused) must not re-fire every 10 minutes at Sonnet prices.
+            # The scheduled cadence stays the backstop for that join.
+            try:
+                await asyncio.to_thread(join_trigger.mark_fired, decision["high_water"])
+            except Exception:
+                log.exception("awareness join trigger: could not mark high-water")
+
+    _safe_create_task(_run(), name="awareness-join-trigger")
+    return {"joins": [j.get("subject_tag") for j in decision["joins"]]}
 
 
 async def _weekly_leadership_review():
@@ -803,9 +857,17 @@ THINKING_CHANNEL_ID = int(
 
 
 # Live #thinking session for the in-flight tick. Awareness runs one-at-a-time
-# (scheduler max_instances=1), so a single holder is safe; a fresh `start`
+# (see _awareness_lock), so a single holder is safe; a fresh `start`
 # finalizes any stale session first.
 _thinking_session: dict = {}
+
+# Awareness runs strictly one-at-a-time. The scheduler's max_instances=1 only
+# serializes the *cron* job against itself; since joins can also trigger a run
+# out of band (runtime/awareness/trigger.py), the guarantee has to live here
+# instead. It is load-bearing beyond _thinking_session: two concurrent loops
+# would build their reads from the same unadvanced event cursor and both post
+# the same signals.
+_awareness_lock = asyncio.Lock()
 
 
 async def _awareness_event(event: dict) -> None:
@@ -908,14 +970,29 @@ async def _awareness_event(event: dict) -> None:
         log.exception("awareness: #thinking event %s failed", etype)
 
 
-async def _awareness_loop():
+async def _awareness_loop(*, trigger: str = "schedule"):
     """The awareness loop (runtime/awareness). Builds the read, runs the brain,
     persists the train of thought, and STREAMS a bot-native #thinking diagnostic.
 
     The brain is the SOLE proactive poster: it posts its plan to #announcements /
     #elixir and escalates clan-chat-worthy posts as #actions relay cards.
     The engine's proactive delivery is off (see _engine_tick), so there's never a
-    gap or a double-post."""
+    gap or a double-post.
+
+    Reached two ways: the cron schedule, and an out-of-band ``join`` trigger when
+    a newcomer is waiting to be welcomed (runtime/awareness/trigger.py). Both
+    paths run the same brain — the trigger changes *when* it thinks, never who
+    writes. A run already in flight covers everything past the event cursor, so a
+    second overlapping request is skipped rather than queued."""
+    if _awareness_lock.locked():
+        log.info("awareness loop (%s): a run is already in flight — skipping", trigger)
+        return None
+    async with _awareness_lock:
+        return await _awareness_loop_body(trigger)
+
+
+async def _awareness_loop_body(trigger: str):
+    """One awareness turn. Callers must hold ``_awareness_lock``."""
     from runtime.awareness import deliver as deliver_mod
     from runtime.awareness import store as awareness_store
     from runtime.awareness.loop import run_awareness_loop
@@ -963,7 +1040,7 @@ async def _awareness_loop():
         log.exception("awareness loop failed")
         return
     runtime_status.mark_job_success("awareness_loop", json.dumps(counters, default=str))
-    log.info("awareness loop (live): %s", counters)
+    log.info("awareness loop (live, %s): %s", trigger, counters)
     return counters
 
 

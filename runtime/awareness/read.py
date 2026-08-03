@@ -106,6 +106,13 @@ def _delivery_block() -> dict:
             "card a leader must manually paste into the game (clan chat has no post "
             "API), adding hours of unpredictable human latency, and can be declined."
         ),
+        "joins_run_me_immediately": (
+            "One exception to the cadence: a new member joining wakes me within "
+            "minutes instead of waiting for my next scheduled run, because a "
+            "newcomer is in the app right now. If this run was triggered by a "
+            "join, the newcomer is fresh — greet them as someone who just walked "
+            "in, not as someone who has been standing around unacknowledged."
+        ),
     }
     try:
         from zoneinfo import ZoneInfo

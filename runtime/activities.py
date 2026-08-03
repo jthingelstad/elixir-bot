@@ -408,6 +408,11 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         # including one where Sonnet called save_clan_memory. It can write the post
         # but not do the research, which yields well-formatted posts built on
         # thinner evidence. Cost of this change: hard-posts wait up to 6h.
+        # That price was reconsidered for ONE event on 2026-08-03: a member_joined now
+        # triggers an out-of-band run from the engine tick (runtime/awareness/trigger.py),
+        # so a newcomer waits ~10 min, not up to 6h. Measured before the change: median
+        # 2.0h to welcome, worst 5.2h, and one join at 22:58 CT welcomed at 03:05 CT to
+        # an empty room. Every other hard-post still waits for this cron.
         schedule_kind="cron",
         schedule_config={
             "hour": _attr("AWARENESS_LOOP_HOURS", AWARENESS_LOOP_HOURS_DEFAULT),

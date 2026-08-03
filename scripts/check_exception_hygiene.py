@@ -56,7 +56,11 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/activity_runner.py": 3,
     "runtime/admin.py": 2,  # -2: #212 retired the dead signal.publish-pending impl
     "runtime/alerts.py": 2,  # +1: schedule_job_failure_alert best-effort loop-schedule guard
-    "runtime/app.py": 38,  # dead war-thread post-step retired in #223
+    # 38 -> 40 (2026-08-03): the join trigger's two guards. Both are the same
+    # "a diagnostic must never fail its caller" shape as the rest of this file —
+    # one keeps a trigger failure from failing the engine tick, the other keeps a
+    # high-water write failure from escaping a background task.
+    "runtime/app.py": 40,
     "runtime/awareness/deliver.py": 10,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
