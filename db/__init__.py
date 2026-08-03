@@ -517,6 +517,13 @@ def _store_raw_payload(
     payload_json = _json_or_none(payload)
     if payload_json is None:
         return None
+    # Canonical bare-upper at the write, so readers can compare the column
+    # directly instead of wrapping it in UPPER(LTRIM(...)) — which silently
+    # disables idx_api_receipts_lookup (schema v33). Both tables below take the
+    # same normalized value or the payload/receipt pair stops joining.
+    # `or entity_key` keeps a degenerate empty/None key exactly as it was rather
+    # than turning it into "".
+    entity_key = _tag_key(entity_key) or entity_key
     # Use the observation envelope's canonical hash, not the serialized
     # compatibility blob's whitespace-sensitive hash. This is what lets a
     # generation point back to the exact network receipt that fed it.

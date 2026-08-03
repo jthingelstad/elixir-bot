@@ -12,7 +12,7 @@ import json
 from datetime import datetime, timezone
 
 from engine.db import canon_tag
-from engine.normalize import canonical_utc_timestamp, parse_cr_time
+from engine.normalize import bare_tag, canonical_utc_timestamp, parse_cr_time
 
 CLAN_MAX_AGE_MINUTES = 30
 BATTLELOG_MAX_AGE_MINUTES = 360
@@ -124,10 +124,12 @@ def start_materialization(conn, *, started_at: str, run_kind: str = "scheduled")
 
 def add_materialization_input(conn, materialization_id: int, observation) -> int:
     """Link an admitted observation and its closest raw receipt to a run."""
-    raw_key = str(observation.entity_key).lstrip("#").upper()
+    # Canonical form, matching how the column is stored since v33 — the shared
+    # helper rather than a local lstrip/upper, which disagreed on padded input.
+    raw_key = bare_tag(observation.entity_key)
     receipt = conn.execute(
         """SELECT receipt_id FROM api_observation_receipts
-           WHERE endpoint = ? AND UPPER(LTRIM(entity_key, '#')) = ?
+           WHERE endpoint = ? AND entity_key = ?
              AND payload_hash = ?
            ORDER BY receipt_id DESC LIMIT 1""",
         (observation.endpoint, raw_key, observation.payload_hash),
@@ -179,10 +181,10 @@ def record_admission_decision(conn, decision, payload) -> None:
         return
     from engine.db import payload_hash
 
-    raw_key = str(decision.entity_key).lstrip("#").upper()
+    raw_key = bare_tag(decision.entity_key)
     row = conn.execute(
         """SELECT receipt_id FROM api_observation_receipts
-           WHERE endpoint = ? AND UPPER(LTRIM(entity_key, '#')) = ?
+           WHERE endpoint = ? AND entity_key = ?
              AND payload_hash = ?
            ORDER BY receipt_id DESC LIMIT 1""",
         (decision.endpoint, raw_key, payload_hash(payload)),
