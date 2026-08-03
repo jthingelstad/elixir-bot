@@ -229,16 +229,36 @@ async def _clan_wars_intel_email():
     sender = _os.getenv("ELIXIR_EMAIL_ADDRESS", "elixir@poapkings.com")
     await _asyncio.to_thread(outbound.send, to=sender, bcc=recipients, subject=subject, body=body)
 
-    # Memory is what makes the trigger idempotent -- write it only after a send.
-    try:
-        await _asyncio.to_thread(
-            upsert_intel_report_memory,
-            season_id=season_id,
-            body=body,
-            metadata={"clan_count": len(ctx["opponents"]), "delivery": "email"},
+    # The memory IS the idempotency. Written after the send, because a memory
+    # without a send would silently skip the season -- but that ordering means a
+    # failed write leaves a sent email with nothing recording it, and the next
+    # run broadcasts the same report to the whole clan again.
+    #
+    # This happened on the first live run (2026-08-03): the send landed, the
+    # upsert hit "database is locked" behind the bot's own writer, and it was
+    # logged at WARNING and swallowed. A warning is the wrong severity for
+    # "a duplicate mass email is now scheduled." Retry, then fail the job loudly.
+    memory_ok = False
+    for attempt in range(3):
+        try:
+            await _asyncio.to_thread(
+                upsert_intel_report_memory,
+                season_id=season_id,
+                body=body,
+                metadata={"clan_count": len(ctx["opponents"]), "delivery": "email"},
+            )
+            memory_ok = True
+            break
+        except Exception:
+            log.warning("intel email: memory upsert attempt %d failed", attempt + 1, exc_info=True)
+            await _asyncio.sleep(5)
+    if not memory_ok:
+        runtime_status.mark_job_failure(
+            "clan_wars_intel",
+            f"season {season_id} EMAILED to {len(recipients)} member(s) but the idempotency "
+            "memory could not be written -- the next run will re-send unless it is added by hand",
         )
-    except Exception:
-        log.warning("intel email: memory upsert failed", exc_info=True)
+        return
 
     runtime_status.mark_job_success(
         "clan_wars_intel",
