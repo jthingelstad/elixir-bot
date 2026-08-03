@@ -7,6 +7,7 @@ via tools and composes the Discord-ready post itself.
 """
 
 __all__ = [
+    "_clan_wars_intel_email",
     "_clan_wars_intel_report",
 ]
 
@@ -136,4 +137,111 @@ async def _clan_wars_intel_report():
     runtime_status.mark_job_success(
         "clan_wars_intel",
         f"posted {len(messages)} messages for {len(competitors)} opponents",
+    )
+
+
+# --- The intel report as email (2026-08-03) -------------------------------
+# Pivoted off Discord entirely. The report is a monthly, once-per-season piece
+# with a top-5 roster table per opponent -- long-form, referred back to, and a
+# poor fit for a channel that scrolls. Email also lets it be a real document.
+#
+# Trigger is a daily CHECK rather than a season-start cron: seasons begin on the
+# first Monday, which the old `day=1` cron could miss by up to six days, and an
+# event listener would lose the report entirely if the bot were down at rollover.
+# "Is there a season with no intel memory yet?" is idempotent, self-healing, and
+# survives a missed day.
+
+INTEL_LOOKBACK_DAYS = 6
+
+
+async def _clan_wars_intel_email():
+    """Email the Clan Wars Intel Report once per war season."""
+    import asyncio as _asyncio
+    from datetime import datetime, timedelta, timezone
+
+    import db as _db
+    from agent.mail import outbound
+    from agent.workflows import generate_war_intel_narrative
+    from runtime import war_intel
+
+    runtime_status.mark_job_start("clan_wars_intel")
+
+    if not outbound.enabled():
+        runtime_status.mark_job_success("clan_wars_intel", "skipped: mail not configured")
+        return
+
+    def _due() -> int | None:
+        """The season id owed a report, or None."""
+        with _db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT season_id, started_at FROM war_seasons "
+                "WHERE ended_at IS NULL ORDER BY season_id DESC LIMIT 1"
+            ).fetchone()
+            if not row:
+                return None
+            season_id, started_at = int(row[0]), str(row[1] or "")
+            try:
+                started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            if datetime.now(timezone.utc) - started > timedelta(days=INTEL_LOOKBACK_DAYS):
+                return None  # too late to be "the start of the season"
+        # Ask through the same API the writer uses -- the memories table does not
+        # store a plain "clan_wars_intel:135" key, and hand-rolling the format here
+        # would make the idempotency check quietly never match.
+        from storage.contextual_memory import list_memories
+
+        already = list_memories(
+            viewer_scope="system_internal",
+            include_system_internal=True,
+            filters={"event_type": "clan_wars_intel", "event_id": str(season_id)},
+            limit=1,
+        )
+        return None if already else season_id
+
+    season_id = await _asyncio.to_thread(_due)
+    if season_id is None:
+        runtime_status.mark_job_success("clan_wars_intel", "no season owed a report")
+        return
+
+    try:
+        ctx = await _asyncio.to_thread(war_intel.build_intel_context, season_id=season_id)
+    except ValueError as exc:
+        runtime_status.mark_job_success("clan_wars_intel", f"skipped: {exc}")
+        return
+    except Exception as exc:  # noqa: BLE001 - report failure must not kill the scheduler
+        log.exception("intel email: context build failed")
+        runtime_status.mark_job_failure("clan_wars_intel", f"context build failed: {exc}")
+        return
+
+    narrative = await _asyncio.to_thread(
+        generate_war_intel_narrative, war_intel.facts_for_model(ctx)
+    )
+    subject, body = war_intel.render_war_intel_email(ctx, narrative or {})
+
+    recipients = await _asyncio.to_thread(lambda: [m["email"] for m in _db.list_member_emails()])
+    if not recipients:
+        runtime_status.mark_job_success("clan_wars_intel", "no members with a verified email")
+        return
+
+    import os as _os
+
+    sender = _os.getenv("ELIXIR_EMAIL_ADDRESS", "elixir@poapkings.com")
+    await _asyncio.to_thread(outbound.send, to=sender, bcc=recipients, subject=subject, body=body)
+
+    # Memory is what makes the trigger idempotent -- write it only after a send.
+    try:
+        await _asyncio.to_thread(
+            upsert_intel_report_memory,
+            season_id=season_id,
+            body=body,
+            metadata={"clan_count": len(ctx["opponents"]), "delivery": "email"},
+        )
+    except Exception:
+        log.warning("intel email: memory upsert failed", exc_info=True)
+
+    runtime_status.mark_job_success(
+        "clan_wars_intel",
+        f"emailed season {season_id} intel ({len(ctx['opponents'])} opponents) "
+        f"to {len(recipients)} member(s)",
     )

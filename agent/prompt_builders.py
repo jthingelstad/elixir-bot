@@ -349,6 +349,44 @@ def _intel_report_system():
     )
 
 
+def _war_intel_system():
+    """System prompt for the Clan Wars Intel Report email.
+
+    Facts-in, prose-out: this workflow gets NO tools. Every number, clan and
+    player name is assembled deterministically by runtime.war_intel and rendered
+    by the email template — the model writes judgement only. The Discord-era
+    version handed the model cr_api and let it compose the numbers, which is
+    exactly where an invented opponent does the most damage.
+    """
+    return _build_system_prompt(
+        prompts.identity_block(),
+        prompts.knowledge_block(),
+        "You are writing the Clan Wars Intel Report — a monthly scouting email sent to the "
+        "clan at the start of a new river race season, before the first battle day.\n\n"
+        "GROUNDING (critical): use ONLY the facts in the brief. Never invent a clan, a player, "
+        "a trophy count, or a record. You have no tools and cannot look anything up. The email "
+        "already renders each clan's stat line and a top-5 member table beneath your paragraph, "
+        "so do NOT re-list the roster or restate the raw numbers — add the read on them.\n"
+        "RECENT RACES is the most predictive fact in the brief. A clan that keeps FINISHING "
+        "first is a threat whatever its trophy average says, and a big high-trophy roster that "
+        "has been placing 5th is not — weigh form above size. Donations are deliberately absent: "
+        "the counter resets weekly and this report runs on reset day, so never mention them.\n\n"
+        'The five members shown are the TOP FIVE ONLY. You do not know anything about the rest of a clan\'s roster beyond the aggregate counts given, so never name a player who is not in the brief and never count players above a threshold ("four more above 12k") — you cannot see them.\n\n'
+        "What a good paragraph does: says who this clan actually is, what shape they are in, "
+        "and what it means for us. A top-heavy clan with a dead roster is a different problem "
+        "than an even one. Entry requirements, donation rate and how many played this week are "
+        "the tells. Be specific and useful; dry wit is welcome, hype is not. 2-4 sentences.\n\n"
+        "Threat is YOUR call, 1-5, and should reflect how hard they will actually be to beat in "
+        "a river race — activity and depth matter more than a single big trophy count. Do not "
+        "give every clan the same rating.\n\n"
+        "Respond with JSON only (no markdown wrapper):\n"
+        '{"assessment": "2-4 sentence strategic overview of the race as a whole", '
+        '"clans": [{"tag": "#XXXX", "threat": 3, "paragraph": "2-4 sentences"}], '
+        '"closer": "one short sign-off line"}\n\n'
+        "Include exactly one `clans` entry per opponent in the brief, using the tag as given.",
+    )
+
+
 def _interactive_system(channel_name):
     lane_key = prompts.lane_key_for_channel(channel_name, "interactive")
     purpose, knowledge, channel_context = _lane_base(channel_name, lane_key)
@@ -1003,6 +1041,7 @@ __all__ = [
     "_weekly_recap_system",
     "_event_system",
     "_awareness_system",
+    "_war_intel_system",
     "_ask_elixir_daily_system",
     "_memory_synthesis_system",
     "_clan_chat_copy_system",

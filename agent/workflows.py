@@ -41,6 +41,7 @@ from agent.prompt_builders import (
     _screenshot_readout_system,
     _tournament_recap_system,
     _tournament_update_system,
+    _war_intel_system,
     _weekly_recap_system,
 )
 from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
@@ -1566,6 +1567,42 @@ def generate_tournament_recap(recap_context):
     return text or None
 
 
+def generate_war_intel_narrative(facts: str) -> dict:
+    """Write the Clan Wars Intel Report prose from an assembled facts brief.
+
+    No tools by design: runtime.war_intel already resolved every clan, player and
+    number, and the renderer prints them. The model contributes the assessment,
+    a threat rating and one paragraph per opponent. Returns {} when the model
+    fails or returns unparseable JSON — the renderer falls back to deterministic
+    copy rather than dropping the report, because the tables are the substance.
+    """
+    user_msg = (
+        f"{facts}\n\nWrite the Clan Wars Intel Report now: the overall assessment, "
+        "then one entry per opponent above with a threat rating and paragraph. "
+        "JSON only."
+    )
+    text = (
+        _generate_simple_message(
+            _war_intel_system(),
+            user_msg,
+            workflow="war_intel",
+            temperature=0.8,
+            max_tokens=2000,
+            error_label="War intel",
+        )
+        or ""
+    )
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-z]*\s*|\s*```$", "", text, flags=re.S)
+    try:
+        parsed = json.loads(text)
+    except ValueError, TypeError:
+        log.warning("war intel: model returned unparseable JSON (%d chars)", len(text))
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_context=None):
     """Run the Clan Wars Intel Report workflow.
 
@@ -1635,6 +1672,7 @@ __all__ = [
     "generate_channel_update",
     "generate_clan_chat_copy",
     "generate_intel_report",
+    "generate_war_intel_narrative",
     "run_memory_synthesis",
     "run_awareness_tick",
     "repair_awareness_plan",

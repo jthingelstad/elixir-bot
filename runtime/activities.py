@@ -368,20 +368,24 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ActivityDefinition(
         activity_key="clan-wars-intel",
         owner_lane="elixir",
-        purpose="Generate a detailed intel report on competing clans for the war season.",
+        purpose="Email the Clan Wars Intel Report at the start of each war season: a scouting brief on every opponent in the river race, with a top-5 roster table per clan.",
         job_id="clan-wars-intel",
-        job_function="_clan_wars_intel_report",
+        job_function="_clan_wars_intel_email",
+        # A DAILY check, not a season-start cron. Seasons begin on the first
+        # Monday, which the old `day=1` cron could miss by up to six days, and an
+        # event listener would drop the report entirely if the bot were down at
+        # rollover. The job asks "is there a season with no intel memory yet?" and
+        # sends at most once per season, so a daily poll is idempotent and
+        # self-healing. 12:05 CT keeps it clear of the :00 cron crowd.
         schedule_kind="cron",
         schedule_config={
-            "month": "*",
-            "day": 1,
             "hour": 12,
-            "minute": 0,
+            "minute": 5,
         },
-        delivery_targets=("Discord: #elixir",),
+        delivery_targets=("Email: every member with a verified address (BCC)",),
         activity_role="communicator",
         manual_trigger_allowed=True,
-        enabled_by_default=False,
+        enabled_by_default=True,
     ),
     ActivityDefinition(
         activity_key="awareness-loop",

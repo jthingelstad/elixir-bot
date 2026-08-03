@@ -78,7 +78,14 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/helpers/_reports.py": 10,
     "runtime/jobs/_core.py": 15,
     "runtime/jobs/_battle_intel.py": 2,  # Stage-A/B jobs: mark_job_failure on any tick error
-    "runtime/jobs/_intel.py": 4,
+    # 4 -> 6 (2026-08-03): the intel email job. One guards context assembly so a
+    # failed report marks the job failed instead of killing the scheduler; the
+    # other keeps a memory-write failure from unsending an email already gone.
+    "runtime/jobs/_intel.py": 6,
+    # All three guard per-clan API fetches (opponent profile, our own profile,
+    # river race log): one bad clan must degrade that section of the scouting
+    # report, never sink the whole thing.
+    "runtime/war_intel.py": 3,
     "runtime/jobs/_maintenance.py": 4,
     "runtime/jobs/_memory.py": 23,  # +1: optional contradiction-card channel lookup fails soft (#229)
     "runtime/jobs/_promotion.py": 3,
