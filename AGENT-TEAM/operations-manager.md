@@ -80,6 +80,14 @@ Identify unusual increases, regressions, or waste.
    - **`recorded_at` is ISO-Z (`2026-08-03T15:51:54Z`); SQLite's `datetime('now')` is
      space-separated.** Comparing them silently over-selects, because `'T' > ' '`. Build
      cutoffs with `strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-N days')`.
+   - **Not every row is production.** Any script run from the repo root without
+     `ELIXIR_TELEMETRY_DB_PATH` set writes here too, so a one-off migration dry-run or
+     backfill against a *copy* of the database still lands in the live telemetry file
+     under its own call site. This has already happened once: a 369 ms
+     `db/schema.py` transaction on 2026-08-03 was a dry-run on a copy, while the real
+     production migration two minutes later took 12 ms. Before treating an outlier as
+     production, check whether its timing lines up with a human at a terminal. When you
+     run ad-hoc scripts yourself, point `ELIXIR_TELEMETRY_DB_PATH` somewhere disposable.
 
    `ELIXIR_DB_REPORT_MS` sets the floor for recording a transaction. It is temporarily **0**
    (record everything) to characterize the real hold-time distribution; raise it once the
