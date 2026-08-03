@@ -12,6 +12,29 @@ and how long it was held. That is the metric that matters. Query duration is the
 obvious thing to measure and the least useful one here: nothing is slow, things
 *hold*.
 
+Two things this got wrong the first time, both found by probing rather than by
+reading the code — a partial instrument reports zero rows and looks exactly like
+a healthy system:
+
+1. Instrumentation must sit on the CURSOR, not the connection. `conn.execute()`
+   is only one of the ways this codebase writes; `conn.executemany()`,
+   `cur.execute()` and `cur.executemany()` all bypassed a connection-level
+   override entirely, so those writes opened no record and were invisible to the
+   watchdog. `Connection.execute` is documented as a shortcut for
+   `self.cursor().execute(...)`, so routing it through our cursor makes the
+   cursor the single observation point.
+2. `with conn:` commits inside CPython's C `__exit__`, which does NOT call a
+   Python-level `commit()` override. Records stayed open and were closed by
+   whatever committed next, reporting one transaction's hold time under another
+   transaction's call site — and left open long enough, they would have tripped
+   the watchdog for a stall that was not happening.
+
+Whether a transaction is actually open is answered by `sqlite3`'s own
+`in_transaction`, not by pattern-matching the SQL. The prefix list decides only
+whether an *opening* statement is a write; closing follows `in_transaction`,
+which is what makes implicit commits (`executescript`) and autocommit DDL — a
+`CREATE TABLE` outside a transaction — stop leaking permanently-open records.
+
 `start_watchdog()` runs a thread that notices a write transaction open longer
 than the threshold and dumps every thread's stack. One occurrence names the
 culprit. Weeks of aggregate telemetry would only re-confirm what we already know
@@ -69,6 +92,34 @@ def _call_site() -> str:
     return "unknown"
 
 
+def _is_write(sql: str) -> bool:
+    return sql.lstrip()[:8].lower().startswith(_WRITE_PREFIXES)
+
+
+class InstrumentedCursor(sqlite3.Cursor):
+    """The single observation point. Every execute path lands here."""
+
+    def execute(self, sql, parameters=(), /):  # type: ignore[override]
+        try:
+            return super().execute(sql, parameters)
+        finally:
+            self.connection._observe(sql)
+
+    def executemany(self, sql, parameters, /):  # type: ignore[override]
+        try:
+            return super().executemany(sql, parameters)
+        finally:
+            self.connection._observe(sql)
+
+    def executescript(self, sql_script, /):  # type: ignore[override]
+        try:
+            return super().executescript(sql_script)
+        finally:
+            # executescript issues an implicit COMMIT first and leaves autocommit
+            # state behind it; _observe closes any record it finds open.
+            self.connection._observe(sql_script)
+
+
 class InstrumentedConnection(sqlite3.Connection):
     """A connection that reports how long it holds the write lock.
 
@@ -77,11 +128,39 @@ class InstrumentedConnection(sqlite3.Connection):
     whole codebase and must be invisible.
     """
 
+    def cursor(self, factory=InstrumentedCursor):  # type: ignore[override]
+        return super().cursor(factory)
+
+    # The connection-level shortcuts are re-expressed as what the docs say they
+    # already are — cursor().execute(...) — so the cursor stays the ONLY place
+    # that observes, and nothing can be counted twice.
     def execute(self, sql, parameters=(), /):  # type: ignore[override]
-        stripped = sql.lstrip()[:8].lower()
-        if stripped.startswith(_WRITE_PREFIXES):
-            self._note_write()
-        return super().execute(sql, parameters)
+        return self.cursor().execute(sql, parameters)
+
+    def executemany(self, sql, parameters, /):  # type: ignore[override]
+        return self.cursor().executemany(sql, parameters)
+
+    def executescript(self, sql_script, /):  # type: ignore[override]
+        return self.cursor().executescript(sql_script)
+
+    def _observe(self, sql: str) -> None:
+        """Reconcile our record of this connection against sqlite's own state."""
+        try:
+            live = self.in_transaction
+        except sqlite3.ProgrammingError:
+            # hygiene: not an outage. `in_transaction` raises only on a closed
+            # connection, and close() already flushed the record — there is
+            # nothing left to observe and nothing to report.
+            return
+        if live:
+            if _is_write(sql) or id(self) in _open_writes:
+                self._note_write()
+        elif id(self) in _open_writes:
+            # No transaction is open, so nothing is holding the write lock —
+            # whatever we were tracking ended (implicit or external commit). The
+            # membership test keeps the common case (a read in autocommit) off
+            # the mutex; _close_txn re-checks under it.
+            self._close_txn("autocommit")
 
     def _note_write(self) -> None:
         key = id(self)
@@ -133,6 +212,15 @@ class InstrumentedConnection(sqlite3.Connection):
             return super().close()
         finally:
             self._close_txn("close")
+
+    def __exit__(self, exc_type, exc_value, tb):  # type: ignore[override]
+        # CPython commits/rolls back inside the C-level __exit__ WITHOUT calling
+        # a Python commit() override, so `with conn:` is a closing path in its
+        # own right and has to be caught here.
+        try:
+            return super().__exit__(exc_type, exc_value, tb)
+        finally:
+            self._close_txn("rollback" if exc_type is not None else "commit")
 
 
 def _dump_threads() -> str:
