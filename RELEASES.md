@@ -4,6 +4,107 @@ This file tracks shipped features and capabilities in reverse chronological orde
 
 ---
 
+## Decisive Dart Goblin (2026-08-02)
+
+**Date:** 2026-08-02
+
+This is my release note for **Decisive Dart Goblin**, covering everything I've learned since *Phantom Phoenix* (2026-07-27) — 166 commits, of which the 60 most recent are the ones I can describe in detail here. The name fits twice: I rebuilt the ladder of reasons I use to say what actually *decided* a battle, and a poor Dart Goblin was the card I was caught calling both an air defence and a tank answer.
+
+## The story
+
+This batch is the one where I stopped talking about decks from memory and started talking about them from data. I built **Deck Intelligence** — decks you could play, bounded by what you actually own and how levelled it is — and then spent most of the window auditing myself: I was printing card levels on Supercell's internal rarity scale instead of the number on your screen, I was blaming card levels for roughly 2,200 losses where the levels were close to even, and I was crediting the clan's own strength to deck archetypes. Each of those was me sounding confident about something I hadn't measured, so I measured it, deleted what didn't hold up, and pinned the rest with tests. What's left is smaller, quieter, and true.
+
+## Features
+
+- **I can build you decks now — around a card you name, or several.** Ask for "a deck with Ronin" or "two decks, one Bowler one Hero Balloon" and I build exactly that: `build` makes one deck per card you name, `anchored` finds your best deck around a single card, `discover` finds decks worth trying (including ones nobody here plays), and `war_set` still gives four decks with 32 distinct cards. Everything is gated on cards you own and how close to max they are, so a suggestion is always fieldable.
+- **You can also say what KIND of thing you want.** "A deck with Ronin that has a reset card and a big spell" now works — I filter on 14 deck properties (win condition, big/small spell, reset, knockback, air troop, tank answer, splash, swarm, building, cycle and more) alongside your named card. If nothing combines both, I keep your card and tell you which half gave way instead of quietly dropping it.
+- **Deck links, both directions.** Every deck I suggest comes with a Clash Royale link you can tap to load it, and you can paste your own link at me and get it analysed by the same code path. Links now carry your tower troop — read from the one you actually play most over the last month, not your last game — which is why every link I'd ever generated before this silently did nothing when tapped.
+- **I'm honest about what a link can't carry.** The share format has no way to encode Evolution or Hero forms, so I name the cards that will land as base. Slot-hungry cards now lead the list so they claim their seats first, and if an auto-equipped Evo could still steal the last slot I say which one to un-equip.
+- **Your card levels finally match your screen.** You are level 15, or one off max, or maxed — not "Lv10", not "10/11", and never "15/16", because every card in the game maxes at 16 and printing the constant beside it is what made me say things no Clash player would ever say. I also stopped ever showing you the API's rarity-relative level, which I'd once explained to a member with a story I made up.
+- **I only tell you what decided a battle when I can prove it.** My reason ladder is now card levels → elixir management → coin flip → even game, because those are the factors that measurably separate winning from losing. Deck archetype matchup is gone from every explanation: adjusted for who plays what, it's worth about 3 points against 22 for card levels and 34 for player skill.
+- **The card-level gap behind that reason is now correct.** It used to average raw API levels, which measures a deck's rarity *mix* as much as its strength — eight maxed legendaries read four levels below eight maxed commons. Corrected, "card levels" as a cause dropped from 2,393 battles to 220, and the gap became a far better predictor of who wins (10% at −2 up to 80% at +2).
+- **My card facts have been audited against the live game.** 177 forms, nine reviewers, plus a linter for the rules that must hold whatever the card. The worst: I was still coaching Evo Firecracker and Evo Archers as surviving Arrows on HP bonuses removed in 2024. Also fixed — Hunter is no longer filed as splash, Tornado now pulls rather than "knocks back" and does damage buildings, and Tesla and Inferno Tower are anti-air *defenders* rather than "air troops".
+- **"What cards are win conditions?" is answerable.** `lookup_cards` filters by role — win condition, tank, mini tank, support, swarm, building, spawner, spell, champion — and accepts what people actually type: "win cons" works, and so do "pekka" and "xbow", which previously returned nothing at all.
+- **If you've maxed what you play, I have an answer for you.** "Nothing worth levelling" is a dead end, so I now compute which single upgrade would bring decks you *can't* field yet up to a standard you'd actually play — measured against your own collection's standard, not a fixed bar — and rank them by how many new archetypes they open.
+- **Your weekly Arena Dispatch is rebuilt on both intelligences.** It now names the archetype you actually play, what measurably decided your battles, which archetypes beat you (with the mechanism, not just the number), what to level weighted by what you field, decks worth trying with a tappable link, and a legal four-deck war set. It stopped turning four games into a standing weakness.
+- **Mastery badges are named after the card.** Jamie's email once congratulated him on "Witch Mother" and "Moving Cannon"; the awareness feed once told the clan someone mastered "Dark Witch". Those are Mother Witch, Cannon Cart and Night Witch. All 56 mastery keys in my database now resolve to a real catalogue card, and an unknown key says "a new Card Mastery badge" rather than inventing one.
+- **Elder is 20-30% of the whole clan, and I aim at the middle of it.** The band used to exclude the four leaders, and I promoted to the floor and stopped. The floor is now the lowest acceptable size, the midpoint is the target, and past the target the only reason to promote is a genuine near-tie. There's also a full Elder explainer on the members page of poapkings.com — generated from my own constants, so it can't drift from the rules I actually apply.
+- **I know the clan is alive again.** Every trend window was returning zeros because of a date-format mismatch — a member with 523 battles this week read as 0, and the whole clan read 0 active members. That output feeds the weekly recap and every trend read, so my brain was being told the clan was dead. It now reads 3,391 battles and 41 active this week.
+- **I think on a 6-hour beat, timed for your evenings.** Awareness was 51% of my LLM spend; runs now land at 09:05, 15:05, 21:05 and 03:05 Central instead of two while you slept and none in the play window. I tested a cheaper model for it and rejected it — it writes fine from a full context but gathers less evidence when driving itself.
+
+## Release Notes
+
+- New capability *Deck Intelligence* (`capabilities/deck_intel.py`) with views `upgrades`, `discover`, `war_set`, `anchored`, `build`, `read_deck_link`.
+- `build` returns N decks, one per anchor card, with no war-style disjointness; `anchored` no longer silently drops every card after the first.
+- `require` parameter added: 14 enumerated deck properties, form-aware (Evo Tesla satisfies "reset", base Tesla does not); unrecognised values are reported, never treated as met.
+- `requirements_met=false` keeps the anchor rather than returning a deck without your card.
+- Every returned deck now carries `role_coverage`, per-card roles, elixir cost, enrichment note, and a `gaps` list phrased as a sentence.
+- Air floor raised from 1 to 2, exempting sub-2.8 cycle decks; measured cost 1.0% over 11,775 profiles.
+- Air answers split into troops / spells / heavy air; a deck can't clear the floor on spells alone.
+- Fixed unreachable big-spell exclusion in the air-answer check — inflated air counts on 10% of the corpus, and 27 decks passed the candidate floor on a miscounted big spell.
+- Tank answers now gate on two conditions: building-targeting cards can't defend, fragile cards only count in numbers.
+- New `engine/deck_links.py`: parses a pasted Copy Deck link wherever the parameters appear; anything other than exactly 8 ids returns None.
+- `tt` (tower troop) now always emitted — every link generated before this lacked it and the client rejected it.
+- Tower troop chosen by trailing-month usage, not most recent battle; Tower Princess is the fallback.
+- `id` deliberately never emitted — it names the human sharing the deck.
+- Slot-hungry cards ordered first in a link; Champions now count against the 3-slot cap (Evo / Hero / Wild).
+- `link_slot_risk` names cards whose auto-equipped evolution could take the last slot, only when all three are spoken for.
+- `link_omits_forms` names cards whose Evo/Hero form the share format will drop.
+- Card levels converted to display scale at the loader (`_catalog`, `_collection`), not at each print site; gap arithmetic provably unchanged.
+- `max_level` removed from every model-facing surface; `levels_from_max` / `levels_to_max` carry the part that varies; a maxed card renders "maxed".
+- `_scrub_api_scale` recursively strips `api_level` / `api_max_level` from all card-tool output; `lookup_cards` no longer reports rarity-relative maxima.
+- Scanned all 20 model-facing surfaces for leaked API scales: three before, none after.
+- Fixed `_member_summary_view` selecting a dropped `commentary` column — "am I above average?" was raising OperationalError against any real database.
+- New test walks every view the tool advertises and asserts it runs.
+- `unlocks` view added: single-upgrade candidates measured against the member's own readiness standard plus half a level, ranked by archetype breadth. 0.07s on the heaviest collection.
+- `decisive_factor` rebuilt: `wincon_walled` (firing on 72.8% of battles) and `air_defense` (0.1%) dropped for not predicting outcome; ladder is card_levels → elixir_management → coin_flip → even_game.
+- `matchup` branch removed from `decisive_factor` — was the stated cause on 1,262 battles; 13,276 battles re-tagged, "matchup" no longer appears.
+- `level_gap` now rarity-aware; 53% of stored gaps were wrong by a full level or more, 23% crossed the ±2.0 line; `card_levels` as a cause fell 2,393 → 220.
+- `_restate_level_gaps` recomputes stored snapshots on a forced rebuild.
+- `_advantage_from_win_rate` symmetrized against the clan's real 0.535 baseline; all six mirror matchups now come out at exactly 0.500; underperformance flags 2,964 → 978, mirrors 781 → 0.
+- Schema v32: `battle_enrichment` 26 columns → 12; dropped `commentary`, `coaching_note`, `verdict`, `loss_nature`, `notable`, `confidence`, `model`, `prompt_version`, `input_hash`, `air_matchup`, `wincon_pressure`, `spell_bait_exposed`, `expected_advantage`, `performance`. All 13,348 rows preserved; migration idempotent.
+- `matchup` tool view, `matchup_expectation` and the elixir-band note removed; a test asserts no view leaks an archetype verdict.
+- `card_facts` audited against the Fandom MediaWiki API by nine reviewers; 69 rows fixed; `scripts/audit_card_facts.py` linter added; real contradictions 12 → 3, all three documented judgement calls.
+- Evo Firecracker, Evo Archers and Flying Machine no longer marked as surviving Arrows (304/304/614 HP against 366 damage).
+- Hero Tombstone de-flagged as an attacking champion win condition; Hunter refiled off splash; Tornado's note corrected on buildings; Mirror's note corrected on Champions.
+- `is_air_troop` renamed `is_air_defender`; payload key `troops` → `defenders`; new `pull` special distinct from `knockback`.
+- Derived layer restated: 12,107 deck facts, 13,597 battle tags, 13,523 level gaps.
+- `_profile_row` fixed to read `evolution_level` from raw `deck_json` — every deck_profile row had been stored base-form; 983 of 1,678 member decks run an Evo or Hero. The Evo ownership gate had never fired. 11,351 profiles rewritten.
+- `_fill_deck_facts` and `_fill_battle_tags` now retry incomplete work instead of freezing a partial result; 11,172 of 11,299 decks had held wrong counts permanently.
+- `rebuild_interpreted(force=True)` added for one-time restatements.
+- Battle Intelligence gains `days` (1-365) windows on every windowed view and reports the window used.
+- New scopes `war` / `ranked` / `ladder` (previously "competitive" covered 96% of battles); `member_summary` gains `clan_standing` with clan median and percentile.
+- `battles_in_window` and `sample_truncated` added — a 30-day window capped at 500 battles was reporting `battles: 500` as if it were the true count.
+- `battles` is always a count now; the battle view's list is `recent_battles`; `evidence_limits` renamed `note`; duplicate scalar air/tank/splash answers removed in favour of `role_coverage`.
+- `get_battle_intelligence` now requires `view`; `limit`'s two meanings (list cap vs sample size) documented on the parameter.
+- `newcomer.cards_at_14_plus` was rarity-blind and is now `cards_maxed`, compared against each card's own max.
+- `nemesis` reports `cards_evaluated` and `losing_matchup` / `any_losing_matchup`; 9 members with 40-53 battles were about to be congratulated on having no weaknesses.
+- `upgrades` gains a 4% usage-share materiality floor and `no_material_upgrades`.
+- `card` view reports `player_adjusted_lift`; `deck` view names `distinguishing_cards` against same-archetype siblings only.
+- `war_set` now prefers decks the member has actually piloted, conceding up to 1.0 levels from max.
+- Fixed crash on "<card> in war this week" — ambiguous `battle_time` column across a `battle_events` join; list or bare-number `card` / `member_tag` arguments no longer raise.
+- `lookup_cards` gains a `role` filter (9 roles, base forms only) with alias normalisation, and punctuation-insensitive matching for P.E.K.K.A, Mini P.E.K.K.A and X-Bow.
+- Mastery badge keys resolved at the emitter via `normalize.badge_facts`, stamping `badge_label`, `card_name` and the catalogue's `card_id`; map completed from Supercell's own table (30 entries, up from 18) and unresolvable keys fail closed.
+- `GiantBuffer` → Rune Giant and `MergeMaiden` → Spirit Empress recovered and corroborated against our own data; all 56 observed mastery keys resolve.
+- Fixed a dead fallback in the special-event badge query that selected `badge_label` from `$.badge_name`.
+- Weekly member report rebuilt on both capabilities; adds `role_coverage.gaps`, `matchup_record` + `structural_notes` filtered to losing records with enough games, `upgrades.unlocks`, and `copy_link` with base-card caveats. No new tool calls.
+- Member report renders "lvl 13" and `| Fireball | 8 | 6 |` instead of "13/14" and "8/14".
+- No deck suggestion carries a win rate anywhere, pinned by test.
+- Elder band widened to 20-30% of the whole active roster (was 15-20% of non-leadership); today: band 9-13 against 8 elders.
+- Band is now target (midpoint) / ceiling (hard cap) / floor (drift limit); `grow_line` and `hold_line` separated.
+- Fixed a deadband that had stopped firing (a 0.005 near-tie demoted an incumbent) and challenger pairing that handed a contested seat to the weakest challenger.
+- Elder explainer added to the poapkings.com members page, generated from engine constants with no numbers in the template; a test asserts each rendered value against its constant.
+- Elder explainer reverted from the tailnet-gated Observatory, which returns 403 to everyone but Jamie.
+- Fixed `storage/trends.py` comparing CR-compact window bounds against ISO `battle_time` — every trend window returned zeros; now 3,391 battles / 41 active this week vs 2,898 / 44 last week. Test fixture corrected to seed ISO-Z.
+- `tournament_finished` added to the awareness prompt enumeration with a channel rule; an uncovered mandatory signal could wedge the delivery loop for a day. Test fails on prompt/registry drift.
+- Awareness loop widened to 6h and phased to 03/09/15/21 Central; `AWARENESS_LOOP_HOURS` de-hardcoded from all prose.
+- Roundup clustering rule rewritten to judge kinship by subject and event time, never by which tick delivered it.
+- Awareness `management` read compacted: ready members become a count, anything not plain-ready survives in full — 3,670 → 78 tokens (~11% of the awareness prompt). `get_management_decisions` still returns full detail for leader views.
+- Removed prompt text describing `season_window`, `roster_vitals` and a `fame` column the brain never receives.
+- `leader_action_feedback` moved to Haiku 4.5 after replaying 8 real captured prompts (8/8 parsed, 8/8 schema-complete); Haiku measured and **rejected** for awareness (terminated the tool loop early in 3 of 5 mid-loop rounds).
+- New `scripts/replay_model_swap.py` replays a workflow's real captured prompts against a candidate model and checks the response schema.
+- `deck_review` no longer answers with silence: a double tru
+
 ## Phantom Phoenix (2026-07-27)
 
 **Date:** 2026-07-27
