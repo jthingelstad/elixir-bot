@@ -192,6 +192,14 @@ _LLM_COST_CASE = """
 """
 
 
+def _llm_conn():
+    """LLM telemetry lives in its own database now (storage/telemetry.py), so
+    these panels read from there rather than the clan connection."""
+    from storage import telemetry
+
+    return telemetry.connect()
+
+
 def llm_cost_page() -> dict:
     """LLM spend by workflow (7d + 30d) and by model — cost was tracked per call
     but never surfaced; only a single 7-day total existed in the status report."""
@@ -199,7 +207,7 @@ def llm_cost_page() -> dict:
 
     def _by_workflow(days: int) -> list:
         return _rows(
-            conn,
+            _llm_conn(),
             f"""
             SELECT workflow,
                    COUNT(*) AS calls,
@@ -217,7 +225,7 @@ def llm_cost_page() -> dict:
         wf_7d = _by_workflow(7)
         wf_30d = _by_workflow(30)
         by_model = _rows(
-            conn,
+            _llm_conn(),
             f"""
             SELECT model, COUNT(*) AS calls,
                    ROUND(COALESCE(SUM({_LLM_COST_CASE}), 0) / 1000000.0, 4) AS cost_usd
@@ -978,12 +986,14 @@ def war_page() -> dict:
 
 
 def llm_page(workflow: str | None = None, limit: int = 50) -> dict:
+    # The page mixes sources: calls come from the telemetry DB, prompt_failures
+    # and prompt_feedback are still clan-DB tables. Only the llm_calls reads move.
     conn = db.get_connection()
     try:
         where = "WHERE workflow = ? " if workflow else ""
         params = (workflow, limit) if workflow else (limit,)
         calls = _rows(
-            conn,
+            _llm_conn(),
             f"""
             SELECT call_id, recorded_at, workflow, model, ok, error, duration_ms,
                    prompt_tokens, completion_tokens, total_tokens,
@@ -993,7 +1003,7 @@ def llm_page(workflow: str | None = None, limit: int = 50) -> dict:
         )
         workflows = [
             r["workflow"]
-            for r in _rows(conn, "SELECT DISTINCT workflow FROM llm_calls ORDER BY workflow")
+            for r in _rows(_llm_conn(), "SELECT DISTINCT workflow FROM llm_calls ORDER BY workflow")
         ]
         failures = _rows(
             conn,

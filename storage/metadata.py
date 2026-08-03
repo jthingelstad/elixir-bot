@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -8,8 +9,6 @@ from db import (
     BATTLE_EVENT_RETENTION_DAYS,
     CLAN_EVENT_RETENTION_DAYS,
     CONVERSATION_RETENTION_DAYS,
-    LLM_CALL_RETENTION_DAYS,
-    LLM_PROMPT_RETENTION_DAYS,
     PLAYER_EVENT_RETENTION_DAYS,
     RAW_PAYLOAD_RETENTION_DAYS,
     TOURNAMENT_RETENTION_DAYS,
@@ -237,9 +236,8 @@ _PURGE_TARGETS = [
     ("war_attendance_days", "observed_at", WAR_RETENTION_DAYS),
     ("messages", "created_at", CONVERSATION_RETENTION_DAYS),
     ("tournaments", "watching_started_at", TOURNAMENT_RETENTION_DAYS),
-    # LLM call telemetry: drop the whole row after 90d (blobs get NULLed at 14d
-    # first — see the prompt-blob prune in purge_old_data).
-    ("llm_calls", "recorded_at", LLM_CALL_RETENTION_DAYS),
+    # llm_calls moved to the telemetry database 2026-08-03; its retention now
+    # runs in storage/telemetry.purge_old, on that file's own connection.
     # Episodes are DERIVED from messages, so they cannot outlive them. Before
     # #215 messages purged at 30d while the episodes summarising them grew
     # without bound -- 5,114 episode rows against a 156-row source.
@@ -267,20 +265,14 @@ def purge_old_data(conn: Optional[sqlite3.Connection] = None) -> dict[str, int]:
         cutoff = _date_cutoff(days)
         cursor = conn.execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff,))
         stats[table] = cursor.rowcount
-    # LLM prompt/response blobs: NULL them after the (short) prompt-retention
-    # window while keeping the lightweight metadata row for cost analysis until
-    # its own 90d row-delete above. UPDATE, not DELETE — the row survives.
-    blob_cutoff = _utc_cutoff(LLM_PROMPT_RETENTION_DAYS)
+    # LLM blob pruning moved with the table (2026-08-03). Retention for the
+    # telemetry database runs on ITS connection so a clan-DB maintenance pass can
+    # never be what blocks it -- the whole point of the split.
     try:
-        cursor = conn.execute(
-            "UPDATE llm_calls SET prompt_json = NULL, response_json = NULL "
-            "WHERE recorded_at < ? AND (prompt_json IS NOT NULL OR response_json IS NOT NULL)",
-            (blob_cutoff,),
-        )
-        stats["llm_calls_blobs_pruned"] = cursor.rowcount
-    except sqlite3.OperationalError:
-        # hygiene: columns not yet added on a DB that has never recorded a call —
-        # nothing to prune. (Lazily added by record_llm_call on first write.)
-        stats["llm_calls_blobs_pruned"] = 0
+        from storage import telemetry
+
+        stats.update(telemetry.purge_old())
+    except Exception:  # noqa: BLE001 - telemetry retention never fails clan maintenance
+        logging.getLogger("elixir").warning("telemetry purge failed", exc_info=True)
     conn.commit()
     return stats

@@ -92,7 +92,11 @@ def test_pages_render_on_empty_db():
 
 def test_llm_cost_page_aggregates_by_workflow_and_prices_models():
     """The cost panel prices Sonnet 5 and observed Opus 4.8 calls."""
-    conn = db.get_connection()
+    # llm_calls lives in the telemetry database now (2026-08-03), so the cost
+    # panel is seeded there rather than in the clan DB.
+    from storage import telemetry
+
+    conn = telemetry.connect()
     try:
         # 1M completion tokens: Sonnet 5 introductory pricing → $10, Opus 4.8 → $25.
         conn.execute(
@@ -109,7 +113,7 @@ def test_llm_cost_page_aggregates_by_workflow_and_prices_models():
         )
         conn.commit()
     finally:
-        conn.close()
+        pass
 
     data = queries.llm_cost_page()
     by_wf = {w["workflow"]: w for w in data["workflows_7d"]}

@@ -570,7 +570,7 @@ def _ensure_llm_blob_columns(conn: sqlite3.Connection) -> None:
 
 
 @managed_connection
-def record_llm_call(
+def _record_llm_call_clan_db(
     workflow: str,
     model: str,
     *,
@@ -615,8 +615,14 @@ def record_llm_call(
 def get_llm_call(call_id: int, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     """Full detail for one LLM call — metadata + the captured prompt/response
     blobs, JSON-decoded. Powers the Observatory per-call drill-down. None when
-    the call doesn't exist; blobs are None once pruned (LLM_PROMPT_RETENTION_DAYS)."""
-    _ensure_llm_blob_columns(conn)
+    the call doesn't exist; blobs are None once pruned.
+
+    Reads the TELEMETRY database (2026-08-03), not the clan one. The decorated
+    ``conn`` is still accepted so the db facade's signature is unchanged, and
+    deliberately unused — llm_calls no longer lives on that connection."""
+    from storage import telemetry
+
+    conn = telemetry.connect()
     row = conn.execute("SELECT * FROM llm_calls WHERE call_id = ?", (int(call_id),)).fetchone()
     if row is None:
         return None
@@ -627,3 +633,20 @@ def get_llm_call(call_id: int, conn: Optional[sqlite3.Connection] = None) -> Opt
         except TypeError, ValueError:
             out[key] = None
     return out
+
+
+def record_llm_call(*args, **kwargs) -> None:
+    """Record a model call in the TELEMETRY database, not the clan one.
+
+    Moved 2026-08-03. LLM call rows are telemetry about the agent, not facts
+    about the clan, and every one of them used to take the clan database's single
+    write lock — the same lock whose contention we were trying to measure. The
+    clan DB is now about the clan.
+
+    The old clan-DB writer survives as ``_record_llm_call_clan_db`` only so the
+    one-time history copy has something to read; nothing calls it in production.
+    """
+    kwargs.pop("conn", None)  # the clan connection is exactly what we stopped using
+    from storage import telemetry
+
+    telemetry.record_llm_call(*args, **kwargs)

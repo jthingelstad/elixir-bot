@@ -60,7 +60,7 @@ BROAD_EXCEPTION_BASELINE = {
     # "a diagnostic must never fail its caller" shape as the rest of this file —
     # one keeps a trigger failure from failing the engine tick, the other keeps a
     # high-water write failure from escaping a background task.
-    "runtime/app.py": 40,
+    "runtime/app.py": 41,  # +1: stall-watchdog startup must never block boot
     "runtime/awareness/deliver.py": 10,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
@@ -105,6 +105,12 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/webapp/ticks.py": 2,
     "storage/_formatting.py": 2,
     "storage/identity.py": 2,
+    # Telemetry must never be what breaks the workload it measures, so every
+    # public writer swallows and logs. Same reason for db_watch: an instrument
+    # that can raise into the engine tick is worse than no instrument.
+    "storage/db_watch.py": 4,
+    "storage/telemetry.py": 5,
+    "storage/metadata.py": 1,  # telemetry retention never fails clan maintenance
     # storage/incidents.py removed with the ledger it wrote (2026-07-28).
     "storage/leader_actions.py": 2,
 }

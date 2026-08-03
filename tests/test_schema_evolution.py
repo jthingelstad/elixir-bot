@@ -607,11 +607,20 @@ def test_system_status_reads_awareness_native_ledgers(tmp_path):
 
 
 def test_runtime_schema_mutation_is_centralized():
+    """The CLAN database has exactly one schema owner: db/schema.py.
+
+    storage/telemetry.py is exempt because it does not touch the clan database at
+    all -- it owns a separate SQLite file (elixir-telemetry.db) whose whole
+    purpose is to keep telemetry writes off the clan DB's single write lock. A
+    second database needs a second schema owner; routing it through the clan
+    migration runner would re-couple exactly what the split decoupled.
+    """
     root = Path(__file__).resolve().parents[1]
+    exempt = {root / "db" / "schema.py", root / "storage" / "telemetry.py"}
     offenders = []
     for package in ("engine", "storage", "runtime", "memory_store", "db"):
         for path in (root / package).rglob("*.py"):
-            if path == root / "db" / "schema.py":
+            if path in exempt:
                 continue
             text = path.read_text()
             if "ALTER TABLE" in text or "CREATE TABLE IF NOT EXISTS" in text:

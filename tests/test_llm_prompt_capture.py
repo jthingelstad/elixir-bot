@@ -11,12 +11,17 @@ import json
 
 import agent.core as core
 import db
-from db import managed_connection
 from runtime import app
 from runtime.awareness import diagnostic as diag_mod
 from runtime.webapp import queries
-from storage import messages as messages_store
 from storage import metadata as metadata_store
+from storage import telemetry as telemetry_store
+
+
+def _telemetry_conn():
+    """llm_calls moved to the telemetry database (2026-08-03); these assertions
+    follow it there. conftest points ELIXIR_TELEMETRY_DB_PATH at a tmp file."""
+    return telemetry_store.connect()
 
 
 class _Block:
@@ -61,7 +66,7 @@ def test_every_call_captures_prompt_and_response(monkeypatch):
     monkeypatch.setattr(core, "_get_client", lambda: _FakeClient(_Resp('{"ok": true}')))
     # conftest no-ops db.record_llm_call (no conn) to avoid DB pollution; the DB
     # is already isolated here, so restore the real writer to exercise capture.
-    monkeypatch.setattr(db, "record_llm_call", messages_store.record_llm_call)
+    monkeypatch.setattr(db, "record_llm_call", telemetry_store.record_llm_call)
     # A NON-awareness workflow — capture must happen for everything, not just the brain.
     core._create_chat_completion(
         workflow="channel_update",
@@ -69,7 +74,7 @@ def test_every_call_captures_prompt_and_response(monkeypatch):
         messages=[{"role": "user", "content": "grade this post"}],
         max_tokens=1024,
     )
-    conn = db.get_connection()
+    conn = _telemetry_conn()
     try:
         row = conn.execute(
             "SELECT call_id, workflow, prompt_json, response_json FROM llm_calls "
@@ -95,14 +100,14 @@ def test_get_llm_call_roundtrips_blobs_decoded(monkeypatch):
         "_get_client",
         lambda: _FakeClient(_Resp('{"posts": []}', tool_uses=[tool_use])),
     )
-    monkeypatch.setattr(db, "record_llm_call", messages_store.record_llm_call)
+    monkeypatch.setattr(db, "record_llm_call", telemetry_store.record_llm_call)
     core._create_chat_completion(
         workflow="awareness",
         system="SYS",
         messages=[{"role": "user", "content": "the read"}],
         max_tokens=8192,
     )
-    conn = db.get_connection()
+    conn = _telemetry_conn()
     try:
         call_id = conn.execute(
             "SELECT call_id FROM llm_calls WHERE workflow='awareness' ORDER BY call_id DESC LIMIT 1"
@@ -118,14 +123,14 @@ def test_get_llm_call_roundtrips_blobs_decoded(monkeypatch):
 
 
 def test_llm_call_detail_query_and_missing():
-    messages_store.record_llm_call(
+    telemetry_store.record_llm_call(
         "clanops",
         "claude-sonnet-4-6",
         ok=True,
         prompt_json=json.dumps({"system": "s", "messages": []}),
         response_json=json.dumps({"text": "hi", "tool_uses": []}),
     )
-    conn = db.get_connection()
+    conn = _telemetry_conn()
     try:
         call_id = conn.execute("SELECT MAX(call_id) FROM llm_calls").fetchone()[0]
     finally:
@@ -139,9 +144,9 @@ def test_llm_call_detail_query_and_missing():
 # --------------------------------------------------------------- retention
 
 
-@managed_connection
 def _insert_call_at(recorded_at, *, with_blobs=True, conn=None):
-    messages_store._ensure_llm_blob_columns(conn)
+    # Seeds the TELEMETRY database, which is where llm_calls lives now.
+    conn = _telemetry_conn()
     conn.execute(
         "INSERT INTO llm_calls (recorded_at, workflow, model, ok, prompt_json, response_json) "
         "VALUES (?, 'awareness', 'm', 1, ?, ?)",
@@ -165,7 +170,7 @@ def test_blobs_pruned_after_14d_row_survives():
     stats = metadata_store.purge_old_data()
     assert stats.get("llm_calls_blobs_pruned", 0) >= 1
 
-    conn = db.get_connection()
+    conn = _telemetry_conn()
     try:
         old = conn.execute(
             "SELECT prompt_json, response_json FROM llm_calls WHERE recorded_at=?",
@@ -189,7 +194,7 @@ def test_metadata_row_deleted_after_90d():
     old_ts = (datetime.now(timezone.utc) - timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
     _insert_call_at(old_ts, with_blobs=False)
     metadata_store.purge_old_data()
-    conn = db.get_connection()
+    conn = _telemetry_conn()
     try:
         gone = conn.execute("SELECT 1 FROM llm_calls WHERE recorded_at = ?", (old_ts,)).fetchone()
     finally:

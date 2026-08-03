@@ -216,6 +216,22 @@ def v51_schema_template(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_telemetry_db(tmp_path, monkeypatch):
+    """Telemetry lives in its own file, so tests need their own copy of it too --
+    otherwise a test run writes llm_calls rows into the developer's real
+    elixir-telemetry.db. Also resets the module's cached per-thread connection
+    and schema flag, which would otherwise leak the previous test's path."""
+    from storage import telemetry
+
+    monkeypatch.setenv("ELIXIR_TELEMETRY_DB_PATH", str(tmp_path / "telemetry.db"))
+    telemetry._local.__dict__.pop("conn", None)
+    telemetry._schema_ready = False
+    yield
+    telemetry._local.__dict__.pop("conn", None)
+    telemetry._schema_ready = False
+
+
+@pytest.fixture(autouse=True)
 def _isolate_default_sqlite_db(tmp_path, monkeypatch, v51_schema_template):
     """Route implicit DB access to a per-test v5.1-schema database."""
     db_path = str(tmp_path / "elixir-test.db")

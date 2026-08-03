@@ -632,7 +632,12 @@ def get_connection(db_path: Optional[str] = None, *, migrate: bool = False) -> s
     test fixtures depend on it.
     """
     path = os.fspath(db_path or _resolve_db_path())
-    conn = sqlite3.connect(path)
+    # InstrumentedConnection reports how long each write transaction holds the
+    # single SQLite writer, and feeds the stall watchdog. It is a real
+    # sqlite3.Connection subclass so every caller is unaffected.
+    from storage.db_watch import InstrumentedConnection
+
+    conn = sqlite3.connect(path, factory=InstrumentedConnection)
     # Inspect a possibly mispointed database before enabling WAL or changing
     # any other persistent pragma. Refusing a pre-v5.1 database must be a
     # genuinely read-only decision.

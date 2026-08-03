@@ -1533,6 +1533,15 @@ async def on_ready():
         await start_webapp(deps={"bot": bot})
     except Exception:
         log.exception("observatory webapp startup failed")
+    # Stall watchdog: dumps every thread's stack when a write transaction holds
+    # the single SQLite writer past the threshold. Two 100%-CPU wedges on
+    # 2026-08-03 were cleared by restarts that destroyed the evidence.
+    try:
+        from storage.db_watch import start_watchdog
+
+        start_watchdog()
+    except Exception:
+        log.exception("db stall watchdog failed to start")
     if not scheduler.running:
         cleared_stale_jobs = await asyncio.to_thread(runtime_status.clear_stale_running_jobs)
         if cleared_stale_jobs:
