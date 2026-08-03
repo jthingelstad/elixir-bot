@@ -108,7 +108,10 @@ BROAD_EXCEPTION_BASELINE = {
     # Telemetry must never be what breaks the workload it measures, so every
     # public writer swallows and logs. Same reason for db_watch: an instrument
     # that can raise into the engine tick is worse than no instrument.
-    "storage/db_watch.py": 4,
+    # +1 (2026-08-03): _top_sites serializes the per-site breakdown. If that
+    # fails the transaction row must still record without it — a missing detail
+    # column is recoverable, losing the measurement is not.
+    "storage/db_watch.py": 5,
     "storage/telemetry.py": 5,
     "storage/metadata.py": 1,  # telemetry retention never fails clan maintenance
     # storage/incidents.py removed with the ledger it wrote (2026-07-28).

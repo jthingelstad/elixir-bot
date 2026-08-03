@@ -1,17 +1,46 @@
 ---
 name: llm-cost-report
-description: Analyze the llm_calls table in elixir-v51.db to break down Elixir's LLM spend by workflow, model, and day; identify cost drivers; recommend signal-side or model-tier cuts
+description: Analyze the llm_calls table in elixir-telemetry.db to break down Elixir's LLM spend by workflow, model, and day; identify cost drivers; recommend signal-side or model-tier cuts
 ---
 
 # LLM Cost Report
 
-Read `/Users/otto/Projects/elixir-bot/elixir-v51.db` (table `llm_calls`), compute real spend using current Sonnet 5 introductory pricing, Sonnet 4.6 fallback pricing, and Haiku 4.5 pricing, and hand the user a short prioritized report: where the money goes, whether caching is paying off, daily trend, anomalies, and concrete next levers. Pairs with `log-triage` ("is the bot alive?") and `awareness-report` ("is the bot making good calls?") — this one answers "where is the money going?"
+Read `/Users/otto/Projects/elixir-bot/elixir-telemetry.db` (table `llm_calls`), compute real spend using current Sonnet 5 introductory pricing, Sonnet 4.6 fallback pricing, and Haiku 4.5 pricing, and hand the user a short prioritized report: where the money goes, whether caching is paying off, daily trend, anomalies, and concrete next levers. Pairs with `log-triage` ("is the bot alive?") and `awareness-report` ("is the bot making good calls?") — this one answers "where is the money going?"
 
 Budget context: the user's target is **$20/month (~$0.67/day)**. Report current spend against that bar.
 
 ## Scope
 
 Default to the **last 7 days** of `llm_calls` rows. Overridable by the user ("last 24h", "last 30 days", "since 2026-04-10"). `recorded_at` is an ISO-8601 timestamp.
+
+### The database moved — do not read the clan DB
+
+`llm_calls` lived in `elixir-v51.db` until **2026-08-03**, when telemetry was split
+into its own file so the instrument would stop contending with the workload it
+measures. The clan DB still carries a copy of every row written before the
+cutover and **it is frozen** — nothing new lands there ever again.
+
+That stale table is dangerous rather than merely useless: querying it shows spend
+falling off a cliff on 2026-08-03 and holding at zero, which reads exactly like a
+cost win. If a report ever shows spend ending abruptly on that date, the path is
+wrong, not the spend. The clan copy is retained only until it is dropped in a
+future migration.
+
+### Timestamps are ISO-Z; do not compare against `datetime('now')`
+
+`recorded_at` is written as `2026-08-03T15:51:54Z`. SQLite's `datetime('now')`
+returns `2026-08-03 15:51:54` — space separator, no `Z`. These compare as
+strings, and `'T' > ' '`, so a naive `recorded_at >= datetime('now','-7 days')`
+**silently over-selects**, pulling in the whole boundary day.
+
+Build cutoffs in the same format instead:
+
+```sql
+strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
+```
+
+Rows written before the 2026-08-03 cutover carry no `Z`. Both forms still sort
+correctly against a `Z`-suffixed cutoff, so one filter covers the whole history.
 
 ### Bootstrap guard
 
@@ -51,7 +80,7 @@ Test models (`claude-test-*`) are priced at $0 — filter them out of cost total
 
 ## Queries to run
 
-Run all four queries against `elixir-v51.db` via read-only `sqlite3` and interpret them together.
+Run all four queries against `elixir-telemetry.db` via read-only `sqlite3` and interpret them together.
 
 ### Q1 — Daily totals and trend
 
@@ -68,7 +97,7 @@ SELECT date(recorded_at) AS day,
             THEN prompt_tokens*1 + cache_read_tokens*0.1 + cache_creation_tokens*1.25 + completion_tokens*5
             ELSE 0 END) / 1e6, 2) AS cost_usd
 FROM llm_calls
-WHERE recorded_at >= datetime('now', '-7 days')
+WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
 GROUP BY day
 ORDER BY day;
 ```
@@ -95,7 +124,7 @@ SELECT workflow,
        ROUND(AVG(cache_creation_tokens))AS avg_cache_write,
        ROUND(AVG(completion_tokens))    AS avg_completion
 FROM llm_calls
-WHERE recorded_at >= datetime('now', '-7 days')
+WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
   AND model LIKE 'claude-%'
 GROUP BY workflow, model
 ORDER BY cost_usd DESC;
@@ -112,7 +141,7 @@ SELECT workflow,
        ROUND(SUM(cache_read_tokens) * 1.0 / NULLIF(SUM(cache_creation_tokens), 0), 2)
          AS read_per_write
 FROM llm_calls
-WHERE recorded_at >= datetime('now', '-7 days')
+WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
   AND cache_creation_tokens > 0
 GROUP BY workflow
 ORDER BY cc_total DESC;
@@ -135,7 +164,7 @@ WITH daily AS (
               THEN prompt_tokens*1 + cache_read_tokens*0.1 + cache_creation_tokens*1.25 + completion_tokens*5
               ELSE 0 END) / 1e6 AS cost
   FROM llm_calls
-  WHERE recorded_at >= datetime('now', '-14 days')
+  WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-14 days')
   GROUP BY day
 )
 SELECT day, ROUND(cost, 2) AS cost_usd

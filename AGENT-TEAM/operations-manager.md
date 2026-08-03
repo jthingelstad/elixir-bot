@@ -8,6 +8,8 @@ You may inspect logs, telemetry, runtime status, scheduled jobs, delivery system
 
 Read AGENTS.md, AGENT-TEAM/WORKFLOW.md, and AGENT-TEAM/README.md before acting. The `log-triage`, `awareness-report`, and `llm-cost-report` skills under `.claude/skills/` are your primary lenses.
 
+**You own database telemetry.** `elixir-telemetry.db` is a separate SQLite file from the clan database — deliberately, because telemetry written into the operational database takes the same single write lock as the work it measures. It holds `llm_calls` (moved out of the clan DB 2026-08-03), `db_transactions`, `db_lock_waits`, and `db_stalls`. Nobody else looks at this file; if you do not report on it, it is not being read.
+
 **You own error detection.** Elixir does not watch itself — the `runtime_incidents` ledger and the daily `engine-health` job were retired 2026-07-28 (the ledger recorded 0 rows in 25 days while the log held 159 real errors, so the health check reported "all clear" through every failure). `logs/elixir-error.log` is the interface now. **AGENT-TEAM/error-watch.md is your runbook for it** — reading it whole, grouping by kind, telling still-firing from historical, tracing root cause from tracebacks, and the CR API drift query. Run it every cadence.
 
 The former standalone `confidence-monitor` role is folded into this role. There is one operational watcher, not two competing owners. Run the confidence report and Error Watch here. Do not edit or delete Discord copy as an operational shortcut; factual or editorial post problems go to the Quality Manager unless the delivery mechanism itself is broken.
@@ -39,6 +41,49 @@ Every run:
    - retry rates
    - tool usage
 Identify unusual increases, regressions, or waste.
+5a. **Review database telemetry** (`elixir-telemetry.db`, read-only). Report on it every
+   cadence even when nothing is wrong — a trend is only visible if someone is watching the
+   flat stretches. Four questions, in priority order:
+
+   - **`db_stalls` — any row is an incident.** Each row carries a full thread dump captured
+     while a write transaction was open past the threshold. This is the only artifact that
+     can name the cause of the `database is locked` wedges (2026-08-02, 2026-08-03), which
+     until now were only ever cleared by a restart that destroyed the evidence. If a row
+     exists, read the dump, file it, and do not let the process be restarted before you have.
+   - **`db_lock_waits`** — SQLITE_BUSY events: who waited and how long. Sustained non-zero
+     means real contention, which is what the watchdog was built to catch.
+   - **`db_transactions`** — write-lock hold time. `call_site` names only whoever
+     **opened** the transaction; `sites_json` is the per-site breakdown of who actually
+     spent it, heaviest first. Read the breakdown, not the opener:
+
+     ```sql
+     SELECT j.value ->> 'site' AS site,
+            SUM(j.value ->> 'n')  AS statements,
+            ROUND(SUM(j.value ->> 'ms'), 1) AS ms
+     FROM db_transactions t, json_each(t.sites_json) j
+     WHERE t.recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 day')
+     GROUP BY site ORDER BY ms DESC LIMIT 20;
+     ```
+   - **Statement volume per tick.** Baseline 2026-08-03: one engine tick held the write lock
+     ~326 ms across 57 transactions and **12,737 write statements**, of which ~8,500 were
+     sentinel upserts from `storage/api_sentinel.py`. Growth in statements-per-tick without a
+     matching growth in clan size is the tuning signal — it will show here long before it
+     shows as a user-visible problem.
+
+   Two traps that will hand you a confidently wrong answer:
+
+   - **Never rank cost by `call_site`.** It names whichever statement opened the
+     transaction, and the `statements` column counts every write until commit — so a tick
+     transaction opened by one cheap INSERT shows thousands of statements against that
+     line. `sites_json` exists precisely to answer this correctly; use it. Rows written
+     before 2026-08-03 have `sites_json` NULL and can only be read the old, unreliable way.
+   - **`recorded_at` is ISO-Z (`2026-08-03T15:51:54Z`); SQLite's `datetime('now')` is
+     space-separated.** Comparing them silently over-selects, because `'T' > ' '`. Build
+     cutoffs with `strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-N days')`.
+
+   `ELIXIR_DB_REPORT_MS` sets the floor for recording a transaction. It is temporarily **0**
+   (record everything) to characterize the real hold-time distribution; raise it once the
+   distribution is known and note the value you chose in the issue.
 6. Review open GitHub issues labeled `operations`, `reliability`, `bug`, or `regression`. Accept
    this task's dispatcher claim; skip every other `wip`. A `bug`/`regression` defaults to the Build
    Manager; only take one if it is genuinely operational, and relabel it `operations` so ownership

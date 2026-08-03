@@ -11,6 +11,7 @@ So the coverage claim is asserted here, path by path, rather than reasoned about
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -23,13 +24,14 @@ def recorded(monkeypatch):
     """Capture what would have been written to the telemetry file."""
     rows: list[dict] = []
 
-    def _capture(call_site, held_ms, *, statements=0, outcome):
+    def _capture(call_site, held_ms, *, statements=0, outcome, sites_json=None):
         rows.append(
             {
                 "call_site": call_site,
                 "held_ms": held_ms,
                 "statements": statements,
                 "outcome": outcome,
+                "sites": json.loads(sites_json) if sites_json else [],
             }
         )
 
@@ -135,3 +137,54 @@ def test_call_site_attributes_to_the_caller(conn, recorded):
     conn.execute("INSERT INTO t VALUES (13)")
     conn.commit()
     assert recorded[0]["call_site"].startswith("tests/test_db_watch_coverage.py:")
+
+
+def _opener(conn):
+    conn.execute("INSERT INTO t VALUES (100)")
+
+
+def _bulk_writer(conn):
+    for n in range(50):
+        conn.execute("INSERT INTO t VALUES (?)", (n,))
+
+
+def test_sites_breakdown_separates_the_opener_from_the_spender(conn, recorded):
+    """`call_site` names who OPENED the transaction — not who spent it.
+
+    This is the whole reason the breakdown exists. A tick's transaction is opened
+    by one cheap statement and then filled by thousands from elsewhere; reading
+    `call_site` alone points the finger at the wrong line.
+    """
+    _opener(conn)  # 1 statement, opens the transaction
+    _bulk_writer(conn)  # 50 statements, the actual work
+    conn.commit()
+
+    row = recorded[0]
+    assert row["statements"] == 51
+    assert "_opener" not in row["call_site"]  # sanity: it is a file:line label
+
+    sites = {entry["site"].split(":")[0] + ":" + str(entry["n"]): entry for entry in row["sites"]}
+    counts = {entry["n"] for entry in row["sites"]}
+    assert counts == {1, 50}, f"expected a 1-statement opener and a 50-statement spender: {sites}"
+
+    # The transaction is attributed to the opener, but the breakdown names both.
+    opener_entries = [e for e in row["sites"] if e["n"] == 1]
+    assert row["call_site"] == opener_entries[0]["site"]
+    assert len(row["sites"]) == 2
+
+
+def test_sites_are_ranked_heaviest_first(conn, recorded):
+    _opener(conn)
+    _bulk_writer(conn)
+    conn.commit()
+    times = [entry["ms"] for entry in recorded[0]["sites"]]
+    assert times == sorted(times, reverse=True)
+
+
+def test_breakdown_is_capped(conn, recorded, monkeypatch):
+    monkeypatch.setattr(db_watch, "TOP_SITES", 2)
+    conn.execute("INSERT INTO t VALUES (1)")
+    conn.execute("INSERT INTO t VALUES (2)")
+    conn.execute("INSERT INTO t VALUES (3)")
+    conn.commit()
+    assert len(recorded[0]["sites"]) == 2

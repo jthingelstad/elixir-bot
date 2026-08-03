@@ -80,7 +80,12 @@ _SCHEMA = (
         call_site TEXT,
         held_ms INTEGER NOT NULL,
         statements INTEGER,
-        outcome TEXT NOT NULL
+        outcome TEXT NOT NULL,
+        -- Per-site breakdown WITHIN this transaction, heaviest first:
+        -- [{"site": "engine/x.py:12", "n": 3969, "ms": 118.4}, ...]
+        -- `call_site` above names only whoever OPENED the transaction, which is
+        -- not usually who spent the time. Read this column before blaming a line.
+        sites_json TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS idx_db_txn_recorded ON db_transactions(recorded_at)",
     "CREATE INDEX IF NOT EXISTS idx_db_txn_held ON db_transactions(held_ms)",
@@ -134,6 +139,13 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+# Columns added after a table first shipped. `CREATE TABLE IF NOT EXISTS` is a
+# no-op against an existing file, so a new column needs an explicit ALTER. This
+# file is disposable telemetry, not clan data — no version counter, just make the
+# shape current and move on.
+_ADDED_COLUMNS = (("db_transactions", "sites_json", "TEXT"),)
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     global _schema_ready
     if _schema_ready:
@@ -141,6 +153,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     with _schema_lock:
         for statement in _SCHEMA:
             conn.execute(statement)
+        for table, column, decl in _ADDED_COLUMNS:
+            existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
         conn.commit()
         _schema_ready = True
 
@@ -192,13 +208,21 @@ def record_llm_call(
         log.debug("telemetry: llm call record failed", exc_info=True)
 
 
-def record_transaction(call_site: str, held_ms: int, *, statements: int = 0, outcome: str) -> None:
+def record_transaction(
+    call_site: str,
+    held_ms: int,
+    *,
+    statements: int = 0,
+    outcome: str,
+    sites_json: Optional[str] = None,
+) -> None:
     try:
         conn = connect()
         conn.execute(
-            "INSERT INTO db_transactions (recorded_at, call_site, held_ms, statements, outcome) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (_utcnow(), call_site, int(held_ms), int(statements), outcome),
+            "INSERT INTO db_transactions "
+            "(recorded_at, call_site, held_ms, statements, outcome, sites_json) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (_utcnow(), call_site, int(held_ms), int(statements), outcome, sites_json),
         )
         conn.commit()
     except Exception:

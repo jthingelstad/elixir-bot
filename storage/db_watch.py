@@ -46,6 +46,7 @@ stall you have to restart.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
@@ -73,17 +74,50 @@ _watchdog: threading.Thread | None = None
 _reported: set[int] = set()
 
 
+# Resolved per WRITE STATEMENT, so it has to be cheap. `traceback.extract_stack`
+# reads source lines through linecache and costs ~15us/call — at ~12,700 write
+# statements per engine tick that is ~190ms of overhead against a ~330ms
+# measurement, i.e. the instrument would have become the thing it was measuring.
+# Walking frames directly costs ~0.5us. Measured, not assumed.
+_MAX_FRAME_HOPS = 25
+_file_labels: dict[str, str | None] = {}
+
+
+def _file_label(filename: str) -> str | None:
+    """Repo-relative label for a filename, or None if it is infrastructure.
+
+    Memoized on the filename, which sqlite/CPython hands us as the same interned
+    string every time, so the common path is one dict hit.
+    """
+    try:
+        return _file_labels[filename]
+    except KeyError:
+        pass
+    name = filename.replace("\\", "/")
+    if (
+        "/storage/db_watch" in name
+        or "/db/__init__" in name
+        or "sqlite3" in name
+        or "/elixir-bot/" not in name
+    ):
+        label = None
+    else:
+        label = name.split("/elixir-bot/")[-1]
+    _file_labels[filename] = label
+    return label
+
+
 def _call_site() -> str:
     """The first frame outside the storage/db layer — who actually asked."""
     try:
-        for frame in traceback.extract_stack()[::-1]:
-            name = frame.filename.replace("\\", "/")
-            if "/storage/db_watch" in name or "/db/__init__" in name or "sqlite3" in name:
-                continue
-            if "/elixir-bot/" not in name:
-                continue
-            short = name.split("/elixir-bot/")[-1]
-            return f"{short}:{frame.lineno}"
+        frame = sys._getframe(1)
+        hops = 0
+        while frame is not None and hops < _MAX_FRAME_HOPS:
+            label = _file_label(frame.f_code.co_filename)
+            if label is not None:
+                return f"{label}:{frame.f_lineno}"
+            frame = frame.f_back
+            hops += 1
     except Exception:  # noqa: BLE001
         # hygiene: call-site attribution is a label on a metric. If walking the
         # stack fails, the metric still gets recorded as "unknown" — logging here
@@ -96,28 +130,52 @@ def _is_write(sql: str) -> bool:
     return sql.lstrip()[:8].lower().startswith(_WRITE_PREFIXES)
 
 
+# Enough to see where a transaction's work went without storing a row per
+# statement; a transaction spread over more sites than this is already the
+# finding.
+TOP_SITES = 8
+
+
+def _top_sites(sites: dict[str, list]) -> str | None:
+    """The per-site breakdown inside one transaction, heaviest first."""
+    if not sites:
+        return None
+    try:
+        ranked = sorted(sites.items(), key=lambda kv: (-kv[1][1], -kv[1][0]))[:TOP_SITES]
+        return json.dumps(
+            [{"site": site, "n": count, "ms": round(ms, 1)} for site, (count, ms) in ranked]
+        )
+    except Exception:  # noqa: BLE001
+        # hygiene: a breakdown is an optional detail on an optional metric. The
+        # transaction row itself still records without it.
+        return None
+
+
 class InstrumentedCursor(sqlite3.Cursor):
     """The single observation point. Every execute path lands here."""
 
     def execute(self, sql, parameters=(), /):  # type: ignore[override]
+        started = time.perf_counter()
         try:
             return super().execute(sql, parameters)
         finally:
-            self.connection._observe(sql)
+            self.connection._observe(sql, (time.perf_counter() - started) * 1000)
 
     def executemany(self, sql, parameters, /):  # type: ignore[override]
+        started = time.perf_counter()
         try:
             return super().executemany(sql, parameters)
         finally:
-            self.connection._observe(sql)
+            self.connection._observe(sql, (time.perf_counter() - started) * 1000)
 
     def executescript(self, sql_script, /):  # type: ignore[override]
+        started = time.perf_counter()
         try:
             return super().executescript(sql_script)
         finally:
             # executescript issues an implicit COMMIT first and leaves autocommit
             # state behind it; _observe closes any record it finds open.
-            self.connection._observe(sql_script)
+            self.connection._observe(sql_script, (time.perf_counter() - started) * 1000)
 
 
 class InstrumentedConnection(sqlite3.Connection):
@@ -143,7 +201,7 @@ class InstrumentedConnection(sqlite3.Connection):
     def executescript(self, sql_script, /):  # type: ignore[override]
         return self.cursor().executescript(sql_script)
 
-    def _observe(self, sql: str) -> None:
+    def _observe(self, sql: str, elapsed_ms: float = 0.0) -> None:
         """Reconcile our record of this connection against sqlite's own state."""
         try:
             live = self.in_transaction
@@ -154,7 +212,9 @@ class InstrumentedConnection(sqlite3.Connection):
             return
         if live:
             if _is_write(sql) or id(self) in _open_writes:
-                self._note_write()
+                # Resolve the site BEFORE taking the mutex: walking frames while
+                # holding it would serialize every writing thread on stack walks.
+                self._note_write(_call_site(), elapsed_ms)
         elif id(self) in _open_writes:
             # No transaction is open, so nothing is holding the write lock —
             # whatever we were tracking ended (implicit or external commit). The
@@ -162,19 +222,28 @@ class InstrumentedConnection(sqlite3.Connection):
             # the mutex; _close_txn re-checks under it.
             self._close_txn("autocommit")
 
-    def _note_write(self) -> None:
+    def _note_write(self, site: str, elapsed_ms: float = 0.0) -> None:
         key = id(self)
         with _lock:
             entry = _open_writes.get(key)
             if entry is None:
                 _open_writes[key] = {
                     "started": time.monotonic(),
-                    "call_site": _call_site(),
+                    "call_site": site,
                     "statements": 1,
                     "thread": threading.current_thread().name,
+                    # site -> [statement count, cumulative ms]. `call_site` above
+                    # is only whoever OPENED the transaction; this is who spent it.
+                    "sites": {site: [1, elapsed_ms]},
                 }
             else:
                 entry["statements"] += 1
+                seen = entry["sites"].get(site)
+                if seen is None:
+                    entry["sites"][site] = [1, elapsed_ms]
+                else:
+                    seen[0] += 1
+                    seen[1] += elapsed_ms
 
     def _close_txn(self, outcome: str) -> None:
         key = id(self)
@@ -190,7 +259,11 @@ class InstrumentedConnection(sqlite3.Connection):
             from storage import telemetry
 
             telemetry.record_transaction(
-                entry["call_site"], held_ms, statements=entry["statements"], outcome=outcome
+                entry["call_site"],
+                held_ms,
+                statements=entry["statements"],
+                outcome=outcome,
+                sites_json=_top_sites(entry["sites"]),
             )
         except Exception:  # noqa: BLE001 - telemetry never breaks the caller
             log.debug("db_watch: transaction record failed", exc_info=True)
