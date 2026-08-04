@@ -292,6 +292,7 @@ def _clan_chat_copy_system():
         "(a) never use `&` — write `and` (the game blanks `&` AND the words on both sides of it, e.g. `Javed & pax` all disappear); "
         "(b) never put `+` directly before a number — write `up 821` or `gained 821 (5,718 to 6,539)`, never `+821` (the game reads `+`digits as a phone number and hides it); "
         "(c) avoid words the filter blocks as slang even when your meaning is innocent — e.g. `edging` (say `just ahead of` / `nosing past`); "
+        "(c2) never write `phone` — the filter reads it as contact-sharing and blanks it along with the word before it (`134. Phone trouble` became `**** ***** trouble`); say `device` or name the cause differently; "
         "(d) never join two word-parts with a hyphen — write `ranked play`, not `ranked-play` (the game reads a `word-word` token as a handle and blanks it, the same way it blanks `&`). "
         "A member name may itself contain a hyphen (e.g. `L-Drxgo`); write such a name with a space (`L Drxgo`) so it is not blanked. "
         "Plain numbers, commas, `#`, and parentheses are fine.\n"

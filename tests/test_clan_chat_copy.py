@@ -296,3 +296,22 @@ def test_detector_allows_legitimate_small_totals():
         "100 trophies on the line",
     ):
         assert not clan_chat_copy.has_engine_internals(legitimate), legitimate
+
+
+def test_phone_is_neutralized_case_preserving():
+    """Confirmed live 2026-08-03: `Phone` was blanked, and took `134.` with it.
+
+    "...in seasons 133 and 134. Phone trouble is pulling them from the game"
+    rendered in-game as "seasons 133 and **** ***** trouble is pulling them".
+    """
+    from runtime.clan_chat_copy import censor_safe_clan_chat
+
+    out = censor_safe_clan_chat("in seasons 133 and 134. Phone trouble is pulling them")
+    assert "Phone" not in out and "phone" not in out
+    assert "Device trouble" in out, out
+    assert "134." in out, "the flanking token must survive"
+
+    assert "device" in censor_safe_clan_chat("his phone died")
+    assert "devices" in censor_safe_clan_chat("their phones died")
+    # Not a substring match: "phonetic" is not the trigger.
+    assert "phonetic" in censor_safe_clan_chat("a phonetic name")

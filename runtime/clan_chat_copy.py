@@ -71,6 +71,31 @@ _CENSOR_AMP_RE = re.compile(r"\s*&\s*")
 _CENSOR_PLUS_NUM_RE = re.compile(r"\+(?=\d)")
 _CENSOR_INNER_HYPHEN_RE = re.compile(r"(?<=\w)-(?=\w)")
 
+# Words the filter treats as contact-sharing regardless of context. Confirmed
+# live 2026-08-03: "…in seasons 133 and 134. Phone trouble is pulling them from
+# the game" rendered as "seasons 133 and **** ***** trouble is pulling them" —
+# `Phone` blanked, and it took the adjacent `134.` with it, the same flanking
+# behaviour `&` has. This sits in the same contact-info class as the `+`digits
+# rule above.
+#
+# NOT explained, and deliberately not guessed at: the same day, "Season 135 is
+# underway." blanked as "Season *** ** ********" while `134` survived
+# uncensored in the same message. Adding a rule for that without knowing the
+# trigger would be superstition. If more samples arrive, triangulate first.
+_CENSOR_WORD_SUBS = (
+    (re.compile(r"\bphones\b", re.IGNORECASE), "devices"),
+    (re.compile(r"\bphone\b", re.IGNORECASE), "device"),
+)
+
+
+def _match_case(original: str, replacement: str) -> str:
+    """Keep the sentence reading naturally: `Phone` -> `Device`, not `device`."""
+    if original.isupper():
+        return replacement.upper()
+    if original[:1].isupper():
+        return replacement.capitalize()
+    return replacement
+
 
 def censor_safe_clan_chat(text: str) -> str:
     """Neutralize the in-game chat filter's silent-censor triggers so a message —
@@ -83,6 +108,10 @@ def censor_safe_clan_chat(text: str) -> str:
     out = _CENSOR_AMP_RE.sub(" and ", text)
     out = _CENSOR_PLUS_NUM_RE.sub("", out)
     out = _CENSOR_INNER_HYPHEN_RE.sub(" ", out)
+    for pattern, replacement in _CENSOR_WORD_SUBS:
+        # `word=replacement` binds per-iteration; a bare closure over the loop
+        # variable would apply the LAST replacement to every pattern.
+        out = pattern.sub(lambda m, word=replacement: _match_case(m.group(0), word), out)
     return " ".join(out.split())
 
 

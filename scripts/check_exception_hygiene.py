@@ -80,10 +80,12 @@ BROAD_EXCEPTION_BASELINE = {
     # reformatted Discord post — a plainer email beats a missing one.
     "runtime/jobs/_core.py": 16,
     "runtime/jobs/_battle_intel.py": 2,  # Stage-A/B jobs: mark_job_failure on any tick error
-    # 4 -> 6 (2026-08-03): the intel email job. One guards context assembly so a
-    # failed report marks the job failed instead of killing the scheduler; the
-    # other keeps a memory-write failure from unsending an email already gone.
-    "runtime/jobs/_intel.py": 6,
+    # 6 -> 2 (2026-08-03): the Discord version of the intel report was removed —
+    # email is the path for it — taking its four guards with it. The two that
+    # remain belong to the email job: one guards context assembly so a failed
+    # report marks the job failed instead of killing the scheduler; the other
+    # keeps a memory-write failure from unsending an email already gone.
+    "runtime/jobs/_intel.py": 2,
     # All three guard per-clan API fetches (opponent profile, our own profile,
     # river race log): one bad clan must degrade that section of the scouting
     # report, never sink the whole thing.

@@ -10,7 +10,6 @@ __all__ = [
     "_ask_elixir_daily_insight",
     "_weekly_clan_recap",
     "_weekly_discord_invite_relay",
-    "_clan_wars_intel_report",
 ]
 
 import asyncio
@@ -35,7 +34,6 @@ from runtime.helpers import (
     format_weekly_recap_email,
 )
 from runtime.helpers._common import _load_live_clan_context, _post_to_elixir
-from runtime.jobs._intel import _clan_wars_intel_report
 from runtime.leader_action_policy import can_post_leader_action
 from runtime.leader_action_ui import (
     CLASH_COPY_MAX_LENGTH,

@@ -32,7 +32,6 @@ from runtime.jobs._core import (  # noqa: F401
 )
 from runtime.jobs._intel import (  # noqa: F401
     _clan_wars_intel_email,
-    _clan_wars_intel_report,
 )
 from runtime.jobs._maintenance import (  # noqa: F401
     API_SENTINEL_POLL_MINUTES,

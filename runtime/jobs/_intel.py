@@ -8,21 +8,11 @@ via tools and composes the Discord-ready post itself.
 
 __all__ = [
     "_clan_wars_intel_email",
-    "_clan_wars_intel_report",
 ]
 
-import asyncio
 import logging
 
-import cr_api
-import elixir_agent
 from runtime import status as runtime_status
-from runtime.helpers import (
-    _channel_config_by_key,
-    _get_singleton_channel_id,
-    build_lane_memory_context,
-)
-from runtime.helpers._common import _post_to_elixir
 from storage.contextual_memory import upsert_intel_report_memory
 
 log = logging.getLogger("elixir")
@@ -38,119 +28,15 @@ def _bot():
     return _runtime_app().bot
 
 
-async def _clan_wars_intel_report():
-    """Generate and post the Clan Wars Intel Report to #elixir."""
-    runtime_status.mark_job_start("clan_wars_intel")
-
-    try:
-        channel_id = _get_singleton_channel_id("elixir")
-    except Exception as exc:
-        runtime_status.mark_job_failure("clan_wars_intel", f"channel config error: {exc}")
-        return
-
-    channel = _bot().get_channel(channel_id)
-    if not channel:
-        runtime_status.mark_job_failure("clan_wars_intel", "elixir channel not found")
-        return
-
-    try:
-        war = await asyncio.to_thread(cr_api.get_current_war)
-    except Exception as exc:
-        log.error("Intel report: war fetch failed: %s", exc, exc_info=True)
-        runtime_status.mark_job_failure("clan_wars_intel", f"war fetch failed: {exc}")
-        return
-
-    if not war:
-        runtime_status.mark_job_success("clan_wars_intel", "no active war data")
-        return
-
-    our_tag = cr_api.CLAN_TAG
-    competitors = [
-        (c.get("tag") or "").lstrip("#").upper()
-        for c in (war.get("clans") or [])
-        if (c.get("tag") or "").lstrip("#").upper()
-        and (c.get("tag") or "").lstrip("#").upper() != our_tag
-    ]
-    if not competitors:
-        runtime_status.mark_job_success("clan_wars_intel", "no competitors in current war")
-        return
-
-    season_id = war.get("seasonId")
-
-    memory_context = None
-    try:
-        channel_config = _channel_config_by_key("elixir")
-        memory_context = await asyncio.to_thread(
-            build_lane_memory_context,
-            channel_config,
-            signals=[],
-        )
-    except Exception as exc:
-        log.warning("Intel report: memory context setup failed: %s", exc)
-
-    response = await asyncio.to_thread(
-        elixir_agent.generate_intel_report,
-        our_tag,
-        competitors,
-        season_id=season_id,
-        memory_context=memory_context,
-    )
-
-    if not isinstance(response, dict):
-        runtime_status.mark_job_failure(
-            "clan_wars_intel", "intel_report workflow returned no response"
-        )
-        return
-
-    content = response.get("content")
-    if isinstance(content, str):
-        messages = [content]
-    elif isinstance(content, list):
-        messages = [str(m) for m in content if m]
-    else:
-        messages = []
-
-    if not messages:
-        runtime_status.mark_job_failure(
-            "clan_wars_intel", "intel_report workflow returned empty content"
-        )
-        return
-
-    for message_text in messages:
-        await _post_to_elixir(channel, {"content": message_text})
-
-    if season_id is not None:
-        memory_body = "\n\n".join(messages)
-        summary = response.get("summary")
-        if summary:
-            memory_body = f"{summary}\n\n{memory_body}"
-        try:
-            await asyncio.to_thread(
-                upsert_intel_report_memory,
-                season_id=season_id,
-                body=memory_body,
-                metadata={"clan_count": len(competitors)},
-            )
-        except Exception as exc:
-            log.warning("Intel report: memory upsert failed: %s", exc)
-
-    runtime_status.mark_job_success(
-        "clan_wars_intel",
-        f"posted {len(messages)} messages for {len(competitors)} opponents",
-    )
+# _clan_wars_intel_report (the #elixir Discord version) was REMOVED 2026-08-03.
+# Email is the path for this report (Jamie). It was already unscheduled — the
+# clan-wars-intel activity points at _clan_wars_intel_email — but it survived as
+# reachable dead code writing the SAME runtime_status key, so a green Discord run
+# could mask a failed email run.
 
 
-# --- The intel report as email (2026-08-03) -------------------------------
-# Pivoted off Discord entirely. The report is a monthly, once-per-season piece
-# with a top-5 roster table per opponent -- long-form, referred back to, and a
-# poor fit for a channel that scrolls. Email also lets it be a real document.
-#
-# Trigger is a daily CHECK rather than a season-start cron: seasons begin on the
-# first Monday, which the old `day=1` cron could miss by up to six days, and an
-# event listener would lose the report entirely if the bot were down at rollover.
-# "Is there a season with no intel memory yet?" is idempotent, self-healing, and
-# survives a missed day.
-
+# How long after a war season opens the intel report is still worth sending.
+# Past this the "what to expect this season" framing is stale.
 INTEL_LOOKBACK_DAYS = 6
 
 
