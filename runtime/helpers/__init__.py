@@ -81,6 +81,7 @@ from runtime.helpers._reports import (  # noqa: F401
     _load_live_clan_context,
     _strip_weekly_recap_header,
     build_lane_memory_context,
+    format_weekly_recap_email,
 )
 from runtime.helpers._requests import (  # noqa: F401
     _fallback_channel_response,

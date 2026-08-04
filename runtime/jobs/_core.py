@@ -32,6 +32,7 @@ from runtime.helpers import (
     _format_weekly_recap_post,
     _get_singleton_channel_id,
     _strip_weekly_recap_header,
+    format_weekly_recap_email,
 )
 from runtime.helpers._common import _load_live_clan_context, _post_to_elixir
 from runtime.jobs._intel import _clan_wars_intel_report
@@ -656,11 +657,16 @@ async def _weekly_clan_recap():
         tags=["weekly", "recap", "clan-history"],
         metadata={"channel_id": channel.id, "workflow": "announcements"},
     )
-    # Also email the recap to clan members who have a verified email (best-effort;
-    # a mail failure must never fail the recap job).
+    # Email the recap to clan members with a verified email. A mail failure must
+    # not abort the job — the Discord post already landed — but it must not be
+    # INVISIBLE either. Swallowing it here and still calling mark_job_success at
+    # the end is how the 2026-08-03 report went missing with a green job status.
+    emailed = 0
+    email_error: str | None = None
     try:
-        await _email_weekly_recap(recap_post)
-    except Exception:
+        emailed = await _email_weekly_recap(recap_text)
+    except Exception as exc:  # noqa: BLE001 - reported below, not swallowed
+        email_error = f"{type(exc).__name__}: {exc}"
         log.warning("weekly recap email failed", exc_info=True)
     # (POAP KINGS website weekly-recap sync + blog post removed 2026-06-21 — the
     # site has its own update script now. The Discord #announcements recap above
@@ -669,7 +675,15 @@ async def _weekly_clan_recap():
         await _weekly_story_relay_card(recap_text)
     except Exception:
         log.warning("weekly story relay card failed", exc_info=True)
-    runtime_status.mark_job_success("weekly_clan_recap", "weekly recap posted")
+    if email_error:
+        # mark_job_failure raises a deduped #elixir-log alert, which is the whole
+        # point: the email is the half of this deliverable nobody sees fail.
+        runtime_status.mark_job_failure(
+            "weekly_clan_recap",
+            f"Discord recap posted, but the email did NOT go out ({email_error})",
+        )
+        return
+    runtime_status.mark_job_success("weekly_clan_recap", f"weekly recap posted; emailed {emailed}")
 
 
 async def _weekly_elder_standing():
@@ -730,12 +744,14 @@ async def _weekly_elder_standing():
     )
 
 
-async def _email_weekly_recap(recap_post: str) -> int:
+async def _email_weekly_recap(recap_text: str) -> int:
     """BCC the weekly recap to clan members with a verified email (BCC so nobody
-    sees anyone else's address). Discord custom emoji (`<:name:id>`) are stripped
-    so they don't leak into the email as raw text. Best-effort; returns the count."""
-    import re as _re
+    sees anyone else's address).
 
+    Takes the RAW recap text, not the Discord post: the email body is rendered as
+    email markdown (real headings) rather than a Discord post with its emoji filed
+    off. See helpers.format_weekly_recap_email. Returns the recipient count and
+    lets send errors propagate — the caller decides what a failure means."""
     from agent.mail import outbound
 
     if not outbound.enabled():
@@ -743,8 +759,7 @@ async def _email_weekly_recap(recap_post: str) -> int:
     recipients = await asyncio.to_thread(lambda: [m["email"] for m in db.list_member_emails()])
     if not recipients:
         return 0
-    body = _re.sub(r"<a?:\w+:\d+>", "", recap_post)
-    body = _re.sub(r"[ \t]{2,}", " ", body).strip()
+    body = format_weekly_recap_email(recap_text)
     email_addr = os.getenv("ELIXIR_EMAIL_ADDRESS", "elixir@poapkings.com")
     subject = f"POAP KINGS — Weekly Clan Recap ({datetime.now(CHICAGO).strftime('%b %d, %Y')})"
     await asyncio.to_thread(

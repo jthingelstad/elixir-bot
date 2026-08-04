@@ -52,6 +52,7 @@ __all__ = [
     "_WEEKLY_RECAP_HEADER_RE",
     "_strip_weekly_recap_header",
     "_format_weekly_recap_post",
+    "format_weekly_recap_email",
     "build_lane_memory_context",
 ]
 
@@ -1207,6 +1208,52 @@ def _strip_weekly_recap_header(text: str) -> str:
         while lines and not (lines[0] or "").strip():
             lines = lines[1:]
     return "\n".join(lines).strip()
+
+
+# Discord custom emoji (`<:name:1234>`) and `:shortcode:` names are Discord
+# rendering instructions. In an email they arrive as literal noise.
+_DISCORD_EMOJI_RE = re.compile(r"<a?:\w+:\d+>")
+_EMOJI_SHORTCODE_RE = re.compile(r":[a-z0-9_+\-]{2,}:")
+# A paragraph that opens with a bold sentence and continues into prose. The brain
+# writes these as section leads; Discord has no headings, so bold is the only
+# emphasis it has. Email does have headings.
+_BOLD_LEAD_RE = re.compile(r"^\*\*(?P<lead>[^*]+?)\*\*\s+(?P<rest>\S.*)$", re.DOTALL)
+
+
+def format_weekly_recap_email(recap_text: str, *, now: datetime | None = None) -> str:
+    """The weekly recap as EMAIL markdown, not a Discord post with the emoji filed off.
+
+    The Discord post opens with `**Weekly Recap | date**` — bold text pretending to
+    be a title, because Discord has no headings. Mailing that verbatim produced a
+    wall of paragraphs with nothing for a stylesheet to hook: no `<h1>`, no `<h2>`,
+    one undifferentiated block.
+
+    This promotes the title to an `<h1>` and each paragraph's bold lead sentence to
+    an `<h2>`, leaving the brain's words untouched — it re-marks structure the
+    author already expressed, rather than rewriting prose. Paragraphs without a
+    bold lead pass through as paragraphs.
+    """
+    body = _strip_weekly_recap_header(recap_text)
+    body = _DISCORD_EMOJI_RE.sub("", body)
+    body = _EMOJI_SHORTCODE_RE.sub("", body)
+    body = re.sub(r"[ \t]{2,}", " ", body).strip()
+
+    current = (now or datetime.now(timezone.utc)).astimezone(_chicago())
+    date_line = f"{current.strftime('%B')} {current.day}, {current.year}"
+    out: list[str] = ["# Weekly Recap", "", f"_{date_line}_", ""]
+
+    for para in re.split(r"\n\s*\n", body):
+        para = para.strip()
+        if not para:
+            continue
+        match = _BOLD_LEAD_RE.match(para)
+        if match:
+            # Trailing period reads wrong as a heading; the rest keeps its own.
+            lead = match.group("lead").strip().rstrip(".").strip()
+            out.extend([f"## {lead}", "", match.group("rest").strip(), ""])
+        else:
+            out.extend([para, ""])
+    return "\n".join(out).strip()
 
 
 def _format_weekly_recap_post(recap_text: str, *, now: datetime | None = None) -> str:
