@@ -425,7 +425,7 @@ CREATE TABLE tournament_participants (
 CREATE INDEX idx_tournament_participants_tournament ON tournament_participants(tournament_id);
 
 -- tick_history: Observatory-persisted engine tick counters (added 2026-07-04;
--- 30-day self-pruning — see runtime/webapp/ticks.py)
+-- 30-day self-pruning — see runtime/tick_history.py)
 CREATE TABLE tick_history (
     tick_id INTEGER PRIMARY KEY,
     recorded_at TEXT NOT NULL,

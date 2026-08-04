@@ -19,7 +19,7 @@ rationale and may describe components later retired from production.
    those streams; identity, tenure, awards, and recognition claims are durable
    records rather than disposable projections.
 5. `capabilities/` packages canonical domain answers for tools, awareness,
-   reports, memory synthesis, admin, and Observatory. Consumers choose wording
+   reports, memory synthesis, and admin. Consumers choose wording
    and presentation; they do not independently recalculate the facts.
 6. The unified awareness loop reads new stream positions plus projections and
    capability answers, makes one proactive plan, validates it, sends it, then

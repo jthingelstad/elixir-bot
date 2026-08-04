@@ -1,4 +1,14 @@
-"""Engine-tick history for the /ticks page.
+"""Engine-tick history — the durable record of what every tick did.
+
+Lived under runtime/webapp/ until 2026-08-04 only because the Observatory
+page was its first reader. The Observatory is gone; the record is not. It is
+written by the engine tick itself (runtime/app.py) and is the cheapest
+forensic trail Elixir has: 144 rows/day, $0, self-pruning at 30 days, and it
+survives the restarts that destroy in-memory state.
+
+Its consumer now is ad-hoc — `recent_ticks()` from a shell, or SQL against
+`tick_history` — which is the same way the AGENT-TEAM runbooks read
+everything else.
 
 Persisted since 2026-07-04 (Jamie: "let's for sure persist tick history"):
 every tick's full counter dict lands in `tick_history` (30-day retention,
@@ -16,7 +26,7 @@ from datetime import datetime, timezone
 _TICKS: collections.deque = collections.deque(maxlen=288)  # ~48h at 10-min ticks
 
 _RETENTION_DAYS = 30
-log = logging.getLogger("elixir.webapp.ticks")
+log = logging.getLogger("elixir.tick_history")
 
 
 def record_tick(counters: dict) -> None:
@@ -43,9 +53,7 @@ def record_tick(counters: dict) -> None:
         finally:
             conn.close()
     except Exception:  # persistence must never fail the tick
-        log.exception(
-            "webapp.tick_history.persist failed: recorded_at=%s", entry.get("recorded_at")
-        )
+        log.exception("tick_history.persist failed: recorded_at=%s", entry.get("recorded_at"))
 
 
 def recent_ticks(limit: int = 100) -> list[dict]:

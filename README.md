@@ -114,8 +114,7 @@ Non-secret clan and Discord configuration lives in `prompts/CLAN.md` and
   schema checks, and storage facade.
 - [storage/](storage/) — domain persistence and read helpers.
 - [agent/](agent/) — workflow prompts, model loop, tool contracts, and tools.
-- [runtime/](runtime/) — Discord routing, activities, jobs, awareness, logging,
-  and the Observatory web app.
+- [runtime/](runtime/) — Discord routing, activities, jobs, awareness, and logging.
 - [prompts/](prompts/) — identity, purpose, clan, channel, lane, and workflow
   instructions.
 - [tests/](tests/) — unit, integration, fixture, invariant, and entrypoint tests.
@@ -185,8 +184,10 @@ is the operator interface, and triaging it is the Operations Manager's job — s
 `AGENT-TEAM/error-watch.md`.
 
 Member self-service commands live under `/elixir`. Leadership operations live
-under `/clanops`. System telemetry and management surfaces belong in the
-Observatory web app, not general Discord commands.
+under `/clanops`. System telemetry is read from the databases directly — via the
+`.claude/skills/` lenses, `scripts/admin.sh`, or SQL. The Observatory web app was
+deleted 2026-08-04: it went unused for weeks while still taking a share of every
+schema change.
 
 Review model/channel failures with:
 

@@ -60,7 +60,9 @@ BROAD_EXCEPTION_BASELINE = {
     # "a diagnostic must never fail its caller" shape as the rest of this file —
     # one keeps a trigger failure from failing the engine tick, the other keeps a
     # high-water write failure from escaping a background task.
-    "runtime/app.py": 41,  # +1: stall-watchdog startup must never block boot
+    # 41 -> 40 (2026-08-04): the Observatory webapp startup guard went with the
+    # webapp itself. The stall-watchdog boot guard is still in this count.
+    "runtime/app.py": 40,
     "runtime/awareness/deliver.py": 10,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
@@ -107,10 +109,8 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/startup.py": 3,
     "runtime/status.py": 3,
     "runtime/system_signals.py": 1,
-    "runtime/webapp/chat.py": 2,
-    "runtime/webapp/queries.py": 5,  # +1: command war-snapshot best-effort (like war_page)
-    "runtime/webapp/routes.py": 4,
-    "runtime/webapp/ticks.py": 2,
+    # was runtime/webapp/ticks.py — the Observatory went, the tick record stayed.
+    "runtime/tick_history.py": 2,
     "storage/_formatting.py": 2,
     # +1 (v34): the 7-day LLM cost now reads the telemetry DB and fails soft —
     # a status page must render even when the telemetry file is unreadable.

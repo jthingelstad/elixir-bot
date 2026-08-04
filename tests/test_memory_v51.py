@@ -7,15 +7,11 @@ expiry), migration parity on a seeded old-schema source, and the Observatory
 
 from __future__ import annotations
 
-import asyncio
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from aiohttp.test_utils import TestClient, TestServer
-
 import db
 import memory_store
-from runtime.webapp.server import build_app
 
 LOGIN = {"Tailscale-User-Login": "jthingelstad@github"}
 
@@ -234,7 +230,12 @@ def test_migration_parity_seeded_source(tmp_path):
         conn.close()
 
 
-def test_memories_page_renders():
+def test_memories_are_listable_and_full_text_searchable():
+    """The Observatory /memories page was deleted 2026-08-04.
+
+    The page was never the point — this is: a stored memory is retrievable,
+    and the FTS index finds it by a word from its body.
+    """
     conn = db.get_connection()
     try:
         memory_store.ensure_memory_schema(conn)
@@ -244,25 +245,15 @@ def test_memories_page_renders():
             body="a very findable zanzibar fact",
             member_tag="#PAGE1",
         )
+        listed = memory_store.list_memories(viewer_scope="leadership", limit=50, conn=conn)
+        assert any(m.get("title") == "Render me" for m in listed)
+
+        found = memory_store.search_memories("zanzibar", viewer_scope="leadership", conn=conn)
+        assert any(r.memory.get("title") == "Render me" for r in found), (
+            "full-text search must find a memory by a word from its body"
+        )
     finally:
         conn.close()
-
-    async def body():
-        app = build_app(deps=None)
-        client = TestClient(TestServer(app))
-        await client.start_server()
-        try:
-            r = await client.get("/memories", headers=LOGIN)
-            assert r.status == 200
-            text = await r.text()
-            assert "Render me" in text
-            r = await client.get("/memories?q=zanzibar", headers=LOGIN)
-            assert r.status == 200
-            assert "Render me" in await r.text()
-        finally:
-            await client.close()
-
-    asyncio.run(body())
 
 
 def test_build_memory_context_ranked_and_query():

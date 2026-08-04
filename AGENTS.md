@@ -162,7 +162,7 @@ tools make them visible:
 
 ### Review discipline
 
-A green suite is necessary, not sufficient. Before deploying a substantive change, do a **cold adversarial review** of the diff — read it as a skeptic hunting for what breaks, not as the author confirming what works. After deploying, do a **live behavioral audit**: watch what the running system actually does (Observatory, tick counters, posted messages) rather than what the code says it should do. The 2026-07-04 end-to-end review is the reference case: the suite was green, yet the live audit found a season-breaking gap (the awards consumer was never built — two work streams each assumed the other owned it) and the cold review found ten more real defects (delivery commit ordering, per-lane fail-stop, timestamp-format mismatches, CSRF host matching). An `engine-health` daily activity once tried to institutionalize the live audit's checks in-product; it was retired 2026-07-28 because a check that only covers known failure classes, run by the system it is checking, manufactures false calm (it read a ledger that never recorded a row). The watching lives outside the runtime now — `AGENT-TEAM/error-watch.md` — and new changes still need fresh adversarial eyes. Never mark a cross-stream feature done without verifying the consumer end-to-end.
+A green suite is necessary, not sufficient. Before deploying a substantive change, do a **cold adversarial review** of the diff — read it as a skeptic hunting for what breaks, not as the author confirming what works. After deploying, do a **live behavioral audit**: watch what the running system actually does (tick counters, the error log, posted messages) rather than what the code says it should do. The 2026-07-04 end-to-end review is the reference case: the suite was green, yet the live audit found a season-breaking gap (the awards consumer was never built — two work streams each assumed the other owned it) and the cold review found ten more real defects (delivery commit ordering, per-lane fail-stop, timestamp-format mismatches, CSRF host matching). An `engine-health` daily activity once tried to institutionalize the live audit's checks in-product; it was retired 2026-07-28 because a check that only covers known failure classes, run by the system it is checking, manufactures false calm (it read a ledger that never recorded a row). The watching lives outside the runtime now — `AGENT-TEAM/error-watch.md` — and new changes still need fresh adversarial eyes. Never mark a cross-stream feature done without verifying the consumer end-to-end.
 
 ## Cleanup
 
@@ -336,7 +336,7 @@ name — belongs in a capability, where it is computed once, tested, and identic
 across every surface that asks.
 
 Domain knowledge written as prose in a prompt fails three ways at once: it is
-untestable, it is invisible to the weekly report and the Observatory, and the model
+untestable, it is invisible to the weekly report, and the model
 follows it only approximately. Measured on the `deck_review` prompt (2026-08-01):
 
 | Prompt was doing | Tool already did it |
@@ -463,7 +463,7 @@ Elixir also posts a startup check-in to the #elixir-log webhook with the running
 
 ## Query Layer (Current)
 
-Elixir’s core member/leader questions should be answered from structured capabilities, query helpers, and tools, not prompt reconstruction. Shared domain answers live in `capabilities/`; LLM tools are adapters over those contracts rather than their sole owners. The versioned capability layer covers canonical game truth, clan game modes, live/season war intelligence, facet-based member intelligence, deck and clan-local metagame intelligence, authoritative management decisions, and provisional-versus-durable awards. These contracts feed tools, awareness, reports, memory synthesis, and admin/Observatory reads. External API refresh remains outside member capabilities, and management capabilities package the engine verdict without rescoring it.
+Elixir’s core member/leader questions should be answered from structured capabilities, query helpers, and tools, not prompt reconstruction. Shared domain answers live in `capabilities/`; LLM tools are adapters over those contracts rather than their sole owners. The versioned capability layer covers canonical game truth, clan game modes, live/season war intelligence, facet-based member intelligence, deck and clan-local metagame intelligence, authoritative management decisions, and provisional-versus-durable awards. These contracts feed tools, awareness, reports, memory synthesis, and admin reads. External API refresh remains outside member capabilities, and management capabilities package the engine verdict without rescoring it.
 
 The LLM has a 14-tool, domain-aligned surface (defined in `agent/tool_defs.py`) with one owner per question:
 

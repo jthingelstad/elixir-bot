@@ -141,8 +141,7 @@ uv run --locked python scripts/confidence_report.py --json
 ```
 
 Do not call a deployment complete merely because the test suite passed. Inspect
-fresh tick/awareness output, the error log, and the relevant Discord or
-Observatory behavior.
+fresh tick/awareness output, the error log, and the relevant Discord behavior.
 
 ## Scheduled activities
 
@@ -190,8 +189,10 @@ Common leadership operations include:
 /clanops tournament status
 ```
 
-Use the Observatory for system telemetry, awareness-loop inspection, and other
-management views removed from Discord.
+System telemetry and awareness-loop inspection are read from the databases
+directly: the `log-triage`, `awareness-report` and `llm-cost-report` skills,
+`scripts/admin.sh`, `runtime/tick_history.py`, or plain SQL against
+`elixir-v51.db` / `elixir-telemetry.db`.
 
 ## Health and error checks
 

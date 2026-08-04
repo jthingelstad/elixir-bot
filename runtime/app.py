@@ -693,12 +693,12 @@ async def _engine_tick():
     except Exception:
         log.exception("engine tick: join trigger failed")
     log.info("engine tick: %s", counters)
-    try:  # Observatory tick history (in-memory ring; never fails the tick)
-        from runtime.webapp import ticks as webapp_ticks
+    try:  # durable tick history (never fails the tick)
+        from runtime import tick_history
 
-        webapp_ticks.record_tick(dict(counters))
+        tick_history.record_tick(dict(counters))
     except Exception:
-        log.debug("webapp tick recording failed", exc_info=True)
+        log.debug("tick history recording failed", exc_info=True)
     runtime_status.mark_job_success("engine_tick", json.dumps(counters, default=str)[:900])
     return counters
 
@@ -1523,15 +1523,6 @@ async def on_ready():
     guild = bot.get_guild(GUILD_ID)
     if guild:
         await sync_emoji(guild)
-    # The Observatory (admin web UI) — in-process, loopback-only, tailnet-gated.
-    # Outside the scheduler guard (a reconnect must not skip it); start_webapp
-    # is idempotent, and a webapp failure must never block the bot.
-    try:
-        from runtime.webapp.server import start_webapp
-
-        await start_webapp(deps={"bot": bot})
-    except Exception:
-        log.exception("observatory webapp startup failed")
     # Stall watchdog: dumps every thread's stack when a write transaction holds
     # the single SQLite writer past the threshold. Two 100%-CPU wedges on
     # 2026-08-03 were cleared by restarts that destroyed the evidence.

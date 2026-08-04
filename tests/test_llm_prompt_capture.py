@@ -13,7 +13,6 @@ import agent.core as core
 import db
 from runtime import app
 from runtime.awareness import diagnostic as diag_mod
-from runtime.webapp import queries
 from storage import metadata as metadata_store
 from storage import telemetry as telemetry_store
 
@@ -135,10 +134,22 @@ def test_llm_call_detail_query_and_missing():
         call_id = conn.execute("SELECT MAX(call_id) FROM llm_calls").fetchone()[0]
     finally:
         conn.close()
-    data = queries.llm_call_detail(call_id)
-    assert data["prompt"]["system"] == "s"
-    assert data["response"]["text"] == "hi"
-    assert queries.llm_call_detail(9_999_999) is None
+    # The Observatory's llm_call_detail() helper was deleted with the webapp
+    # (2026-08-04). What mattered was never the page — it was that the captured
+    # prompt/response survive the round trip intact and stay parseable.
+    conn = _telemetry_conn()
+    try:
+        row = conn.execute(
+            "SELECT prompt_json, response_json FROM llm_calls WHERE call_id = ?", (call_id,)
+        ).fetchone()
+        assert json.loads(row[0])["system"] == "s"
+        assert json.loads(row[1])["text"] == "hi"
+        assert (
+            conn.execute("SELECT 1 FROM llm_calls WHERE call_id = ?", (9_999_999,)).fetchone()
+            is None
+        )
+    finally:
+        conn.close()
 
 
 # --------------------------------------------------------------- retention

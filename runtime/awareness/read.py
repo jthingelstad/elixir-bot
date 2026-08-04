@@ -1,7 +1,7 @@
 """Assemble "the read" — the situation snapshot the awareness loop reviews.
 
 ``build_read`` collapses the v5.1 storage palette (the same modules the
-Observatory reads through ``runtime/webapp/queries.py``) into a single dict
+the retired Observatory read through its own query layer) into a single dict
 handed to ``agent.workflows.run_awareness_tick``. It is pure: local DB reads
 only, no Discord I/O and no LLM call.
 
@@ -401,7 +401,7 @@ def _compact_signal(event: dict, catalog: dict | None = None) -> dict:
 
 def _war_clock_dict(conn) -> dict | None:
     """Live war clock rebuilt from the stored race projection — the same
-    adapter as ``runtime.webapp.queries._war_clock_dict``."""
+    adapter (the Observatory's copy retired with it 2026-08-04)."""
     from engine.clock import war_clock
     from engine.tick import HOME_CLAN
 
