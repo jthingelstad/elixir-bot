@@ -1,0 +1,7 @@
+#!/bin/sh
+# Tracked hook — lives in the repo, not in .git/hooks, so a fresh clone has it.
+# Activate with:  git config core.hooksPath .githooks   (see SETUP.md)
+#
+# Deliberately thin: the gate list lives in scripts/gates.sh so CI and this hook
+# cannot drift apart. Do not add gates here.
+exec "$(git rev-parse --show-toplevel)/scripts/gates.sh"

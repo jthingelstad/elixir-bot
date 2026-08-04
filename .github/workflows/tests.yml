@@ -22,23 +22,8 @@ jobs:
           enable-cache: true
           prune-cache: true
       - run: uv sync --locked
-      - name: Verify dependency lock
-        run: uv lock --check
-      - name: Audit locked dependencies
-        run: |
-          uv export --locked --no-dev --no-emit-project --format requirements-txt > /tmp/requirements.txt
-          uvx --from pip-audit==2.10.1 pip-audit --requirement /tmp/requirements.txt --disable-pip
-      - name: Verify documentation
-        run: uv run --locked python scripts/check_docs.py
-      - name: Verify exception policy
-        run: uv run --locked python scripts/check_exception_hygiene.py
-      - name: Lint
-        run: uv run --locked ruff check .
-      - name: Format
-        run: uv run --locked ruff format --check .
-      - name: Capability contracts
-        run: uv run --locked mypy capabilities/
-      - name: Tests
-        run: uv run --locked pytest tests/ -q --cov=capabilities --cov-report=term-missing --cov-fail-under=80
-      - name: War-week simulation
-        run: uv run --locked python scripts/simulate.py
+      # Every gate lives in scripts/gates.sh, which the local pre-commit hook
+      # runs too. Do NOT add gate steps here: a gate CI runs and the hook does
+      # not is how three pushes passed locally and failed in CI on 2026-08-03.
+      - name: Gates (same list the pre-commit hook runs)
+        run: bash scripts/gates.sh

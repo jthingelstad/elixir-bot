@@ -18,6 +18,26 @@ uv run --locked pytest tests/ -q
 Production uses `uv sync --locked --no-dev`. Direct dependencies live in
 `pyproject.toml`; `uv.lock` is the only resolved dependency lock.
 
+### Enable the commit gates (one time per clone)
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`.githooks/pre-commit` runs `scripts/gates.sh`, which is the **same list CI
+runs** — lock check, dependency CVE audit, docs, exception policy, ruff, mypy,
+tests with coverage, and the war-week simulation. Without this config the hooks
+directory is inert and nothing checks a commit.
+
+Gates belong in `scripts/gates.sh` and nowhere else. A gate added to CI alone is
+invisible until it fails after a push: that is exactly what happened on
+2026-08-03, when a `pip-audit` CVE disclosure failed three consecutive pushes
+that had each passed cleanly on the way out. `tests/test_ci_local_parity.py`
+fails if CI or the hook stops using the shared script.
+
+The audit gate needs network, so it cannot pass offline — that is a true
+failure, not a false one, since the push would fail in CI too.
+
 ## Configure
 
 Create `.env` in the repository root.
