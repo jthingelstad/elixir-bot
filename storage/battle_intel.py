@@ -349,7 +349,17 @@ def _restate_level_gaps(conn) -> int:
     return updated
 
 
-def _fill_deck_facts(conn, *, restate: bool = False) -> int:
+def _noop_checkpoint() -> None:
+    """Default for a BORROWED connection: never commit someone else's work."""
+
+
+# Rows per executemany, and per released write-lock hold. Small enough that the
+# single SQLite writer is handed back promptly, large enough that per-statement
+# overhead stops mattering.
+WRITE_CHUNK = 500
+
+
+def _fill_deck_facts(conn, *, restate: bool = False, checkpoint=_noop_checkpoint) -> int:
     """Compute each deck's completeness counts from its cards' enriched facts.
 
     ``restate`` recomputes every profiled deck rather than only the incomplete ones,
@@ -374,15 +384,13 @@ def _fill_deck_facts(conn, *, restate: bool = False) -> int:
         if restate
         else "SELECT deck_hash FROM deck_profile WHERE facts_complete IS NULL OR facts_complete = 0"
     ).fetchall()
+    pending: list[tuple] = []
     for r in rows:
         card_facts = _deck_card_facts(conn, r["deck_hash"], facts)
         if not card_facts:
             continue
         d = deck_facts(card_facts)
-        conn.execute(
-            "UPDATE deck_profile SET air_answer_count=?, tank_answer_count=?, "
-            "splash_answer_count=?, swarm_count=?, bait_unit_count=?, has_big_spell=?, "
-            "has_small_spell=?, facts_complete=? WHERE deck_hash=?",
+        pending.append(
             (
                 d["air_answer_count"],
                 d["tank_answer_count"],
@@ -393,10 +401,28 @@ def _fill_deck_facts(conn, *, restate: bool = False) -> int:
                 d["has_small_spell"],
                 d["facts_complete"],
                 r["deck_hash"],
-            ),
+            )
         )
-        updated += 1
+        if len(pending) >= WRITE_CHUNK:
+            updated += _flush_deck_facts(conn, pending)
+            checkpoint()
+    updated += _flush_deck_facts(conn, pending)
+    checkpoint()
     return updated
+
+
+def _flush_deck_facts(conn, pending: list[tuple]) -> int:
+    if not pending:
+        return 0
+    conn.executemany(
+        "UPDATE deck_profile SET air_answer_count=?, tank_answer_count=?, "
+        "splash_answer_count=?, swarm_count=?, bait_unit_count=?, has_big_spell=?, "
+        "has_small_spell=?, facts_complete=? WHERE deck_hash=?",
+        pending,
+    )
+    n = len(pending)
+    pending.clear()
+    return n
 
 
 def _deck_summary(conn, deck_hash: str, facts: dict) -> dict:
@@ -416,7 +442,15 @@ def _deck_summary(conn, deck_hash: str, facts: dict) -> dict:
     return d
 
 
-def _fill_battle_tags(conn, limit: Optional[int] = 5000, force: bool = False) -> int:
+_BATTLE_TAG_BATCH = 5000
+
+
+def _fill_battle_tags(
+    conn,
+    limit: Optional[int] = _BATTLE_TAG_BATCH,
+    force: bool = False,
+    checkpoint=_noop_checkpoint,
+) -> int:
     """Snapshot per-battle structural tags for battles that don't have them yet.
 
     ``force`` re-tags every battle (see ``rebuild_interpreted``); ``limit=None`` lifts
@@ -449,11 +483,10 @@ def _fill_battle_tags(conn, limit: Optional[int] = 5000, force: bool = False) ->
         params = (limit,)
     rows = conn.execute(sql, params).fetchall()
     updated = 0
+    pending: list[tuple] = []
     for r in rows:
         validity = level_validity(r["game_mode_name"], r["is_ranked"])
-        conn.execute(
-            "UPDATE battle_enrichment SET level_validity=?, decisive_factor=? "
-            "WHERE battle_dedup_key=?",
+        pending.append(
             (
                 validity,
                 decisive_factor(
@@ -463,13 +496,28 @@ def _fill_battle_tags(conn, limit: Optional[int] = 5000, force: bool = False) ->
                     discipline_delta=r["discipline_delta"],
                 ),
                 r["battle_dedup_key"],
-            ),
+            )
         )
-        updated += 1
+        if len(pending) >= WRITE_CHUNK:
+            updated += _flush_battle_tags(conn, pending)
+            checkpoint()
+    updated += _flush_battle_tags(conn, pending)
+    checkpoint()
     return updated
 
 
-@managed_connection
+def _flush_battle_tags(conn, pending: list[tuple]) -> int:
+    if not pending:
+        return 0
+    conn.executemany(
+        "UPDATE battle_enrichment SET level_validity=?, decisive_factor=? WHERE battle_dedup_key=?",
+        pending,
+    )
+    n = len(pending)
+    pending.clear()
+    return n
+
+
 def rebuild_interpreted(*, force: bool = False, conn: Optional[sqlite3.Connection] = None) -> dict:
     """v2 Layers 2-3 (all $0): deck facts from enriched card facts, then per-battle
     structural tags. Safe to re-run; fills what is missing, and with ``force`` also
@@ -478,16 +526,47 @@ def rebuild_interpreted(*, force: bool = False, conn: Optional[sqlite3.Connectio
     ``force`` re-tags every battle regardless of state. Needed after the card-facts
     table gains coverage, because a battle tagged against partial facts looks settled:
     its decks are complete now, so the incremental guard would skip it.
+
+    **Deliberately NOT @managed_connection.** That decorator makes the whole call one
+    transaction, and SQLite has exactly one writer. On 2026-08-03 this held it for
+    46.1s across 117,434 statements: every API persist failed with `database is
+    locked` for 17 minutes (28 dropped payloads), the engine tick was skipped as
+    "maximum number of running instances reached", and the job never finished —
+    `run_count 1, success_count 0`. This work is idempotent and explicitly safe to
+    re-run, so it does not need to be atomic; it needs to release the writer. When it
+    owns the connection it commits between chunks. When the connection is BORROWED it
+    commits nothing, because an inner commit would persist a caller's partial work and
+    defeat the engine tick's per-step rollback guard.
     """
-    gaps = _restate_level_gaps(conn) if force else 0
-    decks = _fill_deck_facts(conn, restate=force)
-    if force:
-        battles = _fill_battle_tags(conn, limit=None, force=True)
-    else:
-        battles = 0
-        while True:
-            n = _fill_battle_tags(conn)
-            battles += n
-            if not n:
-                break
-    return {"deck_facts": decks, "battle_tags": battles, "level_gaps": gaps}
+    from db import get_connection
+
+    owns = conn is None
+    conn = conn or get_connection()
+    checkpoint = conn.commit if owns else _noop_checkpoint
+    try:
+        gaps = _restate_level_gaps(conn) if force else 0
+        checkpoint()
+        decks = _fill_deck_facts(conn, restate=force, checkpoint=checkpoint)
+        if force:
+            battles = _fill_battle_tags(conn, limit=None, force=True, checkpoint=checkpoint)
+        else:
+            battles = 0
+            while True:
+                n = _fill_battle_tags(conn, checkpoint=checkpoint)
+                battles += n
+                # Stop on a SHORT batch, not an empty one. The incremental WHERE also
+                # matches battles whose decks are still facts_complete=0, and the
+                # UPDATE does not clear that — so a permanently-incomplete deck
+                # re-selects the same rows forever and `if not n` never fires. A full
+                # batch is the only evidence there may be more.
+                if n < _BATTLE_TAG_BATCH:
+                    break
+        checkpoint()
+        return {"deck_facts": decks, "battle_tags": battles, "level_gaps": gaps}
+    except Exception:
+        if owns:
+            conn.rollback()
+        raise
+    finally:
+        if owns:
+            conn.close()

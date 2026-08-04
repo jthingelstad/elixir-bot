@@ -215,18 +215,37 @@ def record_transaction(
     statements: int = 0,
     outcome: str,
     sites_json: Optional[str] = None,
-) -> None:
+    txn_id: Optional[int] = None,
+) -> Optional[int]:
+    """Record one write transaction; returns its row id.
+
+    ``txn_id`` UPDATES an existing row instead of inserting. The watchdog writes a
+    provisional ``outcome='stalled'`` row as soon as a transaction crosses the
+    threshold, because a transaction that hangs and dies with its process would
+    otherwise never be recorded at all — and those are the ones that matter.
+    Finalizing in place keeps it to one row per transaction.
+    """
     try:
         conn = connect()
-        conn.execute(
+        if txn_id is not None:
+            conn.execute(
+                "UPDATE db_transactions SET held_ms = ?, statements = ?, outcome = ?, "
+                "sites_json = COALESCE(?, sites_json) WHERE txn_id = ?",
+                (int(held_ms), int(statements), outcome, sites_json, int(txn_id)),
+            )
+            conn.commit()
+            return txn_id
+        cur = conn.execute(
             "INSERT INTO db_transactions "
             "(recorded_at, call_site, held_ms, statements, outcome, sites_json) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             (_utcnow(), call_site, int(held_ms), int(statements), outcome, sites_json),
         )
         conn.commit()
+        return int(cur.lastrowid)
     except Exception:
         log.debug("telemetry: transaction record failed", exc_info=True)
+        return None
 
 
 def record_lock_wait(call_site: str, waited_ms: int, *, resolved: bool) -> None:

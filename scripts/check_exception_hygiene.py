@@ -116,6 +116,10 @@ BROAD_EXCEPTION_BASELINE = {
     "storage/metadata.py": 1,  # telemetry retention never fails clan maintenance
     # storage/incidents.py removed with the ledger it wrote (2026-07-28).
     "storage/leader_actions.py": 2,
+    # rebuild_interpreted manages its own connection instead of using
+    # @managed_connection, so it must reproduce the decorator's rollback/close —
+    # the catch re-raises after rolling back, exactly like the decorator's.
+    "storage/battle_intel.py": 1,
 }
 
 _LOG_CALLS = {"critical", "debug", "error", "exception", "info", "warn", "warning"}

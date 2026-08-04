@@ -253,7 +253,7 @@ class InstrumentedConnection(sqlite3.Connection):
         if not entry:
             return
         held_ms = int((time.monotonic() - entry["started"]) * 1000)
-        if held_ms < REPORT_MS:
+        if held_ms < REPORT_MS and entry.get("txn_id") is None:
             return
         try:
             from storage import telemetry
@@ -264,6 +264,9 @@ class InstrumentedConnection(sqlite3.Connection):
                 statements=entry["statements"],
                 outcome=outcome,
                 sites_json=_top_sites(entry["sites"]),
+                # Finalize the provisional row the watchdog wrote, rather than
+                # adding a second row for the same transaction.
+                txn_id=entry.get("txn_id"),
             )
         except Exception:  # noqa: BLE001 - telemetry never breaks the caller
             log.debug("db_watch: transaction record failed", exc_info=True)
@@ -333,6 +336,26 @@ def _watch_once() -> None:
             from storage import telemetry
 
             telemetry.record_stall(entry["call_site"], open_ms, dump)
+            # Write the transaction row NOW, provisionally. A transaction only
+            # reaches db_transactions when it closes, and the worst ones never do
+            # — the 46.1s stall on 2026-08-03 hung its job and died with the
+            # process, so the table's largest row was 369ms while a 46-second
+            # holder went unrecorded. The one event most worth having is the one
+            # the old design was structurally guaranteed to lose.
+            txn_id = telemetry.record_transaction(
+                entry["call_site"],
+                open_ms,
+                statements=entry["statements"],
+                outcome="stalled",
+                sites_json=_top_sites(entry["sites"]),
+            )
+            # Hand the row id back so _close_txn finalizes THIS row instead of
+            # inserting a duplicate. Guarded: the entry may already be gone.
+            if txn_id is not None:
+                with _lock:
+                    live = _open_writes.get(_key)
+                    if live is not None and live["started"] == entry["started"]:
+                        live["txn_id"] = txn_id
         except Exception:  # noqa: BLE001
             log.debug("db_watch: stall record failed", exc_info=True)
 

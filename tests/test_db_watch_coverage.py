@@ -24,16 +24,20 @@ def recorded(monkeypatch):
     """Capture what would have been written to the telemetry file."""
     rows: list[dict] = []
 
-    def _capture(call_site, held_ms, *, statements=0, outcome, sites_json=None):
-        rows.append(
-            {
-                "call_site": call_site,
-                "held_ms": held_ms,
-                "statements": statements,
-                "outcome": outcome,
-                "sites": json.loads(sites_json) if sites_json else [],
-            }
-        )
+    def _capture(call_site, held_ms, *, statements=0, outcome, sites_json=None, txn_id=None):
+        row = {
+            "call_site": call_site,
+            "held_ms": held_ms,
+            "statements": statements,
+            "outcome": outcome,
+            "sites": json.loads(sites_json) if sites_json else [],
+            "txn_id": txn_id,
+        }
+        if txn_id is not None:  # finalize in place, mirroring the real writer
+            rows[txn_id - 1] = row
+            return txn_id
+        rows.append(row)
+        return len(rows)
 
     # Report every transaction, not just slow ones: these are microseconds.
     monkeypatch.setattr(db_watch, "REPORT_MS", 0)
@@ -188,3 +192,48 @@ def test_breakdown_is_capped(conn, recorded, monkeypatch):
     conn.execute("INSERT INTO t VALUES (3)")
     conn.commit()
     assert len(recorded[0]["sites"]) == 2
+
+
+def test_a_stalled_transaction_is_recorded_before_it_can_die(conn, recorded, monkeypatch):
+    """The worst transactions never close — so waiting for close loses them.
+
+    On 2026-08-03 a 46.1s holder hung its job and died with the process. The
+    stall table caught it; db_transactions' largest row was 369ms. The watchdog
+    now writes the row provisionally at detection.
+    """
+    monkeypatch.setattr(db_watch, "STALL_SECONDS", 0.0)
+    monkeypatch.setattr(db_watch, "_dump_threads", lambda: "<dump>")
+    stalls = []
+    monkeypatch.setattr(telemetry, "record_stall", lambda *a, **k: stalls.append(a))
+
+    conn.execute("INSERT INTO t VALUES (1)")
+    db_watch._watch_once()
+
+    assert stalls, "stall should be detected"
+    assert [r["outcome"] for r in recorded] == ["stalled"]
+    assert recorded[0]["call_site"].startswith("tests/test_db_watch_coverage.py:")
+
+
+def test_a_stalled_transaction_that_later_commits_is_one_row(conn, recorded, monkeypatch):
+    """Finalize the provisional row rather than adding a second one."""
+    monkeypatch.setattr(db_watch, "STALL_SECONDS", 0.0)
+    monkeypatch.setattr(db_watch, "_dump_threads", lambda: "<dump>")
+    monkeypatch.setattr(telemetry, "record_stall", lambda *a, **k: None)
+
+    ids = []
+    real = telemetry.record_transaction
+
+    def _tracking(call_site, held_ms, **kw):
+        ids.append(kw.get("txn_id"))
+        return real(call_site, held_ms, **kw)
+
+    monkeypatch.setattr(telemetry, "record_transaction", _tracking)
+
+    conn.execute("INSERT INTO t VALUES (2)")
+    db_watch._watch_once()
+    conn.commit()
+
+    # Two calls: the provisional insert (txn_id=None) then the finalize (an id).
+    assert len(ids) == 2, ids
+    assert ids[0] is None
+    assert ids[1] is not None, "close must finalize the provisional row, not insert a new one"
