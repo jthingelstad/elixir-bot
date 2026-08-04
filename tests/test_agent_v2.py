@@ -332,7 +332,8 @@ def test_build_tool_result_envelope_under_limit_unchanged():
 def test_interactive_workflow_exposes_all_read_tools():
     interactive_names = {tool["name"] for tool in elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]}
 
-    assert len(interactive_names) == 15
+    # 15 -> 16 (2026-08-04): get_game_mode_performance
+    assert len(interactive_names) == 16
     assert "get_member" in interactive_names
     assert "read_deck_link" in interactive_names
     assert "get_member_cards" in interactive_names

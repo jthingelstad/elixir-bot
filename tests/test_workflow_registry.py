@@ -55,11 +55,14 @@ def test_empty_toolsets_stay_empty():
         assert elixir_agent.TOOLSETS_BY_WORKFLOW[workflow] == []
 
 
-def test_shared_tool_block_has_seventeen_non_overlapping_owners():
+def test_shared_tool_block_has_eighteen_non_overlapping_owners():
     shared = get_workflow_spec("clanops").tools
     names = _names(shared)
 
-    assert len(names) == len(set(names)) == 17
+    # 17 -> 18 (2026-08-04): get_game_mode_performance. A named-mode question
+    # had no tool that could answer it; the rollups bucketed every special
+    # event together.
+    assert len(names) == len(set(names)) == 18
     assert "get_battle_intelligence" in names
     # read_deck_link: members paste decks back after Elixir shares one.
     assert "read_deck_link" in names

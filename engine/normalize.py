@@ -363,6 +363,7 @@ def badge_facts(badge_name, catalog=None) -> dict:
 # compounds a generic split mangles (CW→Clan War, TeamVsTeam→2v2); everything
 # else falls through to a structural cleaner.
 _GAME_MODE_LABELS = {
+    "Chaos_1v1_Draft": "C.H.A.O.S Draft",
     "Crazy_Arena": "Crazy Arena",
     "Challenge_AllCards_EventDeck_NoSet": "All-Cards Challenge",
     "TeamVsTeam": "2v2",

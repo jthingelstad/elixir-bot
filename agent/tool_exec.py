@@ -620,6 +620,29 @@ def _execute_get_member_cards(arguments):
     return _scrub_api_scale(result)
 
 
+def _execute_get_game_mode_performance(arguments):
+    """One named game mode: the member's record plus the clan leaderboard.
+
+    Exists because the grouped rollups could not answer "how am I doing in
+    C.H.A.O.S Draft League" — every special event collapsed into one bucket, so
+    Elixir truthfully told a member it could not tell him, while the data held
+    134 of his battles at 57%.
+    """
+    from capabilities.game_modes import get_game_mode_performance
+
+    mode = (arguments.get("mode") or "").strip()
+    days = arguments.get("days")
+    try:
+        days = int(days) if days is not None else 90
+    except TypeError, ValueError:
+        days = 90
+    return get_game_mode_performance(
+        mode,
+        player_tag=arguments.get("member_tag"),
+        days=max(1, min(days, 365)),
+    )
+
+
 def _execute_get_awards(arguments):
     """Execute the get_awards tool — filtered list, per-member leaderboard,
     or current-season standings across the awards table."""
@@ -1792,6 +1815,7 @@ ADVERTISED_TOOL_EXECUTOR_NAMES = frozenset(
         "save_clan_memory",
         "record_leadership_followup",
         "get_awards",
+        "get_game_mode_performance",
         "lookup_reference",
     }
 )
@@ -1835,6 +1859,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_member_war_detail(arguments)
         elif name == "get_awards":
             result = _execute_get_awards(arguments)
+        elif name == "get_game_mode_performance":
+            result = _execute_get_game_mode_performance(arguments)
         elif name == "lookup_reference":
             result = _execute_lookup_reference(arguments, workflow=workflow)
         elif name == "get_river_race":

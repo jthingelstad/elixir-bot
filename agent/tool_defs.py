@@ -1416,6 +1416,52 @@ TOOLS = [
         },
     },
     {
+        "name": "get_game_mode_performance",
+        "description": (
+            "Performance in ONE named game mode — the member's own record and the "
+            "clan leaderboard for it.\n\n"
+            "Use this whenever someone asks about a specific mode by name: "
+            "'how am I doing in C.H.A.O.S Draft League', 'chaos mode leaderboard', "
+            "'who's best at Crazy Arena', 'my Showdown record'. Do NOT answer such "
+            "questions from the grouped Events/Challenges rollups in get_member or "
+            "the clan mode windows — those bucket every special event together and "
+            "cannot separate one mode from another.\n\n"
+            "`mode` is matched loosely against how members and the game name modes, "
+            "so 'chaos', 'C.H.A.O.S Draft League' and 'Chaos_1v1_Draft' all work. "
+            "When nothing matches, the result has resolved=false and "
+            "available_modes — offer those real names instead of telling the member "
+            "the mode does not exist.\n\n"
+            "Pass member_tag to include that member's record and their rank. The "
+            "leaderboard needs at least 3 battles in the window to list a member.\n\n"
+            "OMIT `mode` entirely to list every mode the clan actually plays, with "
+            "battle counts and clan win rates — use that for 'what game modes do you "
+            "track?', 'what modes can I ask about?', or when a member is browsing "
+            "rather than asking about one mode. Members cannot ask about a mode "
+            "whose name they do not know, and the raw names are unguessable."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "description": (
+                        "Mode name as the member said it (e.g. 'chaos', 'Crazy Arena'). "
+                        "Omit to list every tracked mode."
+                    ),
+                },
+                "member_tag": {
+                    "type": "string",
+                    "description": "Optional player tag to include a personal record and rank.",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "Lookback window in days (default 90).",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "get_awards",
         "description": (
             "Query the clan awards record — the authoritative history of every "
@@ -1554,6 +1600,7 @@ _SHARED_TOOL_NAMES = (
     "cr_api",
     "save_clan_memory",
     "record_leadership_followup",
+    "get_game_mode_performance",
     "get_awards",
     "lookup_reference",
 )
