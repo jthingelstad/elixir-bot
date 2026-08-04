@@ -43,7 +43,7 @@ BROAD_EXCEPTION_BASELINE = {
     # even with no database; an unavailable floor renders as "read it live"
     # rather than a guessed number.
     "prompts.py": 1,
-    "db/schema.py": 33,  # +1: v33 migration rollback/re-raise (same pattern as v2-v32)
+    "db/schema.py": 34,  # +1: v34 migration rollback/re-raise (same pattern as v2-v33)
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
@@ -112,7 +112,9 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/webapp/routes.py": 4,
     "runtime/webapp/ticks.py": 2,
     "storage/_formatting.py": 2,
-    "storage/identity.py": 2,
+    # +1 (v34): the 7-day LLM cost now reads the telemetry DB and fails soft —
+    # a status page must render even when the telemetry file is unreadable.
+    "storage/identity.py": 3,
     # Telemetry must never be what breaks the workload it measures, so every
     # public writer swallows and logs. Same reason for db_watch: an instrument
     # that can raise into the engine tick is worse than no instrument.

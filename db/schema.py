@@ -13,8 +13,8 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 33
-EXPECTED_TABLE_COUNT = 64
+CURRENT_SCHEMA_VERSION = 34
+EXPECTED_TABLE_COUNT = 63  # 64 -> 63 (v34): llm_calls moved to the telemetry DB
 
 
 def initialize_empty_database(
@@ -218,7 +218,6 @@ _V1_COLUMNS = {
     "war_weeks": (("defense_fame", "INTEGER"),),
     "card_catalog": (("first_seen_at", "TEXT"),),
     "api_sentinel_observations": (("first_entity_key", "TEXT"),),
-    "llm_calls": (("prompt_json", "TEXT"), ("response_json", "TEXT")),
     "awareness_thoughts": (
         ("loop_number", "INTEGER"),
         ("tool_trace_json", "TEXT"),
@@ -241,7 +240,6 @@ REQUIRED_SCHEMA = {
     "war_weeks": {"season_id", "section_index", "defense_fame"},
     "card_catalog": {"card_id", "first_seen_at"},
     "api_sentinel_observations": {"observation_id", "first_entity_key"},
-    "llm_calls": {"call_id", "prompt_json", "response_json"},
     "admin_command_invocations": {
         "invocation_id",
         "command_key",
@@ -1931,6 +1929,14 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+    if version < 34:
+        try:
+            _apply_v34(conn)
+            conn.execute("PRAGMA user_version = 34")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -2033,6 +2039,50 @@ def _apply_v33(conn: sqlite3.Connection) -> None:
         conn.execute(
             f"UPDATE {table} SET entity_key = {_V33_CANON} WHERE entity_key <> {_V33_CANON}"
         )
+
+
+def _apply_v34(conn: sqlite3.Connection) -> None:
+    """Drop llm_calls from the clan database.
+
+    Telemetry moved to its own file on 2026-08-03 (storage/telemetry.py) because
+    every model call was taking the clan database's single write lock — the same
+    lock whose contention we were trying to measure. The clan copy has been
+    frozen since the cutover and nothing reads or writes it: the facade writer
+    delegates to the telemetry file, and the Observatory panels read it through
+    _llm_conn().
+
+    Leaving it was worse than useless. A frozen table full of real rows reads as
+    live data — querying it shows spend collapsing to zero on the cutover date,
+    which looks exactly like a cost win.
+
+    Refuses to drop if the telemetry file exists but holds FEWER rows than the
+    clan copy, which would mean the history copy never completed. If the
+    telemetry file is absent entirely this is a fresh or restored database with
+    no history worth keeping, and the drop proceeds.
+    """
+    tables = _tables(conn)
+    if "llm_calls" not in tables:
+        return
+    clan_rows = int(conn.execute("SELECT COUNT(*) FROM llm_calls").fetchone()[0])
+    if clan_rows:
+        import os as _os
+
+        path = _os.getenv("ELIXIR_TELEMETRY_DB_PATH") or "elixir-telemetry.db"
+        if _os.path.exists(path):
+            probe = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            try:
+                copied = int(probe.execute("SELECT COUNT(*) FROM llm_calls").fetchone()[0])
+            except sqlite3.Error:
+                copied = 0
+            finally:
+                probe.close()
+            if copied < clan_rows:
+                raise RuntimeError(
+                    f"v34: refusing to drop llm_calls — the clan DB holds {clan_rows} rows "
+                    f"but the telemetry file at {path} holds {copied}. Copy the history "
+                    f"first; this migration destroys the only other copy."
+                )
+    conn.execute("DROP TABLE IF EXISTS llm_calls")
 
 
 def assert_current_schema(conn: sqlite3.Connection) -> None:
@@ -2221,7 +2271,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "19cc48d733fa5066ffeea7a4065e02e652ab20f81b1b5cb3557ab00e153dca1a"
+CURRENT_SCHEMA_FINGERPRINT = "020345b47dc00e391cd936cd0cc86aa756445dc979e58865d316aa65389c1e53"
 
 
 __all__ = [

@@ -130,15 +130,19 @@ def test_llm_cost_page_aggregates_by_workflow_and_prices_models():
 
 
 def test_system_status_prices_observed_opus_48_calls():
+    """llm_calls lives in the telemetry DB since v34 — seed it there."""
+    from storage import telemetry
+
+    tel = telemetry.connect()
+    tel.execute(
+        "INSERT INTO llm_calls (recorded_at, workflow, model, ok, "
+        "completion_tokens, total_tokens) VALUES "
+        "(strftime('%Y-%m-%dT%H:%M:%S','now'), 'memory_synthesis', "
+        "'claude-opus-4-8', 1, 1000000, 1000000)",
+    )
+    tel.commit()
     conn = db.get_connection()
     try:
-        conn.execute(
-            "INSERT INTO llm_calls (recorded_at, workflow, model, ok, "
-            "completion_tokens, total_tokens) VALUES "
-            "(strftime('%Y-%m-%dT%H:%M:%S','now'), 'memory_synthesis', "
-            "'claude-opus-4-8', 1, 1000000, 1000000)",
-        )
-        conn.commit()
         status = identity.get_system_status(conn=conn)
     finally:
         conn.close()

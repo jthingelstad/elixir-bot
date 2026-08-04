@@ -473,6 +473,24 @@ def get_channel_state(
     return dict(row) if row else None
 
 
+_LLM_COST_7D_SQL = """
+        SELECT COUNT(*) AS calls,
+               SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures,
+               ROUND(COALESCE(SUM(CASE
+                    WHEN model LIKE 'claude-opus-4-8%' OR model LIKE 'Codex-opus-4-8%'
+                    THEN COALESCE(prompt_tokens, 0)*5 + COALESCE(cache_read_tokens, 0)*0.5 + COALESCE(cache_creation_tokens, 0)*6.25 + COALESCE(completion_tokens, 0)*25
+                    WHEN model LIKE 'claude-sonnet-5%' OR model LIKE 'Codex-sonnet-5%'
+                    THEN COALESCE(prompt_tokens, 0)*2 + COALESCE(cache_read_tokens, 0)*0.2 + COALESCE(cache_creation_tokens, 0)*2.5 + COALESCE(completion_tokens, 0)*10
+                    WHEN model LIKE 'claude-sonnet%' OR model LIKE 'Codex-sonnet%'
+                    THEN COALESCE(prompt_tokens, 0)*3 + COALESCE(cache_read_tokens, 0)*0.3 + COALESCE(cache_creation_tokens, 0)*3.75 + COALESCE(completion_tokens, 0)*15
+                    WHEN model LIKE 'claude-haiku%' OR model LIKE 'Codex-haiku%'
+                    THEN COALESCE(prompt_tokens, 0)*1 + COALESCE(cache_read_tokens, 0)*0.1 + COALESCE(cache_creation_tokens, 0)*1.25 + COALESCE(completion_tokens, 0)*5
+                    ELSE 0 END), 0) / 1000000.0, 4) AS cost_usd
+        FROM llm_calls
+        WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-7 days')
+        """
+
+
 @managed_connection
 def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
     from storage.player import get_player_intel_refresh_targets
@@ -551,24 +569,21 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
     )
     current_season_id = get_current_season_id(conn=conn)
     stale_targets = len(get_player_intel_refresh_targets(limit=500, stale_after_hours=6, conn=conn))
-    llm_cost_7d = conn.execute(
-        """
-        SELECT COUNT(*) AS calls,
-               SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures,
-               ROUND(COALESCE(SUM(CASE
-                    WHEN model LIKE 'claude-opus-4-8%' OR model LIKE 'Codex-opus-4-8%'
-                    THEN COALESCE(prompt_tokens, 0)*5 + COALESCE(cache_read_tokens, 0)*0.5 + COALESCE(cache_creation_tokens, 0)*6.25 + COALESCE(completion_tokens, 0)*25
-                    WHEN model LIKE 'claude-sonnet-5%' OR model LIKE 'Codex-sonnet-5%'
-                    THEN COALESCE(prompt_tokens, 0)*2 + COALESCE(cache_read_tokens, 0)*0.2 + COALESCE(cache_creation_tokens, 0)*2.5 + COALESCE(completion_tokens, 0)*10
-                    WHEN model LIKE 'claude-sonnet%' OR model LIKE 'Codex-sonnet%'
-                    THEN COALESCE(prompt_tokens, 0)*3 + COALESCE(cache_read_tokens, 0)*0.3 + COALESCE(cache_creation_tokens, 0)*3.75 + COALESCE(completion_tokens, 0)*15
-                    WHEN model LIKE 'claude-haiku%' OR model LIKE 'Codex-haiku%'
-                    THEN COALESCE(prompt_tokens, 0)*1 + COALESCE(cache_read_tokens, 0)*0.1 + COALESCE(cache_creation_tokens, 0)*1.25 + COALESCE(completion_tokens, 0)*5
-                    ELSE 0 END), 0) / 1000000.0, 4) AS cost_usd
-        FROM llm_calls
-        WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-7 days')
-        """
-    ).fetchone()
+
+    # llm_calls lives in the telemetry database since 2026-08-03 (schema v34
+    # dropped the clan copy). Fail soft: a status page must render even when the
+    # telemetry file is missing or unreadable — this panel is the least important
+    # thing on it.
+    def _llm_cost_7d():
+        try:
+            from storage import telemetry
+
+            return telemetry.connect().execute(_LLM_COST_7D_SQL).fetchone()
+        except Exception:  # noqa: BLE001 - a cost panel must not break /status
+            log.warning("system status: LLM cost unavailable", exc_info=True)
+            return None
+
+    llm_cost_7d = _llm_cost_7d()
     awareness_7d = conn.execute(
         """
         SELECT

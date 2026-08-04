@@ -522,7 +522,6 @@ CARRIED_VERBATIM = [
     "raw_api_payloads",
     "discord_users",
     "leader_action_recommendations",
-    "llm_calls",
     "prompt_failures",
     "prompt_feedback",
     "system_signals",
