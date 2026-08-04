@@ -21,10 +21,28 @@ elixir.pid
 # Eval-script output artifacts (scripts themselves are committed; results aren't)
 scripts/*.json
 
-# v5 event-sourcing databases (large; rebuildable)
-elixir-v5*.db*
-# Telemetry database (separate file from the clan DB — storage/telemetry.py)
-elixir-telemetry.db*
+# SQLite databases — ALL of them, by extension, not by name.
+#
+# Naming individual files is what failed on 2026-08-03: elixir-telemetry.db was
+# committed before its ignore rule existed, .gitignore does not untrack an
+# already-tracked file, and 96 MB of LLM prompts and responses — including 11
+# member email addresses — were pushed to this PUBLIC repository across five
+# commits. A per-file rule only protects the files somebody remembered.
+#
+# No SQLite database belongs in this repo: they are large, rebuildable, and
+# carry member data. The sidecar suffixes matter as much as the file — a -wal
+# holds committed rows that are not yet in the main file.
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db3
+*.s3db
+*.sl3
 
 # AGENT-TEAM per-run scratch (roles' notes; noisy). Role defs, scripts, and the
 # Manager's summaries/ ARE committed — only the raw run notes are ignored.
