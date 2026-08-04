@@ -82,6 +82,15 @@ _reported: set[int] = set()
 _MAX_FRAME_HOPS = 25
 _file_labels: dict[str, str | None] = {}
 
+# Derived from this file's own location, NOT by matching a literal repo name.
+# Splitting on "/elixir-bot/" broke on GitHub Actions, which checks out to
+# /home/runner/work/elixir-bot/elixir-bot/ — the repo name nested inside itself
+# — and every call site came back labelled "elixir-bot/tests/...". A path is a
+# path; resolve it, do not pattern-match it.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))).replace("\\", "/")
+if not _PROJECT_ROOT.endswith("/"):
+    _PROJECT_ROOT += "/"
+
 
 def _file_label(filename: str) -> str | None:
     """Repo-relative label for a filename, or None if it is infrastructure.
@@ -94,15 +103,19 @@ def _file_label(filename: str) -> str | None:
     except KeyError:
         pass
     name = filename.replace("\\", "/")
-    if (
-        "/storage/db_watch" in name
-        or "/db/__init__" in name
-        or "sqlite3" in name
-        or "/elixir-bot/" not in name
-    ):
-        label = None
+    if not name.startswith(_PROJECT_ROOT):
+        label = None  # stdlib, site-packages, exec'd strings
     else:
-        label = name.split("/elixir-bot/")[-1]
+        rel = name[len(_PROJECT_ROOT) :]
+        # The instrument itself and the connection factory are not call sites.
+        if (
+            rel.startswith("storage/db_watch")
+            or rel.startswith("db/__init__")
+            or rel.startswith(".venv/")
+        ):
+            label = None
+        else:
+            label = rel
     _file_labels[filename] = label
     return label
 

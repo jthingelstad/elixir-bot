@@ -237,3 +237,27 @@ def test_a_stalled_transaction_that_later_commits_is_one_row(conn, recorded, mon
     assert len(ids) == 2, ids
     assert ids[0] is None
     assert ids[1] is not None, "close must finalize the provisional row, not insert a new one"
+
+
+def test_call_site_labels_survive_a_repo_nested_inside_its_own_name(monkeypatch):
+    """GitHub Actions checks out to /home/runner/work/<repo>/<repo>/.
+
+    The first implementation split on the literal "/elixir-bot/" and took the
+    last piece, so under that layout every label came back as
+    "elixir-bot/tests/..." — passing locally, failing only in CI.
+    """
+    monkeypatch.setattr(db_watch, "_PROJECT_ROOT", "/home/runner/work/elixir-bot/elixir-bot/")
+    db_watch._file_labels.clear()
+    label = db_watch._file_label("/home/runner/work/elixir-bot/elixir-bot/engine/tick.py")
+    db_watch._file_labels.clear()
+    assert label == "engine/tick.py"
+
+
+def test_paths_outside_the_project_are_not_call_sites(monkeypatch):
+    monkeypatch.setattr(db_watch, "_PROJECT_ROOT", "/repo/")
+    db_watch._file_labels.clear()
+    assert db_watch._file_label("/usr/lib/python3.14/sqlite3/dbapi2.py") is None
+    assert db_watch._file_label("/repo/.venv/lib/site-packages/x.py") is None
+    assert db_watch._file_label("/repo/storage/db_watch.py") is None
+    assert db_watch._file_label("/repo/engine/tick.py") == "engine/tick.py"
+    db_watch._file_labels.clear()
