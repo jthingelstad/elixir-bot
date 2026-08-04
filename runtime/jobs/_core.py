@@ -619,7 +619,16 @@ async def _weekly_clan_recap():
 
     recap_text = await asyncio.to_thread(_compose)
     if not recap_text:
-        runtime_status.mark_job_success("weekly_clan_recap", "no recap generated")
+        # FAILURE, not success. The weekly clan report is a standing Monday
+        # deliverable, so "the composer returned nothing" is a broken run, not a
+        # quiet no-op. Recording it as success is how 2026-08-03 passed unnoticed
+        # until Jamie asked where his report was: the job was green, the LLM call
+        # was ok=1, and the only evidence was completion_chars=0 in the log.
+        # Contrast the legitimate no-ops elsewhere in this file ("no members with
+        # a verified email"), where there was genuinely nothing to send.
+        runtime_status.mark_job_failure(
+            "weekly_clan_recap", "composer returned no recap (nothing was sent)"
+        )
         return
     recap_post = _format_weekly_recap_post(recap_text)
 
@@ -694,7 +703,12 @@ async def _weekly_elder_standing():
 
     text, source = await asyncio.to_thread(_compose)
     if not text:
-        runtime_status.mark_job_success("weekly_elder_standing", "no report generated")
+        # Same class as weekly_clan_recap: the composer was asked for a report
+        # and produced none. A standing weekly post that silently does not post
+        # is a failure, and a green job status is what hides it.
+        runtime_status.mark_job_failure(
+            "weekly_elder_standing", f"composer returned no report (source={source})"
+        )
         return
     try:
         await _post_to_elixir(channel, {"content": text})

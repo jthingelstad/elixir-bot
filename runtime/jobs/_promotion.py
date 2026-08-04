@@ -130,7 +130,9 @@ async def _promotion_content_cycle():
         roster_data=None,
     )
     if not promote:
-        runtime_status.mark_job_success("promotion_content_cycle", "no promotion content")
+        runtime_status.mark_job_failure(
+            "promotion_content_cycle", "composer returned no promotion content"
+        )
         return
     try:
         _validate_promote_content_or_raise(
@@ -145,7 +147,9 @@ async def _promotion_content_cycle():
 
     channel_posts = _promotion_channel_posts(promote)
     if not channel_posts:
-        runtime_status.mark_job_success("promotion_content_cycle", "no promotion channel copy")
+        runtime_status.mark_job_failure(
+            "promotion_content_cycle", "promotion content produced no channel copy"
+        )
         return
 
     await _post_to_elixir(channel, {"content": channel_posts})

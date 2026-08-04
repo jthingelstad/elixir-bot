@@ -1407,7 +1407,18 @@ def generate_weekly_recap(
         _weekly_recap_system(),
         user_msg,
         workflow="weekly_recap",
-        max_tokens=1600,
+        # 8192, not 1600. On 2026-08-03 this ran on claude-opus-5 and spent the
+        # ENTIRE 1600-token budget on extended thinking: stop_reason=max_tokens,
+        # completion_tokens=1600, completion_chars=0. The API call succeeded, the
+        # recap came back empty, and the Monday clan report silently never sent.
+        # Thinking tokens come out of this budget, so a cap sized for the visible
+        # answer alone is a cap the model can exhaust before it starts writing.
+        #
+        # Sized generously on purpose (Jamie, 2026-08-03): this runs ONCE A WEEK,
+        # so the marginal cost of headroom is a rounding error against the cost of
+        # the report silently not existing. Only tokens actually produced are
+        # billed — a large cap buys room, not spend.
+        max_tokens=16384,
         allowed_tools=TOOLSETS_BY_WORKFLOW["weekly_recap"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["weekly_recap"],
         strict_json=True,
