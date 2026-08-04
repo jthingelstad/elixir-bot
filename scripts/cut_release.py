@@ -291,9 +291,24 @@ def main() -> int:
                 if not recipients:
                     print("Email skipped: no clan members have a verified email on file.")
                 else:
-                    outbound.send(to=EMAIL_ADDRESS, bcc=recipients, subject=subject, body=detailed)
-                    where = args.to if args.to else f"{len(recipients)} member(s) (bcc)"
-                    print(f"Emailed detailed notes to {where}.")
+                    from runtime import email_dedup
+
+                    # One broadcast per release. Re-running a cut on the same tag
+                    # used to re-email everyone. A --to override is a manual test
+                    # send and is never deduped.
+                    key = str(tag or subject)
+                    if not args.to and email_dedup.already_sent("release_notes", key):
+                        print(f"Email skipped: release notes for {key} already sent.")
+                    else:
+                        outbound.send(
+                            to=EMAIL_ADDRESS, bcc=recipients, subject=subject, body=detailed
+                        )
+                        where = args.to if args.to else f"{len(recipients)} member(s) (bcc)"
+                        print(f"Emailed detailed notes to {where}.")
+                        if not args.to and not email_dedup.record_sent(
+                            "release_notes", key, detail=f"{len(recipients)} recipient(s)"
+                        ):
+                            print("⚠️  Sent but NOT recorded — a re-run would email again.")
         except Exception as exc:
             print(f"⚠️  Email failed (release still cut): {exc}")
 

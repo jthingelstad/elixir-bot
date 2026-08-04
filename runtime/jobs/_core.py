@@ -22,6 +22,7 @@ import pytz
 
 import db
 import elixir_agent
+from runtime import email_dedup
 from runtime import status as runtime_status
 from runtime.clan_chat_copy import generate_clan_chat_copy
 from runtime.helpers import (
@@ -779,11 +780,26 @@ async def _email_weekly_recap(recap_text: str, email_context: str | None = None)
         log.warning("weekly recap email: composer returned nothing, using the Discord recap")
         body = format_weekly_recap_email(recap_text)
     email_addr = os.getenv("ELIXIR_EMAIL_ADDRESS", "elixir@poapkings.com")
-    subject = f"POAP KINGS — Weekly Clan Recap ({datetime.now(CHICAGO).strftime('%b %d, %Y')})"
+    now_ct = datetime.now(CHICAGO)
+    subject = f"POAP KINGS — Weekly Clan Recap ({now_ct.strftime('%b %d, %Y')})"
+    # One recap per ISO week. A manual re-trigger while debugging used to
+    # re-broadcast to everyone; it happened twice on 2026-08-03.
+    week_key = "{}-W{:02d}".format(*now_ct.isocalendar()[:2])
+    if await asyncio.to_thread(email_dedup.already_sent, "weekly_recap", week_key):
+        log.info("weekly recap email already sent for %s; skipping", week_key)
+        return 0
     await asyncio.to_thread(
         outbound.send, to=email_addr, bcc=recipients, subject=subject, body=body
     )
     log.info("weekly recap emailed to %d member(s)", len(recipients))
+    if not await asyncio.to_thread(
+        email_dedup.record_sent,
+        "weekly_recap",
+        week_key,
+        detail=f"{len(recipients)} recipient(s)",
+    ):
+        # Say it out loud: the next run will re-send rather than skip.
+        log.error("weekly recap: sent but NOT recorded for %s — a re-run will duplicate", week_key)
     return len(recipients)
 
 
@@ -811,23 +827,43 @@ async def _weekly_member_report_cycle():
         runtime_status.mark_job_success("weekly_member_report", "no members with a verified email")
         return {"sent": 0, "total": 0}
 
-    def _build_and_send(rec: dict) -> None:
+    # Per member, per ISO week. Without this a partial re-run re-sends to every
+    # member who already succeeded — the isolation that makes one failure
+    # survivable also makes a retry duplicate everyone else.
+    week_key = "{}-W{:02d}".format(*datetime.now(CHICAGO).isocalendar()[:2])
+
+    def _build_and_send(rec: dict) -> bool:
         tag = rec["player_tag"]
+        dedup_key = f"{tag}:{week_key}"
+        if email_dedup.already_sent("member_report", dedup_key):
+            return False
         name = rec.get("member_name") or tag
         ctx = member_report.build_member_report_context(tag, name)
         narrative = generate_member_report(member_report.facts_for_model(ctx))
         subject, body = member_report.render_member_report(ctx, narrative)
         outbound.send(to=rec["email"], subject=subject, body=body)
+        if not email_dedup.record_sent("member_report", dedup_key):
+            log.error("arena dispatch: sent to %s but NOT recorded; a re-run will duplicate", tag)
+        return True
 
     sent = 0
+    skipped = 0
     for rec in recipients:
         try:
-            await asyncio.to_thread(_build_and_send, rec)
-            sent += 1
+            if await asyncio.to_thread(_build_and_send, rec):
+                sent += 1
+            else:
+                skipped += 1
         except Exception as exc:  # one member's failure never sinks the batch
             log.warning("arena dispatch failed for %s: %s", rec.get("player_tag"), exc)
 
     total = len(recipients)
+    if sent == 0 and skipped == total and total:
+        # Everyone was already mailed this week — a no-op re-run, not a failure.
+        runtime_status.mark_job_success(
+            "weekly_member_report", f"already sent this week ({total} member(s))"
+        )
+        return {"sent": 0, "total": total, "skipped": skipped}
     if sent == 0:
         runtime_status.mark_job_failure("weekly_member_report", f"0/{total} arena dispatches sent")
     else:

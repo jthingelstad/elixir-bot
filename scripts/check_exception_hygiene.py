@@ -70,6 +70,10 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/discord_commands.py": 8,  # +1: command telemetry is fail-soft and logs before continuing
     "runtime/discord_posting.py": 2,
     "runtime/elder_standing.py": 1,
+    # Both fail OPEN and log: an unreadable/unwritable dedup store must never
+    # suppress a deliverable. A duplicate email is visible; a silent omission
+    # is the failure this whole area spent 2026-08-03 fixing.
+    "runtime/email_dedup.py": 2,
     "runtime/email_verification.py": 1,
     # runtime/health.py removed: the daily health check was retired 2026-07-28
     # (it read an incident ledger that never recorded a row).

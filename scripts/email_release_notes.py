@@ -75,8 +75,19 @@ def main() -> int:
     if not recipients:
         print("No clan members have a verified email on file — nothing to send.")
         return 0
+    from runtime import email_dedup
+
+    # One broadcast per release. A --to override is a manual test send, never deduped.
+    key = str(name or subject)
+    if not args.to and email_dedup.already_sent("release_notes", key):
+        print(f"Release notes for {key} were already emailed — nothing sent.")
+        return 0
     outbound.send(to=EMAIL_ADDRESS, bcc=recipients, subject=subject, body=draft["body"])
     print(f"Sent to {len(recipients)} recipient(s) (bcc) from {EMAIL_ADDRESS}.")
+    if not args.to and not email_dedup.record_sent(
+        "release_notes", key, detail=f"{len(recipients)} recipient(s)"
+    ):
+        print("⚠️  Sent but NOT recorded — a re-run would email again.")
     return 0
 
 
