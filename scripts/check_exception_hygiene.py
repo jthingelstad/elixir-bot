@@ -76,7 +76,9 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/helpers/_common.py": 1,
     "runtime/helpers/_members.py": 2,
     "runtime/helpers/_reports.py": 10,
-    "runtime/jobs/_core.py": 15,
+    # +1 (2026-08-03): the weekly email composer logs and falls back to the
+    # reformatted Discord post — a plainer email beats a missing one.
+    "runtime/jobs/_core.py": 16,
     "runtime/jobs/_battle_intel.py": 2,  # Stage-A/B jobs: mark_job_failure on any tick error
     # 4 -> 6 (2026-08-03): the intel email job. One guards context assembly so a
     # failed report marks the job failed instead of killing the scheduler; the

@@ -42,6 +42,7 @@ from agent.prompt_builders import (
     _tournament_recap_system,
     _tournament_update_system,
     _war_intel_system,
+    _weekly_recap_email_system,
     _weekly_recap_system,
 )
 from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
@@ -1429,6 +1430,63 @@ def generate_weekly_recap(
         return None
     recap = str(result.get("recap") or "").strip()
     return recap or None
+
+
+def generate_weekly_recap_email(
+    read: dict,
+    week_context: str,
+    discord_recap: str = "",
+    *,
+    tool_stats: dict | None = None,
+):
+    """The emailed Weekly Clan Report — its OWN composition, not a reformat.
+
+    Decoupled from the Discord post (Jamie, 2026-08-03). The Discord recap is
+    short, punchy and written under Discord's formatting constraints; email has
+    headings, tables and room, and a reader who may not be in Discord at all.
+    Reformatting one into the other gave the worst of both.
+
+    The Discord post is passed in only so this can avoid repeating its phrasing —
+    it is context, not source material. Facts come from the same week fact-base
+    and the same read.
+
+    Returns the email body as Markdown, or None when composition fails (the
+    caller then falls back to the reformatted Discord post rather than sending
+    nothing)."""
+    public = {k: v for k, v in (read or {}).items() if not k.startswith("_")}
+    posted = (
+        "This morning's Discord post (do not repeat its phrasing; the email is "
+        f"the fuller edition):\n{discord_recap}"
+        if discord_recap
+        else "(nothing posted to Discord this week)"
+    )
+    user_msg = (
+        "Write this week's Weekly Clan Report as an EMAIL, per your system "
+        "prompt. Use headings, tables and lists; be expansive and explain why "
+        "things happened, not just what. Ground every claim in the week facts, "
+        "the read, or a tool result.\n\n"
+        f"THE WEEK (aggregated facts):\n{week_context}\n\n"
+        f"{posted}\n\n"
+        "THE READ (live clan state):\n"
+        f"```json\n{json.dumps(public, indent=2, default=str)}\n```\n"
+    )
+    result = _chat_with_tools(
+        _weekly_recap_email_system(),
+        user_msg,
+        workflow="weekly_recap_email",
+        # Weekly, and deliberately the longest thing Elixir writes. Thinking
+        # tokens come out of this budget too — see generate_weekly_recap.
+        max_tokens=16384,
+        allowed_tools=TOOLSETS_BY_WORKFLOW["weekly_recap_email"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["weekly_recap_email"],
+        strict_json=True,
+        return_errors=True,
+        tool_stats=tool_stats,
+    )
+    if not isinstance(result, dict) or "_error" in result:
+        return None
+    email = str(result.get("email") or "").strip()
+    return email or None
 
 
 _MEMBER_REPORT_BLOCKS = ("overview", "standouts", "progress", "meta", "closer")

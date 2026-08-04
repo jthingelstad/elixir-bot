@@ -664,7 +664,7 @@ async def _weekly_clan_recap():
     emailed = 0
     email_error: str | None = None
     try:
-        emailed = await _email_weekly_recap(recap_text)
+        emailed = await _email_weekly_recap(recap_text, recap_context)
     except Exception as exc:  # noqa: BLE001 - reported below, not swallowed
         email_error = f"{type(exc).__name__}: {exc}"
         log.warning("weekly recap email failed", exc_info=True)
@@ -744,7 +744,7 @@ async def _weekly_elder_standing():
     )
 
 
-async def _email_weekly_recap(recap_text: str) -> int:
+async def _email_weekly_recap(recap_text: str, email_context: str | None = None) -> int:
     """BCC the weekly recap to clan members with a verified email (BCC so nobody
     sees anyone else's address).
 
@@ -759,7 +759,27 @@ async def _email_weekly_recap(recap_text: str) -> int:
     recipients = await asyncio.to_thread(lambda: [m["email"] for m in db.list_member_emails()])
     if not recipients:
         return 0
-    body = format_weekly_recap_email(recap_text)
+    body = None
+    if email_context is not None:
+        # The email is its OWN composition — expansive, with headings and tables
+        # — not the Discord post reformatted. See generate_weekly_recap_email.
+        def _compose_email():
+            try:
+                from runtime.awareness import read as awareness_read
+
+                return elixir_agent.generate_weekly_recap_email(
+                    awareness_read.build_read(), email_context, recap_text
+                )
+            except Exception:
+                log.error("Weekly recap email compose failed", exc_info=True)
+                return None
+
+        body = await asyncio.to_thread(_compose_email)
+    if not body:
+        # Fall back to the reformatted Discord post rather than sending nothing.
+        # A plainer email still beats a missing one.
+        log.warning("weekly recap email: composer returned nothing, using the Discord recap")
+        body = format_weekly_recap_email(recap_text)
     email_addr = os.getenv("ELIXIR_EMAIL_ADDRESS", "elixir@poapkings.com")
     subject = f"POAP KINGS — Weekly Clan Recap ({datetime.now(CHICAGO).strftime('%b %d, %Y')})"
     await asyncio.to_thread(

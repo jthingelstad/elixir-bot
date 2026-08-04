@@ -822,6 +822,23 @@ def _weekly_recap_system():
     )
 
 
+def _weekly_recap_email_system():
+    """System prompt for the emailed Weekly Clan Report.
+
+    Deliberately NOT _weekly_recap_system(): that one ends with
+    _discord_formatting_guidance() and _discord_emoji_guidance(), which is
+    exactly why the emailed recap read as a Discord post — the prompt was
+    telling it to write one. This composes for email: headings, tables, lists,
+    and room to be expansive.
+    """
+    return _build_system_prompt(
+        prompts.identity_block(),
+        prompts.knowledge_block(),
+        prompts.policy(),
+        prompts.agent_prompt("weekly_recap_email"),
+    )
+
+
 def _member_report_system():
     return _build_system_prompt(
         "You are Elixir, the AI clanmate of the POAP KINGS Clash Royale clan. You are writing a "

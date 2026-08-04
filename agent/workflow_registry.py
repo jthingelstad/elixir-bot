@@ -244,6 +244,16 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=6,
         model_family="intensive",
     ),
+    # The emailed Weekly Clan Report — a separate composition from `weekly_recap`,
+    # not a reformat of it. Discord gets the short punchy post; email gets the
+    # expansive edition with headings and tables.
+    WorkflowSpec(
+        "weekly_recap_email",
+        response_schema={"required": ["email"]},
+        tools=INTERACTIVE_READ_TOOLS,
+        max_tool_rounds=6,
+        model_family="intensive",
+    ),
     WorkflowSpec("member_report", model_family="intensive"),
     # Weekly public Elder Standing report — standalone, no tools, composed from a
     # pre-materialized facts brief (runtime.elder_standing), grounding-guarded.

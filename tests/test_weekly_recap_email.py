@@ -113,3 +113,61 @@ def test_the_job_does_not_report_success_when_the_email_failed():
         "the email-failure branch must be checked BEFORE the unconditional success call"
     )
     assert "did NOT go out" in source, "the alert should name what actually failed"
+
+
+def test_email_is_its_own_composition_not_the_discord_post(monkeypatch):
+    """Decoupled (Jamie, 2026-08-03): email composes independently.
+
+    Discord gets the short punchy post; email gets the expansive edition with
+    headings and tables. Reformatting one into the other gave the worst of both.
+    """
+    sent = {}
+    monkeypatch.setattr(outbound, "enabled", lambda: True)
+    monkeypatch.setattr(outbound, "send", lambda **kw: sent.update(kw) or {})
+    monkeypatch.setattr(db, "list_member_emails", lambda: [{"email": "a@b.com"}])
+    monkeypatch.setattr("runtime.awareness.read.build_read", lambda *a, **k: {"clan": "POAP KINGS"})
+    seen = {}
+
+    def _compose(read, week_context, discord_recap="", **kw):
+        seen["week_context"] = week_context
+        seen["discord_recap"] = discord_recap
+        return (
+            "# Weekly Clan Report\n\n## War\n\n| Clan | Fame |\n|---|---|\n| POAP KINGS | 51,900 |"
+        )
+
+    monkeypatch.setattr(_core.elixir_agent, "generate_weekly_recap_email", _compose)
+
+    asyncio.run(_core._email_weekly_recap("**Short discord post.** Punchy.", "WEEK FACTS"))
+
+    # It composed from the week facts, and saw the Discord post only as context.
+    assert seen["week_context"] == "WEEK FACTS"
+    assert "Short discord post" in seen["discord_recap"]
+    # The email body is the composer's output, not the Discord post.
+    assert sent["body"].startswith("# Weekly Clan Report")
+    assert "| Clan | Fame |" in sent["body"], "email formatting (tables) survives to the body"
+    assert "Punchy." not in sent["body"]
+
+
+def test_email_falls_back_to_the_discord_recap_when_composition_fails(monkeypatch):
+    """A plainer email still beats a missing one."""
+    sent = {}
+    monkeypatch.setattr(outbound, "enabled", lambda: True)
+    monkeypatch.setattr(outbound, "send", lambda **kw: sent.update(kw) or {})
+    monkeypatch.setattr(db, "list_member_emails", lambda: [{"email": "a@b.com"}])
+    monkeypatch.setattr("runtime.awareness.read.build_read", lambda *a, **k: {})
+    monkeypatch.setattr(_core.elixir_agent, "generate_weekly_recap_email", lambda *a, **k: None)
+
+    n = asyncio.run(_core._email_weekly_recap("**Season closed.** We won.", "WEEK FACTS"))
+    assert n == 1
+    assert sent["body"].startswith("# Weekly Recap")
+    assert "## Season closed" in sent["body"]
+
+
+def test_no_email_context_means_the_reformat_path(monkeypatch):
+    """Callers that pass no context (previews, older paths) still work."""
+    sent = {}
+    monkeypatch.setattr(outbound, "enabled", lambda: True)
+    monkeypatch.setattr(outbound, "send", lambda **kw: sent.update(kw) or {})
+    monkeypatch.setattr(db, "list_member_emails", lambda: [{"email": "a@b.com"}])
+    asyncio.run(_core._email_weekly_recap("**Big week.** We won."))
+    assert sent["body"].startswith("# Weekly Recap")
