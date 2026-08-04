@@ -96,7 +96,6 @@ groupable as-is.
    SELECT sentinel_type, name, endpoint, first_seen_at
      FROM api_sentinel_observations
     WHERE sentinel_type IN ('schema_path', 'progress_key', 'battle_game_mode')
-      AND announced_signal_key IS NULL
       AND first_seen_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-2 days')
     ORDER BY first_seen_at DESC
     LIMIT 10;
@@ -106,9 +105,13 @@ groupable as-is.
    - **Structural types only.** New `event` tags appear constantly as Supercell
      runs events — pure noise. A new schema path, progress key, or game mode
      means Elixir's *model of the payload* may now be wrong.
-   - **`announced_signal_key IS NULL`** is the unannounced backlog.
-   - **48-hour window**, because the historical backlog is ~738 unannounced rows
-     (mostly the sentinel's initial seeding) and would otherwise alert forever.
+   - **48-hour window**, because the historical backlog is ~740 rows (mostly the
+     sentinel's initial seeding) and would otherwise alert forever. This is the
+     ONLY thing bounding the alert: `announced_signal_key` was dropped in schema
+     v35 (2026-08-04) because nothing had ever written it, so filtering on it was
+     a no-op that hid 30 legacy rows while appearing to do work.
+   - **`first_seen_at` is the only timestamp now.** The sentinel writes on
+     novelty only; `last_seen_at` was dropped with the touch that maintained it.
 
    This alert is deliberately thin — it says *something changed*, nothing more.
    Hand it to the **Data Analyst** (`data` issue) to characterize and quantify;

@@ -3467,7 +3467,9 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert specs["api-sentinel"]["activity_role"] == "observer+communicator"
     assert specs["api-sentinel"]["schedule"] == "Every 240 minutes."
     assert (
-        "Discord: #leaders on first-seen CR API schema or event drift"
+        # The sentinel has been record-only since v13; the old string claimed a
+        # #leaders post that no longer happens, and this test pinned the lie.
+        "None — record-only since v13; drift is read by AGENT-TEAM/error-watch.md"
         in specs["api-sentinel"]["delivery_targets"]
     )
     assert "promotion-content" in specs

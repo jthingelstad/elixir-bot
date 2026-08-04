@@ -29,7 +29,7 @@ Every successful Supercell API call is persisted as a raw payload (hash-deduped)
 
 Coverage caveat: a payload only lands in the table when the corresponding `cr_api.get_*` function is actually called. `get_tournament` and `get_clan_by_tag`, for example, only fire when an agent or user references a specific tag — there can be long stretches with zero rows.
 
-Default window: the full retained history in `raw_api_payloads`. Payload retention is 14 days (see `db.RAW_PAYLOAD_RETENTION_DAYS`). The user can narrow: "just the last week", "only since 2026-04-01", "one payload per player".
+Default window: the full retained history in `raw_api_payloads`. Payload retention is **60 days** (`db.RAW_PAYLOAD_RETENTION_DAYS`, widened 2026-07-30; purged weekly, so the effective window is 60-67 days). Older docs saying 14 are stale — reasoning over the wrong window makes a long-lived field look new. The user can narrow: "just the last week", "only since 2026-04-01", "one payload per player".
 
 ## Sampling strategy
 

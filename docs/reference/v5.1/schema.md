@@ -37,7 +37,7 @@
 
 | Constant | Value | Applies to |
 |---|---|---|
-| `RAW_PAYLOAD_RETENTION_DAYS` | 14 | API receipts and deduplicated payload content (content retained from its last receipt) |
+| `RAW_PAYLOAD_RETENTION_DAYS` | 60 | API receipts and deduplicated payload content (content retained from its last receipt) |
 | `BATTLE_EVENT_RETENTION_DAYS` | **180** | `battle_events` (Q8: ≥3 seasons) |
 | `PLAYER_EVENT_RETENTION_DAYS` | 180 | `player_events` |
 | `CLAN_EVENT_RETENTION_DAYS` | 365 | `clan_events` (rare, load-bearing for history reads) |
@@ -141,7 +141,7 @@ CREATE TABLE player_aliases (               -- was: member_aliases
 
 CREATE TABLE clans (                        -- NEW: our clan + River-Race opponents,
     clan_tag   TEXT PRIMARY KEY,            -- one shape (§7, feedback New-3)
-    name TEXT, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
+    name TEXT, first_seen_at TEXT NOT NULL,
     is_home INTEGER NOT NULL DEFAULT 0      -- 1 for #J2RGCRVG exactly once
 );
 

@@ -616,7 +616,8 @@ ledger. In particular, an empty battlelog is valid evidence of no recent battles
 while a missing battlelog is not evidence at all.
 
 Crucially, the raw log is **not** the system of record. It is a **14-day rolling
-buffer** (`RAW_PAYLOAD_RETENTION_DAYS = 14`, purged every maintenance cycle), and
+buffer** (`RAW_PAYLOAD_RETENTION_DAYS = 60` since 2026-07-30, purged weekly by
+the Sunday maintenance job, so the effective window runs 60-67 days), and
 historical API state cannot be re-fetched (the CR API only returns *current* state). So
 the raw log is a **forward-only analysis buffer** — an earlier draft's claim that we
 could "re-derive everything from raw" was exactly backwards.

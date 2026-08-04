@@ -319,7 +319,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=(
             "Storage: api_sentinel_observations",
-            "Discord: #leaders on first-seen CR API schema or event drift",
+            "None — record-only since v13; drift is read by AGENT-TEAM/error-watch.md",
         ),
         activity_role="observer+communicator",
     ),

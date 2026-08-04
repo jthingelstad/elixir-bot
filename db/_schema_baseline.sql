@@ -134,9 +134,7 @@ CREATE TABLE api_sentinel_observations (
             endpoint TEXT,
             entity_key TEXT,
             first_seen_at TEXT NOT NULL,
-            last_seen_at TEXT NOT NULL,
             sample_json TEXT,
-            announced_signal_key TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             UNIQUE(sentinel_type, scope, name)
@@ -144,9 +142,8 @@ CREATE TABLE api_sentinel_observations (
 
 CREATE INDEX idx_api_sentinel_type_seen ON api_sentinel_observations(sentinel_type, first_seen_at DESC);
 
-CREATE INDEX idx_api_sentinel_endpoint ON api_sentinel_observations(endpoint, last_seen_at DESC);
+CREATE INDEX idx_api_sentinel_endpoint ON api_sentinel_observations(endpoint, first_seen_at DESC);
 
-CREATE INDEX idx_api_sentinel_announced ON api_sentinel_observations(announced_signal_key);
 
 CREATE TABLE arena_relay_screenshot_observations (
             observation_id INTEGER PRIMARY KEY AUTOINCREMENT,

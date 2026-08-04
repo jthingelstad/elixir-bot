@@ -43,7 +43,7 @@ BROAD_EXCEPTION_BASELINE = {
     # even with no database; an unavailable floor renders as "read it live"
     # rather than a guessed number.
     "prompts.py": 1,
-    "db/schema.py": 34,  # +1: v34 migration rollback/re-raise (same pattern as v2-v33)
+    "db/schema.py": 35,  # +1: v35 migration rollback/re-raise (same pattern as v2-v34)
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,

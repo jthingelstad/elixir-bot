@@ -7,7 +7,7 @@ gets the same record new battles do -- tower troop, elixir leaked, tower HP,
 opponent identity, duel rounds, boat results.
 
 Sources, in order of preference per battle:
-  1. `raw_api_payloads` in the live DB  (~2 weeks, short retention by design)
+  1. `raw_api_payloads` in the live DB  (60-day retention since 2026-07-30)
   2. every `*.db.gz` in $ELIXIR_BACKUP_DIR, newest first -- each froze that
      same short window on its own date, so the union reaches months back
 

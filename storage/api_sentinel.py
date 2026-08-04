@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 
 from db import _json_or_none, _utcnow, managed_connection
 
@@ -173,69 +174,97 @@ def _ensure_first_entity_key(conn: sqlite3.Connection) -> None:
     require_columns(conn, "api_sentinel_observations", {"first_entity_key"})
 
 
-def _insert_or_touch_observation(
+# The catalog of keys this process has already seen, loaded once and consulted
+# in memory. Before 2026-08-04 every field of every API payload did a SELECT and
+# an UPDATE to refresh `last_seen_at` — roughly 362,000 statements a day to
+# maintain 776 rows and discover about three genuinely new things a month.
+#
+# The value was always the INSERT. `last_seen_at` existed for one Observatory
+# page, and that page was deleted; the column went with it (schema v35). What
+# remains is novelty detection, which needs a set membership test, not a query.
+_known_keys: set[tuple[str, str, str]] | None = None
+_known_lock = threading.Lock()
+
+
+def _observation_key(observation: dict) -> tuple[str, str, str]:
+    return (
+        str(observation["sentinel_type"]),
+        str(observation["scope"]),
+        str(observation["name"]),
+    )
+
+
+def _load_known_keys(conn: sqlite3.Connection) -> set[tuple[str, str, str]]:
+    """One query per process. The catalog is ~776 rows and grows ~3/month."""
+    global _known_keys
+    with _known_lock:
+        if _known_keys is None:
+            _known_keys = {
+                (str(r[0]), str(r[1]), str(r[2]))
+                for r in conn.execute(
+                    "SELECT sentinel_type, scope, name FROM api_sentinel_observations"
+                )
+            }
+        return _known_keys
+
+
+def reset_known_keys() -> None:
+    """Drop the cache (tests, and after a restore repopulates the table)."""
+    global _known_keys
+    with _known_lock:
+        _known_keys = None
+
+
+def _insert_observation_if_new(
     conn: sqlite3.Connection, observation: dict, now: str
 ) -> dict | None:
-    row = conn.execute(
-        """
-        SELECT observation_id
-        FROM api_sentinel_observations
-        WHERE sentinel_type = ? AND scope = ? AND name = ?
-        """,
-        (
-            observation["sentinel_type"],
-            observation["scope"],
-            observation["name"],
-        ),
-    ).fetchone()
-    sample_json = _json_or_none(observation.get("sample") or {})
-    if row:
-        # Touch: entity_key/sample_json track the LATEST observer (by design).
-        # first_entity_key is deliberately NOT updated — it preserves who was
-        # first seen wearing this (the game-level stream attributes a new event
-        # badge to that member; entity_key alone drifts to whoever polled last).
-        conn.execute(
-            """
-            UPDATE api_sentinel_observations
-            SET last_seen_at = ?, endpoint = ?, entity_key = ?, sample_json = ?, updated_at = ?
-            WHERE observation_id = ?
-            """,
-            (
-                now,
-                observation.get("endpoint"),
-                observation.get("entity_key"),
-                sample_json,
-                now,
-                row["observation_id"],
-            ),
-        )
+    """Record a first sighting. Returns the row on novelty, None when known.
+
+    `sample_json` is NOT refreshed on later sightings — engine/emitters/game.py
+    reads it to build the clan-facing event and badge posts, and the FIRST
+    sighting is the one those posts are about. Same reasoning as
+    `first_entity_key`, which preserves who was first seen wearing a badge.
+    """
+    key = _observation_key(observation)
+    known = _load_known_keys(conn)
+    if key in known:
         return None
 
-    conn.execute(
-        """
-        INSERT INTO api_sentinel_observations (
-            sentinel_type, scope, name, endpoint, entity_key, first_entity_key,
-            first_seen_at, last_seen_at, sample_json, created_at, updated_at
+    sample_json = _json_or_none(observation.get("sample") or {})
+    try:
+        conn.execute(
+            """
+            INSERT INTO api_sentinel_observations (
+                sentinel_type, scope, name, endpoint, entity_key, first_entity_key,
+                first_seen_at, sample_json, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                observation["sentinel_type"],
+                observation["scope"],
+                observation["name"],
+                observation.get("endpoint"),
+                observation.get("entity_key"),
+                observation.get("entity_key"),
+                now,
+                sample_json,
+                now,
+                now,
+            ),
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            observation["sentinel_type"],
-            observation["scope"],
-            observation["name"],
-            observation.get("endpoint"),
-            observation.get("entity_key"),
-            observation.get("entity_key"),
-            now,
-            now,
-            sample_json,
-            now,
-            now,
-        ),
-    )
+    except sqlite3.IntegrityError:
+        # Another thread inserted the same key first. Not novelty for us.
+        with _known_lock:
+            if _known_keys is not None:
+                _known_keys.add(key)
+        return None
+
+    with _known_lock:
+        if _known_keys is not None:
+            _known_keys.add(key)
     inserted = dict(observation)
     inserted["first_seen_at"] = now
-    inserted["last_seen_at"] = now
     return inserted
 
 
@@ -249,7 +278,7 @@ def _record_api_sentinel_observations(
     _ensure_first_entity_key(conn)
     new_observations = []
     for observation in build_api_sentinel_observations(endpoint, entity_key, payload):
-        inserted = _insert_or_touch_observation(conn, observation, now)
+        inserted = _insert_observation_if_new(conn, observation, now)
         if inserted:
             new_observations.append(inserted)
     return new_observations
@@ -299,7 +328,6 @@ def bootstrap_api_sentinel_baseline(conn=None) -> dict:
                 row["endpoint"],
                 row["entity_key"],
                 payload,
-                announce=False,
             )
         )
     conn.commit()

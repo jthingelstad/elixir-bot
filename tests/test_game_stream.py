@@ -50,15 +50,14 @@ def _obs(
     conn.execute(
         """INSERT INTO api_sentinel_observations
                (sentinel_type, scope, name, endpoint, entity_key, first_seen_at,
-                last_seen_at, sample_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                sample_json, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             sentinel_type,
             "player.badges" if sentinel_type == "badge_name" else "events",
             name,
             "player",
             entity,
-            first_seen,
             first_seen,
             json.dumps(sample or {}),
             first_seen,
@@ -143,13 +142,21 @@ def test_emitter_skips_mastery_attributes_novel_badge_and_reads_events():
 
 
 def test_badge_attributed_to_first_observer_not_latest():
-    # The sentinel overwrites entity_key with the LATEST observer on every touch,
-    # so attribution must ride first_entity_key (preserved on insert). Real case:
-    # Chaos_S2 first seen on Aaqib, later touched by Vijay.
+    # Attribution rides first_entity_key, set once on insert. Real case: Chaos_S2
+    # first seen on Aaqib, later re-observed on Vijay.
+    #
+    # Before 2026-08-04 the sentinel touched every row on every sighting and
+    # entity_key drifted to the latest observer, which is why attribution had to
+    # use first_entity_key. The sentinel now writes on novelty only, so the
+    # second sighting is a no-op and nothing drifts — but first_entity_key is
+    # still what the emitter reads, and this pins that.
     from storage.api_sentinel import (
         _ensure_first_entity_key,
-        _insert_or_touch_observation,
+        _insert_observation_if_new,
+        reset_known_keys,
     )
+
+    reset_known_keys()  # module-level novelty cache must not leak between tests
 
     conn = _mem()
     conn.execute(
@@ -163,7 +170,7 @@ def test_badge_attributed_to_first_observer_not_latest():
     _ensure_first_entity_key(conn)
     # filler so Chaos_S2 lands at observation_id >= 2 (a 0 cursor hits the
     # go-live seed path instead of emitting)
-    _insert_or_touch_observation(
+    _insert_observation_if_new(
         conn,
         {
             "sentinel_type": "badge_name",
@@ -183,13 +190,16 @@ def test_badge_attributed_to_first_observer_not_latest():
         "endpoint": "player",
         "sample": {"badge": badge},
     }
-    _insert_or_touch_observation(conn, {**base, "entity_key": "AAA"}, "2026-07-06T21:30:43")
-    _insert_or_touch_observation(conn, {**base, "entity_key": "BBB"}, "2026-07-07T02:00:00")
+    _insert_observation_if_new(conn, {**base, "entity_key": "AAA"}, "2026-07-06T21:30:43")
+    _insert_observation_if_new(conn, {**base, "entity_key": "BBB"}, "2026-07-07T02:00:00")
     row = conn.execute(
         "SELECT observation_id, entity_key, first_entity_key "
         "FROM api_sentinel_observations WHERE name='Chaos_S2'"
     ).fetchone()
-    assert row["entity_key"] == "BBB" and row["first_entity_key"] == "AAA"  # drift vs preserved
+    # Both are AAA now: novelty-only writes mean the second sighting never
+    # touched the row, so entity_key cannot drift. first_entity_key is still the
+    # column the emitter attributes from, which is what matters here.
+    assert row["entity_key"] == "AAA" and row["first_entity_key"] == "AAA"
     conn.commit()
     # emit the (existing) obs by placing the cursor just behind it
     cursor_set(conn, "emit:game", row["observation_id"] - 1)

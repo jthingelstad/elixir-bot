@@ -13,7 +13,7 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 34
+CURRENT_SCHEMA_VERSION = 35
 EXPECTED_TABLE_COUNT = 63  # 64 -> 63 (v34): llm_calls moved to the telemetry DB
 
 
@@ -1937,6 +1937,14 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+    if version < 35:
+        try:
+            _apply_v35(conn)
+            conn.execute("PRAGMA user_version = 35")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -2083,6 +2091,43 @@ def _apply_v34(conn: sqlite3.Connection) -> None:
                     f"first; this migration destroys the only other copy."
                 )
     conn.execute("DROP TABLE IF EXISTS llm_calls")
+
+
+def _apply_v35(conn: sqlite3.Connection) -> None:
+    """Drop the API sentinel's touch-maintained columns.
+
+    Until 2026-08-04 every field of every API payload did a SELECT and an UPDATE
+    to refresh `last_seen_at` — about 362,000 statements a day to maintain 776
+    rows and discover roughly three genuinely new things a month. The value was
+    always the INSERT; the touching existed to keep `last_seen_at` current for
+    one Observatory page, and that page was deleted. The sentinel now writes only
+    on novelty, so the column would freeze — and a frozen timestamp that looks
+    live is exactly the trap the clan-DB llm_calls copy was.
+
+    `announced_signal_key` goes with it: nothing has ever written it, so the
+    AGENT-TEAM runbooks' `WHERE announced_signal_key IS NULL` filter was a no-op
+    that quietly hid 30 legacy rows. Those runbooks are updated in the same
+    change.
+
+    `sample_json` and `first_entity_key` STAY — engine/emitters/game.py reads
+    both to build the clan-facing event and badge posts.
+
+    SQLite refuses DROP COLUMN on an indexed column, so the two indexes come
+    down first; the endpoint index is rebuilt on first_seen_at, which is the
+    column anyone actually orders by now.
+    """
+    if "api_sentinel_observations" not in _tables(conn):
+        return
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(api_sentinel_observations)")}
+    conn.execute("DROP INDEX IF EXISTS idx_api_sentinel_endpoint")
+    conn.execute("DROP INDEX IF EXISTS idx_api_sentinel_announced")
+    for column in ("last_seen_at", "announced_signal_key"):
+        if column in existing:
+            conn.execute(f"ALTER TABLE api_sentinel_observations DROP COLUMN {column}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_api_sentinel_endpoint "
+        "ON api_sentinel_observations(endpoint, first_seen_at DESC)"
+    )
 
 
 def assert_current_schema(conn: sqlite3.Connection) -> None:
@@ -2271,7 +2316,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "020345b47dc00e391cd936cd0cc86aa756445dc979e58865d316aa65389c1e53"
+CURRENT_SCHEMA_FINGERPRINT = "0030a7b395cd77bc42aa5d9b79cf3c455267e537f47a7e893a8793c458a49d07"
 
 
 __all__ = [
