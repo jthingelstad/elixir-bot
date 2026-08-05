@@ -62,12 +62,21 @@ BROAD_EXCEPTION_BASELINE = {
     # high-water write failure from escaping a background task.
     # 41 -> 40 (2026-08-04): the Observatory webapp startup guard went with the
     # webapp itself. The stall-watchdog boot guard is still in this count.
-    "runtime/app.py": 40,
+    # 40 -> 41 (2026-08-04): the Phase 0 wake-evaluation guard in the engine
+    # tick. Shadow measurement must never be able to fail a tick.
+    "runtime/app.py": 41,
     "runtime/awareness/deliver.py": 10,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
     "runtime/awareness/read.py": 1,
     "runtime/awareness/store.py": 1,
+    # 4 (2026-08-04, new): the wake evaluator runs inside the 10-minute engine
+    # tick and is pure measurement in Phase 0 — every guard here degrades to
+    # "no wake this tick" and logs, which is strictly safer than a raised
+    # exception killing the heartbeat. Two guard evaluate/observe at the tick
+    # boundary, one guards the telemetry budget read (an unreadable file must
+    # not block a wake), one guards a high-water write.
+    "runtime/awareness/wake.py": 4,
     "runtime/channel_router.py": 20,
     "runtime/discord_commands.py": 8,  # +1: command telemetry is fail-soft and logs before continuing
     "runtime/discord_posting.py": 2,
@@ -122,7 +131,11 @@ BROAD_EXCEPTION_BASELINE = {
     # fails the transaction row must still record without it — a missing detail
     # column is recoverable, losing the measurement is not.
     "storage/db_watch.py": 5,
-    "storage/telemetry.py": 5,
+    # 5 -> 6 (2026-08-04): record_wake_observation follows the same fail-soft
+    # rule as every other writer here. That policy hid a real NameError (json
+    # was never imported) until a test asserted the row actually persisted —
+    # which is the argument for asserting persistence, not for raising.
+    "storage/telemetry.py": 6,
     "storage/metadata.py": 1,  # telemetry retention never fails clan maintenance
     # storage/incidents.py removed with the ledger it wrote (2026-07-28).
     "storage/leader_actions.py": 2,

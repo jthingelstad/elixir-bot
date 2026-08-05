@@ -2,7 +2,33 @@
 
 Emitters own detection; this registry owns what may cross the event-stream
 boundary.  A new event type is therefore incomplete until its stream, payload
-floor, time semantics, lane, and hard-post policy are declared together.
+floor, time semantics, lane, hard-post policy, **and wake policy** are declared
+together.
+
+``wake`` answers *when does this event deserve cognition?* and is deliberately
+orthogonal to ``hard_post``, which answers *must this event eventually be
+covered?*  A hard-post with ``wake="digest"`` is still guaranteed a post — it
+just waits for the daily deliberation.  A ``wake="immediate"`` soft event gets
+prompt attention with no coverage guarantee at all.
+
+  - ``immediate`` — fire a scoped responder turn on the next engine tick.
+  - ``batch``     — coalesce with its class for up to ``BATCH_WINDOW_MINUTES``
+                    so three badges become one post, then fire.
+  - ``digest``    — no wake; the daily deliberation reads it with everything
+                    else.  This is the default: most event types are texture,
+                    not news.
+  - ``never``     — excluded from wake consideration entirely.
+
+``wake_model`` picks the composer tier for the wake this event lands in
+(``lightweight`` = Haiku, ``chat`` = Sonnet).  The 2026-08-04 scoped-composer
+experiment is the evidence for the split: roster moments (join / leave / role)
+are Haiku-safe behind the delivery validator, while war and season narrative —
+streak math, league semantics, multi-signal batches — measurably needs Sonnet.
+
+Changing when Elixir speaks about an event is therefore a **one-line data
+change here**, never a code path in the responder.  See
+docs/plans/agentic-loop.md; a per-event-type branch in the responder is the
+tell that we are rebuilding v4's ``runtime/signals/delivery.py``.
 """
 
 from __future__ import annotations
@@ -10,6 +36,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from engine.normalize import canonical_utc_timestamp
+
+WAKE_CLASSES = frozenset({"immediate", "batch", "digest", "never"})
+WAKE_MODELS = frozenset({"lightweight", "chat"})
 
 
 @dataclass(frozen=True)
@@ -19,6 +48,8 @@ class EventContract:
     required_payload: frozenset[str] = frozenset()
     time_semantics: str = "observed_between_polls"
     hard_post: bool = False
+    wake: str = "digest"
+    wake_model: str = "lightweight"
 
 
 def _event(
@@ -27,13 +58,21 @@ def _event(
     *required_payload: str,
     time_semantics: str = "observed_between_polls",
     hard_post: bool = False,
+    wake: str = "digest",
+    wake_model: str = "lightweight",
 ) -> EventContract:
+    if wake not in WAKE_CLASSES:
+        raise ValueError(f"unknown wake class: {wake!r}")
+    if wake_model not in WAKE_MODELS:
+        raise ValueError(f"unknown wake model: {wake_model!r}")
     return EventContract(
         stream=stream,
         lane=lane,
         required_payload=frozenset(required_payload),
         time_semantics=time_semantics,
         hard_post=hard_post,
+        wake=wake,
+        wake_model=wake_model,
     )
 
 
@@ -41,19 +80,25 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
     # player stream
     "career_wins_milestone": _event("player", "milestone", "milestone", "wins"),
     "best_trophies_peak": _event("player", "milestone", "boundary", "best_trophies"),
-    "badge_earned": _event("player", "milestone", "badge_name"),
-    "arena_changed": _event("player", "milestone", "arena_id", "arena_name"),
+    # A one-off (level-less) badge is the game's Legendary tier; the emitter
+    # tiers it in the payload. Batching is what keeps three badges in an hour
+    # from becoming three posts — the 2026-07-13 milestone recalibration by
+    # other means.
+    "badge_earned": _event("player", "milestone", "badge_name", wake="batch"),
+    "arena_changed": _event("player", "milestone", "arena_id", "arena_name", wake="batch"),
     "card_unlocked": _event("player", "milestone", "card_id", "card_name", "rarity"),
     "card_level_milestone": _event("player", "milestone", "card_id", "card_name", "milestone"),
     "collection_level_milestone": _event("player", "milestone", "milestone", "collection_level"),
-    "pol_promotion": _event("player", "battle_mode", "league", "prev_league"),
-    "ultimate_champion_reached": _event("player", "battle_mode", "league"),
+    "pol_promotion": _event("player", "battle_mode", "league", "prev_league", wake="batch"),
+    "ultimate_champion_reached": _event("player", "battle_mode", "league", wake="batch"),
     "pol_global_rank_attained": _event("player", "battle_mode", "from_rank", "to_rank", "league"),
     "pol_season_closed": _event("player", "battle_mode", "pol_season_id", time_semantics="exact"),
     # clan stream
-    "member_joined": _event("clan", "clan_event", "name", hard_post=True),
+    # The join is the canonical immediate wake: the newcomer is in the app NOW,
+    # and this is the case runtime/awareness/trigger.py already proved.
+    "member_joined": _event("clan", "clan_event", "name", hard_post=True, wake="immediate"),
     "member_left": _event("clan", "clan_event", "name"),
-    "member_left_verified": _event("clan", "clan_event", "name", hard_post=True),
+    "member_left_verified": _event("clan", "clan_event", "name", hard_post=True, wake="immediate"),
     "role_changed": _event(
         "clan",
         "clan_event",
@@ -61,11 +106,25 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
         "prev_role",
         "direction",
         hard_post=True,
+        wake="immediate",
     ),
     "weekly_donation_leader": _event("clan", "clan_event", "week_ending", "leaders"),
     "clan_score_milestone": _event("clan", "clan_event", "milestone", "clan_score"),
-    "clan_league_changed": _event("clan", "clan_event", "league", "prev_league", "war_trophies"),
-    "clan_birthday": _event("clan", "clan_event", "years", hard_post=True),
+    # Rides along with the season-close narrative rather than earning its own
+    # post: on 2026-08-03 the brain folded it into the season recap, and a
+    # standalone league-change post would read as a demotion notice.
+    "clan_league_changed": _event(
+        "clan",
+        "clan_event",
+        "league",
+        "prev_league",
+        "war_trophies",
+        wake="immediate",
+        wake_model="chat",
+    ),
+    "clan_birthday": _event(
+        "clan", "clan_event", "years", hard_post=True, wake="immediate", wake_model="chat"
+    ),
     # A tournament is a time-bounded event stream, not its own subsystem (#210).
     # It ends on the clan stream like any other bounded thing, and the awareness
     # loop narrates it — the same path season_closed and member_joined take.
@@ -79,6 +138,8 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
         "podium",
         time_semantics="exact",
         hard_post=True,
+        wake="immediate",
+        wake_model="chat",
     ),
     "member_birthday": _event("clan", "clan_event", "name"),
     "join_anniversary": _event("clan", "clan_event", "name", "months"),
@@ -92,18 +153,42 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
         "podium",
         time_semantics="exact",
         hard_post=True,
+        wake="immediate",
+        wake_model="chat",
     ),
-    # war stream
-    "season_closed": _event("war", "war", "weeks", time_semantics="exact", hard_post=True),
-    "week_finished": _event("war", "war", "our_rank", "our_fame", "standings", hard_post=True),
+    # war stream — the narrative tier. Streak math, league semantics and
+    # multi-signal batches are exactly where the scoped-composer experiment
+    # measured Haiku slipping (wrong award name, week off-by-one).
+    "season_closed": _event(
+        "war",
+        "war",
+        "weeks",
+        time_semantics="exact",
+        hard_post=True,
+        wake="immediate",
+        wake_model="chat",
+    ),
+    "week_finished": _event(
+        "war",
+        "war",
+        "our_rank",
+        "our_fame",
+        "standings",
+        hard_post=True,
+        wake="immediate",
+        wake_model="chat",
+    ),
     "season_started": _event("war", "war", "season_id"),
     "colosseum_detected": _event("war", "war", "section_index"),
     "war_day_opened": _event("war", "war", "period_type", "day_index", "war_day_human"),
     "race_finished": _event("war", "war", "finished_at", time_semantics="exact"),
-    # game stream
-    "card_added": _event("game", "system", "name", time_semantics="exact"),
-    "event_started": _event("game", "system", "title", time_semantics="exact"),
-    "event_badge_earned": _event("game", "system", "badge_name", time_semantics="exact"),
+    # game stream — system texture. card_added in particular flooded channels
+    # on backfill (see the brain data-source audit); it never wakes anything.
+    "card_added": _event("game", "system", "name", time_semantics="exact", wake="never"),
+    "event_started": _event("game", "system", "title", time_semantics="exact", wake="never"),
+    "event_badge_earned": _event(
+        "game", "system", "badge_name", time_semantics="exact", wake="never"
+    ),
 }
 
 _STREAM_BY_TABLE = {
@@ -144,10 +229,35 @@ def lane_by_event_type() -> dict[str, str]:
     return {event_type: contract.lane for event_type, contract in EVENT_CONTRACTS.items()}
 
 
+def wake_policy(event_type: str) -> tuple[str, str]:
+    """``(wake_class, wake_model)`` for an event type.
+
+    An unknown event type is ``("digest", "lightweight")``: something the
+    registry has not declared must never wake the clan's voice on its own, but
+    the daily deliberation still sees it.
+    """
+    contract = EVENT_CONTRACTS.get(event_type)
+    if contract is None:
+        return "digest", "lightweight"
+    return contract.wake, contract.wake_model
+
+
+def wake_event_types(wake_class: str) -> frozenset[str]:
+    return frozenset(
+        event_type
+        for event_type, contract in EVENT_CONTRACTS.items()
+        if contract.wake == wake_class
+    )
+
+
 __all__ = [
     "EVENT_CONTRACTS",
+    "WAKE_CLASSES",
+    "WAKE_MODELS",
     "EventContract",
     "hard_post_event_types",
     "lane_by_event_type",
     "validate_event",
+    "wake_event_types",
+    "wake_policy",
 ]

@@ -27,6 +27,7 @@ The primary database stays about the clan. This one holds:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
@@ -105,6 +106,23 @@ _SCHEMA = (
         thread_dump TEXT NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_db_stall_recorded ON db_stalls(recorded_at)",
+    # Agentic Loop v2 Phase 0: what the wake evaluator WOULD have fired. Lives
+    # here and not in the clan DB because a shadow run is disposable
+    # measurement, and Phase 0 is explicitly a no-migration phase.
+    """CREATE TABLE IF NOT EXISTS wake_observations (
+        observation_id INTEGER PRIMARY KEY,
+        recorded_at TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        wake_class TEXT NOT NULL,
+        wake_model TEXT NOT NULL,
+        event_count INTEGER NOT NULL,
+        signal_keys_json TEXT NOT NULL,
+        event_types_json TEXT NOT NULL,
+        oldest_observed_at TEXT,
+        reason TEXT,
+        fired INTEGER NOT NULL DEFAULT 1
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_wake_obs_recorded ON wake_observations(recorded_at)",
 )
 
 
@@ -274,6 +292,47 @@ def record_stall(call_site: str, open_ms: int, thread_dump: str) -> None:
         log.debug("telemetry: stall record failed", exc_info=True)
 
 
+def record_wake_observation(
+    *,
+    mode: str,
+    wake_class: str,
+    wake_model: str,
+    signal_keys: list,
+    event_types: list,
+    oldest_observed_at: str | None = None,
+    reason: str = "",
+    fired: bool = True,
+) -> None:
+    """One wake decision, fired or held. ``mode`` is ``shadow`` or ``live``.
+
+    Held decisions are recorded too (``fired=0``): "we would have fired but the
+    daily budget was spent" is the observation that tells us the budget is
+    wrong, and it is invisible if only fires are stored.
+    """
+    try:
+        conn = connect()
+        conn.execute(
+            "INSERT INTO wake_observations (recorded_at, mode, wake_class, wake_model, "
+            "event_count, signal_keys_json, event_types_json, oldest_observed_at, reason, fired) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                _utcnow(),
+                mode,
+                wake_class,
+                wake_model,
+                len(signal_keys or []),
+                json.dumps(list(signal_keys or [])),
+                json.dumps(list(event_types or [])),
+                oldest_observed_at,
+                reason[:400],
+                1 if fired else 0,
+            ),
+        )
+        conn.commit()
+    except Exception:
+        log.debug("telemetry: wake observation record failed", exc_info=True)
+
+
 def purge_old(now: datetime | None = None) -> dict:
     """Retention for the telemetry file. Runs on its own connection, so it can
     never block the clan database."""
@@ -296,6 +355,7 @@ def purge_old(now: datetime | None = None) -> dict:
             ("db_transactions", "recorded_at", DB_METRIC_RETENTION_DAYS),
             ("db_lock_waits", "recorded_at", DB_METRIC_RETENTION_DAYS),
             ("db_stalls", "recorded_at", DB_METRIC_RETENTION_DAYS),
+            ("wake_observations", "recorded_at", DB_METRIC_RETENTION_DAYS),
         ):
             cur = conn.execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff(days),))
             stats[f"{table}_purged"] = cur.rowcount
@@ -312,5 +372,6 @@ __all__ = [
     "record_lock_wait",
     "record_stall",
     "record_transaction",
+    "record_wake_observation",
     "telemetry_path",
 ]

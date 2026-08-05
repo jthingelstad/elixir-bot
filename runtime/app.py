@@ -692,6 +692,12 @@ async def _engine_tick():
             counters["awareness_join_trigger"] = triggered
     except Exception:
         log.exception("engine tick: join trigger failed")
+    try:  # Agentic Loop v2 Phase 0: shadow wake measurement. Posts nothing.
+        wake_summary = await _evaluate_wakes()
+        if wake_summary:
+            counters["wake"] = wake_summary
+    except Exception:
+        log.exception("engine tick: wake evaluation failed")
     log.info("engine tick: %s", counters)
     try:  # durable tick history (never fails the tick)
         from runtime import tick_history
@@ -701,6 +707,26 @@ async def _engine_tick():
         log.debug("tick history recording failed", exc_info=True)
     runtime_status.mark_job_success("engine_tick", json.dumps(counters, default=str)[:900])
     return counters
+
+
+async def _evaluate_wakes():
+    """Shadow-measure what the wake evaluator would have fired (Phase 0).
+
+    Deliberately runs AFTER the join trigger and composes nothing: Phase 0 is
+    measurement only, so the join trigger remains the only thing that can
+    actually cause an out-of-band run. Both observe the same pending events, and
+    that overlap is the point — the shadow report compares what a wake would
+    have done against what the brain actually did.
+    """
+    from runtime.awareness import wake
+
+    if not wake.wake_enabled():
+        return None
+    job = scheduler.get_job("awareness-loop") if scheduler.running else None
+    return await asyncio.to_thread(
+        wake.evaluate_and_observe,
+        next_scheduled_at=getattr(job, "next_run_time", None),
+    )
 
 
 async def _maybe_trigger_awareness_for_joins():

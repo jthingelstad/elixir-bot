@@ -52,6 +52,10 @@ a phase until the previous phase's exit gate is reviewed.
 
 ### Phase 0 — Shadow wakes + baseline (measure before changing)
 
+**Status: BUILT 2026-08-04, live shadow running, awaiting Jamie's exit-gate
+review.** Backfill simulation over the last 20 days is already in (numbers
+below); a week of live shadow confirms it.
+
 **Goal:** know exactly what the wake architecture would have done, before it
 does anything.
 
@@ -67,8 +71,31 @@ Build:
 - A small report: shadow-wake latency vs. actual post latency per event class;
   wakes/day distribution; projected cost.
 
-Exit gate: ~1 week of shadow data. Jamie reviews the report — do the wake
-assignments and volumes look right?
+Shipped as: `engine/event_contracts.py` (wake fields + assignments),
+`runtime/awareness/wake.py`, `storage/telemetry.record_wake_observation` +
+`wake_observations` table (telemetry DB, no core migration),
+`scripts/wake_shadow_report.py` (`--simulate` replays history so the gate does
+not have to wait a week), `tests/test_wake_evaluator.py` (15 tests).
+
+**Backfill findings, 20 days to 2026-08-04** (`--simulate --days 20`):
+
+| Measure | Result |
+|---|---|
+| Wakes/day | 5.6 (budget is 20 — ample headroom) |
+| Split | 89 batch/Haiku, 20 immediate/Haiku, 3 immediate/Sonnet |
+| Median latency saved | 56 min (mean 90, **max 338**) |
+| Hard-post misses | **0** — every guaranteed post matched an intent |
+| Projected wake cost | $0.15/day vs $2.00/day scheduled brain |
+
+**The finding that needs a decision:** `badge_earned` would wake 51× and the
+brain posted about it 39 fewer times than that — only 6 of 102 badge events
+since 2026-07-15 appear in any intent. `pol_promotion` is 8 of 23. Both look
+like demote-to-digest candidates; `arena_changed` is the opposite (26 intents,
+1 unmatched) and should stay batch. Left AS-IS deliberately: wake assignments
+are this gate's review item, not an autonomous edit.
+
+Exit gate: Jamie reviews — do the assignments and volumes look right, and
+should badge/pol_promotion demote to digest?
 Kill switch: `ELIXIR_WAKE_POLICY=0` (default ON for shadow, it posts nothing).
 Size: an evening. No LLM calls, no schema change, no behavior change.
 
