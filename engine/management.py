@@ -28,7 +28,11 @@ log = logging.getLogger("engine.management")
 PROMOTE_TENURE_MIN = 28  # four-week hard filter before elder consideration
 WAR_FLOOR_DAYS = 1  # mandatory war participation: ≥N played days ...
 WAR_FLOOR_WINDOW = 14  # ... in the last WAR_FLOOR_WINDOW days
-WAR_RATE_WINDOW = 28  # war_rate score window (decks used ÷ available)
+WAR_RATE_WINDOW = 28  # war_rate score window (per-day credit, averaged)
+# Share of a war day's credit reserved for FINISHING it (2026-08-04, Jamie:
+# "All four is more than half the decks and should impact calculation"). The
+# rest is proportional to decks used. See _war_day_credit.
+FULL_DAY_BONUS = 0.25
 # Ranked is scored/floored by PARTICIPATION now, not league reached (2026-07-12):
 # every elder metric must be in the player's control and reward participation,
 # not account power. League/prestige was a backdoor for collection strength.
@@ -509,10 +513,46 @@ def _passes_competitive_floor(conn, tag, now: str) -> bool:
     return _passes_war_floor(conn, tag, now) or _passes_ranked_floor(conn, tag, now)
 
 
+def _war_day_credit(used: int, available: int) -> float:
+    """Credit for ONE war day. Finishing is worth more than the decks say.
+
+    Ratified 2026-08-04 (Jamie): *"All four is more than half the decks and
+    should impact calculation."* A member who uses all four decks has done the
+    whole job; one who uses two has done part of it and left points on the
+    table. Straight `used ÷ available` called that exactly half, so the credit
+    is now superlinear at the top:
+
+        credit = (1 - FULL_DAY_BONUS) · used/available  +  FULL_DAY_BONUS · (day complete)
+
+    4/4 = 1.000, 3/4 = 0.563, 2/4 = 0.375, 1/4 = 0.188, 0 = 0. Four decks is
+    worth 2.7× two decks rather than 2×, and the range stays 0–1 so nothing
+    downstream changes shape.
+
+    Why this matters less than it looks, and is still worth doing: war behaviour
+    is strongly bimodal — over the 28 days to 2026-08-04, 66% of member-days
+    were absent and 25% were complete, with only 9% partial. So this re-scores
+    roughly one day in eleven. Those are exactly the days where "showed up and
+    trailed off" was being scored as if it were half of "showed up and
+    finished".
+    """
+    if not available:
+        return 0.0
+    used = max(0, min(int(used or 0), int(available)))
+    fraction = used / available
+    complete = 1.0 if used >= available else 0.0
+    return (1.0 - FULL_DAY_BONUS) * fraction + FULL_DAY_BONUS * complete
+
+
 def _war_rate(conn, tag, now: str) -> float:
-    """Decks used ÷ available over the trailing war window (§3.2). 0.0 when the
-    member has no finalized war days — non-participation ranks at the bottom."""
-    row = conn.execute(
+    """Per-day war credit averaged over the trailing war window (§3.2). 0.0 when
+    the member has no finalized war days — non-participation ranks at the bottom.
+
+    Averaged per DAY rather than summed-decks ÷ summed-available so that the
+    full-day bonus applies to each day on its own. Summing first would let four
+    half-days look identical to two complete ones, which is the distinction this
+    is here to make.
+    """
+    rows = conn.execute(
         # Window on the DATE, not the instant. war_attendance_days rows are
         # bulk-stamped one timestamp per war week (17 distinct values live, each a
         # Monday ~10:00Z covering that week's 4 days), so an hour-precise cutoff
@@ -520,14 +560,15 @@ def _war_rate(conn, tag, now: str) -> float:
         # runs. Measured: the same calendar day at 08:00Z vs 20:49Z changed
         # war_rate for 15 of 39 members — Aaqib Javed by 0.131, which at weight
         # 0.65 is 2.6x SWAP_MARGIN. Seats must not depend on the clock.
-        """SELECT SUM(decks_used) AS used, SUM(decks_available) AS avail
+        """SELECT decks_used, decks_available
            FROM war_attendance_days
            WHERE player_tag = ? AND date(observed_at) >= date(?, ?)""",
         (tag, now, f"-{WAR_RATE_WINDOW} days"),
-    ).fetchone()
-    if not row or not row["avail"]:
+    ).fetchall()
+    days = [r for r in rows if (r["decks_available"] or 0) > 0]
+    if not days:
         return 0.0
-    return (row["used"] or 0) / row["avail"]
+    return sum(_war_day_credit(r["decks_used"], r["decks_available"]) for r in days) / len(days)
 
 
 def _percentile(value: float, values: list[float]) -> float:
@@ -539,6 +580,31 @@ def _percentile(value: float, values: list[float]) -> float:
     below = sum(1 for v in values if v < value)
     equal = sum(1 for v in values if v == value)
     return (below + 0.5 * equal) / n
+
+
+def _participation_percentile(value: float, values: list[float]) -> float:
+    """Percentile for a metric where zero means *did not participate*.
+
+    Non-participation scores 0.0. Participants are ranked against each other.
+
+    Mid-rank percentile is a RANKING device, and the elder score uses these
+    numbers as CREDIT MAGNITUDES — so handing a tied block its midpoint paid
+    members for doing nothing. Measured 2026-08-04 on the live roster: 27 of 41
+    members had zero ranked battles and every one received `ranked_pct = 0.329`,
+    worth up to 0.086 of final score through the competitive term — 1.7× the
+    swap margin that decides seats. Eleven members with a 0.00 war rate likewise
+    collected 0.134.
+
+    Ranking participants among themselves rather than against the whole roster
+    is deliberate: it keeps the scale meaningful when most of the clan sits at
+    zero. With 27 of 41 at zero, a whole-roster percentile would hand the very
+    first battle a ~0.67 — a cliff far bigger than the gap between a 1-battle
+    member and a 221-battle one.
+    """
+    if value <= 0:
+        return 0.0
+    participants = [v for v in values if v > 0]
+    return _percentile(value, participants)
 
 
 def _elder_scores(conn, now: str, week_anchor: str) -> dict:
@@ -576,10 +642,14 @@ def _elder_scores(conn, now: str, week_anchor: str) -> dict:
     war_vals = [r["war_rate"] for r in raw.values()]
     don_vals = [r["donations"] for r in raw.values()]
     rk_vals = [r["ranked_battles"] for r in raw.values()]
+    # All three are participation metrics, so all three zero-anchor: a member who
+    # did none of a thing scores 0 for it, and the members who did are ranked
+    # against each other. Before this, doing nothing paid — see
+    # _participation_percentile for the measurement.
     for r in raw.values():
-        r["war_pct"] = _percentile(r["war_rate"], war_vals)
-        r["donation_pct"] = _percentile(r["donations"], don_vals)
-        r["ranked_pct"] = _percentile(r["ranked_battles"], rk_vals)
+        r["war_pct"] = _participation_percentile(r["war_rate"], war_vals)
+        r["donation_pct"] = _participation_percentile(r["donations"], don_vals)
+        r["ranked_pct"] = _participation_percentile(r["ranked_battles"], rk_vals)
         # competitive = war participation PRIMARY; ranked participation fills part
         # of the gap war leaves (headroom), muted by RANKED_WEIGHT because war is
         # direct clan contribution and ranked only reps the clan. War-maxed → ~1;
@@ -719,9 +789,28 @@ def _elder_band(conn, scores: dict, now: str) -> dict:
     paired = min(len(prom_by_rank), len(out_by_rank))
     for i in range(paired):
         m, e = prom_by_rank[i], out_by_rank[i]
-        if scores[m]["score"] - scores[e]["score"] >= SWAP_MARGIN:
+        margin = scores[m]["score"] - scores[e]["score"]
+        # Inside the deadband the contest is a CLOSE CALL, and tenure decides it
+        # (2026-08-04, Jamie: "clan tenure should weigh in for ties or close
+        # calls. Tenure wins."). Usually the incumbent is also the longer-tenured
+        # one and nothing changes — the case this exists for is the long-serving
+        # member held out by a recently-promoted elder who is barely ahead, which
+        # is exactly the recognition gap Vijay raised on 2026-08-01.
+        #
+        # Tenure decides the seat; it never manufactures a promotion on its own.
+        # A challenger still has to be AHEAD to take the seat — the deadband only
+        # stops being a shield when the longer-tenured player is the one behind
+        # it.
+        close_call = 0 < margin < SWAP_MARGIN
+        tenure_wins = close_call and scores[m]["tenure"] > scores[e]["tenure"]
+        if margin >= SWAP_MARGIN or tenure_wins:
             promotable.add(m)
             demotable.add(e)
+            # One reason string for both paths. `demote_reasons` reaches the
+            # member-facing Elder Standing report, and a raw token like
+            # "outranked_tenure" is exactly the kind of engine internal that has
+            # leaked into a post before. The distinction changes nothing
+            # downstream — both take the 3-week swap cadence.
             demote_reasons[e] = "outranked"
         # else: deadband — the seat holds, the challenge is cancelled this week
     # Unpaired outranked = past the ceiling: demote to return to the band.
