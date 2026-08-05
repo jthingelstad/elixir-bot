@@ -1,7 +1,21 @@
 # Elixir v5.1 — Clan-Management Rules
 
-> **Status:** ✅ Build-ready — §5 defaults **ratified as drafted (Jamie, 2026-07-03)**.
-> **Owner:** Jamie · **Last worked:** 2026-07-03
+> **Status:** 📐 Design record — §5 defaults **ratified as drafted (Jamie, 2026-07-03)**.
+> **Owner:** Jamie · **Last worked:** 2026-07-03 · **Drift audited:** 2026-08-05
+>
+> ⚠️ **The elder band in §3.3 has changed materially since ratification and the
+> numbers below are NOT current.** For what the engine does today, read
+> `prompts/POLICY.md` (leader-facing prose) or `engine/management.py` (the
+> constants themselves). This doc records the *original decisions and their
+> rationale*, which is why superseded rules are marked in place rather than
+> rewritten — the reasoning behind a number is worth keeping even after the
+> number moves. Every such point below carries a **⟳ Superseded** note with the
+> current value and the date it changed.
+>
+> This matters because the doc is cited as an authority from
+> `engine/management.py:1`, `AGENTS.md` ("their meaning lives in
+> `management.md`"), and `storage/war_analytics.py` (by section number). A
+> reader following those pointers lands here expecting current rules.
 >
 > The transition rules for the §13.3 deterministic core. The 2026-07-03 clarity
 > review (feedback.md rev 5) found that `schema.md` §6.3 defines the state
@@ -93,6 +107,14 @@ score       = 0.65 · competitive + 0.35 · donation_percentile
 
 - **war_pct** = percentile of war_rate (decks used ÷ available) — the PRIMARY
   lane; war is direct clan contribution (Fame + clan-league progress).
+  > ⟳ **Superseded 2026-08-04** — `war_rate` is no longer a flat decks ratio. It
+  > is per-day credit **averaged over the days**, and finishing a day is worth
+  > more than its deck share: `credit = 0.75·(used/available) + 0.25·(complete)`
+  > (`FULL_DAY_BONUS = 0.25`). 4/4 = 1.00, 3/4 = 0.56, 2/4 = 0.38 — four decks is
+  > ~2.7× two, not 2×. Averaging per *day* rather than summing decks first is
+  > load-bearing: summed, four half-days would score identically to two complete
+  > ones, which is the exact distinction the bonus exists to make. Jamie: *"All
+  > four is more than half the decks and should impact calculation."*
 - **ranked_pct** = percentile of **ranked battles played** in the score window —
   PARTICIPATION, not league reached (reworked 2026-07-12). Playing ranked reps
   the clan but doesn't build it the way war does, so it's muted by
@@ -107,14 +129,38 @@ score       = 0.65 · competitive + 0.35 · donation_percentile
   ranked rose to the top.
 - **donations** = the closed-week donation volume ("lead by example"),
   percentile within the roster.
+  > ⟳ **Superseded 2026-07-12** — the input is the **trailing 4-week average**
+  > (`member_management.donations_4wk_avg`), not a closed week. A single week
+  > swings hard on the donation reset; a near-empty Sunday snapshot made
+  > donations count for nothing. This also makes the scored number equal the
+  > number the Elder Standing report and webapp display.
 - Percentiles compute over the active non-leadership roster each weekly review,
   so the bar self-calibrates. Weights `SCORE_W_WAR = 0.65`,
   `SCORE_W_DONATION = 0.35` (the war weight now names the whole competitive
   term).
+  > ⟳ **Amended 2026-08-04** — all three inputs are **zero-anchored**
+  > (`_participation_percentile`): doing none of a thing scores 0.0 for it, and
+  > only the members who did it are percentiled against each other. A mid-rank
+  > percentile is a *ranking* device, but the score consumes it as a *credit
+  > magnitude*, so a tied block of non-participants was being paid its midpoint.
+  > Measured on the live roster: 27 of 41 members had zero ranked battles and
+  > each received `ranked_pct = 0.329`, worth up to 0.086 of final score — **1.7×
+  > `SWAP_MARGIN`**, the margin that decides seats. Eleven members with a 0.00
+  > war rate likewise collected 0.134. Ranking participants among themselves
+  > (rather than against the whole roster) keeps the scale meaningful when most
+  > of the clan sits at zero — a whole-roster percentile would hand the very
+  > first battle a ~0.67 cliff.
 - **Battle/laddering is NOT in the elder score** (Jamie 2026-07-05) — general
   activity belongs to the kick path (§3.5), not elder-worthiness.
 
 ### 3.3 The band (how many elders)
+
+> ⚠️ **This whole section is superseded.** Both the percentages and the
+> population changed, and the single-`K` model was replaced by three lines with
+> different jobs. The current rules are in `prompts/POLICY.md` §"How many
+> Elders" and `engine/management.py::_elder_band`. Kept here for the 2026-07-05
+> rationale — the "corps tracks the ranking" principle below is still exactly
+> why the band works the way it does.
 
 Target elder count for a non-leadership roster of `N` (roster minus leaders and
 co-leaders by role):
@@ -122,6 +168,17 @@ co-leaders by role):
 ```
 floor   = round(0.15 · N)     ceiling = round(0.20 · N)
 ```
+
+> ⟳ **Superseded twice.** The share is now **`0.20 / 0.30`** (2026-07-05
+> retune), and since 2026-08-01 it is taken over the **whole active roster,
+> leadership included** — not `N`. Jamie: *"one in four or five people here
+> wears a badge"* is a statement about the clan you see in-game, and excluding
+> the four leaders from the denominator quietly shrank it. Everything *else* —
+> rank, median, who is promotable — still runs over the non-leadership
+> population, because a co-leader cannot be promoted to elder and should not
+> dilute the median that decides whether a member is worthy. Two populations,
+> deliberately different. At a 45-member roster the live band is **9–14**, where
+> this doc's formula would give 6–8.
 
 **The corps TRACKS THE RANKING** (Jamie, 2026-07-05 — reverses the earlier
 "never churn an in-band elder" reading): *"it is entirely appropriate for an
@@ -144,6 +201,34 @@ thin/weak clan promotes nobody rather than the undeserving. "Range, not quota"
 now means the *count* floats in [floor, ceiling] while the *composition* always
 tracks the ranking.
 
+> ⟳ **Superseded — there is no single `K` any more.** `clamp(current_elders,
+> floor, ceiling)` made the corps' current size its own target, so growing to
+> the floor and stopping was the behaviour. The floor is the *lowest acceptable*
+> count, not the goal. Three lines now, each with a distinct job:
+>
+> ```
+> target  = round((floor + ceil) / 2)   the midpoint; what growth is pulled TOWARD
+> ceiling = round(0.30 · roster)        HARD; growth stops, and only past it is
+>                                       anyone demoted for the count alone
+> floor   = round(0.20 · roster)        a DRIFT LIMIT; force-promotes nobody
+> ```
+>
+> `grow_line` = top-`target` (who is worth promoting); `hold_line` = top-`ceil`
+> (who keeps a seat). Separating them is what lets the count sit anywhere in the
+> band: an elder ranked 12th of 13 is inside the tolerance and is **not**
+> displaced merely for being past the target, while a member inside the top 11
+> is still worth promoting. A close call at the boundary can carry the corps to
+> the ceiling, and a thin field lets it settle back toward the floor, without
+> either edge ever being the aim.
+>
+> ⟳ **The worthiness floor now gates ALL growth, not just below-floor growth.**
+> Promoting a below-average member to hit a number is precisely what a target
+> must never cause — this is the mechanism by which a weak field trends the
+> corps *down* instead of padding it out. Note also that
+> `WORTHINESS_MIN_PERCENTILE = 0.50` is **decorative**: the constant is defined
+> but referenced nowhere, and the median comparison in `_elder_band` is
+> hardcoded. Changing the constant would do nothing.
+
 ### 3.4 Anti-flap + hysteresis — demotion easier, swaps never oscillate
 
 A swap must be *earned and durable*, never a jitter at the boundary:
@@ -151,6 +236,27 @@ A swap must be *earned and durable*, never a jitter at the boundary:
 - **`SWAP_MARGIN = 0.05` deadband:** a member displaces an elder only when they
   out-score them by ≥ the margin. A near-tie holds the incumbent — so two
   players trading a hair-lead week to week never swap the seat.
+  > ⟳ **Amended 2026-08-04 — tenure decides close calls.** Inside the deadband
+  > the contest is a close call, and the longer-tenured player wins it. Usually
+  > the incumbent *is* the longer-tenured one and nothing changes; the case this
+  > exists for is the long-serving member held out by a recently-promoted elder
+  > who is barely ahead. Tenure never manufactures a promotion — the challenger
+  > must still be ahead on score; tenure only stops the deadband from shielding a
+  > shorter-tenured incumbent. Jamie: *"clan tenure should weigh in for ties or
+  > close calls. Tenure wins."* Both paths emit the single reason string
+  > `"outranked"`; a token like `outranked_tenure` is an engine internal and the
+  > reason reaches the member-facing Elder Standing report.
+  >
+  > ⟳ **The pairing is across the K line, not best-vs-best.** Pair the *weakest*
+  > challenger above the line against the *strongest* outranked elder below it —
+  > the closest contest, which is where a deadband belongs. Sorting both lists
+  > the same way paired strongest-with-strongest (the widest gap, the easiest
+  > swap), so the margin was tested against a contest that was never close and
+  > the seat nearest the line got taken on a hair's lead. The contest is judged
+  > at the **hold line**, not the target: an elder who slipped past the ceiling
+  > was pushed out by whoever occupies that seat, and pairing only against
+  > members inside the target would leave them unpaired and demoted with no
+  > deadband check at all.
 - **Sustained weeks** (the state machines): a member holds the promotable set
   for **`PROMOTE_QUALIFYING_WEEKS (3)`** reviews → `eligible`; one miss is
   grace, two consecutive misses reset.
@@ -167,7 +273,10 @@ re-clear the margin *and* sustain 3 weeks to swap back.
   at the new role. Auto-withdraw: leaving the candidate set two weeks (promote)
   or one week (demote) pulls any open action.
 
-### 3.3 `kick_state` — the reactive path (Q1)
+### 3.5 `kick_state` — the reactive path (Q1)
+
+> Numbered **3.3** until 2026-08-05, colliding with the band section above while
+> §3.2 pointed readers at a §3.5 that did not exist.
 
 Driven by **days since last battle** (`D` below), evaluated every tick.
 **Redesigned 2026-07-11** — flat thresholds, contribution grace scaled by
@@ -190,9 +299,15 @@ contributes  = _passes_war_floor OR _passes_ranked_floor   # the elder floor
   — the old `max(7, trophies/1000 × 1.4)` buffer is removed (a high-trophy idle
   member on a full roster still costs a slot).
 - **Contribution grace** replaces the trophy buffer: a member who passes the
-  **same floor that earns elder** (recent war participation *or* Champion ranked
-  — ranked counts equally, on live/last season, not a 3-season average) gets up
-  to **+4 confirm days**, but only *scaled by open-slot slack*. Full grace on an
+  **same floor that earns elder** — a war day with a deck played in the last 14,
+  *or* ≥5 ranked battles in the last 14, ranked counting equally — gets up
+  to **+4 confirm days**, but only *scaled by open-slot slack*.
+  > ⟳ **Corrected 2026-08-05.** This read "*or* Champion ranked … on live/last
+  > season, not a 3-season average", which was already stale when written: the
+  > ranked half of the elder floor became **participation** on 2026-07-12
+  > (`RANKED_FLOOR_BATTLES = 5` in 14 days). Because the grace deliberately
+  > reuses `_passes_war_floor OR _passes_ranked_floor`, it inherited the rework
+  > automatically and the prose simply fell behind the code it describes. Full grace on an
   empty roster; **zero at 50/50** — an idle member only costs a slot when the
   clan is full. So the plain card is **8 days** (5 + 3); a contributor on a
   near-empty roster stretches to ~12.
@@ -218,7 +333,15 @@ The §6.3 metric columns (`donations_4wk_avg`, `war_fame_3season_avg`,
 `war_attendance_rate`, `battle_days_last_28`, `tenure_days`) are **not** inputs
 to the machines beyond the rules above — they are carried so the subagent can
 *render evidence* ("4-week donation avg 212, war attendance 94%") without
-re-deriving anything. `state_json` holds each machine's internals
+re-deriving anything.
+
+> ⟳ **`donations_4wk_avg` is no longer evidence-only** — since 2026-07-12 it is
+> the donation term of the elder score itself (`_elder_scores` reads the column
+> directly). One upside of the change: the number that is *scored* is now
+> identical to the number the Elder Standing report and the webapp *display*,
+> so a member cannot be shown one figure and ranked on another.
+> `war_fame_3season_avg` is the opposite case — still a column, but nothing
+> reads it since the 3-season fame grace was removed from the kick path. `state_json` holds each machine's internals
 (qualifying-week history, miss counters) so auto-withdraw and the parity of
 "why is X eligible?" are answerable.
 
@@ -230,11 +353,15 @@ re-deriving anything. `state_json` holds each machine's internals
 | **Elder band** (2026-07-05) | | |
 | `PROMOTE_TENURE_MIN` | 28 days | four-week hard filter before elder consideration |
 | `WAR_FLOOR_DAYS` / `WAR_FLOOR_WINDOW` | 1 / 14 | war half of the competitive floor (≥1 finalized day in 14) |
-| `RANKED_FLOOR_LEAGUE` | 4 (Champion) | ranked half of the competitive floor; best-of current/last season |
+| ~~`RANKED_FLOOR_LEAGUE`~~ | 4 (Champion) — **no longer gates** | ⟳ 2026-07-12: retained for DISPLAY only (the league *name*). The ranked floor is now participation |
+| `RANKED_FLOOR_BATTLES` | 5 | ⟳ *added 2026-07-12* — ranked half of the competitive floor: ≥5 ranked battles in `WAR_FLOOR_WINDOW` |
+| `RANKED_WEIGHT` | 0.40 | ⟳ *added 2026-07-12* — mutes ranked inside the competitive term; it fills the gap war leaves, never substitutes |
+| `WAR_RATE_WINDOW` | 28 days | trailing window the per-day war credit is averaged over |
+| `FULL_DAY_BONUS` | 0.25 | ⟳ *added 2026-08-04* — share of a war day's credit reserved for **finishing** it |
 | `SCORE_W_WAR` / `SCORE_W_DONATION` | 0.65 / 0.35 | war-weighted rank blend; war is the core elder duty |
-| `ELDER_BAND_FLOOR` / `ELDER_BAND_CEIL` | 0.15 / 0.20 | elder share of the non-leadership roster (range, not quota) |
-| `WORTHINESS_MIN_PERCENTILE` | 0.50 | below-floor promotions still require ≥ roster-median score |
-| `SWAP_MARGIN` | 0.05 | anti-flap deadband — a member displaces an elder only by out-scoring them this much |
+| `ELDER_BAND_FLOOR` / `ELDER_BAND_CEIL` | ~~0.15 / 0.20~~ → **0.20 / 0.30** | ⟳ retuned 2026-07-05; denominator changed 2026-08-01 to the **whole active roster, leadership included** (§3.3) |
+| `WORTHINESS_MIN_PERCENTILE` | 0.50 | ⚠️ **decorative** — defined but referenced nowhere; the median test in `_elder_band` is hardcoded. Note also that worthiness now gates *all* growth, not just below-floor |
+| `SWAP_MARGIN` | 0.05 | anti-flap deadband — a member displaces an elder only by out-scoring them this much, **or by winning a close call on tenure** (⟳ 2026-08-04) |
 | `PROMOTE_QUALIFYING_WEEKS` | 3 | sustained weeks to promote / to swap out an outranked elder |
 | `DEMOTE_WEEKS` | 2 | abandonment demotion (faster); outranked demotion uses the 3-week promote cadence |
 | **Kick path (redesigned 2026-07-11)** | | |
@@ -253,6 +380,21 @@ These move into `CLAN.md`'s Thresholds section (the precedent home) **at the
 cut**, alongside C5's prose update — `CLAN.md` is the live bot's prompt, so the
 constants land when the engine that reads them does (migration.md Phase 5).
 This doc's tables remain the reference for what they mean.
+
+> ⟳ **That is not how it landed, and the difference is why this doc rotted.**
+> The engine never reads its constants from `CLAN.md` or from here — it carries
+> them as module constants in `engine/management.py`, and both documents are
+> hand-copied prose that drifts silently. `CLAN.md` still claimed to be the
+> source the engine reads until 2026-08-05, by which point it had
+> `promote_qualifying_weeks: 4` (is 3) and `demote_weeks: 4` (is 2, and
+> abandonment-only).
+>
+> **`engine/management.py` is the single source of truth.** Changing an elder
+> constant is a four-file change: the engine, `prompts/POLICY.md`, and the two
+> poapkings.com pages (`src/members.njk`, `src/faq.njk`). The comment above
+> `ELDER_BAND_FLOOR` names them all, and `tests/test_cr_knowledge.py` asserts
+> POLICY.md's prose against the imported constants so this class of drift fails
+> a test instead of surviving for a month.
 
 ## 6. What this doc deliberately does not do
 
