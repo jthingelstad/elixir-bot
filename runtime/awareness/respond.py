@@ -380,11 +380,24 @@ def _deliver(episode: dict, seed: dict, floor: frozenset, deliver_fn) -> dict:
 
 
 def record_episode(episode: dict, outcome: dict) -> None:
-    """Persist what this wake thought and did.
+    """Persist what this wake thought and did — write-only, admin-facing.
 
-    The substrate the nightly reflection reads. Lives in the telemetry database
-    for now — Phase 1 is deliberately migration-free, and an episode is
-    observation, not clan state.
+    Lives in the telemetry database because an episode is observation about the
+    agent, not a fact about the clan. **Nothing in Elixir's behaviour may ever
+    read it back.** The telemetry file is operational history for humans: if it
+    were deleted, we lose the ability to explain what happened, never the
+    ability to do the right thing next time.
+
+    One reader exists and it is a report — `runtime/awareness/divergence.py`
+    counts floor misses for the daily #leaders message, and degrades to
+    "unavailable" when the file is missing.
+
+    An earlier version of this docstring called episodes "the substrate the
+    nightly reflection reads". That was wrong and worth correcting rather than
+    deleting: Phase 4's reflection reads 24h of **delivery intents** from the
+    clan database, plus reactions and lessons that also live there. If a future
+    phase ever wants an episode to change what Elixir does, the episode has to
+    move to the clan DB first — that is the line.
     """
     try:
         from storage import telemetry

@@ -278,3 +278,77 @@ def test_the_escalation_rung_has_real_output_headroom():
     assert set(respond._MAX_TOKENS_BY_TIER) == set(respond._LADDER), (
         "every ladder rung needs a declared ceiling"
     )
+
+
+# ------------------------------------- telemetry must stay operational-only
+
+
+def test_the_wake_budget_counter_lives_in_the_clan_db(engine_conn):
+    """A number that can SUPPRESS a wake is a decision, not a report.
+
+    `elixir-telemetry.db` is operational history for humans: deleting it must
+    cost visibility, never function. The budget counter used to be read from
+    `wake_observations` there, which broke that rule — and was broken in fact
+    too, because `observe()` wrote `mode='shadow'` while the live path read
+    `mode='live'`, so the cap never once bound.
+    """
+    from datetime import datetime, timezone
+
+    from runtime.awareness import wake
+
+    now = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
+    assert wake._wakes_today(engine_conn, "live", now) == 0
+    wake.record_spend("live", now=now, conn=engine_conn)
+    wake.record_spend("live", now=now, conn=engine_conn)
+    assert wake._wakes_today(engine_conn, "live", now) == 2
+
+    # Modes are separate ledgers; shadow must never charge the live budget.
+    wake.record_spend("shadow", now=now, conn=engine_conn)
+    assert wake._wakes_today(engine_conn, "live", now) == 2
+    assert wake._wakes_today(engine_conn, "shadow", now) == 1
+
+    # And it is genuinely in the clan database, keyed by date.
+    row = engine_conn.execute(
+        "SELECT cursor_int FROM stream_cursors WHERE consumer_key = ? AND scope_key = ?",
+        ("awareness:wake:budget:live", "2026-08-05"),
+    ).fetchone()
+    assert row and row[0] == 2
+
+
+def test_nothing_in_the_wake_path_reads_the_telemetry_database_to_decide():
+    """Guard the rule at the source level: `wake.py` may WRITE observations but
+    must not consult telemetry for anything that changes what Elixir does."""
+    import inspect
+
+    from runtime.awareness import wake
+
+    # The functions that DECIDE. `observe`/`record_wake_observation` are writers
+    # and may of course touch telemetry; these may not.
+    # Match the CODE, not the word: these docstrings deliberately explain that
+    # the counter used to live in telemetry, and that history is worth keeping.
+    for fn in (wake._wakes_today, wake.evaluate, wake.pending_events, wake.record_spend):
+        source = inspect.getsource(fn)
+        for pattern in ("telemetry.connect(", "import telemetry", "wake_observations"):
+            assert pattern not in source, (
+                f"{fn.__name__} contains {pattern!r}; a decision may not depend on "
+                "a file that is safe to delete"
+            )
+
+
+def test_the_divergence_report_never_calls_itself_clean_when_it_could_not_look():
+    """A health check that reports green when its data source is missing is
+    worse than no check."""
+    from runtime.awareness import divergence
+
+    original = divergence.floor_misses
+    divergence.floor_misses = lambda hours=24: {
+        "window_hours": hours,
+        "misses": [],
+        "available": False,
+    }
+    try:
+        result = divergence.report(hours=24)
+    finally:
+        divergence.floor_misses = original
+    assert result["clean"] is False
+    assert result["floor_data_available"] is False

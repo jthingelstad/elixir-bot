@@ -42,7 +42,6 @@ except ImportError:
 
 import anthropic  # noqa: E402
 
-import db  # noqa: E402
 from agent.workflow_registry import get_workflow_spec  # noqa: E402
 
 
@@ -73,14 +72,19 @@ def main() -> int:
         required = (get_workflow_spec(args.workflow).response_schema or {}).get("required", [])
     except KeyError:
         required = []
-    conn = db.get_connection()
+    # llm_calls moved to the telemetry database in schema v34 (2026-08-03).
+    # This script kept querying the clan connection and has been silently dead
+    # since — the table is not there. Read-only admin tooling; the telemetry DB
+    # is the right source for captured prompts.
+    from storage import telemetry
+
+    conn = telemetry.connect()
     rows = conn.execute(
         "SELECT model, prompt_json, response_json FROM llm_calls "
         "WHERE workflow = ? AND ok = 1 AND prompt_json IS NOT NULL "
         "ORDER BY recorded_at DESC LIMIT ?",
         (args.workflow, args.n),
     ).fetchall()
-    conn.close()
     if not rows:
         print(f"no captured calls for {args.workflow}", file=sys.stderr)
         return 1

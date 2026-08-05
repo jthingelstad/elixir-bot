@@ -732,6 +732,11 @@ async def _evaluate_wakes():
         if respond_mod.job_for(fired.get("events") or []) is None:
             continue
         outcome = await _run_wake_responder(fired)
+        # Charge the budget where the money goes, not where it succeeds — a turn
+        # that failed every tier cost the same as one that landed. The counter is
+        # clan-DB state (stream_cursors), because a number that can suppress a
+        # wake is a decision and must not depend on the telemetry file.
+        await asyncio.to_thread(wake.record_spend, "live")
         if outcome.get("handled"):
             handled.append(fired["wake_class"])
             await asyncio.to_thread(wake.mark_fired, fired["consumer_key"], fired["high_water"])
@@ -1573,6 +1578,11 @@ async def _report_wake_divergence():
         return
     if result.get("same_member"):
         log.info("wake divergence: same-member repeats %s", result["same_member"][:5])
+    if not result.get("floor_data_available"):
+        # Not clean, but not an incident either: the telemetry file is
+        # deletable by design, so losing the floor half degrades the CHECK, not
+        # Elixir. Say so plainly instead of implying a divergence was found.
+        log.warning("wake divergence: floor-miss data unavailable (telemetry unreadable)")
     overlap = result.get("overlap") or []
     misses = result.get("floor_misses") or []
     if not overlap and not misses:

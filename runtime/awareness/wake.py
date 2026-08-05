@@ -61,6 +61,10 @@ log = logging.getLogger("elixir")
 # run must never advance the marks the live responder will depend on.
 SHADOW_CURSOR_PREFIX = "awareness:wake:shadow:"
 LIVE_CURSOR_PREFIX = "awareness:wake:"
+# Daily wake-budget counter, in the CLAN db. Deliberately NOT telemetry: this
+# number can suppress a wake, and a decision may not depend on a file that is
+# safe to delete.
+BUDGET_CURSOR_PREFIX = "awareness:wake:budget:"
 
 # How long a batch class may coalesce before it fires anyway, and the count that
 # fires it early. Three badges in an hour should be one post, not three.
@@ -238,23 +242,56 @@ def _age_minutes(observed_at: str | None, now: datetime) -> float:
     return (now - stamp).total_seconds() / 60.0
 
 
-def _wakes_today(mode: str, now: datetime) -> int:
-    """Fired wakes recorded for ``mode`` since UTC midnight."""
-    try:
-        from storage import telemetry
+def _budget_key(mode: str) -> str:
+    return f"{BUDGET_CURSOR_PREFIX}{mode}"
 
-        conn = telemetry.connect()
-        row = conn.execute(
-            "SELECT COUNT(*) FROM wake_observations "
-            "WHERE mode = ? AND fired = 1 AND recorded_at >= ?",
-            (mode, now.strftime("%Y-%m-%dT00:00:00Z")),
-        ).fetchone()
-        return int(row[0] or 0)
-    except Exception:
-        # Budget accounting must never block a wake; an unreadable telemetry
-        # file means we cannot prove the budget is spent, so we let it through.
-        log.debug("wake: could not read today's wake count", exc_info=True)
-        return 0
+
+def _wakes_today(conn: sqlite3.Connection, mode: str, now: datetime) -> int:
+    """Wakes this mode has already spent today, from the CLAN database.
+
+    Counted from ``stream_cursors`` keyed ``(awareness:wake:budget:<mode>,
+    YYYY-MM-DD)`` — the table's ``scope_key`` column exists for exactly this and
+    was otherwise unused, so a dated counter needs no migration.
+
+    **This used to read the observations table in the telemetry database, and
+    that was wrong on principle.** The telemetry file is operational history for
+    humans: it must be safe to delete, and nothing Elixir *does* may depend on
+    it. A budget that suppresses a wake is a decision, not a report, so its state
+    belongs in the clan DB beside the cursors it works with.
+
+    It was also wrong in fact. `observe()` only ever wrote `mode='shadow'` rows
+    while the live path read `mode='live'`, so the count was 0 on every live tick
+    and the cap had never once bound. Moving the counter to the point of spend
+    fixes both at the same time.
+    """
+    row = conn.execute(
+        "SELECT cursor_int FROM stream_cursors WHERE consumer_key = ? AND scope_key = ?",
+        (_budget_key(mode), now.strftime("%Y-%m-%d")),
+    ).fetchone()
+    return int(row[0] or 0) if row else 0
+
+
+@managed_connection
+def record_spend(mode: str, *, count: int = 1, now: datetime = None, conn=None) -> int:
+    """Charge ``count`` wakes against today's budget. Returns the new total.
+
+    Called where the money is actually spent — after the responder has RUN, not
+    after it has succeeded, because a failed turn costs the same as a good one.
+    Old dates are left in place; db-maintenance purges them with everything else.
+    """
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+    conn.execute(
+        "INSERT INTO stream_cursors (consumer_key, scope_key, cursor_int, updated_at) "
+        "VALUES (?, ?, ?, ?) ON CONFLICT(consumer_key, scope_key) DO UPDATE SET "
+        "cursor_int = COALESCE(stream_cursors.cursor_int, 0) + excluded.cursor_int, "
+        "updated_at = excluded.updated_at",
+        (_budget_key(mode), stamp, max(0, int(count)), _utcnow()),
+    )
+    row = conn.execute(
+        "SELECT cursor_int FROM stream_cursors WHERE consumer_key = ? AND scope_key = ?",
+        (_budget_key(mode), stamp),
+    ).fetchone()
+    return int(row[0] or 0) if row else 0
 
 
 @managed_connection
@@ -293,7 +330,7 @@ def evaluate(
             lead_reason = f"scheduled deliberation in {lead:.0f}m (< {min_lead_minutes()}m lead)"
 
     budget = daily_wake_budget()
-    spent = _wakes_today(mode, now)
+    spent = _wakes_today(conn, mode, now)
 
     # Group by (class, model, job). Events of the same tier AND the same job ride
     # together — one author, one post, no divergence.
@@ -430,6 +467,12 @@ def observe(decision: dict) -> int:
             mark_fired(wake["consumer_key"], wake["high_water"])
         except Exception:
             log.exception("wake: could not mark high-water for %s", wake["consumer_key"])
+        # Shadow spends nothing, but it keeps its own counter so the shadow
+        # budget behaves like the live one and the two never share a number.
+        try:
+            record_spend(mode)
+        except Exception:
+            log.exception("wake: could not charge the %s wake budget", mode)
         recorded += 1
 
     for hold in decision.get("held") or []:

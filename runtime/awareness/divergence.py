@@ -114,11 +114,24 @@ def floor_misses(hours: int = WINDOW_HOURS_DEFAULT) -> dict:
 
 
 def report(hours: int = WINDOW_HOURS_DEFAULT) -> dict:
-    """Both halves, plus a single ``clean`` flag a job can branch on."""
+    """Both halves, plus a ``clean`` flag — which never means "I could not look".
+
+    A health check that reports green when its data source is missing is worse
+    than no check: the first version folded `floor_misses`'s empty list into
+    `clean` without asking whether the telemetry file had been readable, so a
+    deleted telemetry DB would have produced a confident all-clear. `clean` now
+    requires that the floor half actually ran, and the caller is told when it
+    did not.
+    """
     divergence = check_divergence(hours=hours)
     floors = floor_misses(hours=hours)
     divergence["floor_misses"] = floors.get("misses") or []
-    divergence["clean"] = not divergence["overlap"] and not divergence["floor_misses"]
+    divergence["floor_data_available"] = bool(floors.get("available"))
+    divergence["clean"] = (
+        not divergence["overlap"]
+        and not divergence["floor_misses"]
+        and divergence["floor_data_available"]
+    )
     return divergence
 
 

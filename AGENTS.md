@@ -165,7 +165,20 @@ Four database files exist, with distinct roles:
 
 - **`elixir-v51.db`** — the operational engine DB. `db/schema.py` is the canonical schema entrypoint for the private clean-break baseline and ordered post-cut evolution. `db.get_connection()` refuses databases without the v5.1 spine, migrates compatible v5.1 databases forward, and is the sole initializer.
 - Durable memory lives IN the engine DB since 2026-07-04 (the v5.1 memory pass, `docs/reference/v5.1/memory.md`): `memories` + `memory_tags` + `memories_fts`, accessed through the `memory_store` seam. `inference` rows carry a 90-day default TTL and are reclaimed by db-maintenance; curated kinds (`leader_note`, `synthesis`, `system`) never expire by default (#215). The old `elixir-v5-memory.db` is archived (`elixir-v5-memory-archive-2026H2.db`, read-only); `ELIXIR_V5_MEMORY_DB` is retired.
-- **`elixir-telemetry.db`** — LLM call telemetry, split out 2026-08-03 (`storage/telemetry.py`, `ELIXIR_TELEMETRY_DB_PATH`). Schema v34 dropped `llm_calls` from the clan DB because **every model call was taking the clan database's single write lock**. It is ~116 MB and **not covered by `scripts/backup_db.py`** — a known gap, not a design decision.
+- **`elixir-telemetry.db`** — operational telemetry, split out 2026-08-03 (`storage/telemetry.py`, `ELIXIR_TELEMETRY_DB_PATH`): `llm_calls`, `db_transactions`, `db_lock_waits`, `db_stalls`, `wake_observations`, `wake_episodes`. Schema v34 dropped `llm_calls` from the clan DB because **every model call was taking the clan database's single write lock**. ~116 MB and **not covered by `scripts/backup_db.py`** — a known gap, not a design decision.
+
+  > **The rule: this file is admin-only, and Elixir's behaviour may never depend
+  > on it.** Deleting it must cost operational *history* — never function. Reads
+  > are allowed only for things a human looks at (`/status`'s cost panel, the
+  > Observatory drill-down, `scripts/wake_shadow_report.py`, the daily divergence
+  > report), and each fails soft. Anything that *decides* — gates a post, picks a
+  > tier, moves a cursor, feeds a prompt — reads the clan DB.
+  >
+  > This was violated once: the daily wake budget counted fired wakes from
+  > `wake_observations` and could suppress a wake on the result. It moved to
+  > `stream_cursors` in the clan DB on 2026-08-05. `tests/test_wake_jobs_phase2.py`
+  > now pins both halves of the rule. If a future feature wants an episode to
+  > change what Elixir does, the episode moves to the clan DB first.
 - **`elixir-v5-archive-2026H2.db`** — the pre-cut cold archive. Read-only (chmod 444), never written; open with `file:…?immutable=1`. **Not present on this workstation** — `db.schema.build_database()` and the test fixture treat it as optional and fall back to the frozen private migration-0 SQL in `db/`, which is why nothing has failed. Do not assume it is reachable; verify before planning any recovery around it.
 
 **Historical recovery actually comes from the rolling backups** in `$ELIXIR_BACKUP_DIR` (see `scripts/backup_db.py`). Each nightly `.db.gz` froze the short-retention `raw_api_payloads` window as it stood on its own date, so their UNION reaches much further back than any single snapshot. `scripts/backfill_battle_fields.py` is the current worked example: it reads the live database plus every backup through the current extractor.
