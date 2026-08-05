@@ -12,18 +12,22 @@ matches brain quality at 4–20× lower cost; the brain spends ~300K tokens/tick
 | Phase | State | Flag |
 |---|---|---|
 | 0 — shadow wakes + baseline | **shipped, live** (`4eaab798`) | `ELIXIR_WAKE_POLICY=1`, `ELIXIR_WAKE_SHADOW=1` |
-| 1 — chassis + join responder | **shipped, LIVE** (`276011fb`, enabled `f1d6c2fa`) | `ELIXIR_WAKE_RESPONDER=1` |
+| 1 — chassis + join responder | **shipped, LIVE, gate MET 2026-08-05** (`276011fb`, enabled `f1d6c2fa`) | `ELIXIR_WAKE_RESPONDER=1` |
 | 2 — roster wakes, brain 4×→2× | not started | — |
 | 3 — war wakes, brain →1× | not started | — |
 | 4 — leader-feedback reflection | not started | — |
 | 5 — dossiers + follow-ups | not started | needs `_apply_v36` |
 | 6 — adoption + tuning | not started | — |
 
-**Open at the top of Phase 2:** the responder's exit gate is ≥5 real joins
-welcomed by the chassis, reviewed by Jamie. At the time of writing, zero have
-occurred since it was enabled — the gate is *waiting on clan activity*, not on
-work. Phase 2 should not start until those welcomes exist and Jamie has read
-them.
+**Phase 2 is unblocked.** Phase 1's gate was met on 2026-08-05 by rehearsal
+rather than by waiting for five organic joins (see Phase 1 below for why and
+what was proven). Nothing else blocks Phase 2 starting.
+
+**A gate lesson worth carrying forward:** "≥5 real joins" was an exit criterion
+the team could not influence — it depended on strangers deciding to join a clan.
+When a gate is waiting on the world rather than on work, look for a rehearsal
+that isolates the untested wiring instead of parking the phase. Two isolations
+made it safe here: a database copy and a redirected Discord channel.
 
 Wake-policy decisions already ratified (both from Phase 0 findings): badges
 split at the emitter into `badge_earned` (digest) / `legendary_badge_earned`
@@ -230,7 +234,38 @@ Three bugs the live run caught, all fixed:
   and the model led with account age while holding the deck. Rewritten as a
   prohibition; the next run dropped it entirely and named the deck's cards.
 
-Exit gate: ≥5 real joins welcomed by the chassis with the flag on.
+**Exit gate: MET 2026-08-05 (Jamie).** The original bar was ≥5 real joins, which
+would have parked the phase for weeks — new members join rarely. Jamie's call:
+prove the wiring by rehearsal instead. Three real joins (blackberry, Ram,
+Gabriel) were replayed through the **live delivery path**, isolated two ways —
+`ELIXIR_DB_PATH` on a copy, every Discord send redirected to `#thinking`.
+Verified afterwards: zero intents, zero `awareness_posts`, zero leader-action
+rows in the production database.
+
+All three composed, validated, created a durable intent, sent, recorded a
+receipt and produced an in-game sibling — `fulfilled`, `attempts=1`, message id
+present, no stuck `sending` rows.
+
+Two results only a live run could produce:
+
+- **The escalation ladder fired for real.** On Gabriel, Haiku returned prose
+  instead of calling the posting tool and produced no post; the responder
+  escalated to Sonnet, which delivered. That path had unit tests but had never
+  executed against a live model. Reliability observed: Haiku carried 2 of 3.
+- **Cost, measured:** $0.29 for three welcomes — **~$0.10 each** including the
+  failed attempt and the escalation. Use that as the planning number rather
+  than the $0.044 from the stubbed replay. Still ~1/5 of a brain tick.
+
+Quality reviewed and accepted by Jamie. The welcome led with deck archetype
+rather than trophies-and-arena (the prohibited opener), and the seed's stint
+history caught that Ram was on his *third* stint — something the brain's own
+post had missed.
+
+Still unproven, both well-worn paths every brain post already uses:
+`_engine_send` marshalling from the worker thread to the bot's event loop, and
+the clan-chat relay raising a real `#actions` card rather than the rehearsal's
+stand-in. The first organic join exercises both, with the daily brain as
+backstop.
 
 
 **Goal:** the smallest real chassis, serving exactly one wake type
