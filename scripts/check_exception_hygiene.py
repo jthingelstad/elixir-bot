@@ -76,7 +76,10 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/awareness/deliver.py": 10,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
-    "runtime/awareness/read.py": 1,
+    # 1 -> 2 (2026-08-04): the covered-signal lookup fails OPEN. A failure that
+    # silently emptied the set would suppress nothing (correct); a failure that
+    # raised would take down the whole read, and with it the hard-post floor.
+    "runtime/awareness/read.py": 2,
     "runtime/awareness/store.py": 1,
     # 4 (2026-08-04, new): the wake evaluator runs inside the 10-minute engine
     # tick and is pure measurement in Phase 0 — every guard here degrades to

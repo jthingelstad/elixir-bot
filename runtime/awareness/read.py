@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import db
 from capabilities import awards as awards_capability
@@ -704,6 +704,34 @@ def _recent_agent_writes(conn, limit: int = 10) -> list[dict]:
     return out
 
 
+def _covered_signal_keys(conn, hours: int = 24) -> set:
+    """Signal keys already delivered by any author in the recent past.
+
+    Read from the delivery outbox rather than from the messages table: the
+    outbox is where coverage is recorded, and auditing what Elixir posted by
+    looking anywhere else has produced a real miss before.
+
+    Bounded to a day because a signal older than that is past the brain's cursor
+    anyway, and an unbounded scan of covers_json grows without limit.
+    """
+    cutoff = (_now() - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    covered: set = set()
+    try:
+        rows = conn.execute(
+            "SELECT covers_json FROM awareness_delivery_intents "
+            "WHERE status = 'fulfilled' AND created_at >= ?",
+            (cutoff,),
+        ).fetchall()
+    except Exception:
+        log.debug("awareness read: covered-signal lookup failed", exc_info=True)
+        return covered
+    for row in rows:
+        for key in _parse_json(row["covers_json"], []) or []:
+            if key:
+                covered.add(str(key))
+    return covered
+
+
 def _editorial_guidance(conn, limit: int = 12) -> list[dict]:
     """Active editorial lessons from human actions and live quality evals.
 
@@ -878,9 +906,20 @@ def build_read(conn=None) -> dict:
             if any(e.get("event_type") in BADGE_EVENT_TYPES for e in events)
             else {}
         )
+        # Signals another author has already covered are not the brain's to
+        # narrate again. Before the scoped responder existed this could not
+        # happen — the brain was the only composer — but a responder that
+        # welcomes a join within minutes leaves that join sitting past the
+        # brain's cursor until the next deliberation. Identical re-posts dedup on
+        # the delivery intent key, hash(lane, covers); a post that BATCHES the
+        # join with another event hashes differently and would welcome the member
+        # a second time.
+        already_covered = _covered_signal_keys(conn)
         for event in events:
             lane = _category_for(event)
             compact = _compact_signal(event, badge_catalog)
+            if compact.get("signal_key") in already_covered:
+                continue
             signals_by_category.setdefault(lane, []).append(compact)
             if (event.get("event_type") or "") in HARD_POST_EVENT_TYPES:
                 hard_post_signals.append(compact)
