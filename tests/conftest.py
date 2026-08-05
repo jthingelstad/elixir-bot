@@ -216,6 +216,50 @@ def v51_schema_template(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _block_live_webhooks(monkeypatch):
+    """No test may post to a real Discord webhook.
+
+    This is not hypothetical. `test_memory_synthesis_cycle_keeps_success_when_
+    actions_is_unconfigured` replaced `asyncio.to_thread` with a fake that runs
+    the function for real, but did not stub `elixir_log` — so every full test run
+    posted its fixture text to the live #elixir-log. **400 messages went out
+    between 2026-07-30 and 2026-08-05**, each reading "1 not delivered — those
+    contradictions reach nobody", which is alarming, member-visible, and was
+    entirely fake.
+
+    A per-test stub would fix that one test. This blocks the whole class, the
+    same way the fixtures above stop tests writing to the live databases: the
+    webhook URL is read from the environment at call time, and importing
+    `runtime.app` anywhere calls `load_dotenv()`, so any unmocked post reaches
+    production Discord.
+
+    Raising alone is not enough to make the leak visible: every caller of
+    `elixir_log` wraps it in a fail-soft `except Exception` — that is why the
+    original leak ran silently for six days. So the violation is RECORDED and
+    asserted at teardown, where no production handler can swallow it.
+    """
+    import requests
+
+    real_post = requests.post
+    attempts: list[str] = []
+
+    def _guarded_post(url, *args, **kwargs):
+        if isinstance(url, str) and "discord.com/api/webhooks" in url:
+            attempts.append(url.split("/webhooks/")[-1][:12])
+            raise AssertionError("blocked: live Discord webhook post from a test")
+        return real_post(url, *args, **kwargs)
+
+    monkeypatch.setattr(requests, "post", _guarded_post)
+    yield
+    assert not attempts, (
+        f"this test tried to POST to a live Discord webhook ({len(attempts)}x). "
+        "Stub runtime.elixir_log (or whatever calls it) — the guard exists "
+        "because 400 fake alerts reached #elixir-log between 2026-07-30 and "
+        "2026-08-05, and every caller's fail-soft except hid it."
+    )
+
+
+@pytest.fixture(autouse=True)
 def _isolate_telemetry_db(tmp_path, monkeypatch):
     """Telemetry lives in its own file, so tests need their own copy of it too --
     otherwise a test run writes llm_calls rows into the developer's real

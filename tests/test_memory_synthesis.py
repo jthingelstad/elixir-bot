@@ -580,12 +580,22 @@ def test_memory_synthesis_cycle_keeps_success_when_actions_is_unconfigured():
         patch("runtime.jobs._memory.bot.get_channel") as mock_channel,
         patch("runtime.jobs._memory.runtime_status.mark_job_start"),
         patch("runtime.jobs._memory.runtime_status.mark_job_success") as mock_success,
+        # Without this the fake to_thread above runs post_event for REAL, and
+        # this test's fixture text — "1 not delivered — those contradictions
+        # reach nobody" — goes to the live #elixir-log. It did, 400 times
+        # between 2026-07-30 and 2026-08-05, on every full test run.
+        patch(
+            "runtime.jobs._memory.elixir_log.post_event_async", new=AsyncMock()
+        ) as mock_elixir_log,
     ):
         asyncio.run(_memory_synthesis_cycle())
 
     mock_memory.assert_called_once()
     mock_channel.assert_not_called()
     assert "contradiction_cards=0" in mock_success.call_args.args[1]
+    # The hygiene warning is the whole point of the run — assert it was composed
+    # rather than merely not-crashing.
+    assert "reach nobody" in mock_elixir_log.call_args.args[0]
 
 
 def test_memory_synthesis_cycle_quiet_week_posts_nothing():

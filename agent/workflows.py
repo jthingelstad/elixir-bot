@@ -444,7 +444,19 @@ def run_memory_synthesis(context: dict):
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["memory_synthesis"],
         strict_json=True,
         return_errors=True,
-        max_tokens=3000,
+        # 3000 -> 16384 (2026-08-05). Extended thinking is drawn from max_tokens,
+        # so on an Opus-tier model a ceiling sized for the visible answer can be
+        # spent before a single character is written. This job has not succeeded
+        # once since it moved to claude-opus-5: on 2026-08-02 the first attempt
+        # logged `completion_chars=0` against a 177K-char prompt, and the retry
+        # managed 609 chars before truncating again — both returned EXACTLY 3000
+        # completion tokens, the ceiling's fingerprint.
+        #
+        # Same failure the weekly recap hit on 2026-08-03 at max_tokens=1600.
+        # Note the retry path reduces the INPUT context, which cannot help when
+        # the constraint is the OUTPUT ceiling — that is why attempt two failed
+        # the same way. The ceiling is the fix; the retry stays as a backstop.
+        max_tokens=16384,
     )
 
 
