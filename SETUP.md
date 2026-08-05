@@ -194,6 +194,24 @@ directly: the `log-triage`, `awareness-report` and `llm-cost-report` skills,
 `scripts/admin.sh`, `runtime/tick_history.py`, or plain SQL against
 `elixir-v51.db` / `elixir-telemetry.db`.
 
+### Wake shadow report (Agentic Loop v2, Phase 0)
+
+The wake evaluator runs at the end of every engine tick and records what it
+*would* have fired to `wake_observations` in the telemetry database. It is
+measurement only — Phase 0 composes nothing and posts nothing.
+
+```bash
+uv run --locked python scripts/wake_shadow_report.py --days 7
+uv run --locked python scripts/wake_shadow_report.py --simulate --days 20
+```
+
+`--simulate` replays historical events through the current wake policy instead
+of reading live shadow rows, so a policy change can be evaluated against real
+history immediately rather than after a week of observation. Wake policy itself
+lives on the event contracts in [engine/event_contracts.py](engine/event_contracts.py);
+`ELIXIR_WAKE_POLICY=0` disables evaluation entirely. See
+[docs/plans/agentic-loop.md](docs/plans/agentic-loop.md).
+
 ## Health and error checks
 
 Elixir does not monitor itself. `logs/elixir-error.log` (ERROR+ with tracebacks,
