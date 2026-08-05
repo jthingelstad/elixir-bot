@@ -1,11 +1,69 @@
 # Agentic Loop v2 — event-driven wakes, one chassis, a learning loop
 
-Status: **plan ratified pending Jamie review** (2026-08-04). Umbrella document;
+Status: **Phases 0 and 1 shipped and live** (2026-08-04). Umbrella document;
 each phase gets its own ready-to-build doc as it comes up. Supersedes the fixed
 4×/day awareness cadence as the target architecture. The scoped-composer
 experiment (2026-08-04, seven replayed hard-posts, Haiku/Sonnet vs the brain's
 actual posts) is the evidence base: a ~25–40K-token scoped turn with tools
 matches brain quality at 4–20× lower cost; the brain spends ~300K tokens/tick.
+
+## Where this stands
+
+| Phase | State | Flag |
+|---|---|---|
+| 0 — shadow wakes + baseline | **shipped, live** (`4eaab798`) | `ELIXIR_WAKE_POLICY=1`, `ELIXIR_WAKE_SHADOW=1` |
+| 1 — chassis + join responder | **shipped, LIVE** (`276011fb`, enabled `f1d6c2fa`) | `ELIXIR_WAKE_RESPONDER=1` |
+| 2 — roster wakes, brain 4×→2× | not started | — |
+| 3 — war wakes, brain →1× | not started | — |
+| 4 — leader-feedback reflection | not started | — |
+| 5 — dossiers + follow-ups | not started | needs `_apply_v36` |
+| 6 — adoption + tuning | not started | — |
+
+**Open at the top of Phase 2:** the responder's exit gate is ≥5 real joins
+welcomed by the chassis, reviewed by Jamie. At the time of writing, zero have
+occurred since it was enabled — the gate is *waiting on clan activity*, not on
+work. Phase 2 should not start until those welcomes exist and Jamie has read
+them.
+
+Wake-policy decisions already ratified (both from Phase 0 findings): badges
+split at the emitter into `badge_earned` (digest) / `legendary_badge_earned`
+(immediate); ranked promotions split three ways at league 4 —
+`pol_promotion` (digest) / `champion_league_reached` (immediate) /
+`ultimate_champion_reached` (immediate). Jamie's governing principle, stated
+2026-08-04: *use normalization judiciously to make the data shape work for
+Elixir* — when routing needs a distinction, split the type at the emitter or
+stamp a resolved field into the payload floor, never a predicate each reader
+re-invents.
+
+### Built so far — the map
+
+| Piece | Where |
+|---|---|
+| Wake policy (data) | `engine/event_contracts.py` — `wake`, `wake_model` per contract |
+| Wake evaluator | `runtime/awareness/wake.py` |
+| Shadow report | `scripts/wake_shadow_report.py` (`--simulate` replays history) |
+| Chassis | `agent/chassis.py` — `Attention` / `Scope` / `Budget` / `run_turn` |
+| Delivery validator | `agent/post_validation.py` |
+| Posting tools | `agent/tool_defs.SURFACE_TOOLS` + executors in `agent/tool_exec.py` |
+| Scoped responder | `runtime/awareness/respond.py` |
+| Job prompts | `prompts/jobs/*.md` via `prompts.job_prompt()` |
+| Episodes / observations | `wake_episodes`, `wake_observations` (telemetry DB) |
+| Tier predicates | `engine/normalize.badge_tier`, `.ranked_league_tier` |
+
+### Bugs this work has found in existing code
+
+Worth keeping, because they are the argument for the next phase's care:
+
+- `MAX_ROUNDS_BY_WORKFLOW` was built only from specs declaring a
+  `response_schema`, silently forcing every other spec to 3 rounds.
+- `write_tools_allowed` was a declarative-only field that granted nothing; the
+  gate hardcoded two workflow names.
+- Surface tools declared for the write gate leaked into `ALL_TOOLS` (clanops's
+  surface).
+- `storage/telemetry.py` used `json.dumps` without importing `json`, hidden by
+  the module's fail-soft `except`.
+- Reaching Ultimate Champion emitted two events for the same player at the same
+  timestamp.
 
 ## The destination
 
@@ -215,16 +273,46 @@ Size: a weekend. No schema migration.
 **Goal:** the chassis covers all Haiku-tier hard-posts; the scheduled brain
 halves.
 
-Build:
-- Wake classes go live for `member_left_verified`, `role_changed`,
-  `tournament_finished`, `pol_season_podium`, `clan_birthday`, plus the batch
-  class (legendary badges / arena / pol promotions, 60-min coalesce).
-- Job files: `farewell.md`, `role_change.md`, `podium.md`, `milestone_batch.md`.
-- Escalation ladder live end-to-end; `trigger.py` deleted (subsumed).
-- Scheduled awareness cadence 4× → 2×/day (`runtime/activities.py`).
-- Divergence watch: a nightly check that no two intents in 24h cover
-  overlapping signals or re-tell the same member's story (the v4 regression
-  canary).
+**Entry condition:** Phase 1's exit gate is met — ≥5 real joins welcomed by the
+chassis and reviewed. Do not start on a hunch that it works; the welcomes are
+the evidence.
+
+Build, in this order:
+
+1. **Job files first, one per event type**, because a job file is the only
+   per-purpose prose and writing it is where the thinking happens:
+   `farewell.md`, `role_change.md`, `podium.md`, `milestone_batch.md`. Mine the
+   real posts for the lessons the way `welcome.md` did — `awareness.md` lines
+   ~145-160 carry the departure and role-change rules, and the leader-context
+   note (`member_left_verified` payload carries `leader_context`) must reach the
+   farewell. Kicks are NEVER narrated.
+2. **Register them** in `respond.JOB_BY_EVENT_TYPE`. This is the whole wiring —
+   if anything else needs to change per event type, stop (design rule 2).
+3. **Surfaces per job.** A farewell is announcements + clan chat (notable
+   departures only); a role change is announcements; `pol_season_podium` is
+   announcements. `respond.respond()` currently hardcodes
+   `lanes=("announcements",)` and both surfaces — that must become a per-job
+   declaration, which is the first real test of whether the Attention
+   abstraction holds.
+4. **Batch-class job** (`milestone_batch.md`) for the coalesced
+   arena/legendary-badge/champion-league wake. This is the first wake carrying
+   MIXED event types in one turn, so `job_for()`'s one-job rule needs a
+   many-types-one-job mapping rather than a per-type map.
+5. **Cadence 4× → 2×/day** in `runtime/activities.py`, and delete
+   `runtime/awareness/trigger.py` (subsumed by the evaluator; its cursor key
+   `awareness:join_trigger` can stay as an orphan row or be cleaned).
+6. **Divergence watch** — a nightly check that no two fulfilled intents within
+   24h cover overlapping signal keys, or re-tell the same member's story. This
+   is the v4 regression canary and the one genuinely new safety mechanism the
+   phase needs.
+
+Known traps, all paid for already:
+- Emoji: prefer the `elixir_` custom set (Jamie); `:crossed_swords:` is the
+  honest Unicode exception.
+- A departure post must not fire on a raw `member_left` — only
+  `member_left_verified`.
+- The responder must keep using the caller's `deliver_fn`; a second delivery
+  path is the v4 failure.
 
 Exit gate: two weeks, zero floor misses (reconciliation log), zero divergence
 flags, Jamie satisfied with post quality. Cost report: expected ~$1.40/day
