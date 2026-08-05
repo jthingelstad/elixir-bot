@@ -85,10 +85,21 @@ into the copy.
 
 ## The clan-chat sibling
 
-Selective, and one line for the **single strongest moment** — never one per
-member in a roundup. A four-member roundup got exactly one clan-chat line, for
-the 23,000-career-wins decade milestone. Reaching Ultimate Champion got one both
-times it happened.
+Clan chat reaches *every* member, including the many who never open Discord.
+That is what makes it worth protecting, and the bar here is genuinely high.
+
+**An arena climb on its own does not clear it.** Across 28 delivered milestone
+posts, an arena change never once earned its own in-game line — the siblings
+that looked like theirs belonged to a join covered by the same post. A climb is
+a #elixir moment; the whole clan does not need to be told mid-game.
+
+What does clear it: **Ultimate Champion or a Champion-tier arrival** (both times
+Ultimate Champion happened, it got one), a **Legendary badge alongside something
+else** that makes it a real day, a **genuine multi-member roundup**, or a
+career milestone of the 23,000-wins kind — a four-member roundup got exactly one
+line, for the decade milestone.
+
+One line for the **single strongest moment**, never one per member.
 
 ≤200 characters including room for the appended sign-off, plain text only: no
 markdown, no `:emoji_codes:`, no links, no @mentions — the game renders none.

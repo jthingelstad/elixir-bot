@@ -103,6 +103,21 @@ _LANE_BY_SURFACE = {_ANNOUNCE: "announcements", _ELIXIR: "elixir"}
 # The escalation ladder. Same attention, stronger composer.
 _LADDER = {"lightweight": "wake_response", "chat": "wake_response_chat"}
 
+# Output ceiling per tier. NOT the same number, and the difference is the point:
+# **extended thinking is drawn from max_tokens**, so on a reasoning model a
+# ceiling sized for the visible answer can be spent before a character is
+# written. This repo has been bitten three times now — the weekly recap at 1,600
+# (2026-08-03), memory synthesis at 3,000 (which never once succeeded on Opus),
+# and the 2026-08-05 Phase 2 rehearsal, where the Sonnet rung truncated on a
+# milestone batch at 2,000 and produced nothing.
+#
+# 8,192 matches what the awareness brain uses for a multi-post plan, and the
+# chat rung is the ESCALATION — the one that must not fail when a hard post has
+# already lost the cheap tier. Haiku stays at 2,000: it has composed every post
+# it was asked for without truncating, and raising a proven ceiling to buy
+# imagined headroom is how a working tier gets destabilised.
+_MAX_TOKENS_BY_TIER = {"lightweight": 2000, "chat": 8192}
+
 
 def job_spec(job: str) -> JobSpec | None:
     return JOBS_BY_NAME.get(job)
@@ -283,7 +298,7 @@ def respond(
                 signal_keys=tuple(str(e.get("signal_key")) for e in events if e.get("signal_key")),
             ),
             surfaces=frozenset(surfaces),
-            budget=chassis.Budget(model_family=tier, max_tokens=2000),
+            budget=chassis.Budget(model_family=tier, max_tokens=_MAX_TOKENS_BY_TIER[tier]),
             floor=floor,
             workflow=_LADDER[tier],
         )

@@ -262,3 +262,19 @@ def test_divergence_is_clean_when_each_signal_has_one_post(engine_conn):
     engine_conn.commit()
     result = divergence.check_divergence(hours=24 * 3650, conn=engine_conn)
     assert result["overlap"] == []
+
+
+def test_the_escalation_rung_has_real_output_headroom():
+    """Extended thinking is drawn from max_tokens, so a ceiling sized for the
+    visible answer can be spent before a character is written.
+
+    The 2026-08-05 rehearsal caught the Sonnet rung truncating at 2,000 on a
+    milestone batch and producing nothing — the same failure the weekly recap hit
+    at 1,600 and memory synthesis at 3,000. The chat tier is the ESCALATION: it
+    runs when a hard post has already lost the cheap tier, so it is the one rung
+    that must not fail for want of room.
+    """
+    assert respond._MAX_TOKENS_BY_TIER["chat"] >= 8192
+    assert set(respond._MAX_TOKENS_BY_TIER) == set(respond._LADDER), (
+        "every ladder rung needs a declared ceiling"
+    )
