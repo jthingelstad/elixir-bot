@@ -87,15 +87,40 @@ not have to wait a week), `tests/test_wake_evaluator.py` (15 tests).
 | Hard-post misses | **0** — every guaranteed post matched an intent |
 | Projected wake cost | $0.15/day vs $2.00/day scheduled brain |
 
-**The finding that needs a decision:** `badge_earned` would wake 51× and the
-brain posted about it 39 fewer times than that — only 6 of 102 badge events
-since 2026-07-15 appear in any intent. `pol_promotion` is 8 of 23. Both look
-like demote-to-digest candidates; `arena_changed` is the opposite (26 intents,
-1 unmatched) and should stay batch. Left AS-IS deliberately: wake assignments
-are this gate's review item, not an autonomous edit.
+**The finding, and what it changed.** `badge_earned` would have woken 51×
+while the brain posted about badges only 6 times. Investigating rather than
+demoting revealed the real problem: **one event type covered two populations.**
+Of 102 badge events, ~40 were "Card Mastery: <card>" grind and 4 were one-off
+Legendary badges — and the brain's six posts were all Legendaries. A wake policy
+keyed on event type alone had to choose between waking 40× for grind or making
+the rare ones wait.
 
-Exit gate: Jamie reviews — do the assignments and volumes look right, and
-should badge/pol_promotion demote to digest?
+Jamie's call (2026-08-04) was to **split the type at the emitter** rather than
+add a payload predicate to the registry — keeping wake policy pure data, and
+putting the distinction where the tier is already known. The general principle
+he stated: *use normalization judiciously to make the data shape work for
+Elixir.*
+
+Shipped: `legendary_badge_earned` as its own contract (immediate),
+`badge_earned` demoted to digest, `badge_tier` stamped into the payload at the
+emitter (and added to the payload floor) so `runtime/awareness/read.py` stops
+re-deriving `level is None`. `normalize.badge_tier()` is now the single
+predicate. Ranked got the same treatment using types that already existed:
+`ultimate_champion_reached` immediate, `pol_promotion` digest.
+
+Re-simulated after the split:
+
+| Measure | Before split | After |
+|---|---|---|
+| Wakes/day | 5.6 | **2.6** |
+| Wakes with no matching post | 52 | **1** |
+| Median latency saved | 56 min | 63 min |
+
+The one caveat: historical rows all carry the old type, so the simulation
+cannot show `legendary_badge_earned` firing. Applying the new predicate to
+history, 4 of those 102 badges would wake immediately and 98 would not.
+
+Exit gate: Jamie reviews the assignments and volumes.
 Kill switch: `ELIXIR_WAKE_POLICY=0` (default ON for shadow, it posts nothing).
 Size: an evening. No LLM calls, no schema change, no behavior change.
 

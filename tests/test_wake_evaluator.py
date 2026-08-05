@@ -116,25 +116,54 @@ def test_same_tier_events_ride_one_wake_but_tiers_split(engine_conn):
 
 
 def test_a_batch_class_coalesces_before_firing(engine_conn):
-    """Three badges in an hour are one post, not three."""
-    _player_event(engine_conn, "badge_earned", tag="#AAA", minutes_ago=5)
+    """Three arena climbs in an hour are one post, not three."""
+    _player_event(engine_conn, "arena_changed", tag="#AAA", minutes_ago=5)
     decision = wake.evaluate(now=NOW)
     assert decision["wakes"] == [], "still inside the coalesce window"
     assert decision["held"] and "coalescing" in decision["held"][0]["reason"]
 
     # A third event fires it early, without waiting out the window.
-    _player_event(engine_conn, "badge_earned", tag="#BBB", minutes_ago=4)
-    _player_event(engine_conn, "badge_earned", tag="#CCC", minutes_ago=3)
+    _player_event(engine_conn, "arena_changed", tag="#BBB", minutes_ago=4)
+    _player_event(engine_conn, "arena_changed", tag="#CCC", minutes_ago=3)
     decision = wake.evaluate(now=NOW)
     assert len(decision["wakes"]) == 1
     assert len(decision["wakes"][0]["events"]) == 3
 
 
 def test_a_batch_fires_once_the_window_expires(engine_conn):
-    _player_event(engine_conn, "badge_earned", minutes_ago=90)
+    _player_event(engine_conn, "arena_changed", minutes_ago=90)
     decision = wake.evaluate(now=NOW)
     assert len(decision["wakes"]) == 1
     assert decision["wakes"][0]["wake_class"] == "batch"
+
+
+def test_the_badge_split_routes_grind_and_rare_differently(engine_conn):
+    """The 2026-08-04 finding: one `badge_earned` type covered two populations.
+
+    Over 20 days the clan earned 102 badges — ~40 Card Mastery grind, 4 one-off
+    Legendaries — and the brain posted about the Legendaries only. A single wake
+    class had to choose between waking 40 times for mastery or making the rare
+    ones wait for the daily brain; splitting the type at the emitter is what
+    lets both be right.
+    """
+    _player_event(engine_conn, "badge_earned", tag="#AAA")
+    _player_event(engine_conn, "legendary_badge_earned", tag="#BBB")
+    decision = wake.evaluate(now=NOW)
+
+    assert len(decision["wakes"]) == 1, "the Legendary wakes; the mastery grind does not"
+    fired = decision["wakes"][0]
+    assert fired["wake_class"] == "immediate"
+    assert [e["event_type"] for e in fired["events"]] == ["legendary_badge_earned"]
+    assert decision["pending"] == 2, "the mastery badge still reaches the daily brain"
+
+
+def test_reaching_the_top_of_ranked_wakes_but_a_league_bump_does_not(engine_conn):
+    """Same split, using event types that already existed."""
+    _player_event(engine_conn, "pol_promotion", tag="#AAA")
+    _player_event(engine_conn, "ultimate_champion_reached", tag="#BBB")
+    decision = wake.evaluate(now=NOW)
+    fired_types = [e["event_type"] for w in decision["wakes"] for e in w["events"]]
+    assert fired_types == ["ultimate_champion_reached"]
 
 
 def test_high_water_bounds_a_failed_wake_to_one_attempt(engine_conn):
@@ -201,7 +230,7 @@ def test_observing_records_fires_and_holds_distinctly(engine_conn):
     """A held wake is the observation that tells us a policy is wrong; it is
     invisible if only fires are stored."""
     _clan_event(engine_conn, "member_joined")
-    _player_event(engine_conn, "badge_earned", minutes_ago=1)
+    _player_event(engine_conn, "arena_changed", minutes_ago=1)
     decision = wake.evaluate(now=NOW)
     wake.observe(decision)
 

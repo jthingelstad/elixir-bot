@@ -328,6 +328,22 @@ def humanize_badge(badge_name, known_cards=None) -> str:
     return label or badge_name
 
 
+def badge_tier(level) -> str:
+    """``"legendary"`` for a one-off badge, ``"routine"`` for a leveled one.
+
+    A badge with no level is awarded once and never again — the game's notable
+    tier (the Legendary badges, and the one-off event badges like `Chaos_S2`).
+    A badge WITH a level is mastery/progression: it ticks up as a member grinds,
+    and it is the bulk of the volume.
+
+    Single source of truth on purpose. This predicate used to live inline in
+    runtime/awareness/read.py, which meant the emitter, the gate, and the read
+    each had their own opinion about what "notable" meant; the emitter now
+    stamps the answer and splits the event type on it.
+    """
+    return "legendary" if level is None else "routine"
+
+
 def badge_facts(badge_name, catalog=None) -> dict:
     """One raw badge key → every resolved fact about it, in one place.
 

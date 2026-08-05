@@ -24,7 +24,7 @@ from capabilities import game_modes as game_mode_capability
 from capabilities import management as management_capability
 from capabilities import war as war_capability
 from engine import normalize
-from engine.event_contracts import hard_post_event_types, lane_by_event_type
+from engine.event_contracts import BADGE_EVENT_TYPES, hard_post_event_types, lane_by_event_type
 from runtime.activities import AWARENESS_LOOP_HOURS_DEFAULT
 from storage import card_catalog, events_read, leader_actions, revisits
 
@@ -360,7 +360,7 @@ def _compact_signal(event: dict, catalog: dict | None = None) -> dict:
     # progression bump, which is routine. Arena changes carry the new arena.
     payload = event.get("payload") or {}
     et = event.get("event_type")
-    if et == "badge_earned":
+    if et in BADGE_EVENT_TYPES:
         raw = payload.get("badge_name") or payload.get("name")
         # The brain gets the RESOLVED badge, never the raw key. It used to get
         # `MasteryDarkWitch` and wrote the clan a post congratulating a member on
@@ -376,7 +376,12 @@ def _compact_signal(event: dict, catalog: dict | None = None) -> dict:
         card = payload.get("card_name") or facts.get("card_name")
         if card:
             compact["card_name"] = card
-        compact["badge_tier"] = "legendary" if payload.get("level") is None else "routine"
+        # Emitter-stamped since 2026-08-04 (it also splits the event type on it);
+        # older rows predate the stamp and are tiered here on the way past, from
+        # the same predicate the emitter uses.
+        compact["badge_tier"] = payload.get("badge_tier") or normalize.badge_tier(
+            payload.get("level")
+        )
     elif et in ("arena_changed", "arena_up"):
         compact["arena_name"] = payload.get("arena_name")
     elif et == "pol_season_podium":
@@ -870,7 +875,7 @@ def build_read(conn=None) -> dict:
         hard_post_signals: list[dict] = []
         badge_catalog = (
             card_catalog.card_index(conn=conn)
-            if any(e.get("event_type") == "badge_earned" for e in events)
+            if any(e.get("event_type") in BADGE_EVENT_TYPES for e in events)
             else {}
         )
         for event in events:

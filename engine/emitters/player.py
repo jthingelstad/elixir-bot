@@ -141,7 +141,8 @@ def emit_profile(conn, tag, old, new, observed_at, window_start) -> int:
             b,
             {"boundary": b, "best_trophies": new.get("best_trophies")},
         )
-    # badge_earned — newly-present badge (BadgeEarnedDetector; keyed by name)
+    # badge_earned / legendary_badge_earned — newly-present badge
+    # (BadgeEarnedDetector; keyed by name)
     #
     # The payload carries the RESOLVED badge alongside the raw key: badge_label,
     # and for a Card Mastery badge the card_name and card_id it refers to. The raw
@@ -149,20 +150,34 @@ def emit_profile(conn, tag, old, new, observed_at, window_start) -> int:
     # but no reader should ever have to decode it — `MasteryDarkWitch` is Night
     # Witch, and a reader that guesses gets a real-but-wrong card. Resolved here,
     # once, against the live catalog.
+    #
+    # **The tier is part of the identity, so it splits the event type.** One
+    # `badge_earned` type covered two populations that mean opposite things: over
+    # 20 days to 2026-08-04 the clan earned 102 badges, ~40 of them "Card Mastery:
+    # <card>" grind, and 4 one-off Legendary badges. The brain posted about the
+    # Legendaries and correctly ignored the grind — but a wake policy keyed on
+    # event type alone cannot tell them apart, so it would either wake 40 times
+    # for mastery or delay the rare ones. Splitting at the emitter, where the
+    # level is already known, keeps routing a property of the data instead of a
+    # predicate every reader re-invents (`level is None` was being re-derived
+    # downstream in runtime/awareness/read.py).
     old_badges = old.get("badges") or {}
     new_badges = {k: v for k, v in (new.get("badges") or {}).items() if k not in old_badges}
     catalog = card_catalog.card_index(conn=conn) if new_badges else {}
     for name, info in new_badges.items():
+        level = (info or {}).get("level")
+        tier = normalize.badge_tier(level)
         n += _emit(
             conn,
             tag,
             observed_at,
             window_start,
-            "badge_earned",
+            "legendary_badge_earned" if tier == "legendary" else "badge_earned",
             name,
             {
                 "badge_name": name,
-                "level": (info or {}).get("level"),
+                "level": level,
+                "badge_tier": tier,
                 **normalize.badge_facts(name, catalog),
             },
         )

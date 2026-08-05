@@ -286,6 +286,9 @@ def _badge_earned_fact(signal: dict) -> dict | None:
     return {
         "title": f"{name}: {badge_label}",
         "body": f"{name} earned the {badge_label} badge",
+        # The MEMORY namespace, not the domain event type — deliberately left
+        # unsplit so a member's badge memories stay one queryable series across
+        # the 2026-08-04 tier split.
         "event_type": "badge_earned",
         "event_id": f"badge:{tag}:{badge_key or badge_label}",
         "scope": "public",
@@ -414,6 +417,11 @@ _SIGNAL_FACT_MAP = {
     "new_card_unlocked": _card_unlocked_fact,
     "new_champion_unlocked": _card_unlocked_fact,
     "badge_earned": _badge_earned_fact,
+    # Both halves of the 2026-08-04 badge split map to the same fact: a memory
+    # note says "X earned the Y badge" regardless of tier. Missing this entry
+    # would silently stop recording the rare badges — the ones most worth
+    # remembering.
+    "legendary_badge_earned": _badge_earned_fact,
     "badge_level_milestone": _badge_earned_fact,
     "battle_hot_streak": _hot_streak_fact,
     "battle_trophy_push": _trophy_push_fact,

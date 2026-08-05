@@ -40,6 +40,12 @@ from engine.normalize import canonical_utc_timestamp
 WAKE_CLASSES = frozenset({"immediate", "batch", "digest", "never"})
 WAKE_MODELS = frozenset({"lightweight", "chat"})
 
+# Both halves of the badge split. Every reader that asks "is this a badge event?"
+# must ask it through this, because historical rows (pre 2026-08-04) carry
+# `badge_earned` regardless of tier — a reader that hardcodes one name silently
+# drops either the new Legendary events or the entire back catalogue.
+BADGE_EVENT_TYPES = frozenset({"badge_earned", "legendary_badge_earned"})
+
 
 @dataclass(frozen=True)
 class EventContract:
@@ -80,17 +86,24 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
     # player stream
     "career_wins_milestone": _event("player", "milestone", "milestone", "wins"),
     "best_trophies_peak": _event("player", "milestone", "boundary", "best_trophies"),
-    # A one-off (level-less) badge is the game's Legendary tier; the emitter
-    # tiers it in the payload. Batching is what keeps three badges in an hour
-    # from becoming three posts — the 2026-07-13 milestone recalibration by
-    # other means.
-    "badge_earned": _event("player", "milestone", "badge_name", wake="batch"),
+    # Card Mastery grind. ~40 of the clan's 102 badges in 20 days, and the brain
+    # posted about none of them — routing it to digest is what the brain already
+    # decides, made cheap. `legendary_badge_earned` is the notable sibling.
+    "badge_earned": _event("player", "milestone", "badge_name", "badge_tier"),
+    # A one-off (level-less) badge: awarded once, never again. Rare enough to be
+    # worth saying the day it happens (4 in 20 days), which is why it is its own
+    # type rather than a payload check inside badge_earned.
+    "legendary_badge_earned": _event(
+        "player", "milestone", "badge_name", "badge_tier", wake="immediate"
+    ),
     "arena_changed": _event("player", "milestone", "arena_id", "arena_name", wake="batch"),
     "card_unlocked": _event("player", "milestone", "card_id", "card_name", "rarity"),
     "card_level_milestone": _event("player", "milestone", "card_id", "card_name", "milestone"),
     "collection_level_milestone": _event("player", "milestone", "milestone", "collection_level"),
-    "pol_promotion": _event("player", "battle_mode", "league", "prev_league", wake="batch"),
-    "ultimate_champion_reached": _event("player", "battle_mode", "league", wake="batch"),
+    # Same split, already available as distinct types: a league bump is routine
+    # (8 of 23 reached a post), reaching the TOP of Ranked is not.
+    "pol_promotion": _event("player", "battle_mode", "league", "prev_league"),
+    "ultimate_champion_reached": _event("player", "battle_mode", "league", wake="immediate"),
     "pol_global_rank_attained": _event("player", "battle_mode", "from_rank", "to_rank", "league"),
     "pol_season_closed": _event("player", "battle_mode", "pol_season_id", time_semantics="exact"),
     # clan stream
@@ -251,6 +264,7 @@ def wake_event_types(wake_class: str) -> frozenset[str]:
 
 
 __all__ = [
+    "BADGE_EVENT_TYPES",
     "EVENT_CONTRACTS",
     "WAKE_CLASSES",
     "WAKE_MODELS",

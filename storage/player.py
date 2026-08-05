@@ -17,6 +17,7 @@ from db import (
     chicago_today,
     managed_connection,
 )
+from engine.event_contracts import BADGE_EVENT_TYPES
 from engine.normalize import humanize_badge
 from storage._enrichment import _member_reference_fields
 from storage.game_modes import (
@@ -919,6 +920,8 @@ def _special_event_badge_completions(days: int, conn) -> dict[str, list[dict]]:
         .strftime("%Y-%m-%dT%H:%M:%S")
     )
     placeholders = ",".join("?" for _ in badge_names)
+    badge_types = sorted(BADGE_EVENT_TYPES)
+    badge_type_placeholders = ",".join("?" for _ in badge_types)
     rows = conn.execute(
         # badge_label is the emitter-resolved label; it was selected from
         # `$.badge_name` here, so it was the raw API key and always truthy — which
@@ -927,12 +930,17 @@ def _special_event_badge_completions(days: int, conn) -> dict[str, list[dict]]:
         "json_extract(payload_json, '$.badge_label') AS badge_label, COUNT(*) AS badge_events, "
         "MAX(observed_at) AS latest_badge_event "
         "FROM player_events "
-        "WHERE event_type = 'badge_earned' "
+        # Both halves of the badge split. Event badges (Chaos_S2 and friends) are
+        # one-off, so as of 2026-08-04 every NEW one arrives as
+        # `legendary_badge_earned` — filtering on `badge_earned` alone would have
+        # quietly returned only the pre-split back catalogue and reported that no
+        # one is completing events any more.
+        f"WHERE event_type IN ({badge_type_placeholders}) "
         f"AND json_extract(payload_json, '$.badge_name') IN ({placeholders}) "
         "AND observed_at >= ? "
         "GROUP BY player_tag, badge_name "
         "ORDER BY latest_badge_event DESC",
-        (*badge_names, cutoff),
+        (*badge_types, *badge_names, cutoff),
     ).fetchall()
     completions_by_tag: dict[str, list[dict]] = {}
     for row in rows:

@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 import db
 from capabilities import battle_intel, deck_intel
 from capabilities import members as member_capability
+from engine.event_contracts import BADGE_EVENT_TYPES
 from engine.normalize import humanize_badge, humanize_game_mode
 from engine.profiles import MODE_DISPLAY, playstyle_line
 from storage import card_catalog, game_events
@@ -556,7 +557,7 @@ def build_member_report_context(
         badges, cards, ranked, other, arena_changes = [], [], [], [], []
         for e in events:
             et, payload = e.get("event_type"), e.get("payload") or {}
-            if et == "badge_earned":
+            if et in BADGE_EVENT_TYPES:
                 badges.append(
                     {
                         "label": payload.get("badge_label")

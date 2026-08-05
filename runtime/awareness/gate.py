@@ -45,6 +45,8 @@ import logging
 import os
 from typing import Callable
 
+from engine.event_contracts import BADGE_EVENT_TYPES
+
 log = logging.getLogger("elixir")
 
 
@@ -114,7 +116,10 @@ def _notable_soft_signals(read: dict) -> list:
     for s in _soft_lane_signals(read):
         if not isinstance(s, dict):
             continue
-        if s.get("event_type") == "badge_earned" and s.get("badge_tier") == "legendary":
+        # Since 2026-08-04 a Legendary badge has its own event type; the tier
+        # check still stands so historical `badge_earned` rows (which carry every
+        # tier) are classified the same way.
+        if s.get("event_type") in BADGE_EVENT_TYPES and s.get("badge_tier") == "legendary":
             out.append(s)
         elif s.get("event_type") in _ARENA_EVENT_TYPES:
             out.append(s)

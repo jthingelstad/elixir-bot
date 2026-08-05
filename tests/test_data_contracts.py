@@ -79,7 +79,10 @@ def test_event_boundary_rejects_undeclared_or_incomplete_events(engine_conn):
             subject_cols={"player_tag": "#A"},
             observed_at="2026-07-15T12:00:00",
             window_start=None,
-            payload={"badge_name": "TestBadge"},
+            # badge_tier joined the payload floor on 2026-08-04: the tier decides
+            # which of the two badge event types this is, so an event that does
+            # not carry it is genuinely incomplete.
+            payload={"badge_name": "TestBadge", "badge_tier": "routine"},
         )
         == 1
     )
