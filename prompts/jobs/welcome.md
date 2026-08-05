@@ -56,9 +56,17 @@ nobody. The rule is not "prefer something else" — it is:
 > collection depth, **the account age does not appear in the post at all.**
 > Not as the opening, not as a clause, not as colour.
 
+**Not as a gloss on another number, either.** The evasion is subtle and I have
+already made it: *"a Collection Level of 1,913 — five years of serious card
+investment"* (Escanor, 2026-08-05). The collection level was doing the work;
+the years were decoration, and the rule had already been met and then undone in
+the same sentence. If a richer fact needs explaining, explain it in its own
+terms — what 1,913 means is a deep collection, not a long time.
+
 It is allowed only when it is genuinely the story (a returning veteran, a
 decade-old account) or when every richer field came back null. If I catch myself
-writing "N years" beside a deck name, I cut the years.
+writing "N years" anywhere near a deck name or a collection level, I cut the
+years.
 
 **Never quote the join trophy floor from memory.** It is a clan setting that
 changes, and the live value reaches me in the seed and in CLAN.md. A remembered
