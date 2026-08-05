@@ -1,12 +1,29 @@
 # Elixir Bot
 
-Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py plus Anthropic Claude model routing:
-- chat workflows default to `claude-sonnet-4-6`
-- promotion/content workflows default to `claude-sonnet-4-6`
-- interactive/reception workflows default to `claude-haiku-4-5-20251001`
-- observation workflows default to `claude-haiku-4-5-20251001`
+Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py
+plus Anthropic Claude model routing. Models resolve by **family**, not by
+workflow — each workflow declares a `model_family` and the family maps to an id
+in `agent/core.py`:
 
-`AGENTS.md` is the single source of truth for repository-specific instructions and architecture notes.
+| Family | Default | Used for |
+|---|---|---|
+| `chat` | `claude-sonnet-5` | interactive, reception, clanops, awareness |
+| `creative` | `claude-opus-5` | recruiting copy |
+| `intensive` | `claude-opus-5` | weekly recap, memory synthesis |
+| `lightweight` | `claude-haiku-4-5-20251001` | triage, wake responder first rung |
+
+Each is overridable by env (`ELIXIR_CHAT_MODEL` and friends). Read
+`_model_for_workflow` in `agent/core.py` for the mapping — the table above is
+prose and can drift.
+
+`AGENTS.md` is the single source of truth for repository-specific instructions
+and architecture notes. `CLAUDE.md` is a symlink to this file, so Claude Code
+and Codex read the same thing; do not fork them.
+
+**This file is a map, not a mirror.** Where a registry, schema, or script owns
+the real list, link to it and describe the *shape* instead of copying entries.
+Every hand-maintained copy in here has drifted at least once — a 2026-08-05
+audit found ~26 factual errors, almost all of them in copied lists.
 
 ## v5.1 Migration Note (2026-07-03/04)
 
@@ -22,16 +39,17 @@ Rollback before close-out = old git ref + copy the archive back + relaunch.
 
 ## Project Structure
 
-- `elixir.py` — Main bot: Discord events, APScheduler, channel routing
+- `elixir.py` — a 15-line `sys.modules` alias installer; the runtime itself is `runtime/app.py` (Discord events, APScheduler, channel routing)
 - `elixir_agent.py` — Stable public LLM entrypoint; routes observation, channel replies, and content generation through the `agent/` package
 - `cr_api.py` — Clash Royale API client (clan roster, war status, river race log). The **only** API ingress; every successful response appends an `api_observation_receipts` row under its true endpoint, while identical response bodies share one `raw_api_payloads` content row
-- `engine/` — The v5.1 data engine (spec: `docs/reference/v5.1/`): `tick.py` (production orchestrator), `observations.py` (admission + canonical envelopes), `materialize.py` (the shared observation application path used by production, interactive refresh, and replay), `readiness.py` (source freshness + durable materialization generations), `event_contracts.py` (event vocabulary/routing), `clock.py`, `ingest.py`, `baselines.py` + `emitters/`, `change_sets.py`, `management.py`, `polling.py`, `projections.py`, and `offline.py`. The deterministic `recognition/` + `delivery.py` proactive stack was retired entirely in #207 — the awareness loop is the sole proactive owner. `offline.py` remains as the API-free replay harness `scripts/replay_gate.py` drives.
-- `capabilities/` — Canonical domain answers shared by agent tools, awareness, scheduled reports, memory synthesis, and admin surfaces. Consumers may compact or present these facts differently, but do not recalculate them. Versioned contracts currently cover `game_modes.py`, `war.py`, `members.py`, `management.py`, and `awards.py`; management answers are explicitly leadership-scoped, while the other contracts are audience-neutral facts.
+- `engine/` — The v5.1 data engine (spec: `docs/reference/v5.1/`): `tick.py` (production orchestrator), `observations.py` (admission + canonical envelopes), `materialize.py` (the shared observation application path used by production, interactive refresh, and replay), `readiness.py` (source freshness + durable materialization generations), `event_contracts.py` (event vocabulary/routing), `clock.py`, `ingest.py`, `baselines.py` + `emitters/`, `change_sets.py`, `management.py`, `polling.py`, `projections.py`, and `offline.py`. The deterministic `recognition/` + `delivery.py` proactive stack was retired entirely in #207 — the awareness stack is the sole proactive owner. `offline.py` remains as the API-free replay harness `scripts/replay_gate.py` drives.
+- `capabilities/` — Canonical domain answers shared by agent tools, awareness, scheduled reports, memory synthesis, and admin surfaces. Consumers may compact or present these facts differently, but do not recalculate them. Each module declares a `CONTRACT_VERSION`; grep for it rather than trusting a list here. Management answers are explicitly leadership-scoped, while the other contracts are audience-neutral facts.
 - `db/` — SQLite access package: connection discipline, the canonical schema builder and ordered migration ladder (`schema.py`, with private migration-0 assets beside it), identity helpers, and the storage facade
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
 - `prompts/lanes/` — Discord destination-lane behavior prompts
 - `prompts/agents/` — Executable workflow prompts that are not tied to one Discord destination
+- `prompts/jobs/` — Per-job prose for the scoped responder, read by `agent/chassis.py`
 - `scripts/review_agent_feedback.py` — Review recent LLM/channel failures and `#ask-elixir` feedback from SQLite for debugging and prompt/tool routing analysis
 - `runtime/activities.py` — Canonical registry for recurring automated activities
 - `runtime/clan_chat_copy.py` — Dedicated Clash Royale in-game clan chat copy generation, validation, and fallback guardrails
@@ -43,12 +61,12 @@ Rollback before close-out = old git ref + copy the archive back + relaunch.
 
 One data flow, spec'd in `docs/reference/v5.1/`:
 
-- **One ingress:** `cr_api` → append-only `api_observation_receipts` → hash-deduplicated `raw_api_payloads` content (14-day rolling analysis buffer, never the system of record). Admission decisions attach to receipts; `materialization_inputs` link admitted receipts/content hashes to the generation that applied them.
+- **One ingress:** `cr_api` → append-only `api_observation_receipts` → hash-deduplicated `raw_api_payloads` content (60-day rolling analysis buffer, never the system of record). Admission decisions attach to receipts; `materialization_inputs` link admitted receipts/content hashes to the generation that applied them.
 - **Four event streams:** `battle_events` (native — battles mirror in with exact timestamps; war keys resolved from the battle's own time), `player_events`, `clan_events`, `war_events` (emitted — each poll diffs against its `state_baselines` row; first sight emits nothing; dedup keys make re-processing safe). `engine/event_contracts.py` is the single vocabulary for event ownership, payload floors, time semantics, awareness lanes, and hard-post policy.
-- **One proactive owner:** the unified awareness loop reads the event streams and current projections, decides worthiness and framing in one turn, and posts with hard-floor coverage. The ported deterministic recognizers/delivery consumer remain an explicit offline comparison seam only; production `run_tick` does not import or run them.
+- **One proactive owner (the awareness stack):** the brain reads the event streams and current projections, decides worthiness and framing in one turn, and posts with hard-floor coverage; the scoped responder handles single qualifying events between brain runs. Both post through the same validator and outbox. The ported deterministic recognizers/delivery consumer remain an explicit offline comparison seam only; production `run_tick` does not import or run them.
 - **Composition policy:** the awareness workflow owns voice and routing. Deterministic code validates the complete plan before any send (including member pronouns and unranked-war claims), permits one wording-only repair, then fails closed so the event resurfaces next loop. There is no member-facing template fallback.
 - **Delivery:** awareness validates hard-post coverage before any send, persists every planned post to `awareness_delivery_intents`, then advances each intent `pending → sending → fulfilled`. Explicit send failures return only that intent to pending; the next turn skips already-fulfilled posts. `awareness_posts` remains the delivered channel-memory ledger. A failed turn does not advance event cursors. A crash while an intent is `sending` fails closed during its 15-minute lease, then returns to pending for an at-least-once retry instead of wedging the outbox forever. The retired consumer creates `communication_intents` only as a connection-local TEMP table in explicit offline legacy rehearsals.
-- **Clan management:** `engine/management.py` per `docs/reference/v5.1/management.md` — Layer-1 evaluators (sustained donor / war-reliable / battle-active, 3-of-4-week hysteresis) feed promote/demote/kick candidacy machines. Kick-risk is reactive (fires a leader action through the policy gate mid-tick); promote/demote surface in the Monday 7:00 CT weekly review, which is also the only place the weekly counters roll. Engagement is measured from battles — `lastSeen`/logins are deliberately ignored. Every verdict carries `judgment_status` (`ready` / `held` / `unknown`), its evidence timestamp/reason, and the `materialization_id` that produced it; stale evidence fails closed and is excluded from actionable capability reads.
+- **Clan management:** `engine/management.py` is the source of truth for every promote/demote/kick rule and constant. Human-readable policy is `prompts/POLICY.md`; original rationale (with the drifted parts marked) is `docs/reference/v5.1/management.md`. Elder promotion and demotion come from the **elder band** — a score ranks the non-leadership roster, the band sizes the corps, and hysteresis paces the moves. The three Layer-1 signals (`sustained_donor` / `war_reliable` / `battle_active`, 3-of-4-week hysteresis) are still computed and stored but **feed nothing**; they survive as rendered evidence only, which is why `WAR_QUALIFY_RATE` is commented "legacy … evidence rendering only". The kick path is separate: pure idle-days-from-battles arithmetic, reactive mid-tick through the policy gate. Promote/demote surface in the Monday 07:00 CT weekly review, the only place weekly counters roll. Engagement is measured from battles — `lastSeen`/logins are deliberately ignored. Every verdict carries `judgment_status` (`ready` / `held` / `unknown`), its evidence timestamp/reason, and the `materialization_id` that produced it; stale evidence fails closed and is excluded from actionable capability reads.
 - **Adaptive polling:** `poll_state` temperatures (battles → hot; clan-poll deltas → warm; decay to cold) drive a budget of 40 per-player calls/tick, hottest first, with fairness floors (battlelog ≤6 h, profile ≤24 h for everyone). The clan and riverrace calls are cheap fixed overhead outside the budget.
 
 ### Engine Tick Contract
@@ -65,7 +83,8 @@ application service; offline replay uses it too. Awareness and primary
 capabilities read one SQLite snapshot and expose its `data_generation`. The production
 entrypoint has no compose/send arguments and cannot post proactively; neither can
 the offline engine, whose `legacy_proactive` adapter seam was removed with the
-deterministic recognizer in #207. Awareness is the sole proactive owner. Emitter change sets must satisfy their event/table postconditions
+deterministic recognizer in #207. The awareness stack owns all proactive posting
+(the brain plus the scoped responder, one delivery path). Emitter change sets must satisfy their event/table postconditions
 before a baseline advances. Counters land in
 `runtime_job_status` (`engine_tick` row) every tick.
 
@@ -115,54 +134,19 @@ uv run --locked pytest tests/ -v
 
 - **Always use `uv run --locked pytest`** — do not use bare `pytest` or `python3 -m pytest`.
 - `pyproject.toml` configures `pythonpath = ["."]` so all project imports resolve without install.
-- Tests use temp-file/in-memory SQLite and mocked external services (no API keys needed). The suite runs green in ~8 s.
+- Tests use temp-file/in-memory SQLite and mocked external services (no API keys needed). ~2,070 tests, green in ~25 s.
 - `tests/conftest.py` builds the current schema through `db.schema`, the same public builder used by runtime cold starts, into a session template copied per test.
 - Test fixtures handle DB connection lifecycle — use `pytest.fixture` instead of manual try/finally.
-- The pre-commit hook mirrors CI in fail-fast order: dependency lock, docs, exception policy, `ruff check`, `ruff format --check`, capability-contract mypy, then the full suite with the 80% capability-coverage floor. `git commit --no-verify` bypasses in an emergency.
+- **The pre-commit hook and CI are one list: `scripts/gates.sh`.** `.githooks/pre-commit` is a 7-line shim that execs it. They used to be two hand-maintained lists that mirrored each other, and they drifted — pip-audit found three aiohttp CVEs the hook never ran, and three pushes failed CI ~20 s after committing clean. Do not enumerate the gates here; read the script. `git commit --no-verify` bypasses in an emergency.
+- Piping a commit through `tail` swallows gate failures. Assert HEAD actually moved before pushing.
 
-### Reality-based testing (the three levers beyond the suite)
+### Reality-based testing
 
-Unit tests target one delta with minimal dicts; these three run the engine against reality and catch what hand-built fixtures can't. Run the first two before deploying engine changes:
+Three levers beyond the unit suite — see [docs/reference/context-and-confidence-lessons.md](docs/reference/context-and-confidence-lessons.md).
 
-1. **Replay gate** — `uv run --locked python scripts/replay_gate.py`. Snapshots the live DB, clears baselines, and replays the real raw-payload window twice through the awareness-only offline engine. Pass 1 inventories historical drift (current code may derive events an older deployment missed); pass 2 is the hard gate and must add exactly zero events, battles, or legacy claims under the same code. Ends with the current-data-relative season-close rehearsal + global invariants. All gates must PASS.
-2. **Time-travel simulator** — `uv run --locked python scripts/simulate.py`. A deterministic synthetic war week (skewed 09:37Z reset, a join, a leave, a level-up, war battles, section rollover) through the production `run_tick` path at ~2 s/simulated-week. It proves event correctness, drift anchoring, poll fairness, zero legacy claims, absence of the retired delivery queue, and that the awareness read sees hard-post stream events.
-3. **Real-payload fixtures** — `tests/fixtures/cr/*.json`, loaded via `load_cr_fixture` (tests/conftest.py) and asserted by `tests/test_cr_fixture_shapes.py`. When Supercell drifts a payload shape, these fail with a clear diff. Refresh stale fixtures by re-exporting from `raw_api_payloads` — never hand-edit them.
+### Confidence layer
 
-`assert_db_invariants` (tests/conftest.py) is the shared floor under all of it — an autouse sweep after every test, plus a gate inside both scripts: unique open memberships, one ledger claim per key, FTS mirror in sync, canonical timestamps, and projection consistency.
-
-### Confidence layer (where failures go; how to know Elixir is healthy)
-
-The bugs that keep biting are seam/first-use failures that fail *silently*. Three
-tools make them visible:
-
-1. **The error log** — `logs/elixir-error.log` (ERROR+ with tracebacks, written
-   by `runtime/logging_setup.py`, rotated at 2 MB × 5). Abandoned runtime work
-   and cross-table consistency failures log there on their module's own logger
-   with a stable `<component> failed: k=v` prefix. Expected parsing, user/tool
-   errors, and optional enrichment use bounded fallbacks or lower levels instead
-   of flooding it; see `docs/reference/error-handling.md`. It is small enough
-   (~6 lines/day) to read whole, which is the point.
-   **Elixir does not monitor itself.** A `runtime_incidents` ledger and a daily
-   `engine-health` job tried, and the ledger recorded 0 rows in 25 days while
-   the log held 159 real errors — so the check reported "all clear" through
-   every failure. Both were retired 2026-07-28 (schema v20). Detection is an
-   operator job: **AGENT-TEAM/error-watch.md**, owned by the Operations Manager.
-2. **Entrypoint smoke** (`tests/test_entrypoints_smoke.py`) — static + dynamic
-   check that every function's names resolve and every compose/card/tool
-   entrypoint is invocable. Catches the NameError/lazy-import class at test time.
-3. **`scripts/confidence_report.py`** — one command (`--json`, non-zero exit on
-   findings) that unifies grouped errors from the error log + smoke/integration
-   test status + the latest post-quality scorecard, plus the `liveness` silence
-   alarm (an error log cannot report a failure that produced no error, and the
-   worst outages were quiet). "Is Elixir healthy?" in one answer. Run it
-   before/after any change; the external Operations and Quality Manager routines
-   execute it. The scorecard samples the active awareness and assistant-message
-   paths read-only. Agents turn confirmed findings into GitHub issues; the report
-   never creates a second work queue or silently changes production memory.
-
-### Review discipline
-
-A green suite is necessary, not sufficient. Before deploying a substantive change, do a **cold adversarial review** of the diff — read it as a skeptic hunting for what breaks, not as the author confirming what works. After deploying, do a **live behavioral audit**: watch what the running system actually does (tick counters, the error log, posted messages) rather than what the code says it should do. The 2026-07-04 end-to-end review is the reference case: the suite was green, yet the live audit found a season-breaking gap (the awards consumer was never built — two work streams each assumed the other owned it) and the cold review found ten more real defects (delivery commit ordering, per-lane fail-stop, timestamp-format mismatches, CSRF host matching). An `engine-health` daily activity once tried to institutionalize the live audit's checks in-product; it was retired 2026-07-28 because a check that only covers known failure classes, run by the system it is checking, manufactures false calm (it read a ledger that never recorded a row). The watching lives outside the runtime now — `AGENT-TEAM/error-watch.md` — and new changes still need fresh adversarial eyes. Never mark a cross-stream feature done without verifying the consumer end-to-end.
+Where silent failures go, and how to know Elixir is healthy: `logs/elixir-error.log` (small enough to read whole, which is the point), `tests/test_entrypoints_smoke.py`, `scripts/confidence_report.py`. **Elixir does not monitor itself** — a self-check ledger recorded 0 rows in 25 days while the log held 159 real errors, so both were retired 2026-07-28. Detection is an operator job (`AGENT-TEAM/error-watch.md`). Full account: [docs/reference/context-and-confidence-lessons.md](docs/reference/context-and-confidence-lessons.md).
 
 ## Cleanup
 
@@ -177,19 +161,20 @@ uv run --locked python scripts/clean.py --db
 ## Database
 
 SQLite at `elixir-v51.db` (overridable via `ELIXIR_DB_PATH`; gitignored).
-Three database files exist, with distinct roles:
+Four database files exist, with distinct roles:
 
 - **`elixir-v51.db`** — the operational engine DB. `db/schema.py` is the canonical schema entrypoint for the private clean-break baseline and ordered post-cut evolution. `db.get_connection()` refuses databases without the v5.1 spine, migrates compatible v5.1 databases forward, and is the sole initializer.
-- Durable memory lives IN the engine DB since 2026-07-04 (the v5.1 memory pass, `docs/reference/v5.1/memory.md`): `memories` + `memory_tags` + `memories_fts`, accessed through the `memory_store` seam. `inference` rows carry a 90-day default TTL and are reclaimed by db-maintenance; curated kinds (`leader_note`, `synthesis`, `system`) never expire by default (#215). The old `elixir-v5-memory.db` is archived (`elixir-v5-memory-archive-2026H2.db`, read-only); `ELIXIR_V5_MEMORY_DB` is retired. **One database for all runtime activity.**
+- Durable memory lives IN the engine DB since 2026-07-04 (the v5.1 memory pass, `docs/reference/v5.1/memory.md`): `memories` + `memory_tags` + `memories_fts`, accessed through the `memory_store` seam. `inference` rows carry a 90-day default TTL and are reclaimed by db-maintenance; curated kinds (`leader_note`, `synthesis`, `system`) never expire by default (#215). The old `elixir-v5-memory.db` is archived (`elixir-v5-memory-archive-2026H2.db`, read-only); `ELIXIR_V5_MEMORY_DB` is retired.
+- **`elixir-telemetry.db`** — LLM call telemetry, split out 2026-08-03 (`storage/telemetry.py`, `ELIXIR_TELEMETRY_DB_PATH`). Schema v34 dropped `llm_calls` from the clan DB because **every model call was taking the clan database's single write lock**. It is ~116 MB and **not covered by `scripts/backup_db.py`** — a known gap, not a design decision.
 - **`elixir-v5-archive-2026H2.db`** — the pre-cut cold archive. Read-only (chmod 444), never written; open with `file:…?immutable=1`. **Not present on this workstation** — `db.schema.build_database()` and the test fixture treat it as optional and fall back to the frozen private migration-0 SQL in `db/`, which is why nothing has failed. Do not assume it is reachable; verify before planning any recovery around it.
 
-**Historical recovery actually comes from the rolling backups** in `$ELIXIR_BACKUP_DIR` (see `scripts/backup_db.py`). Each nightly `.db.gz` froze the short-retention `raw_api_payloads` window as it stood on its own date, so their UNION reaches much further back than any single snapshot — the live DB holds ~2 weeks of payloads, the backups months. `scripts/backfill_battle_fields.py` is the current worked example: it reads the live database plus every backup through the current extractor.
+**Historical recovery actually comes from the rolling backups** in `$ELIXIR_BACKUP_DIR` (see `scripts/backup_db.py`). Each nightly `.db.gz` froze the short-retention `raw_api_payloads` window as it stood on its own date, so their UNION reaches much further back than any single snapshot. `scripts/backfill_battle_fields.py` is the current worked example: it reads the live database plus every backup through the current extractor.
 
 The engine DB follows the layered retention model (`docs/reference/v5.1/schema.md`):
 
-- L1 API provenance: append-only `api_observation_receipts` plus deduplicated `raw_api_payloads` content (14 d)
+- L1 API provenance: append-only `api_observation_receipts` plus deduplicated `raw_api_payloads` content (**60 d**, widened from 14 on 2026-07-30; the weekly purge cadence stretches the effective window up to 7 days further)
 - L2 current-state baselines: `state_baselines` (diff substrate; not a read model)
-- L3 event streams: `battle_events` (180 d), `player_events` (180 d), `clan_events` (365 d), `war_events` (365 d)
+- L3 event streams: `battle_events` (**730 d**), `player_events` (180 d), `clan_events` (365 d), `war_events` (365 d)
 - L4 rollups (durable): `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics`
 - L5 identity & tenure (durable): `players`, `player_metadata`, `player_aliases`, `clans`, `discord_users`, `discord_links`, `clan_memberships` — **the CR tag is the key everywhere**; "is X a member" = has an open `clan_memberships` row
 - L6 projections (disposable, rebuilt from streams): `player_current_state`, `player_card_collection`, `player_recent_form`, `member_management`
@@ -199,7 +184,7 @@ The engine DB follows the layered retention model (`docs/reference/v5.1/schema.m
 - Bounded war stream: `war_seasons` (durable), `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days`
 - Awards (durable): `awards` — `war_champ` is a ranked podium (season points); `iron_king` is PARTICIPATION (4/4 decks every battle day — unranked, any number earn it, never crown one); `rookie_mvp` = members in their FIRST war season; `free_pass` rotates to the highest-ranked War Champ who did NOT win it last month (`engine/emitters/war.py:close_season`). The LIVE in-progress races are computed on demand via `storage.awards.get_award_races` (top-10, points, tie-aware) and surfaced in the awareness read as `award_races`; `war_champ_lead_change` / `rookie_mvp_lead_change` events emit on a leader change.
 - Engine control: `stream_cursors` (durable), `poll_state`, `runtime_job_status`, `materialization_runs`, `materialization_inputs`
-- Ops telemetry (`llm_calls`, `prompt_failures`, `admin_command_invocations`) + tournaments star + the conversation set (`conversation_threads`, `messages`, `memory_facts`, `memory_episodes`)
+- Ops telemetry (`prompt_failures`, `admin_command_invocations`) + tournaments star + the conversation set (`conversation_threads`, `messages`, `memory_episodes`). `llm_calls` moved to `elixir-telemetry.db` in v34; `memory_facts` was retired in the v5.1 memory pass — both are absent from the live DB
 
 All `db` module functions accept an optional `conn` parameter — pass one in tests, omit in production.
 
@@ -213,18 +198,27 @@ or `ALTER`. The retired pre-v5.1 migration history lives in Git and the cold
 archive rather than executable runtime code. The committed fresh-schema fingerprint test changes with every
 intentional schema change; it hashes the semantic contract (columns, checks,
 keys, indexes, foreign keys, triggers, and virtual tables), so fresh
-declarations and equivalent `ALTER TABLE` history compare equally. Schema v24 removed the
-live-only, unused `awareness_thoughts.prompt_json` column exposed by that parity
-check. Backups: `scripts/backup_db.py` covers the
-operational DB only — single database since the memory pass (the archive needs no backup — it never
-changes).
+declarations and equivalent `ALTER TABLE` history compare equally.
+
+Read `CURRENT_SCHEMA_VERSION` and `EXPECTED_TABLE_COUNT` from `db/schema.py`
+rather than trusting a number here. **A new `_apply_vN` is a deploy** — it runs
+against the live database on the next connection, so rehearse it on a copy with
+`ELIXIR_DB_PATH` first.
+
+Backups: `scripts/backup_db.py` covers the operational DB only. The cold
+archive needs none (it never changes), but `elixir-telemetry.db` is genuinely
+uncovered.
 
 ## Website Note
 
 Elixir no longer publishes to poapkings.com — site publishing was removed
-entirely on 2026-06-21 (the website has its own standalone update script).
-The `poapkings-com` lane / `#website-updates` channel remains only as a
-legacy visibility surface. Don't add site-publish behavior back into the bot.
+entirely on 2026-06-21 (the website has its own standalone update script), and
+the `poapkings-com` lane is gone too. Don't add site-publish behavior back
+into the bot.
+
+The site does still carry clan policy, though: `src/members.njk` and
+`src/faq.njk` explain how Elder works, hand-copied from
+`engine/management.py`. Retuning an elder constant means editing them.
 
 ## Agents And Lanes
 
@@ -232,27 +226,42 @@ Elixir has one identity and several executable workflows. Discord destinations a
 
 Core rule: one signal is not one post. The awareness loop reads the whole current situation, decides which moments deserve communication, and may combine several events into one post while proving coverage for every hard-post signal.
 
-Current primary lanes:
-- `reception` — onboarding and verification (`#welcome`)
-- `general` — mention-driven general Q&A (`#clan-chat`)
-- `ask-elixir` — open-channel clan conversation and Clash Royale screenshot help
-- `leader-lounge` — private leadership and clan operations (`#leaders`)
-- `actions` — crisp leader action cards and leader-posted Clash Royale screenshot observation readouts (`#actions`; also the fail-closed destination for unknown intent prefixes)
-- `river-race` — River Race scoreboard, recap, and major war-momentum updates
-- `member-highlights` — curated player milestones and non-war battle pushes (`#player-highlights`)
-- `clan-events` — joins, promotions, anniversaries, and clan recognitions (`#clan-events`)
-- `announcements` — weekly recap and clan-wide Elixir system updates (`#announcements`)
-- `recruiting` — recruiting copy (`#recruiting`)
-- `poapkings-com` — legacy website-visibility lane (see Website Note)
+**Lanes are declared in `prompts/DISCORD.md` and parsed by `runtime/lanes.py`.**
+That file is the list; lane keys resolve by exact string, so a name invented
+here would simply fail to resolve. There are 8 today, and the two worth knowing
+before you read the file are `elixir` (the awareness brain's public voice —
+"everything worth *saying* about the game lives here") and `actions` (leader
+action cards, and the fail-closed destination for unknown intent prefixes).
+`#thinking` documents itself as *not* a lane: it carries decision transcripts,
+replacing the old `#elixir-log` webhook on 2026-07-09.
 
-Current executable agents/workflows:
-- `awareness` — the sole proactive voice workflow: it reads current streams, projections, history, and channel memory, then returns one structured post plan. Deterministic copy policy permits one wording-only repair and otherwise fails closed before Discord.
+> Four lanes listed here until 2026-08-05 no longer exist — `river-race`,
+> `member-highlights`, `clan-events`, `poapkings-com` — two of whose channels
+> were deleted 2026-07-11. `tests/test_prompts.py` actively asserts their
+> absence, so this prose was contradicted by a passing test.
+
+Current executable workflows (specs in `agent/workflow_registry.py`):
+- `awareness` — the deliberative brain. Reads current streams, projections,
+  history, and channel memory, then returns one structured post plan.
+- `wake_response` / `wake_response_chat` — the scoped responder (Phase 1,
+  live). An engine-tick wake evaluator (`runtime/awareness/wake.py`) picks up
+  qualifying events and `runtime/awareness/respond.py` composes a single
+  focused post on the shared chassis (`agent/chassis.py`), escalating Haiku →
+  Sonnet → the daily brain. Gated by `ELIXIR_WAKE_RESPONDER`.
 - `interactive` — public read-only conversation in member-facing lanes.
 - `clanops` — private leadership conversation with gated write tools.
 - `reception` — constrained onboarding and identity-verification replies.
 - `memory_synthesis` — weekly memory hygiene and canonical arc synthesis.
-- `content` workflows — recruiting, weekly recap, and other publishable content.
-- specialist workflows such as `deck_review`, `tournament_update`, `clan_chat_copy`, and `intent_router`.
+- `content` workflows — recruiting, weekly recap, other publishable content.
+- specialists such as `deck_review`, `tournament_update`, `clan_chat_copy`,
+  `intent_router`.
+
+**One delivery owner, no longer one author.** Since Phase 1 there are two
+composing paths (the brain and the responder), but every post still leaves
+through `runtime/awareness/deliver.deliver_posts`, and posting itself is a tool
+call validated by `agent/post_validation.py`. Say "one delivery owner" — the
+older "sole proactive voice" phrasing is no longer true. Plan:
+`docs/plans/agentic-loop.md`.
 
 ## Recurring Activities
 
@@ -266,14 +275,34 @@ Each activity declares:
 - delivery targets
 - whether manual triggering is allowed
 
-Read the exact, current list (keys, schedules, executors, enabled state) from `runtime/activities.py` — don't trust a hand-maintained copy here, which drifts. The shape today:
+**Read the list from `runtime/activities.py`.** It is ~20 activities and it
+changes; a copy here drifted to missing six of them, including the brain's own
+cadence. Only the load-bearing *shape* belongs in this file:
 
-- **The engine heartbeat is `engine-tick`** (`_engine_tick`, every 10 minutes, `max_instances=1`): one `engine.tick.run_tick` pass — poll → atomic observation apply → readiness-gated manage — plus leader-action card posting. It replaced the deleted `v5-reactive-tick`, `war-poll`, `player-progression`, and `award-detection` activities (awards now grant on the war stream's `season_closed` event; polling is the adaptive scheduler's job). The separate awareness activity consumes events and owns proactive posting.
-- **Clan management:** `weekly-leadership-review` (Mon 7:00 CT — rolls the weekly hysteresis grain, surfaces promote/demote candidacies as leader actions, posts one review) and `action-outcome-refresh` (daily 9:30 CT — leader-action outcome evaluation + feedback-synthesis re-queue). The old `leadership-action-scan` is **gone**; its scan/creation role lives in the engine's reactive kick path.
-- **War:** `war-attendance-snapshot` (daily 4:15 CT — finalizes `war_attendance_days` just before the ~09:15 UTC war-day boundary; evaluators read finalized days only).
-- **Scheduled posts / reports:** `daily-clan-insight` (`#ask-elixir` hidden fact), `weekly-recap` (public recap), `weekly-discord-invite-relay`, `promotion-content` (`#recruiting`), `clan-wars-intel`.
-- **Maintenance / ops:** `api-sentinel` (CR-API drift notes to `#leaders`), `memory-synthesis` (weekly memory hygiene), `card-catalog-sync`, `db-maintenance`, `db-backup` (daily 3:37 CT iCloud snapshot). `engine-health` was retired 2026-07-28 — production-problem detection is an operator/AGENT-TEAM job (`AGENT-TEAM/error-watch.md`), not an internal function of the clan bot.
-- **Tournaments:** the watch is leader-started/stopped (`runtime/jobs/_tournament.py`), a dynamic job that resumes on restart — not a registry entry.
+- **The engine heartbeat is `engine-tick`** — `_engine_tick`, every 10 minutes,
+  `max_instances=1`: one `engine.tick.run_tick` pass (poll → atomic observation
+  apply → readiness-gated manage), plus leader-action card posting and the wake
+  evaluator. It replaced the deleted `v5-reactive-tick`, `war-poll`,
+  `player-progression`, and `award-detection` activities — awards now grant on
+  the war stream's `season_closed` event, and polling is the adaptive
+  scheduler's job.
+- **The brain runs on a cron, not continuously** — `awareness-loop`, four times
+  a day. Cost forced the cadence down from hourly, which is the whole
+  motivation for the wake responder above.
+- **Weeks roll in exactly one place** — `weekly-leadership-review`, Mon 07:00
+  America/Chicago. Hysteresis counters advance nowhere else. The old
+  `leadership-action-scan` is gone; its role lives in the engine's reactive
+  kick path.
+- **War attendance finalizes before the war-day boundary** —
+  `war-attendance-snapshot` daily at 04:15 CT, ahead of the observed
+  ~09:37-10:00 UTC boundary. Evaluators read finalized days only. Anchor
+  war-day math on the *observed* period-start, never a fixed hour.
+- **Tournaments are not a registry entry** — the watch is leader-started and
+  stopped (`runtime/jobs/_tournament.py`), a dynamic job that resumes on
+  restart.
+- `engine-health` was retired 2026-07-28: production-problem detection is an
+  operator/AGENT-TEAM job (`AGENT-TEAM/error-watch.md`), not a function of the
+  clan bot.
 
 ## Architecture: Prompts vs Code
 
@@ -284,10 +313,15 @@ Principle: **Prompts define what Elixir says and why. Code defines when, where, 
 - `SOUL.md` — Elixir's persistent identity, stance, and non-human sense of self.
 - `PURPOSE.md` — Elixir's mission, responsibilities, and guardrails.
 - `GAME.md` — Clash Royale mechanics (game-generic, rarely changes).
-- `CLAN.md` — Clan-specific identity, rules, history, and configurable thresholds (inactivity, the ratified clan-management constants, donation highlights, clan lore).
+- `CLAN.md` — Clan-specific identity, rules, history, and thresholds (inactivity, donation highlights, clan lore). Its clan-management numbers are a **mirror** of `engine/management.py`, not a source.
+- `POLICY.md` — how Elder is earned, held and lost, plus the removal rules. Leader-facing prose, injected into ~9 system prompts. Must match `engine/management.py`; `tests/test_cr_knowledge.py` asserts it against the imported constants.
 - `DISCORD.md` — Declarative Discord channel contract: IDs, lanes, workflows, reply policies, memory scope, and durable-memory flags. The engine resolves lane→channel from this file at runtime (no hard-coded channel ids).
 - `lanes/*.md` — Destination-lane behavior prompts.
 - `agents/*.md` — Executable workflow prompts for awareness, memory synthesis, routing, and specialist agents.
+- `jobs/*.md` — Per-job prose read by the chassis (`agent/chassis.py`), one file per responder job (e.g. `welcome.md`).
+
+All of these **hot-load** — `prompts/*.md` is re-read on every call, so a
+prompt-only fix needs no restart.
 
 ### What stays in code
 
@@ -378,12 +412,17 @@ Important rules:
   - `clanops` -> read + write tools
   - `reception` -> no tools
   - `roster_bios` -> read tools only
-- Write tools are gated by workflow policy: `clanops` and `awareness` can use
-  read + write tools (`save_clan_memory`, `record_leadership_followup`); every
-  other workflow remains read-only or toolless. Note the awareness set is a
-  SEPARATE constant, `AWARENESS_WRITE_TOOL_NAMES` — adding a write tool to
-  `_WRITE_TOOL_NAMES` alone reaches `clanops` and nothing else, which is how a
-  shipped tool was offered to a model zero times.
+- Write tools are gated by workflow policy. Four workflows carry them today:
+  `clanops`, `awareness`, `wake_response`, `wake_response_chat`; every other
+  workflow is read-only or toolless.
+- **There are THREE tool-name sets, and that is the trap this bullet exists
+  for.** `_WRITE_TOOL_NAMES` (clanops), `AWARENESS_WRITE_TOOL_NAMES`
+  (awareness), and `_SURFACE_TOOL_NAMES` (`post_to_discord`,
+  `post_to_clan_chat` — handed out per turn by the chassis, deliberately
+  excluded from `ALL_TOOLS`). Adding a tool to one set reaches only that
+  audience: a shipped tool was once offered to a model **zero** times because
+  it landed in `_WRITE_TOOL_NAMES` alone. Check all three, and check
+  `ADVERTISED_TOOL_EXECUTOR_NAMES` / `SURFACE_TOOL_EXECUTOR_NAMES` too.
 - Tool outputs are wrapped in a compact envelope (`ok`, `error`, `truncated`, `meta`, `data`) and truncated for context budget safety.
 - Leader/member factual answers should prefer structured query tools over clipped roster context. Resolve members by name/Discord handle before using tag-based tools when needed.
 - Strict JSON workflow contracts are validated in code with one repair retry:
@@ -397,7 +436,7 @@ Important rules:
 - Reply behavior is enforced in code from channel config:
   - `mention_only` for channels like `#clan-chat` and `#leaders`
   - `open_channel` for `#ask-elixir`
-  - `disabled` for notification-only channels like `#website-updates`, `#river-race`, and `#announcements`
+  - `disabled` for notification-only channels like `#announcements`
 - `#actions` is normally action-board style with disabled general replies, but `runtime/channel_router.py` special-cases leader-posted Clash Royale screenshots as observation evidence and replies with a concise `leader_screenshot_observation` readout.
 
 ### Agent Feedback Review
@@ -417,40 +456,12 @@ uv run --locked python scripts/review_agent_feedback.py --workflow clanops --jso
 - Roster context is clipped in `_clan_context()` to avoid prompt bloat.
 - Defaults:
   - chat workflows use `MAX_CONTEXT_MEMBERS_DEFAULT` (30)
-  - site generation uses `MAX_CONTEXT_MEMBERS_FULL` (50)
+  - recruiting content uses `MAX_CONTEXT_MEMBERS_FULL` (50) — this was "site generation" until 2026-08-05, but site publishing was removed 2026-06-21 and `generate_promote_content` is the only remaining caller
 - When clipping occurs, context includes an omitted-members summary line.
 
-### Auditing a read block: ask what it could ever CHANGE
+### Auditing a read block
 
-Volatility is the wrong test. `management.materialization.source_freshness` changed
-every tick — per-member battlelog and profile ages — and looked alive. Across 20
-sampled ticks, **907 of 907 member rows said `status: ready` with no reasons**: it
-churned constantly and could never change a decision. ~3,700 tokens a tick, 30% of
-the whole read, telling the brain that nothing was wrong once per member. It now
-sends a count plus the exceptions in full (98% smaller).
-
-The check that finds this: pull real payloads out of `llm_calls.prompt_json`, size
-every field, and for the big ones ask what value would make the brain act
-differently. If the answer is "nothing it has ever contained," summarise it and keep
-the exceptions.
-
-**Two ways this audit goes wrong, both hit in practice:**
-
-- **Regex "unused" is a false negative.** `game_context` matched none of 111 posts
-  and looked identical to the waste above. Checking its literal values showed
-  "Merge Tactics", "Ronin" and "legendary" all reaching output. Match values, not
-  themes, before calling a block dead.
-- **Some blocks work by preventing output.** `channel_memory`,
-  `recent_agent_writes`, `recent_member_spotlights` and `posting_pulse` exist to
-  stop repetition — absence from posts is them succeeding. Output-matching cannot
-  measure them at all.
-
-**A rarely-used block is not automatically a tool.** Moving it means the brain must
-know to ask, and models under-fetch: on replayed rounds Haiku ended the tool loop
-early in 3 of 5, and `game_context` is what tells the brain a new card exists at all —
-without it `lookup_cards` is never called. Price it before moving: `award_races` is
-1,192 tokens at 23% usage, and a triggered tool round re-reads the whole ~57K
-context, so the tool version saves nothing and adds a way to fail.
+Ask what a block could ever CHANGE the brain's behaviour about. Match literal values, not themes — and remember some blocks work by *preventing* output, so absence from posts is them succeeding. Worked examples: [docs/reference/context-and-confidence-lessons.md](docs/reference/context-and-confidence-lessons.md).
 
 ## Announcements and API drift
 
@@ -465,13 +476,17 @@ Elixir also posts a startup check-in to the #elixir-log webhook with the running
 
 Elixir’s core member/leader questions should be answered from structured capabilities, query helpers, and tools, not prompt reconstruction. Shared domain answers live in `capabilities/`; LLM tools are adapters over those contracts rather than their sole owners. The versioned capability layer covers canonical game truth, clan game modes, live/season war intelligence, facet-based member intelligence, deck and clan-local metagame intelligence, authoritative management decisions, and provisional-versus-durable awards. These contracts feed tools, awareness, reports, memory synthesis, and admin reads. External API refresh remains outside member capabilities, and management capabilities package the engine verdict without rescoring it.
 
-The LLM has a 14-tool, domain-aligned surface (defined in `agent/tool_defs.py`) with one owner per question:
+The LLM has a domain-aligned tool surface defined in `agent/tool_defs.py`, with
+one owner per question. Count it from `TOOLS` / `SURFACE_TOOLS` rather than
+quoting a number here — a stale "14" survived four additions. Domains:
 
 - **Member domain**: `resolve_member`, `get_member` (include: profile, form, battles, war, trend, deck, losses, history, memories, chests, awards), `get_member_war_detail` (aspect: summary, attendance, battles, missed_days, vs_clan_avg, war_decks)
 - **River Race domain**: `get_river_race` (live race state + competing clan standings, read off the war clock)
 - **Clan domain**: `get_clan_roster` (aspect: list, summary, recent_joins, longest_tenure, role_changes, max_cards, card_owners, donations, trends)
-- **Deck, card + awards domain**: `get_deck_intelligence` (member primary deck/variants/stability, clan-local archetype spread, leadership-gated named-card balance impact with source/date/direction), `lookup_cards`, `get_member_cards` (profile or filtered lookup), `get_awards`
-- **Elixir state + utility**: `get_elixir_state` (recent stream events / event windows / game modes, awareness decisions and confirmed posts, leader actions, and season state), `cr_api` (live external player/clan/tournament data), `save_clan_memory`, `record_leadership_followup` (optional member-action card and/or timed revisit), `lookup_reference`
+- **Deck, card + awards domain**: `get_deck_intelligence`, `get_deck_recommendations`, `read_deck_link`, `lookup_cards`, `get_member_cards`, `get_awards`
+- **Battle + game-mode intelligence**: `get_battle_intelligence`, `get_game_mode_performance`
+- **Elixir state + utility**: `get_elixir_state`, `cr_api`, `save_clan_memory`, `record_leadership_followup`, `lookup_reference`
+- **Surface tools** (`post_to_discord`, `post_to_clan_chat`): the most consequential writes Elixir has. They are deliberately **not** in `ALL_TOOLS` — the chassis hands them out per turn via `agent.chassis.surface_tools`, and they stage rather than send, so `deliver_posts` stays the single delivery path.
 
 War tools include `war_player_type` (regular/occasional/rare/never) per member. Management judgments come from the deterministic management capability and leader-action pipeline, not a parallel LLM health tool.
 
@@ -483,7 +498,13 @@ Exceptions: preauthored system-signal announcements may be written directly in c
 
 ### Portability
 
-A new clan forks elixir-bot and primarily rewrites `CLAN.md` and `DISCORD.md`, plus any lane prompts that reflect their own server culture. `SOUL.md`, `PURPOSE.md`, `GAME.md`, and most agent prompts should stay mostly portable. The clan-management policy constants live in `CLAN.md`; their meaning lives in `docs/reference/v5.1/management.md`.
+A new clan forks elixir-bot and primarily rewrites `CLAN.md` and `DISCORD.md`, plus any lane prompts that reflect their own server culture. `SOUL.md`, `PURPOSE.md`, `GAME.md`, and most agent prompts should stay mostly portable.
+
+The clan-management constants live in **`engine/management.py`** and nowhere
+else. `prompts/CLAN.md` and `prompts/POLICY.md` mirror them as prose for the
+model and for human leaders, and both have drifted from the engine before — so
+a retune is a four-file change (engine, POLICY.md, and the two poapkings.com
+pages). The comment above `ELDER_BAND_FLOOR` names them all.
 
 ### Future work
 
