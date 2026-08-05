@@ -13,15 +13,16 @@ matches brain quality at 4–20× lower cost; the brain spends ~300K tokens/tick
 |---|---|---|
 | 0 — shadow wakes + baseline | **shipped, live** (`4eaab798`) | `ELIXIR_WAKE_POLICY=1`, `ELIXIR_WAKE_SHADOW=1` |
 | 1 — chassis + join responder | **shipped, LIVE, gate MET 2026-08-05** (`276011fb`, enabled `f1d6c2fa`) | `ELIXIR_WAKE_RESPONDER=1` |
-| 2 — roster wakes, brain 4×→2× | not started | — |
+| 2 — roster wakes, brain 4×→2× | **shipped, LIVE 2026-08-05**, watching | `ELIXIR_WAKE_RESPONDER=1` |
 | 3 — war wakes, brain →1× | not started | — |
 | 4 — leader-feedback reflection | not started | — |
 | 5 — dossiers + follow-ups | not started | needs `_apply_v36` |
 | 6 — adoption + tuning | not started | — |
 
-**Phase 2 is unblocked.** Phase 1's gate was met on 2026-08-05 by rehearsal
-rather than by waiting for five organic joins (see Phase 1 below for why and
-what was proven). Nothing else blocks Phase 2 starting.
+**Phase 2 shipped 2026-08-05.** Five jobs now, the brain runs twice a day, and
+`trigger.py` is gone. What the pre-build analysis changed about the plan is
+recorded in the Phase 2 section below — three of its six steps were wrong about
+where the work was.
 
 **A gate lesson worth carrying forward:** "≥5 real joins" was an exit criterion
 the team could not influence — it depended on strangers deciding to join a clan.
@@ -349,9 +350,56 @@ Known traps, all paid for already:
 - The responder must keep using the caller's `deliver_fn`; a second delivery
   path is the v4 failure.
 
-Exit gate: two weeks, zero floor misses (reconciliation log), zero divergence
-flags, Jamie satisfied with post quality. Cost report: expected ~$1.40/day
-total awareness spend at this stage.
+**SHIPPED 2026-08-05.** What the analysis changed, because three of the six
+steps above were wrong about where the work was:
+
+- **Step 2 was already done.** `JOB_BY_EVENT_TYPE` is `event_type -> job`, which
+  is *already* many-to-one: four milestone types pointing at one job collapse to
+  a single name and `job_for`'s one-job rule fires unchanged. Step 4's "needs a
+  many-types-one-job mapping" was zero lines.
+- **The real blocker was two levels up, in the evaluator.** Wakes grouped by
+  `(class, model)`, not by job. With five jobs registered, a join and a verified
+  departure — both `(immediate, lightweight)` — would land in ONE wake mapping to
+  `{welcome, farewell}`, be refused as ambiguous, and fall to the brain silently,
+  on exactly the busy ticks that matter most. Replaying real history: 34 events
+  that would have been one refused wake are now three clean ones. The key is
+  `(class, model, job)` — class stays because it carries timing, so an immediate
+  legendary badge is not held behind an arena climb's batch window.
+- **Payloads never reached the responder at all.** `pending_events` selected
+  everything except `payload_json`, so `respond`'s payload branch was live only
+  in tests. Every Phase 2 job needs it — the farewell cannot see the leader's
+  note, the role change cannot tell a promotion from a demotion, the podium has
+  no finishers. One column, and the whole phase depended on it.
+- **Job files are hyphenated.** `job_prompt` maps `_` to `-`, so `role_change`
+  reads `role-change.md`. The plan spelled them with underscores, which would
+  have raised inside `assemble_system` on a live member event.
+- **`role_changed` carried no name.** Joins and leaves always have, so this was
+  the one clan event whose payload could not say who it was about. Stamped at the
+  emitter (normalize at the source) rather than worked around in the job.
+- **Surfaces came from measurement, not choice.** 31 days of delivered intents:
+  role changes 7/7 announcements and 0/7 clan chat; milestones 28/28 `#elixir`;
+  joins 10/10 with a clan-chat sibling; farewells 3 of 7 — which is "notable
+  departures only" expressed as evidence. Milestones' apparent clan-chat siblings
+  belonged to co-covered joins; `arena_changed` never once posted alone.
+- **The trigger's third rung had to be replaced before it could be deleted.**
+  `trigger.py` fired the brain out of band for joins; deleting it while halving
+  the cron would have left a failed responder waiting up to 12 hours. The
+  replacement keys on an uncovered *floor* rather than an event type, so it
+  generalises to every hard post and adds no per-event-type knowledge.
+- **Nothing recorded a floor miss.** `episode` was set only on the successful
+  tier, so a wake that failed every tier left one log line — invisible to the
+  query this gate is about. It now names the signals it could not cover.
+
+Baseline this replaces (31 days, measured before the change): verified
+departures reached members in a median 50 min, role changes 55 min, the ranked
+podium 170 min, and reaching Ultimate Champion took **361 min** — six hours to
+say out loud. Two hard posts were missed outright: gtr0925's departure
+(2026-07-15) and a promotion to Elder (2026-07-05). Added load is ~1.9 scoped
+turns/day.
+
+Exit gate: two weeks, zero floor misses (`runtime/awareness/divergence.py`,
+reported daily to #leaders), zero divergence flags, Jamie satisfied with post
+quality. Cost report: expected ~$1.40/day total awareness spend at this stage.
 Kill switch: per-class — a wake class flips back to digest with one registry
 edit; cadence revert is one line.
 Size: 2–3 evenings.

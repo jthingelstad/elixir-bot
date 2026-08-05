@@ -243,11 +243,17 @@ replacing the old `#elixir-log` webhook on 2026-07-09.
 Current executable workflows (specs in `agent/workflow_registry.py`):
 - `awareness` — the deliberative brain. Reads current streams, projections,
   history, and channel memory, then returns one structured post plan.
-- `wake_response` / `wake_response_chat` — the scoped responder (Phase 1,
+- `wake_response` / `wake_response_chat` — the scoped responder (Phases 1-2,
   live). An engine-tick wake evaluator (`runtime/awareness/wake.py`) picks up
   qualifying events and `runtime/awareness/respond.py` composes a single
   focused post on the shared chassis (`agent/chassis.py`), escalating Haiku →
-  Sonnet → the daily brain. Gated by `ELIXIR_WAKE_RESPONDER`.
+  Sonnet → an out-of-band brain run. Gated by `ELIXIR_WAKE_RESPONDER`.
+  **Which events it claims, and which surfaces each job may speak on, is the
+  `JOBS` table in `respond.py` — data, never a code path.** Five jobs today:
+  welcome, farewell, role_change, podium, milestone_batch. Adding one means a
+  row plus a `prompts/jobs/*.md` file (hyphenated: `role_change` reads
+  `role-change.md`). If anything else needs to change per event type, stop —
+  that is v4's `delivery.py` growing back.
 - `interactive` — public read-only conversation in member-facing lanes.
 - `clanops` — private leadership conversation with gated write tools.
 - `reception` — constrained onboarding and identity-verification replies.
@@ -286,9 +292,10 @@ cadence. Only the load-bearing *shape* belongs in this file:
   `player-progression`, and `award-detection` activities — awards now grant on
   the war stream's `season_closed` event, and polling is the adaptive
   scheduler's job.
-- **The brain runs on a cron, not continuously** — `awareness-loop`, four times
-  a day. Cost forced the cadence down from hourly, which is the whole
-  motivation for the wake responder above.
+- **The brain runs on a cron, not continuously** — `awareness-loop`, **twice**
+  a day since 2026-08-05 (Phase 2), down from four. The scoped responder covers
+  the hard posts within a tick, so the cron is for deliberation: digest signals,
+  trends, and the backstop sweep.
 - **Weeks roll in exactly one place** — `weekly-leadership-review`, Mon 07:00
   America/Chicago. Hysteresis counters advance nowhere else. The old
   `leadership-action-scan` is gone; its role lives in the engine's reactive

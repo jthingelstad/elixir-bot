@@ -9,7 +9,14 @@ from typing import Any
 # but moves the runs to 09:05 (morning check-in), 15:05 (after school), 21:05
 # (peak evening play, and the last chance to voice anything before the day rolls)
 # and 03:05 (the one quiet slot, which absorbs overnight war-day boundaries).
-AWARENESS_LOOP_HOURS_DEFAULT = "3,9,15,21"
+# 2026-08-05 (Phase 2): 4x -> 2x. The scoped responder now covers every
+# lightweight-tier hard post (joins, verified departures, role changes) plus the
+# notable milestones, and reaches them in ~10 minutes instead of the 50-170 min
+# the brain averaged. What is left for the brain is deliberation — digest
+# signals, trends, and the backstop sweep — which does not need four passes.
+# 9/21 keeps the two highest-value slots: the morning check-in and peak evening
+# play, the last chance to voice anything before the day rolls.
+AWARENESS_LOOP_HOURS_DEFAULT = "9,21"
 
 
 @dataclass(frozen=True)
@@ -404,19 +411,22 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         # the :00 cron crowd. AWARENESS_LOOP_HOURS and AWARENESS_LOOP_MINUTE are the
         # tunables: hourly -> */3 (2026-07-23) -> */6 (2026-07-31), both for cost,
         # then */6 -> 3,9,15,21 (2026-07-31) to phase the same 6h interval onto CT
-        # waking hours (see AWARENESS_LOOP_HOURS_DEFAULT).
+        # waking hours, then -> 9,21 (2026-08-05, Phase 2) once the scoped
+        # responder took over the hard posts (see AWARENESS_LOOP_HOURS_DEFAULT).
         # Awareness is 51% of Elixir's LLM spend, so the interval is the biggest
         # single lever (~$37/month here). Moving it to Haiku was measured and
         # REJECTED instead: replaying real captured rounds, Haiku wrote near-parity
         # posts but terminated the tool loop early in 3 of 5 mid-loop rounds --
         # including one where Sonnet called save_clan_memory. It can write the post
         # but not do the research, which yields well-formatted posts built on
-        # thinner evidence. Cost of this change: hard-posts wait up to 6h.
-        # That price was reconsidered for ONE event on 2026-08-03: a member_joined now
-        # triggers an out-of-band run from the engine tick (runtime/awareness/trigger.py),
-        # so a newcomer waits ~10 min, not up to 6h. Measured before the change: median
-        # 2.0h to welcome, worst 5.2h, and one join at 22:58 CT welcomed at 03:05 CT to
-        # an empty room. Every other hard-post still waits for this cron.
+        # thinner evidence.
+        # Hard posts no longer wait for this cron at all: the scoped responder
+        # (runtime/awareness/respond.py) composes them within a tick, and when every
+        # model tier fails while a mandatory signal is still uncovered, the engine
+        # tick runs this loop out of band rather than leaving a floor unmet.
+        # Measured before that existed: joins waited a median 2.0h (worst 5.2h, one
+        # welcomed at 03:05 CT to an empty room), verified departures 50 min, role
+        # changes 55 min, and reaching Ultimate Champion took 6 hours to say aloud.
         schedule_kind="cron",
         schedule_config={
             "hour": _attr("AWARENESS_LOOP_HOURS", AWARENESS_LOOP_HOURS_DEFAULT),

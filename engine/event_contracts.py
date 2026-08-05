@@ -124,13 +124,14 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
     "pol_season_closed": _event("player", "battle_mode", "pol_season_id", time_semantics="exact"),
     # clan stream
     # The join is the canonical immediate wake: the newcomer is in the app NOW,
-    # and this is the case runtime/awareness/trigger.py already proved.
+    # and this is the case the retired join trigger already proved.
     "member_joined": _event("clan", "clan_event", "name", hard_post=True, wake="immediate"),
     "member_left": _event("clan", "clan_event", "name"),
     "member_left_verified": _event("clan", "clan_event", "name", hard_post=True, wake="immediate"),
     "role_changed": _event(
         "clan",
         "clan_event",
+        "name",
         "new_role",
         "prev_role",
         "direction",

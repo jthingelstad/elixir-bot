@@ -6,7 +6,7 @@ the awareness brain has not consumed yet, which of them deserve a scoped
 responder turn *now*, which should coalesce for a while, and which can wait for
 the daily deliberation.
 
-It is the generalization of ``runtime/awareness/trigger.py``, which has been
+It is the generalization of the join trigger, which has been
 answering exactly this question for ``member_joined`` since the cadence was
 widened to 4×/day. Every property that made the join trigger safe to run every
 ten minutes is inherited here, deliberately:
@@ -45,6 +45,7 @@ by an unrelated war event in the same tick.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
@@ -130,8 +131,27 @@ def _cursor_prefix(mode: str) -> str:
     return SHADOW_CURSOR_PREFIX if mode == "shadow" else LIVE_CURSOR_PREFIX
 
 
-def _class_key(mode: str, wake_class: str, wake_model: str) -> str:
-    return f"{_cursor_prefix(mode)}{wake_class}:{wake_model}"
+def _class_key(mode: str, wake_class: str, wake_model: str, job: str = "-") -> str:
+    """Per-group high-water key.
+
+    The job joined the key on 2026-08-05 (Phase 2). Old ``class:model`` rows are
+    left behind as orphans on purpose: `_high_water` returns 0 for an unknown
+    key, so each new group re-evaluates its stream once and the cursor-driven
+    dedup means an already-covered event cannot produce a second post.
+    """
+    return f"{_cursor_prefix(mode)}{wake_class}:{wake_model}:{job}"
+
+
+def _job_for_event_type(event_type: str) -> str:
+    """The job name for grouping, or ``-`` for events no job claims.
+
+    Imported lazily: `respond` imports the chassis, which imports prompts and the
+    agent stack, and `wake` runs inside the engine tick where that would be a
+    heavy and circular import at module load.
+    """
+    from runtime.awareness.respond import JOB_BY_EVENT_TYPE
+
+    return JOB_BY_EVENT_TYPE.get(event_type) or "-"
 
 
 def _high_water(conn: sqlite3.Connection, consumer_key: str) -> int:
@@ -160,26 +180,50 @@ def pending_events(conn: sqlite3.Connection) -> list[dict]:
             f"{subject_column} AS subject_tag" if subject_column else "NULL AS subject_tag"
         )
         rows = conn.execute(
-            f"SELECT event_id, event_type, {subject_select}, observed_at, dedup_key "
+            # payload_json is not optional context — it is the event's substance.
+            # Without it a farewell cannot see the leader's departure note, a
+            # role change cannot tell a promotion from a demotion, and the podium
+            # has no finishers. The responder has always read `payload`; until
+            # 2026-08-05 nothing ever put one there, so the branch was live only
+            # in tests.
+            f"SELECT event_id, event_type, {subject_select}, observed_at, dedup_key, payload_json "
             f"FROM {table} WHERE event_id > ? ORDER BY event_id",
             (cursor,),
         ).fetchall()
         for r in rows:
             wake_class, wake_model = wake_policy(r["event_type"])
-            out.append(
-                {
-                    "stream": stream,
-                    "event_id": int(r["event_id"]),
-                    "event_type": r["event_type"],
-                    "subject_tag": r["subject_tag"],
-                    "observed_at": r["observed_at"],
-                    "signal_key": r["dedup_key"]
-                    or f"{stream}:{r['event_type']}:{r['subject_tag']}:{r['observed_at']}",
-                    "wake_class": wake_class,
-                    "wake_model": wake_model,
-                }
-            )
+            entry = {
+                "stream": stream,
+                "event_id": int(r["event_id"]),
+                "event_type": r["event_type"],
+                "subject_tag": r["subject_tag"],
+                "observed_at": r["observed_at"],
+                "signal_key": r["dedup_key"]
+                or f"{stream}:{r['event_type']}:{r['subject_tag']}:{r['observed_at']}",
+                "wake_class": wake_class,
+                "wake_model": wake_model,
+            }
+            payload = _payload(r["payload_json"])
+            if payload is not None:
+                entry["payload"] = payload
+            out.append(entry)
     return out
+
+
+def _payload(raw) -> dict | None:
+    """Decode an event payload, tolerating a bad row rather than losing the tick.
+
+    A malformed payload costs that event its detail; it must never cost the
+    whole evaluation, because the events beside it may carry a hard-post floor.
+    """
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except TypeError, ValueError:
+        log.warning("wake: unparseable payload_json, continuing without it")
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def _age_minutes(observed_at: str | None, now: datetime) -> float:
@@ -251,20 +295,29 @@ def evaluate(
     budget = daily_wake_budget()
     spent = _wakes_today(mode, now)
 
-    # Group by (class, model). Immediate events of the same tier ride together —
-    # one author, one post, no divergence.
-    groups: dict[tuple[str, str], list[dict]] = {}
+    # Group by (class, model, job). Events of the same tier AND the same job ride
+    # together — one author, one post, no divergence.
+    #
+    # The job is in the key because without it Phase 2 defeats itself. A join and
+    # a verified departure are both (immediate, lightweight): they would land in
+    # one wake, `job_for` would see {welcome, farewell}, refuse to pick, and the
+    # whole wake would fall to the daily brain — silently, and precisely on the
+    # busy ticks that matter most. Class stays in the key because it carries
+    # timing: a batch group waits for its window, and an immediate legendary
+    # badge must not be held behind an arena climb just because they share a job.
+    groups: dict[tuple[str, str, str], list[dict]] = {}
     for event in events:
         if event["wake_class"] in ("digest", "never"):
             continue
-        groups.setdefault((event["wake_class"], event["wake_model"]), []).append(event)
+        job = _job_for_event_type(event["event_type"])
+        groups.setdefault((event["wake_class"], event["wake_model"], job), []).append(event)
 
     wakes: list[dict] = []
     held: list[dict] = []
     window = batch_window_minutes()
 
-    for (wake_class, wake_model), group in sorted(groups.items()):
-        consumer_key = _class_key(mode, wake_class, wake_model)
+    for (wake_class, wake_model, job), group in sorted(groups.items()):
+        consumer_key = _class_key(mode, wake_class, wake_model, job)
         mark = _high_water(conn, consumer_key)
         fresh = [e for e in group if e["event_id"] > mark]
         if not fresh:

@@ -228,6 +228,13 @@ def _apply_roster_change_set(
             "role_changed",
             role.dedup_key,
             {
+                # Joins and leaves have always carried the name; role changes did
+                # not, so this was the one clan event whose payload could not say
+                # who it was about. Stamping it at the emitter (Jamie's rule: put
+                # the resolved field in the payload floor, never make each reader
+                # re-derive it) keeps the family consistent and gives the
+                # deterministic fallback copy a name to use.
+                "name": _display_name(conn, role.player_tag, None),
                 "new_role": role.new_role,
                 "prev_role": role.previous_role,
                 "direction": role.direction,

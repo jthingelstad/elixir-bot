@@ -72,8 +72,15 @@ BROAD_EXCEPTION_BASELINE = {
     # tick. Shadow measurement must never be able to fail a tick.
     # 41 -> 42 (2026-08-04): the Phase 1 responder turn, same reason — a wake
     # that fails is a wake the daily deliberation inherits, not a dead tick.
-    "runtime/app.py": 42,
+    # 42 -> 43 (2026-08-05): the Phase 2 divergence report. It observes two
+    # composing paths for overlap; a check that could fail the daily leader-action
+    # job would be a monitor taking down the thing it monitors.
+    "runtime/app.py": 43,
     "runtime/awareness/deliver.py": 10,
+    # The floor-miss half reads the telemetry database, which is a separate file
+    # and may be absent or locked. Missing telemetry must degrade the report to
+    # "unavailable", never raise into the daily job.
+    "runtime/awareness/divergence.py": 1,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
     # 1 -> 2 (2026-08-04): the covered-signal lookup fails OPEN. A failure that

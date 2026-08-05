@@ -686,13 +686,7 @@ async def _engine_tick():
             counters["tournament_autowatch"] = auto
     except Exception:
         log.exception("engine tick post-steps failed")
-    try:  # A newcomer waiting to be welcomed; never fails the tick
-        triggered = await _maybe_trigger_awareness_for_joins()
-        if triggered:
-            counters["awareness_join_trigger"] = triggered
-    except Exception:
-        log.exception("engine tick: join trigger failed")
-    try:  # Agentic Loop v2 Phase 0: shadow wake measurement. Posts nothing.
+    try:  # Agentic Loop v2: wake evaluation, the scoped responder, shadow measurement.
         wake_summary = await _evaluate_wakes()
         if wake_summary:
             counters["wake"] = wake_summary
@@ -710,13 +704,10 @@ async def _engine_tick():
 
 
 async def _evaluate_wakes():
-    """Shadow-measure what the wake evaluator would have fired (Phase 0).
+    """Evaluate wakes, respond to the ones a job claims, and shadow-measure.
 
-    Deliberately runs AFTER the join trigger and composes nothing: Phase 0 is
-    measurement only, so the join trigger remains the only thing that can
-    actually cause an out-of-band run. Both observe the same pending events, and
-    that overlap is the point — the shadow report compares what a wake would
-    have done against what the brain actually did.
+    The shadow pass still runs alongside the live one — that overlap is what the
+    shadow report compares against what the brain actually did.
     """
     from runtime.awareness import respond as respond_mod
     from runtime.awareness import wake
@@ -731,11 +722,12 @@ async def _evaluate_wakes():
     if not respond_mod.responder_enabled():
         return summary
 
-    # Phase 1: the responder composes for the wakes a job claims. Everything it
-    # does not handle stays pending for the daily deliberation — the cursors are
-    # untouched here, so nothing is consumed by trying.
+    # The responder composes for the wakes a job claims. Everything it does not
+    # handle stays pending for the daily deliberation — the cursors are untouched
+    # here, so nothing is consumed by trying.
     decision = await asyncio.to_thread(wake.evaluate, mode="live")
     handled = []
+    missed_floor: list[str] = []
     for fired in decision.get("wakes") or []:
         if respond_mod.job_for(fired.get("events") or []) is None:
             continue
@@ -743,9 +735,29 @@ async def _evaluate_wakes():
         if outcome.get("handled"):
             handled.append(fired["wake_class"])
             await asyncio.to_thread(wake.mark_fired, fired["consumer_key"], fired["high_water"])
+        else:
+            missed_floor.extend(outcome.get("uncovered_floor") or [])
     if handled:
         summary = dict(summary or {})
         summary["responded"] = handled
+    # The third rung. Every model tier failed while a MANDATORY signal was still
+    # uncovered, so the brain runs out of band rather than leaving a floor to the
+    # next scheduled tick. This replaces the retired join trigger, which did
+    # the same thing for joins alone via its own cursor; keying on the floor
+    # instead of on an event type generalises it to every hard post and keeps the
+    # per-event-type knowledge in the registry where it belongs.
+    if missed_floor:
+        log.warning(
+            "wake responder left %d mandatory signal(s) uncovered; running the brain out of band: %s",
+            len(missed_floor),
+            sorted(set(missed_floor))[:5],
+        )
+        summary = dict(summary or {})
+        summary["brain_requested"] = sorted(set(missed_floor))
+        try:
+            await _awareness_loop(trigger="wake_floor")
+        except Exception:
+            log.exception("out-of-band awareness run for an uncovered floor failed")
     return summary
 
 
@@ -795,54 +807,6 @@ async def _run_wake_responder(fired: dict) -> dict:
         outcome.get("reason") or f"delivered {outcome.get('delivered', 0)}",
     )
     return outcome
-
-
-async def _maybe_trigger_awareness_for_joins():
-    """Run the awareness loop now if a newcomer is waiting to be welcomed.
-
-    A join is the one hard-post where minutes matter: the newcomer is in the app
-    right now, and a welcome that lands at 3am to an empty room is a welcome that
-    didn't happen. Everything else about the loop is unchanged — same brain, same
-    coverage floor, same clan-chat sibling. See runtime/awareness/trigger.py for
-    why this triggers the existing author instead of adding a second one.
-
-    Runs the loop as a background task rather than awaiting it here: an awareness
-    turn takes minutes, and the engine tick is a 10-minute heartbeat that must not
-    be held open behind it.
-    """
-    from runtime.awareness import trigger as join_trigger
-
-    if not join_trigger.trigger_enabled():
-        return None
-
-    job = scheduler.get_job("awareness-loop") if scheduler.running else None
-    decision = await asyncio.to_thread(
-        join_trigger.evaluate,
-        next_scheduled_at=getattr(job, "next_run_time", None),
-    )
-    if not decision.get("run"):
-        if decision.get("joins"):
-            log.info("awareness join trigger: holding — %s", decision.get("reason"))
-        return None
-
-    tags = ", ".join(str(j.get("subject_tag")) for j in decision["joins"])
-    log.info("awareness join trigger: firing for %s (%s)", tags, decision["reason"])
-
-    async def _run():
-        try:
-            await _awareness_loop(trigger="join")
-        finally:
-            # Mark whether or not the run succeeded. The high-water mark bounds
-            # this to ONE extra run per join: a run that failed (or that the copy
-            # policy refused) must not re-fire every 10 minutes at Sonnet prices.
-            # The scheduled cadence stays the backstop for that join.
-            try:
-                await asyncio.to_thread(join_trigger.mark_fired, decision["high_water"])
-            except Exception:
-                log.exception("awareness join trigger: could not mark high-water")
-
-    _safe_create_task(_run(), name="awareness-join-trigger")
-    return {"joins": [j.get("subject_tag") for j in decision["joins"]]}
 
 
 async def _weekly_leadership_review():
@@ -957,7 +921,7 @@ _thinking_session: dict = {}
 
 # Awareness runs strictly one-at-a-time. The scheduler's max_instances=1 only
 # serializes the *cron* job against itself; since joins can also trigger a run
-# out of band (runtime/awareness/trigger.py), the guarantee has to live here
+# out of band (the wake responder's floor rung), the guarantee has to live here
 # instead. It is load-bearing beyond _thinking_session: two concurrent loops
 # would build their reads from the same unadvanced event cursor and both post
 # the same signals.
@@ -1074,7 +1038,7 @@ async def _awareness_loop(*, trigger: str = "schedule"):
     gap or a double-post.
 
     Reached two ways: the cron schedule, and an out-of-band ``join`` trigger when
-    a newcomer is waiting to be welcomed (runtime/awareness/trigger.py). Both
+    a mandatory signal went uncovered by the wake responder. Both
     paths run the same brain — the trigger changes *when* it thinks, never who
     writes. A run already in flight covers everything past the event cursor, so a
     second overlapping request is skipped rather than queued."""
@@ -1576,9 +1540,65 @@ async def _action_outcome_refresh():
         runtime_status.mark_job_failure("action_outcome_refresh", str(exc))
         log.warning("action outcome refresh failed: %s", exc, exc_info=True)
         return
+    await _report_wake_divergence()
     runtime_status.mark_job_success(
         "action_outcome_refresh", f"refreshed {len(refreshed) if refreshed else 0}"
     )
+
+
+async def _report_wake_divergence():
+    """The v4 canary, ridden along on the existing daily job.
+
+    Two composing paths now exist, and the failure this architecture must never
+    have is both of them narrating one moment. A signal covered by two fulfilled
+    intents is a real defect and goes to #leaders; a floor the responder could
+    not carry is the exit gate's number. Same-member repeats are reported only in
+    the log, because two posts about one member in a day are often correct.
+
+    Never fails the caller: this observes, it does not gate.
+    """
+    try:
+        from runtime.awareness import divergence
+
+        result = await asyncio.to_thread(divergence.report)
+    except Exception:
+        log.exception("wake divergence check failed")
+        return
+    if result.get("clean"):
+        log.info(
+            "wake divergence: clean (%s intents in %sh)",
+            result.get("intents_examined"),
+            result.get("window_hours"),
+        )
+        return
+    if result.get("same_member"):
+        log.info("wake divergence: same-member repeats %s", result["same_member"][:5])
+    overlap = result.get("overlap") or []
+    misses = result.get("floor_misses") or []
+    if not overlap and not misses:
+        return
+    lines = ["⚠️ **Wake divergence check**"]
+    if overlap:
+        lines.append(
+            f"**{len(overlap)} signal(s) covered by more than one post** — two authors, one moment:"
+        )
+        for item in overlap[:5]:
+            lines.append(f"- `{item['signal_key']}` — intents {', '.join(item['intents'][:3])}")
+    if misses:
+        lines.append(f"**{len(misses)} wake(s) left a mandatory signal uncovered:**")
+        for item in misses[:5]:
+            lines.append(
+                f"- {item['recorded_at'][:16]} `{item['job']}` — {', '.join(item['uncovered'][:2])}"
+            )
+    log.warning("wake divergence: overlap=%d floor_misses=%d", len(overlap), len(misses))
+    try:
+        configs = prompts.discord_channels_by_workflow("clanops")
+        if not configs:
+            log.warning("wake divergence: no clanops channel configured; report not delivered")
+            return
+        await _engine_send(int(configs[0]["id"]), "\n".join(lines))
+    except Exception:
+        log.exception("could not post the wake divergence report")
 
 
 @bot.event

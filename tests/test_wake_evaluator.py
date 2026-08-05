@@ -102,17 +102,62 @@ def test_subject_column_differs_per_stream(engine_conn):
     assert by_type["week_finished"]["subject_tag"] is None
 
 
-def test_same_tier_events_ride_one_wake_but_tiers_split(engine_conn):
-    """One author per wake is the v4 lesson; the tier split keeps a cheap roster
-    wake from being dragged to Sonnet prices by an unrelated war event."""
+def test_wakes_split_by_job_and_by_tier(engine_conn):
+    """One author per wake is the v4 lesson, and the unit of authorship is the
+    JOB — a welcome and a farewell are different posts even though both are
+    cheap-tier roster events.
+
+    Before Phase 2 these two rode one wake, which was harmless only because
+    `welcome` was the single registered job. With a job for each, that wake would
+    have mapped to {welcome, farewell}, `job_for` would have refused to pick, and
+    the whole thing would have fallen to the daily brain — silently, and exactly
+    on the busy ticks that matter most. The tier split still keeps a cheap roster
+    wake from being dragged to Sonnet prices by an unrelated war event.
+    """
     _clan_event(engine_conn, "member_joined", tag="#AAA")
     _clan_event(engine_conn, "member_left_verified", tag="#BBB")
     _war_event(engine_conn, "week_finished")
     decision = wake.evaluate(now=NOW)
-    by_model = {w["wake_model"]: w for w in decision["wakes"]}
-    assert set(by_model) == {"lightweight", "chat"}
-    assert len(by_model["lightweight"]["events"]) == 2, "both roster events, one wake"
-    assert [e["event_type"] for e in by_model["chat"]["events"]] == ["week_finished"]
+
+    from runtime.awareness import respond as respond_mod
+
+    by_job = {respond_mod.job_for(w["events"]): w for w in decision["wakes"]}
+    assert "welcome" in by_job and "farewell" in by_job, "each job gets its own wake"
+    assert [e["event_type"] for e in by_job["welcome"]["events"]] == ["member_joined"]
+    assert [e["event_type"] for e in by_job["farewell"]["events"]] == ["member_left_verified"]
+    assert by_job["welcome"]["wake_model"] == "lightweight"
+
+    # The war event has no job yet (Phase 3) and still separates on tier.
+    chat = [w for w in decision["wakes"] if w["wake_model"] == "chat"]
+    assert [e["event_type"] for e in chat[0]["events"]] == ["week_finished"]
+
+
+def test_a_mixed_milestone_wake_maps_to_one_job(engine_conn):
+    """Many event types -> one job is the mechanism behind the milestone batch.
+
+    Four different milestone types share `milestone_batch`, so a wake carrying
+    several of them collapses to a single job rather than being refused as
+    ambiguous. This is what makes the batch class composable at all.
+    """
+    from runtime.awareness import respond as respond_mod
+
+    events = [
+        {"event_type": "arena_changed"},
+        {"event_type": "legendary_badge_earned"},
+        {"event_type": "champion_league_reached"},
+    ]
+    assert respond_mod.job_for(events) == "milestone_batch"
+
+    # The safety property survives: two DIFFERENT jobs in one wake still refuse.
+    assert (
+        respond_mod.job_for([{"event_type": "member_joined"}, {"event_type": "role_changed"}])
+        is None
+    )
+    # And an unmapped event still disqualifies the whole wake.
+    assert (
+        respond_mod.job_for([{"event_type": "arena_changed"}, {"event_type": "card_unlocked"}])
+        is None
+    )
 
 
 def test_a_batch_class_coalesces_before_firing(engine_conn):

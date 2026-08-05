@@ -1872,6 +1872,23 @@ def _execute_post_to_discord(arguments):
     lane = str(arguments.get("lane") or "").strip()
     if lane not in ("announcements", "elixir"):
         return json.dumps({"error": f"unknown lane {lane!r}; use announcements or elixir"})
+    # The turn may only post where its job declared it speaks. The tool schema
+    # offers both lanes to every turn, so without this a role-change job — which
+    # is announcements-only by a month of measured editorial judgment — could put
+    # a roster fact in #elixir and break the strict Discord split. Allowed
+    # surfaces are registry data on the Attention; this is where they bind.
+    allowed = {
+        chassis._DISCORD_SURFACES[surface]
+        for surface in chassis._DISCORD_SURFACES
+        if surface in staging.attention.surfaces
+    }
+    if lane not in allowed:
+        return json.dumps(
+            {
+                "error": "lane_not_available",
+                "reason": f"this job posts to {sorted(allowed) or 'no Discord lane'}, not {lane!r}",
+            }
+        )
     try:
         from runtime.emoji import available_emoji_names
 

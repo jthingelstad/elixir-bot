@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from agent import chassis
@@ -37,15 +38,78 @@ log = logging.getLogger("elixir")
 
 HARD_POST_EVENT_TYPES = hard_post_event_types()
 
-# Jobs by wake class + event type. A wake with no job cannot be responded to and
-# falls through to the daily brain — which is the correct default for an event
-# type nobody has written a job for yet.
-JOB_BY_EVENT_TYPE = {
-    "member_joined": "welcome",
-}
+
+@dataclass(frozen=True)
+class JobSpec:
+    """One job: the events it claims, and the surfaces it may speak on.
+
+    This table IS the per-event-type behaviour. Design rule 2 of the plan says
+    the day ``respond.py`` grows an ``if event_type ==`` branch we are rebuilding
+    v4's ``delivery.py`` — so everything that differs between a welcome and a
+    farewell lives here as data, or in the job's prose file, and nowhere else.
+
+    ``surfaces`` is what the job MAY use, not what it must: the farewell carries
+    clan chat because a notable departure deserves it, and ``farewell.md``
+    decides which departures qualify. Availability is data; the editorial call is
+    prose. That is why "notable departures only" needs no code.
+    """
+
+    name: str
+    event_types: frozenset
+    surfaces: frozenset
+
+
+_ANNOUNCE = "discord:announcements"
+_ELIXIR = "discord:elixir"
+_CLAN_CHAT = "clan_chat"
+
+# Surfaces below are the ones the brain actually used, measured over 31 days of
+# delivered intents rather than chosen: joins 12/12 to announcements with a
+# clan-chat sibling every time; role changes 7/7 announcements and 0/7 clan chat;
+# the one podium to announcements; every arena/badge/ranked milestone to #elixir
+# (28/28). Milestones never earned their own clan-chat line — the siblings that
+# looked like theirs belonged to a join co-covered by the same post.
+JOBS = (
+    JobSpec("welcome", frozenset({"member_joined"}), frozenset({_ANNOUNCE, _CLAN_CHAT})),
+    JobSpec("farewell", frozenset({"member_left_verified"}), frozenset({_ANNOUNCE, _CLAN_CHAT})),
+    JobSpec("role_change", frozenset({"role_changed"}), frozenset({_ANNOUNCE})),
+    JobSpec("podium", frozenset({"pol_season_podium"}), frozenset({_ANNOUNCE})),
+    JobSpec(
+        "milestone_batch",
+        frozenset(
+            {
+                "arena_changed",
+                "legendary_badge_earned",
+                "champion_league_reached",
+                "ultimate_champion_reached",
+            }
+        ),
+        frozenset({_ELIXIR, _CLAN_CHAT}),
+    ),
+)
+
+JOBS_BY_NAME = {spec.name: spec for spec in JOBS}
+
+# Derived, never hand-maintained: a second list of the same facts is how the two
+# drift apart. Many event types mapping to one job is the whole mechanism behind
+# the mixed milestone wake — `job_for` collapses them to a single job name.
+JOB_BY_EVENT_TYPE = {event_type: spec.name for spec in JOBS for event_type in spec.event_types}
+
+# Discord surface -> lane, matching agent.chassis._DISCORD_SURFACES. Lanes drive
+# the recent-posts context (repetition avoidance); surfaces drive which posting
+# tools and lane prompts the turn gets.
+_LANE_BY_SURFACE = {_ANNOUNCE: "announcements", _ELIXIR: "elixir"}
 
 # The escalation ladder. Same attention, stronger composer.
 _LADDER = {"lightweight": "wake_response", "chat": "wake_response_chat"}
+
+
+def job_spec(job: str) -> JobSpec | None:
+    return JOBS_BY_NAME.get(job)
+
+
+def lanes_for(spec: JobSpec) -> tuple:
+    return tuple(lane for surface, lane in _LANE_BY_SURFACE.items() if surface in spec.surfaces)
 
 
 def responder_enabled() -> bool:
@@ -188,8 +252,15 @@ def respond(
             conn.close()
 
     floor = floor_keys(events)
-    lanes = ("announcements",)
-    surfaces = {chassis.SURFACE_DISCORD_ANNOUNCEMENTS, chassis.SURFACE_CLAN_CHAT}
+    spec = job_spec(job)
+    if spec is None:
+        # job_for() only returns names from this table, so this is unreachable
+        # unless the two fall out of step. Fail to the brain rather than guess a
+        # surface — a wrong lane is a member-facing error.
+        log.error("wake responder: job %r has no spec; leaving for the daily brain", job)
+        return {"handled": False, "reason": f"job {job!r} has no surface declaration"}
+    lanes = lanes_for(spec)
+    surfaces = spec.surfaces
 
     attempts = []
     tiers = ["lightweight"]
@@ -242,11 +313,26 @@ def respond(
             return {"handled": True, **result}
         log.warning("wake responder: delivery failed on %s tier: %s", tier, result.get("reason"))
 
+    # A wake that failed every tier is the evidence the exit gate asks for, so it
+    # has to leave a durable trace. Before this, a fully-failed wake wrote only a
+    # log line: `episode` was set on the successful tier alone, and the caller
+    # records nothing when it is absent. A floor miss was therefore invisible to
+    # exactly the query meant to find it.
     return {
         "handled": False,
         "reason": "no tier produced a deliverable post; leaving for the daily deliberation",
         "attempts": len(attempts),
         "episodes": attempts,
+        "episode": {
+            "job": job,
+            "workflow": _LADDER[tiers[-1]] if tiers else None,
+            "failed_tiers": tiers,
+            "floor": sorted(floor),
+            "attempts": attempts,
+        },
+        # Names the obligations that went unmet, so the nightly check can count
+        # floor misses without re-deriving which signals were mandatory.
+        "uncovered_floor": sorted(floor),
     }
 
 
