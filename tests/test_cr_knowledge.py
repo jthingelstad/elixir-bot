@@ -62,10 +62,37 @@ def test_deck_usage_knowledge():
 
 
 def test_clan_composition_in_policy():
-    """Clan composition rules live in POLICY.md (loaded by leadership lanes only)."""
+    """The elder band lives in POLICY.md (loaded by leadership lanes only), and
+    the prose must match the engine constants. The old assertion here pinned a
+    '2-3 elders per 10' cap that the 2026-07-05 band replaced, so the test kept
+    passing while the file told the model something false — assert against
+    engine.management now, so drift fails instead of persisting."""
+    from engine.management import ELDER_BAND_CEIL, ELDER_BAND_FLOOR
+
     block = prompts.policy()
-    assert "2-3 elders" in block
-    assert "composition" in block.lower()
+    band = f"{round(ELDER_BAND_FLOOR * 100)}-{round(ELDER_BAND_CEIL * 100)}%"
+    assert band in block
+    assert "leadership included" in block
+
+
+def test_policy_describes_war_as_the_primary_elder_path():
+    """POLICY.md said donations were the primary path long after war became the
+    heavier term, and that text reached leaders on 2026-08-02. The weights must
+    be quoted from the engine, not restated from memory."""
+    from engine.management import SCORE_W_DONATION, SCORE_W_WAR
+
+    block = prompts.policy()
+    assert f"{SCORE_W_WAR:.2f} x competitive" in block
+    assert f"{SCORE_W_DONATION:.2f} x donation%" in block
+
+
+def test_policy_does_not_cite_retired_tool_fields():
+    """`elder_cap_reached` and `recommended` were fields POLICY.md told the model
+    to trust; neither exists any more, and `evaluate_elder_eligibility` is dead
+    code. Naming them taught the model to look for data it can never get."""
+    block = prompts.policy()
+    for gone in ("elder_cap_reached", "evaluate_elder_eligibility"):
+        assert gone not in block
 
 
 def test_donation_consistency_knowledge():

@@ -119,15 +119,17 @@ Elixir should sound like it belongs in a clan that is trying to win while also b
 - donation_highlight_hour: 20
 - clan_founded: 2026-02-04
 
-Clan-management constants (ratified 2026-07-03; the transition rules live in
-`docs/reference/v5.1/management.md` — these are the policy numbers the engine reads):
+Clan-management constants, mirrored from `engine/management.py` for reference.
+The engine does **not** read them from here — it carries its own module
+constants, so this list is prose that can drift and has. The full Elder rules
+live in POLICY.md; these are just the numbers.
 
 - donor_week_min: 50            # weekly donations that count as a donor week
 - war_qualify_rate: 0.75        # decks used / decks available per war week
 - battle_days_min: 8            # battle-days per trailing 28 to count as active
 - promote_tenure_min_days: 28
-- promote_qualifying_weeks: 4
-- demote_weeks: 4
+- promote_qualifying_weeks: 3   # weekly reviews in the promotable set before a card
+- demote_weeks: 2               # abandonment only; an outranked elder takes 3 (swap cadence)
 - kick_at_risk_days: 5          # flat at-risk threshold (kick redesign 2026-07-11)
 - kick_confirm_days: 3          # battle-free days past at-risk before a card → 8-day card
 - kick_contrib_grace_max: 4     # extra confirm days for an elder-floor contributor, × open-slot slack
@@ -136,7 +138,7 @@ Notes on thresholds:
 - `inactivity_days` is an early attention signal, not an automatic removal rule.
 - Inactivity is measured from battles, not logins — v5.1 deliberately ignores `lastSeen`.
 - Removal-candidate flagging (kick redesign 2026-07-11): a member is **at risk after a flat 5 days** without a battle (7 days is when the in-game profile shows the inactivity flag; 10 is clearly unmanaged). A removal card is proposed to leaders after **8 days** (5 at-risk + 3 confirm). **Trophies buy no extra rope** — a high-trophy idle member on a full roster still costs a slot.
-- The only leeway is **contribution grace**: a member who clears the same bar that earns Elder (recent clan-war participation **or** Champion-league ranked — ranked counts equally) gets up to 4 extra confirm days, but that grace **shrinks as the clan fills and is zero at 50/50**. When there are open slots, a contributor gets more patience; when the roster is full, an idle seat is an idle seat.
+- The only leeway is **contribution grace**: a member who clears the same bar that earns Elder — a war day with a deck played in the last 14 days **or** 5+ ranked battles in the last 14, ranked counting equally — gets up to 4 extra confirm days, but that grace **shrinks as the clan fills and is zero at 50/50**. When there are open slots, a contributor gets more patience; when the roster is full, an idle seat is an idle seat.
 - **New members get no special shield** — everyone is on the same clock; a brand-new account should be engaging *more* at the start, not less.
 - **Leave of absence:** a member who tells leaders they'll be away is put on a *hold* (grace until they return) — their kick clock is paused. Someone merely silent with no word is not on hold.
 

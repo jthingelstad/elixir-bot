@@ -1,34 +1,83 @@
 # POAP KINGS Policies
 
-Eligibility, cap, and demotion rules for clan leadership. The rules below are documented for human leaders to read. Enforcement happens at the tool layer (`get_promotion_candidates`, `evaluate_elder_eligibility`); the LLM should trust the `recommended`, `demotion_candidates`, and `elder_cap_reached` fields rather than re-deriving these rules.
+How Elder is earned, held, and lost, and when a member is considered for removal. Written for human leaders to read; the same rules are enforced deterministically in `engine/management.py`.
 
-## Promotions
+**Code owns these decisions, not the model.** The weekly review runs the scoring, the band, and the hysteresis every Monday and writes promotion/demotion cards to #actions. Read the result through the management projection — never re-derive who should be Elder, and never state a number that did not come from the engine.
 
-Elder is earned, not automatic.
+## Elder is participation, and every input is in the player's control
 
-- The primary path to Elder is consistent card donations relative to the clan.
-- There is no fixed donation-count floor. If the clan donates more, Elder means donating more.
-- Active battle play is required. Logging in without battling is not activity.
-- Recent war participation is required for Elder.
-- The tool ranks current Members and Elders by a smoothed rolling average of weekly donation peaks, sorted descending.
-- Promotions should preserve role balance and meaning by honoring the Elder cap without trying to fill it.
-- Avoid Elder flapping. Demotion is a negative action and should require sustained or meaningful evidence, not a small rank movement.
+Nothing about account power counts: not trophies, not card levels, not arena, not the Ranked league reached. Only what a player does — war decks played, ranked battles played, cards donated. League and prestige were removed on purpose (2026-07-12); they were a backdoor for collection strength.
 
-`get_promotion_candidates` returns the current smoothed donation leaderboard, promotion recommendations for non-Elders who should take an Elder slot, and demotion recommendations for current Elders who have fallen meaningfully outside the group or failed sustained activity gates. Trust the tool's filtering instead of inventing an absolute donation bar.
+Time served does not earn Elder either. There is a minimum tenure to be considered, and tenure breaks close calls, but sitting in the clan is not a contribution.
 
-## Clan Composition
+## Who is considered
 
-- For every 10 members: about 1 leader or co-leader, 2-3 elders, and the rest members.
-- Hard cap: no more than 3 elders per 10 active members.
-- Not everyone should be Elder. The role should retain meaning and trust.
+Two hard filters, both evaluated live:
 
-The cap is enforced by `get_promotion_candidates` as a maximum, not a target. When the current Elder set and the smoothed donation leaderboard disagree, recommend discrete role swaps and corrections. Do not recommend promotions just because there is unused Elder capacity.
+- **Tenure** — at least 28 days in the clan. This gates promotion *in*; a sitting Elder is never demoted over tenure.
+- **The competitive floor** — at least 1 finalized war day with a deck actually played in the last 14 days, **or** at least 5 ranked battles in the last 14 days. War and ranked count equally here.
 
-## Demotion and Removal
+An Elder who fails *both* halves of that floor has abandoned the duty and is on the fast demotion path.
 
-- Elder demotion risk is based on the same smoothed leaderboard as promotion, with hysteresis. A current Elder should be considered for demotion when they fall meaningfully outside the Elder group or fail sustained battle/war activity gates.
-- Removal is primarily about inactivity and absence.
-- For removal-candidate flagging (kick redesign 2026-07-11, in `engine/management.py`): a flat 5-day battle-free window is at-risk, an 8-day window proposes a removal card. Trophies buy no extra rope. The only leeway is contribution grace (clearing the Elder floor — recent war *or* Champion ranked) and it shrinks as the clan fills, reaching zero at a full roster.
-- When the clan has open slots and is still building its bench, that contribution grace gives contributors more patience. Once the roster is full, the grace is gone and an idle seat is an idle seat — removal calls tighten up. A member who has told leaders they'll be away is on a hold (grace until they return).
-- The `get_promotion_candidates` tool returns `demotion_candidates` alongside promotion recommendations — review both together.
-- Discuss promotions, demotions, and kicks only in private clan leadership channels.
+## How standing is scored
+
+Every active member and Elder is ranked against the others (leaders and co-leaders are excluded from the ranking entirely) on three participation metrics, each turned into a percentile:
+
+- **War rate** — per-day war credit, averaged over 28 days. Finishing a war day is worth more than the deck count suggests: 4 of 4 decks scores 1.00, 3 of 4 scores 0.56, 2 of 4 scores 0.38. Four decks is worth about 2.7x two decks, not 2x.
+- **Ranked battles** — how many were played in the last 28 days. Participation, not the league reached.
+- **Donations** — the trailing 4-week average, not a single week's snapshot.
+
+Doing none of a thing scores zero for it; the players who did it are ranked against each other. The blend:
+
+```
+competitive = war% + 0.40 x ranked% x (1 - war%)
+score       = 0.65 x competitive + 0.35 x donation%
+```
+
+War is the primary path because it is direct clan contribution. Ranked only represents the clan, so it fills part of the gap war leaves rather than substituting for it — and doing both is rewarded. Donations are the lighter half: lead by example, not the main route.
+
+## How many Elders
+
+Elders should be **20-30% of the whole active roster, leadership included**. That yields a floor, a ceiling, and a target at the midpoint.
+
+- **Ceiling — hard.** Growth stops there, and only past it is anyone demoted for the count alone.
+- **Target — the aim.** The middle of the band, not the bottom of it.
+- **Floor — a drift limit, not a quota.** Nothing force-promotes to reach it. A clan without enough worthy members simply carries fewer Elders.
+
+Growth is gated on worthiness as well as slots: a member must score at or above the clan median. Promoting a below-average member to hit a number is exactly what the target must not be allowed to cause.
+
+## Promotion
+
+Sustained, never a snapshot. A member must be in the promotable set on **three separate weekly reviews** before a card is raised. One miss is tolerated; two in a row resets the clock. So a card is roughly three to four weeks out from the first qualifying week, and leaders still make the final call.
+
+Two different ways in:
+
+- **An open seat** — the corps is below target. Nobody loses anything, so no deadband applies: strongest eligible first, stopping at the ceiling.
+- **A swap** — the seats are full. The challenger must out-score the boundary Elder by a clear margin to take the seat. Inside that margin the contest is a close call, and **tenure decides it** — the longer-tenured player wins. A challenger still has to be ahead on score; tenure never manufactures a promotion, it only stops the deadband from shielding a shorter-tenured incumbent.
+
+## Demotion
+
+Demotion is a negative action and requires sustained evidence, never a small rank movement. Two reasons, two cadences:
+
+- **Abandoned** — failed the war floor and the ranked floor. Two weeks.
+- **Outranked** — fell outside the *ceiling* (not the target) and a higher-ranked member took the seat. Three weeks, matching the challenger's promotion cadence so the swap lands together and the Elder count never dips mid-swap.
+
+Any week a member is off the gate resets the clock and withdraws an open card. An Elder sitting between the target and the ceiling is inside the tolerance the band exists to permit, and is not displaced for it.
+
+Declining a card is the only "not now." The engine re-nominates on sustained evidence after 14 days, not on a leader-set clock.
+
+## Removal
+
+Removal is about inactivity and absence, measured from battles played and never from logins.
+
+- A flat **5 battle-free days** is at-risk; **8 days** proposes a removal card. Trophies buy no extra rope.
+- The only leeway is **contribution grace**: a member who currently clears the Elder competitive floor earns up to 4 extra confirm days, but that grace shrinks as the roster fills and reaches zero at 50/50. An idle seat only costs the clan something when there is no slot to spare.
+- New members get no shield — everyone runs on the same clock from their own join date.
+- A member who has told leaders they will be away is on **hold**, and the clock pauses until they return. Silence is not a hold.
+- A declined kick card re-nominates after 7 days.
+
+## Talking about any of this
+
+- Promotions, demotions, and removals are discussed only in private leadership channels.
+- The clan is told *why*. The weekly Elder Standing publishes to #announcements each Tuesday and names who is holding Elder, who is rising toward it, and who is slipping, each with their own participation evidence.
+- Say it in terms a player can act on. "Outranked" means someone participated more than you this week. Never quote internal scores, percentiles, rank positions, or the Elder slot count to members.
