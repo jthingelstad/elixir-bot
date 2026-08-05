@@ -1,11 +1,33 @@
 # Agentic Loop v2 — event-driven wakes, one chassis, a learning loop
 
-Status: **Phases 0 and 1 shipped and live** (2026-08-04). Umbrella document;
+Status: **Phases 0, 1 and 2 shipped and live** (2026-08-05). Umbrella document;
 each phase gets its own ready-to-build doc as it comes up. Supersedes the fixed
 4×/day awareness cadence as the target architecture. The scoped-composer
 experiment (2026-08-04, seven replayed hard-posts, Haiku/Sonnet vs the brain's
 actual posts) is the evidence base: a ~25–40K-token scoped turn with tools
 matches brain quality at 4–20× lower cost; the brain spends ~300K tokens/tick.
+
+> ## ⚠️ Read this before costing any further phase
+>
+> **The economics this plan was written against have changed, and the change
+> argues against its own remaining cost case.** Awareness was 51% of LLM spend
+> when Phase 0 was drafted. Measured 2026-08-05 it is **35%**, and Phase 2's
+> cadence cut takes roughly $37/month more off it. The rest of the bill is
+> member-facing work the plan never touched: interactive ~15%, deck_review ~16%.
+>
+> So **Phase 3's value is no longer primarily cost.** It buys $10–15/month net —
+> it removes brain ticks but adds Sonnet war wakes — against a total that was
+> $201/month. Justify it on **latency and quality** (a season close narrated in
+> minutes rather than at the next cron) or not at all. Anyone opening this plan
+> to "save money" should read the cost table in the Phase 3 section first.
+>
+> **A hard daily spend ceiling now exists** (`agent/spend_budget.py`,
+> `ELIXIR_DAILY_SPEND_USD=3.20`), and it constrains every future phase:
+> `wake_response`, `wake_response_chat`, `awareness`, `clan_chat_copy`,
+> `reception` and `intent_router` are `ESSENTIAL` and never gated. **Any new
+> workflow that carries a hard post MUST be added to `ESSENTIAL`, or the ceiling
+> can silence a floor** — which would break design rule 3 from a direction the
+> rule never anticipated. See [[elixir-daily-spend-ceiling]].
 
 ## Where this stands
 
@@ -19,10 +41,19 @@ matches brain quality at 4–20× lower cost; the brain spends ~300K tokens/tick
 | 5 — dossiers + follow-ups | not started | needs `_apply_v36` |
 | 6 — adoption + tuning | not started | — |
 
-**Phase 2 shipped 2026-08-05.** Five jobs now, the brain runs twice a day, and
-`trigger.py` is gone. What the pre-build analysis changed about the plan is
-recorded in the Phase 2 section below — three of its six steps were wrong about
-where the work was.
+**Phase 2 shipped 2026-08-05** and is **verified on a real member**: Escanor
+joined at 14:57:53Z and the welcome was delivered at 14:58:07Z — **14 seconds**,
+against a historical median of 2.0 hours. Exactly one intent covered it (two
+would be the v4 failure), and the divergence canary reports clean.
+
+Five jobs now, the brain runs twice a day, and `trigger.py` is gone. What the
+pre-build analysis changed about the plan is recorded in the Phase 2 section
+below — three of its six steps were wrong about where the work was.
+
+**Phase 2's exit gate is running: two weeks from 2026-08-05, to 2026-08-19.**
+Watch `#leaders` for the daily divergence report (overlaps + floor misses) and
+review post quality. Note Jamie is away from the evening of 2026-08-06, so the
+first stretch of the gate is unattended by design.
 
 **A gate lesson worth carrying forward:** "≥5 real joins" was an exit criterion
 the team could not influence — it depended on strangers deciding to join a clan.
@@ -51,6 +82,9 @@ re-invents.
 | Delivery validator | `agent/post_validation.py` |
 | Posting tools | `agent/tool_defs.SURFACE_TOOLS` + executors in `agent/tool_exec.py` |
 | Scoped responder | `runtime/awareness/respond.py` |
+| **Job registry (surfaces + event types)** | `runtime/awareness/respond.JOBS` — the per-event-type behaviour, as DATA |
+| **Divergence canary** | `runtime/awareness/divergence.py` → daily #leaders report |
+| **Spend ceiling** | `agent/spend_budget.py` — `ESSENTIAL` exempts every hard-post workflow |
 | Job prompts | `prompts/jobs/*.md` via `prompts.job_prompt()` |
 | Episodes / observations | `wake_episodes`, `wake_observations` (telemetry DB) |
 | Tier predicates | `engine/normalize.badge_tier`, `.ranked_league_tier` |
@@ -98,6 +132,18 @@ availability, validation, delivery, episode accounting — live exactly once.
 3. **Floors are never budget-gated.** Hard-post coverage reconciliation runs on
    every responder turn; an uncovered floor fails the turn, cursors hold, the
    daily deliberation inherits. Same guarantee as today, relocated.
+   > **Extended 2026-08-05.** This rule was written about the *wake* budget. A
+   > second budget now exists — the daily **spend ceiling** — and it can refuse a
+   > model call outright. Every workflow that carries a hard post is therefore in
+   > `agent.spend_budget.ESSENTIAL` and exempt at any spend level, with a test
+   > asserting it at $999 spent. **Adding a floor-carrying workflow without
+   > adding it to `ESSENTIAL` is how this rule gets broken next.**
+7. **A number that can change what Elixir does lives in the clan DB.**
+   `elixir-telemetry.db` is admin history and must stay safe to delete. The wake
+   budget violated this until 2026-08-05 (it counted fired wakes from
+   `wake_observations` and could hold a wake on the result); the spend ceiling
+   was built to the rule from the start. Writes to telemetry are fine; a *read
+   that decides* is not.
 4. **Learning proposes; Jamie ratifies.** Lessons are capped, evidence-linked,
    visible, and removable. Wake-policy changes ship as approval cards, never
    silently.
@@ -412,6 +458,32 @@ survive into Phase 3.
 
 **Goal:** the big moments (week close, season close, league change) arrive as
 Sonnet wakes within minutes; the full brain becomes the daily judgment layer.
+
+> **Re-justify before building this. The cost case has evaporated.**
+>
+> | | share of spend | note |
+> |---|---|---|
+> | awareness | 35% | was 51% when this plan was written; Phase 2 halved its cadence |
+> | interactive | 15% | member conversation — Jamie's stated do-not-cut line |
+> | deck_review | 16% | capped at 6 rounds 2026-08-05; 62% of it is cache writes |
+> | everything else | 34% | |
+>
+> Phase 3 removes brain ticks and **adds** Sonnet war wakes: **$10–15/month net**
+> against a $201/month total. That is not a cost project. Build it for **latency
+> and quality** — a season close narrated in minutes instead of at the next cron,
+> and the cross-stream batching that makes the season-close triple land as one
+> post — or do not build it.
+>
+> Two things that did not exist when this section was written and now gate it:
+> - **`week_finished`, `season_closed`, `clan_league_changed` and
+>   `tournament_finished` are hard posts on the `chat` tier.** Whatever workflow
+>   composes them MUST be in `agent.spend_budget.ESSENTIAL` or the daily spend
+>   ceiling can silence a season close. `wake_response_chat` is already there;
+>   anything new is not.
+> - **The war wakes share `(immediate, chat)` with `pol_season_podium`.** The
+>   grouping key is `(class, model, job)`, so a podium landing in the same tick as
+>   a week close now separates cleanly — but only because the podium has a job.
+>   Give each war type a job or they will collide with each other.
 
 Build:
 - `week_finished` / `season_closed` / `clan_league_changed` as immediate Sonnet
