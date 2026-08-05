@@ -46,11 +46,17 @@ SCORE_W_DONATION = 0.35  # "lead by example" — the lighter half
 # competitive = war_pct + RANKED_WEIGHT * ranked_pct * (1 - war_pct). War-primary,
 # ranked-secondary, doing-both rewarded, bounded 0-1 (no saturation).
 RANKED_WEIGHT = 0.40
-# These four constants are EXPLAINED TO MEMBERS on poapkings.com/members/ ("How
-# Elder works"). The band there is derived from the live member count so it tracks
-# the roster on its own, but the percentages and the tenure/war/ranked thresholds
-# are copied prose — change them here and the website needs the same edit, or the
-# clan is reading rules the engine no longer applies.
+# These four constants are EXPLAINED TO MEMBERS in THREE places, all copied prose:
+#   * poapkings.com src/members.njk — "How Elder works", the full spec
+#   * poapkings.com src/faq.njk     — "How do I earn Elder?", the short version
+#   * prompts/POLICY.md             — read by leaders AND injected into 9 prompts
+# The band on the members page is derived from the live member count so it tracks
+# the roster on its own; everything else is hand-typed. Change a constant here and
+# all three need the same edit, or the clan is reading rules the engine no longer
+# applies. This comment used to name only the members page, which is precisely how
+# the FAQ sat at "15-20% of the clan" against a 20-30% band until 2026-08-05 —
+# two public pages quoting different rules. POLICY.md drifted the same way and
+# told leadership donations were the primary path months after war became 0.65.
 ELDER_BAND_FLOOR = 0.20  # elder share of the WHOLE active roster, leadership included ...
 ELDER_BAND_CEIL = 0.30  # ... a range to maintain, NOT a quota to fill
 WORTHINESS_MIN_PERCENTILE = 0.50  # below-floor promotions still need ≥ median score
