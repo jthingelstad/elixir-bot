@@ -414,6 +414,11 @@ def _award_earned_fact(signal: dict) -> dict | None:
 _SIGNAL_FACT_MAP = {
     "card_level_milestone": _card_level_fact,
     "path_of_legend_promotion": _pol_promotion_fact,
+    "pol_promotion": _pol_promotion_fact,
+    # The 2026-08-04 ranked split. Missing these would silently stop recording
+    # the promotions most worth remembering — the Champion-tier arrivals.
+    "champion_league_reached": _pol_promotion_fact,
+    "ultimate_champion_reached": _pol_promotion_fact,
     "new_card_unlocked": _card_unlocked_fact,
     "new_champion_unlocked": _card_unlocked_fact,
     "badge_earned": _badge_earned_fact,

@@ -46,6 +46,14 @@ WAKE_MODELS = frozenset({"lightweight", "chat"})
 # drops either the new Legendary events or the entire back catalogue.
 BADGE_EVENT_TYPES = frozenset({"badge_earned", "legendary_badge_earned"})
 
+# All three halves of the ranked-promotion split. Same rule as the badges: a
+# reader that hardcodes one name silently drops either the new Champion-tier
+# events or the entire pre-split back catalogue, where every promotion — up to
+# and including Ultimate Champion — arrived as `pol_promotion`.
+RANKED_PROMOTION_EVENT_TYPES = frozenset(
+    {"pol_promotion", "champion_league_reached", "ultimate_champion_reached"}
+)
+
 
 @dataclass(frozen=True)
 class EventContract:
@@ -100,10 +108,18 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
     "card_unlocked": _event("player", "milestone", "card_id", "card_name", "rarity"),
     "card_level_milestone": _event("player", "milestone", "card_id", "card_name", "milestone"),
     "collection_level_milestone": _event("player", "milestone", "milestone", "collection_level"),
-    # Same split, already available as distinct types: a league bump is routine
-    # (8 of 23 reached a post), reaching the TOP of Ranked is not.
-    "pol_promotion": _event("player", "battle_mode", "league", "prev_league"),
-    "ultimate_champion_reached": _event("player", "battle_mode", "league", wake="immediate"),
+    # The ranked ladder splits three ways on the destination tier, because the
+    # clan does not treat a Master-tier bump and a Champion-tier arrival as the
+    # same news: 20% of promotions into leagues 1-3 reached a post, against 60%
+    # into 4-6 and 100% into 7. League 4 is where the game renames the tier to
+    # "Champion", so the boundary is the game's own.
+    "pol_promotion": _event("player", "battle_mode", "league", "prev_league", "league_tier"),
+    "champion_league_reached": _event(
+        "player", "battle_mode", "league", "prev_league", "league_tier", wake="immediate"
+    ),
+    "ultimate_champion_reached": _event(
+        "player", "battle_mode", "league", "league_tier", wake="immediate"
+    ),
     "pol_global_rank_attained": _event("player", "battle_mode", "from_rank", "to_rank", "league"),
     "pol_season_closed": _event("player", "battle_mode", "pol_season_id", time_semantics="exact"),
     # clan stream
@@ -266,6 +282,7 @@ def wake_event_types(wake_class: str) -> frozenset[str]:
 __all__ = [
     "BADGE_EVENT_TYPES",
     "EVENT_CONTRACTS",
+    "RANKED_PROMOTION_EVENT_TYPES",
     "WAKE_CLASSES",
     "WAKE_MODELS",
     "EventContract",

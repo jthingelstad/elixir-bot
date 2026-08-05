@@ -167,6 +167,8 @@ def awareness_post_facts(read: dict, post: dict) -> dict:
             "arena_changed",
             "arena_up",
             "pol_promotion",
+            "champion_league_reached",
+            "ultimate_champion_reached",
             "path_of_legend_promotion",
             "war_week_complete",
             "war_season_complete",

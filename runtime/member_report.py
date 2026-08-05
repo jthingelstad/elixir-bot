@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 import db
 from capabilities import battle_intel, deck_intel
 from capabilities import members as member_capability
-from engine.event_contracts import BADGE_EVENT_TYPES
+from engine.event_contracts import BADGE_EVENT_TYPES, RANKED_PROMOTION_EVENT_TYPES
 from engine.normalize import humanize_badge, humanize_game_mode
 from engine.profiles import MODE_DISPLAY, playstyle_line
 from storage import card_catalog, game_events
@@ -746,7 +746,10 @@ def _progress_items(ctx: dict) -> list[dict]:
             items.append({"emoji": "📚", "text": f"Collection Level {c['milestone']}"})
 
     for r in ctx.get("ranked") or []:
-        if r.get("event_type") == "pol_promotion":
+        # All three halves of the ranked split — a member's report must show a
+        # Champion-tier arrival, and the pre-split history where every promotion
+        # was a plain pol_promotion.
+        if r.get("event_type") in RANKED_PROMOTION_EVENT_TYPES:
             payload = r.get("payload") or {}
             league = payload.get("league_name") or payload.get("league") or payload.get("to_league")
             items.append(

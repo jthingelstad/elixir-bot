@@ -267,19 +267,22 @@ def emit_ranked(conn, tag, old, new, observed_at, window_start) -> int:
     pol_seasons.ensure_open_season(conn, observed_at)
     ol, nl = old.get("league"), new.get("league")
     orank, nrank = old.get("rank"), new.get("rank")
-    # pol_promotion — league increase (PathOfLegendDetector)
+    # pol_promotion / champion_league_reached — league increase
+    # (PathOfLegendDetector)
+    #
+    # **The destination tier splits the event type**, for the same reason the
+    # badge tier does: one type covered a gradient the clan does not treat as
+    # one thing. Over 20 days to 2026-08-04, promotions into the Master tiers
+    # (1-3) reached a post 20% of the time and promotions into the Champion
+    # tiers (4-6) 60% — and league 4 is where the game itself renames the tier
+    # to "Champion", so the boundary is the game's, not one invented here.
+    #
+    # Reaching Ultimate Champion emits ONLY ultimate_champion_reached. It used
+    # to emit that AND a pol_promotion for the same player at the identical
+    # timestamp — a true duplicate that inflated every count involving it.
     if isinstance(ol, int) and isinstance(nl, int) and nl > ol:
-        n += _emit(
-            conn,
-            tag,
-            observed_at,
-            window_start,
-            "pol_promotion",
-            nl,
-            {"league": nl, "prev_league": ol},
-        )
-        # ultimate_champion_reached — crossing into league 10
-        if nl == ULTIMATE_CHAMPION_LEAGUE and ol < ULTIMATE_CHAMPION_LEAGUE:
+        tier = normalize.ranked_league_tier(nl)
+        if tier == "ultimate" and ol < ULTIMATE_CHAMPION_LEAGUE:
             n += _emit(
                 conn,
                 tag,
@@ -287,7 +290,17 @@ def emit_ranked(conn, tag, old, new, observed_at, window_start) -> int:
                 window_start,
                 "ultimate_champion_reached",
                 None,
-                {"league": nl},
+                {"league": nl, "prev_league": ol, "league_tier": tier},
+            )
+        else:
+            n += _emit(
+                conn,
+                tag,
+                observed_at,
+                window_start,
+                "champion_league_reached" if tier == "champion" else "pol_promotion",
+                nl,
+                {"league": nl, "prev_league": ol, "league_tier": tier},
             )
     # pol_global_rank_attained — rank attained or improved (lower = better);
     # key = to_rank (events.md §3: key prefix = event_type, rank attained)

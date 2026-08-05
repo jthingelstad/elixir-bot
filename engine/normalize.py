@@ -177,6 +177,12 @@ LEGACY_POL_LEAGUES = {  # pre-rework Path of Legends scale (docs/cr-api-docs)
     9: "Royal Champion",
     10: "Ultimate Champion",
 }
+# Where the Champion tiers begin on the current scale. Leagues 1-3 are Master
+# 1/2/3 — the grind — and 4 is where the game itself changes the name to
+# "Champion". That naming boundary is also where the clan's own interest
+# changes: over 20 days to 2026-08-04, promotions INTO leagues 1-3 reached a
+# post 20% of the time and promotions into 4-6 reached one 60% of the time.
+RANKED_CHAMPION_LEAGUE = 4
 RANKED_UC_LEAGUE = 7  # current scheme
 LEGACY_POL_UC_LEAGUE = 10  # old scheme (emitters' constant predates this)
 
@@ -342,6 +348,25 @@ def badge_tier(level) -> str:
     stamps the answer and splits the event type on it.
     """
     return "legendary" if level is None else "routine"
+
+
+def ranked_league_tier(league) -> str:
+    """``"master"`` | ``"champion"`` | ``"ultimate"`` for a ranked league.
+
+    The single predicate behind the ranked-promotion event split, and the
+    counterpart to :func:`badge_tier`. Both exist so that "is this notable?" is
+    answered once, at the emitter, instead of re-derived by every reader with
+    its own threshold.
+    """
+    try:
+        value = int(league)
+    except TypeError, ValueError:
+        return "master"
+    if value >= RANKED_UC_LEAGUE:
+        return "ultimate"
+    if value >= RANKED_CHAMPION_LEAGUE:
+        return "champion"
+    return "master"
 
 
 def badge_facts(badge_name, catalog=None) -> dict:

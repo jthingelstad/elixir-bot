@@ -126,8 +126,12 @@ def test_ultimate_champion_fires_at_league_7():
             r["event_type"]
             for r in conn.execute("SELECT event_type FROM player_events WHERE player_tag = '#UC1'")
         ]
-        assert "pol_promotion" in events
         assert "ultimate_champion_reached" in events
+        # Reaching Ultimate Champion no longer ALSO emits a plain pol_promotion.
+        # This test used to assert that duplicate as intended behaviour; the
+        # 2026-08-04 ranked split found it firing for the same player at the
+        # identical timestamp, inflating every count involving it.
+        assert "pol_promotion" not in events
     finally:
         conn.close()
 

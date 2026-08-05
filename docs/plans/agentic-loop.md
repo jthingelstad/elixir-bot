@@ -120,6 +120,21 @@ The one caveat: historical rows all carry the old type, so the simulation
 cannot show `legendary_badge_earned` firing. Applying the new predicate to
 history, 4 of those 102 badges would wake immediately and 98 would not.
 
+**Ranked promotions, analysed the same way (2026-08-04).** Unlike badges (two
+populations, a clean binary) this is a GRADIENT, and the clan's interest tracks
+it: promotions into leagues 1-3 reached a post 20% of the time, into 4-6 60%,
+into 7 100%. League 4 is where the game renames the tier to "Champion", so the
+split uses the game's own boundary. Jamie chose league 4. Shipped:
+`pol_promotion` (Master tiers) → digest, new `champion_league_reached` (4-6) →
+immediate, `ultimate_champion_reached` (7) → immediate.
+
+The analysis also found a duplicate: reaching Ultimate Champion emitted BOTH
+`ultimate_champion_reached` and a `pol_promotion` for the same player at the
+identical timestamp. The emitter now fires only the former.
+
+Applied to the 27 historical promotions: 15 stop waking, 10 wake (~0.5/day),
+2 duplicates removed.
+
 Exit gate: Jamie reviews the assignments and volumes.
 Kill switch: `ELIXIR_WAKE_POLICY=0` (default ON for shadow, it posts nothing).
 Size: an evening. No LLM calls, no schema change, no behavior change.
