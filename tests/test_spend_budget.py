@@ -138,3 +138,54 @@ def test_leadership_is_told_once_per_day_not_once_per_refusal(monkeypatch, engin
     for _ in range(4):
         spend_budget.may_run("deck_review", conn=engine_conn)
     assert len(sent) == 1, f"announced {len(sent)} times, expected once"
+
+
+# ------------------------------------------------- the startup budget line
+
+
+def test_startup_reports_the_remaining_budget(monkeypatch):
+    """A restart is exactly when someone asks "is it working?" — so the boot
+    message says what is left, turning an expected pause into a visible state
+    rather than a suspected fault."""
+    from runtime import startup
+
+    monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "3.20")
+    monkeypatch.setattr(spend_budget, "spend_today_usd", lambda **k: 0.21)
+    line = startup._startup_budget_summary()
+    assert "$2.99" in line and "$3.20" in line and "$0.21" in line
+
+
+def test_startup_names_the_paused_state_not_just_the_number(monkeypatch):
+    """At the ceiling the number alone is ambiguous. Say what is paused and
+    what is not, because "deck reviews are refusing" is otherwise indistinguish-
+    able from a fault."""
+    from runtime import startup
+
+    monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "3.20")
+    monkeypatch.setattr(spend_budget, "spend_today_usd", lambda **k: 3.25)
+    line = startup._startup_budget_summary()
+    assert "Ceiling reached" in line
+    assert "midnight UTC" in line
+    assert "Hard posts are unaffected" in line
+
+
+def test_startup_says_so_when_there_is_no_ceiling(monkeypatch):
+    from runtime import startup
+
+    monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "0")
+    assert "unbounded" in startup._startup_budget_summary()
+
+
+def test_startup_budget_line_never_breaks_the_boot_message(monkeypatch):
+    """The boot message must survive an unreadable counter — it is the thing
+    that tells us the bot came up at all."""
+    from runtime import startup
+
+    monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "3.20")
+
+    def _boom(**kwargs):
+        raise RuntimeError("no database")
+
+    monkeypatch.setattr(spend_budget, "spend_today_usd", _boom)
+    line = startup._startup_budget_summary()
+    assert "unreadable" in line and "fails open" in line

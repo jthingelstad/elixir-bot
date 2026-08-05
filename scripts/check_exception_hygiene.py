@@ -145,7 +145,10 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/onboarding.py": 3,
     "runtime/outreach.py": 3,  # raise_card + send_dm + compose fail-soft in the flow loop
     "runtime/prompt_feedback.py": 5,  # +1: member_outreach decision handling
-    "runtime/startup.py": 3,
+    # 3 -> 4 (2026-08-05): the startup budget line. The boot message is what
+    # tells us the bot came up at all; an unreadable spend counter must degrade
+    # that line, never suppress the message.
+    "runtime/startup.py": 4,
     "runtime/status.py": 3,
     "runtime/system_signals.py": 1,
     # was runtime/webapp/ticks.py — the Observatory went, the tick record stayed.

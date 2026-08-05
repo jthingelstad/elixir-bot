@@ -101,6 +101,44 @@ def _audit_targets(runtime_app) -> list[tuple[dict, list[str]]]:
     return targets
 
 
+def _startup_budget_summary() -> str:
+    """Today's remaining model-spend budget, as a startup line.
+
+    Worth stating on every boot because the ceiling is expected to bite most
+    evenings, and a restart is exactly when someone is asking "is it working?".
+    Seeing the number turns "deck reviews are refusing" from a suspected fault
+    into a visible, expected state.
+
+    Reports whatever is true, including "already spent" — a restart does not
+    reset the day, and pretending otherwise would be the misleading version.
+    """
+    from agent.spend_budget import DEFERRABLE, daily_ceiling_usd, spend_today_usd, warn_fraction
+
+    ceiling = daily_ceiling_usd()
+    if not ceiling:
+        return "Budget: no daily ceiling set — spend is unbounded."
+    try:
+        spent = spend_today_usd()
+    except Exception:
+        log.debug("startup: could not read today's spend", exc_info=True)
+        return "Budget: today's spend is unreadable; the ceiling fails open."
+    remaining = max(0.0, ceiling - spent)
+    line = f"Budget: **${remaining:.2f}** of ${ceiling:.2f} left today (${spent:.2f} spent)."
+    if spent >= ceiling:
+        # Name what is actually happening, not just the number — this is the
+        # state a member would otherwise report as "Elixir is broken".
+        return (
+            f"{line} Ceiling reached: discretionary work is paused until "
+            "midnight UTC. Hard posts are unaffected."
+        )
+    if spent >= ceiling * warn_fraction():
+        return (
+            f"{line} Past the {warn_fraction():.0%} line, so deferrable work "
+            f"({len(DEFERRABLE)} workflows incl. deck reviews) is on hold."
+        )
+    return line
+
+
 async def _startup_channel_audit_summary() -> str:
     from runtime import app as runtime_app
 
@@ -204,11 +242,13 @@ async def _post_startup_message() -> bool:
         fun_line = ":elixir_hype: Elixir is in the arena and the decks are shuffled. Leadership view is live."
     hostname = platform.node() or "unknown"
     channel_audit = await _startup_channel_audit_summary()
+    budget_line = await asyncio.to_thread(_startup_budget_summary)
     content = (
         "**Elixir Online**\n"
         f"Release: **{elixir_agent.RELEASE_LABEL}** \u00b7 Build: **{elixir_agent.BUILD_HASH}** \u00b7 Host: **{hostname}**\n"
         f"{fun_line.strip()}\n"
-        f"{channel_audit}"
+        f"{channel_audit}\n"
+        f"{budget_line}"
     )
     if await elixir_log.post_event_async(content):
         return True
