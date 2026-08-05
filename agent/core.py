@@ -15,6 +15,18 @@ from runtime import status as runtime_status
 
 log = logging.getLogger("elixir_agent")
 
+
+class SpendCeilingReached(RuntimeError):
+    """Raised instead of making a model call once the daily ceiling is hit.
+
+    An exception rather than a None return on purpose: every caller already
+    handles a failed turn (the cursors hold, the daily deliberation inherits),
+    whereas a silent empty result would look like "nothing to say" and quietly
+    consume the moment. Hard-post workflows never see this — see
+    agent/spend_budget.ESSENTIAL.
+    """
+
+
 # Workflows to exclude from prompt caching. Any workflow that makes several
 # tool-calling rounds seconds apart within one turn gets cache reads on rounds
 # 2+, so the 1.25x write premium pays off inside the same turn. The feedback
@@ -341,6 +353,19 @@ def _create_chat_completion(
     response are fine). The system prompt goes in `system`, not a message.
     """
     started = time.perf_counter()
+
+    # The daily spend ceiling. Refused BEFORE the call, because the point is to
+    # not spend. Hard-post workflows are exempt by name — a floor is never
+    # budget-gated, and this raising rather than returning is deliberate: a
+    # caller that silently treats "no budget" as "no news" would turn a cost
+    # control into missing clan history.
+    from agent.spend_budget import may_run
+
+    allowed, why = may_run(workflow)
+    if not allowed:
+        log.warning("spend budget: refusing %s — %s", workflow, why)
+        raise SpendCeilingReached(f"{workflow}: {why}")
+
     selected_model = _model_for_workflow(workflow, model=model)
 
     sanitized_messages = _sanitize_anthropic_messages(messages)
@@ -408,6 +433,22 @@ def _create_chat_completion(
         cache_creation_tokens = getattr(usage, "cache_creation_input_tokens", None)
         cache_read_tokens = getattr(usage, "cache_read_input_tokens", None)
         duration = round((time.perf_counter() - started) * 1000, 2)
+        # Charge the clan-DB spend counter. Wrapped because a counter that can
+        # fail a successful call is worse than one that undercounts by one.
+        try:
+            from agent.spend_budget import call_cost_usd, record_spend_usd
+
+            record_spend_usd(
+                call_cost_usd(
+                    selected_model,
+                    prompt_tokens,
+                    completion_tokens,
+                    cache_creation_tokens,
+                    cache_read_tokens,
+                )
+            )
+        except Exception:
+            log.debug("spend budget: could not record call cost", exc_info=True)
         runtime_status.record_llm_call(
             workflow,
             ok=True,

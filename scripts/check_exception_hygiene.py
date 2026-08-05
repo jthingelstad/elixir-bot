@@ -32,7 +32,13 @@ BROAD_EXCEPTION_BASELINE = {
     # a turn without lessons or recent posts is worse than one with, and far
     # better than a hard-post floor left uncovered because a lookup failed.
     "agent/chassis.py": 3,
-    "agent/core.py": 3,
+    # 3 -> 4 (2026-08-05): recording a call's cost against the daily spend
+    # ceiling. A counter that can fail an already-successful model call would
+    # be a cost control causing the outage it exists to prevent.
+    "agent/core.py": 4,
+    # The ceiling fails OPEN: an unreadable counter must never be what stops
+    # Elixir welcoming a new member.
+    "agent/spend_budget.py": 1,
     "agent/cr_api_tool.py": 1,
     "agent/factual_admission.py": 1,
     "agent/intent_router.py": 1,
