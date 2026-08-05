@@ -26,6 +26,12 @@ EXCLUDED: set[str] = set()
 # handlers. Long-term cleanup should make these numbers go down.
 BROAD_EXCEPTION_BASELINE = {
     "agent/chat.py": 1,
+    # 3 (2026-08-04, new): the chassis degrades rather than raises. One guards
+    # the turn itself (a failed turn becomes an episode with an error, so the
+    # caller can escalate instead of crashing), and two guard context assembly —
+    # a turn without lessons or recent posts is worse than one with, and far
+    # better than a hard-post floor left uncovered because a lookup failed.
+    "agent/chassis.py": 3,
     "agent/core.py": 3,
     "agent/cr_api_tool.py": 1,
     "agent/factual_admission.py": 1,
@@ -64,7 +70,9 @@ BROAD_EXCEPTION_BASELINE = {
     # webapp itself. The stall-watchdog boot guard is still in this count.
     # 40 -> 41 (2026-08-04): the Phase 0 wake-evaluation guard in the engine
     # tick. Shadow measurement must never be able to fail a tick.
-    "runtime/app.py": 41,
+    # 41 -> 42 (2026-08-04): the Phase 1 responder turn, same reason — a wake
+    # that fails is a wake the daily deliberation inherits, not a dead tick.
+    "runtime/app.py": 42,
     "runtime/awareness/deliver.py": 10,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
@@ -77,6 +85,11 @@ BROAD_EXCEPTION_BASELINE = {
     # boundary, one guards the telemetry budget read (an unreadable file must
     # not block a wake), one guards a high-water write.
     "runtime/awareness/wake.py": 4,
+    # 2 (2026-08-04, new): the responder must never take down the engine tick.
+    # One guards delivery (a raised deliver_posts becomes a failed wake the
+    # daily brain inherits, not a crashed tick); one guards the episode record,
+    # which is observation and must not cost a delivered post.
+    "runtime/awareness/respond.py": 2,
     "runtime/channel_router.py": 20,
     "runtime/discord_commands.py": 8,  # +1: command telemetry is fail-soft and logs before continuing
     "runtime/discord_posting.py": 2,

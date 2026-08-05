@@ -128,6 +128,38 @@ Size: an evening. No LLM calls, no schema change, no behavior change.
 
 ### Phase 1 — The chassis, born as the join responder
 
+**Status: BUILT 2026-08-04, shipped OFF (`ELIXIR_WAKE_RESPONDER=0`).** Two real
+joins replayed end to end against production data, delivery stubbed.
+
+Shipped: `agent/chassis.py` (Attention/Scope/Budget, one system-assembly
+recipe, auto-injected lessons, staging), `agent/post_validation.py`,
+`post_to_discord` + `post_to_clan_chat` in `agent/tool_defs.SURFACE_TOOLS`
+(never in `_SHARED_TOOL_NAMES` or `ALL_TOOLS`), executors in
+`agent/tool_exec.py`, `runtime/awareness/respond.py`, `prompts/jobs/welcome.md`,
+`prompts.job_prompt()`, `wake_episodes` in the telemetry DB, and 25 tests.
+
+**Measured:** both welcomes handled on the Haiku tier at **~$0.044 each**
+including validator retries, versus ~$0.50 for a brain tick. The returning
+member was detected from the precomputed stint history and the post came back
+nearly word for word identical to what the brain had written.
+
+The validator bounced twice (a literal `\n`, a `:shortcode:` in clan chat) and
+the model fixed both in-loop — the bounce-and-fix contract works.
+
+Three bugs the live run caught, all fixed:
+- `MAX_ROUNDS_BY_WORKFLOW` was built only from specs declaring a
+  `response_schema`, so a spec declaring 6 rounds silently ran at 3 — the turn
+  spent them on a tool call plus a bounce and returned a *weekly recap* for a
+  join. Also silently affected `awareness_triage` and `release_notes`.
+- Surface tools declared in `TOOL_DEFINITIONS` leaked into `ALL_TOOLS`, which
+  is clanops's surface.
+- The job file's "years played is the weakest fact" guidance was a paragraph,
+  and the model led with account age while holding the deck. Rewritten as a
+  prohibition; the next run dropped it entirely and named the deck's cards.
+
+Exit gate: ≥5 real joins welcomed by the chassis with the flag on.
+
+
 **Goal:** the smallest real chassis, serving exactly one wake type
 (`member_joined`), replacing the join trigger's full-brain run. Joins are the
 proven case (trigger.py exists because of them) and the cheapest quality

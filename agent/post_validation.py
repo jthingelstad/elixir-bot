@@ -1,0 +1,155 @@
+"""Deterministic checks between a composed post and a member's screen.
+
+Agentic Loop v2 (docs/plans/agentic-loop.md). When posting became a tool call,
+the tool boundary became the place to enforce what a prompt can only request.
+Every rule here was **measured**, not imagined: the 2026-08-04 scoped-composer
+experiment ran seven real hard-posts through Haiku and Sonnet, and these are the
+ways the output was wrong.
+
+The contract is a bounce, not a rewrite. A rejected post returns the reason to
+the model, which fixes it and calls again — the author stays the author. Silent
+repair would hide a systematic problem behind a clean-looking post, which is how
+"the model handles it" becomes untrue without anyone noticing.
+
+What this does NOT do is judge quality. Whether a welcome sounds like Elixir
+looked at the newcomer is the job file's problem and the reflection loop's; this
+layer only catches the mechanical failures that a member would see as a bug.
+"""
+
+from __future__ import annotations
+
+import re
+
+# Haiku emitted literal backslash-n sequences inside the tool argument in 4 of 7
+# experiment cases — the JSON string contained the characters `\` and `n`, so
+# Discord would have rendered them verbatim mid-sentence.
+_LITERAL_ESCAPE_RE = re.compile(r"\\[nrt]")
+
+# Two of those same cases also carried a trailing `"` — the model closing a
+# quotation it opened in its own head. It reads as a typo at the end of a post.
+_TRAILING_QUOTE_RE = re.compile(r'["\']\s*$')
+
+# `:name:` shortcodes. An unknown one renders as literal text, so a hallucinated
+# emoji is a visible defect rather than a missing decoration.
+_EMOJI_RE = re.compile(r":([a-z0-9_]+):", re.IGNORECASE)
+
+# Discord's own hard limit is 2000; the lanes want far less than that, but the
+# limit is the thing that would actually fail the send.
+DISCORD_HARD_LIMIT = 2000
+
+
+class PostRejected(Exception):
+    """A composed post failed a mechanical check. The message is shown to the
+    model verbatim, so it must say what is wrong AND what to do about it."""
+
+
+def _reject(problem: str, fix: str) -> None:
+    raise PostRejected(f"{problem} {fix} Rewrite the content and call the tool again.")
+
+
+def validate_discord_post(
+    content: str,
+    *,
+    lane: str,
+    known_emoji: set[str] | None = None,
+    max_chars: int = DISCORD_HARD_LIMIT,
+) -> str:
+    """Return the content unchanged, or raise :class:`PostRejected`.
+
+    Returning the input rather than a cleaned copy is deliberate: a caller that
+    forgets to use the return value still gets the check.
+    """
+    text = content or ""
+    if not text.strip():
+        _reject("The post content was empty.", "A delivered post must have text.")
+
+    if _LITERAL_ESCAPE_RE.search(text):
+        _reject(
+            "The content contains literal escape sequences (backslash-n or similar) "
+            "instead of real line breaks.",
+            "Use actual newlines in the string, not the two characters backslash and n.",
+        )
+
+    if _TRAILING_QUOTE_RE.search(text.strip()):
+        _reject(
+            "The content ends with a stray quotation mark.",
+            "Send only the post itself, with no wrapping quotes.",
+        )
+
+    if len(text) > max_chars:
+        _reject(
+            f"The content is {len(text)} characters, over the {max_chars} limit for "
+            f"the {lane} lane.",
+            "Cut the framing (trophies, arena, tenure) before cutting the specific "
+            "detail that makes the post worth reading.",
+        )
+
+    if known_emoji is not None:
+        # Only the `elixir_` namespace is checkable. Standard Unicode shortcodes
+        # (:wave:, :crossed_swords:) are explicitly allowed by the emoji guidance
+        # and Discord renders them natively — the brain's real posts use them, so
+        # a check that rejected them would reject correct output. What CANNOT be
+        # allowed is an invented custom name, which posts as literal text.
+        used = {name.lower() for name in _EMOJI_RE.findall(text)}
+        unknown = sorted(
+            name for name in used if name.startswith("elixir") and name not in known_emoji
+        )
+        if unknown:
+            _reject(
+                f"The content uses emoji shortcodes that do not exist in this server: "
+                f"{', '.join(':' + name + ':' for name in unknown)}. "
+                "They would render as literal text.",
+                "Use only the documented Elixir emoji, or none at all.",
+            )
+    return text
+
+
+def validate_clan_chat_post(content: str, *, limit: int = 200) -> str:
+    """Clan chat is stricter than Discord and fails differently: the game's own
+    filter silently blanks handle-like tokens, and there is no formatting.
+
+    The censor-safe rewrite and the sentence-aware clip are applied by
+    ``runtime.clan_chat_copy`` — this only rejects what those cannot fix.
+    """
+    text = (content or "").strip()
+    if not text:
+        _reject("The clan-chat line was empty.", "A join must carry an in-game welcome.")
+
+    if _LITERAL_ESCAPE_RE.search(text):
+        _reject(
+            "The clan-chat line contains literal escape sequences.",
+            "Clan chat is a single plain line — no line breaks at all.",
+        )
+
+    if _EMOJI_RE.search(text):
+        _reject(
+            "The clan-chat line contains a :shortcode: emoji. The game renders "
+            "none of them, so it would appear as literal text.",
+            "Write plain text with no shortcodes, markdown, links, or @mentions.",
+        )
+
+    if any(marker in text for marker in ("**", "__", "](", "<@", "<#")):
+        _reject(
+            "The clan-chat line contains Discord markup (bold, links, or mentions). "
+            "The game renders none of it.",
+            "Write one plain sentence.",
+        )
+
+    # Over-length is not a rejection: the clip is sentence-aware and the signature
+    # reserve is computed downstream. But a line so long that clipping would
+    # destroy it is a composition failure, not a formatting one.
+    if len(text) > limit * 2:
+        _reject(
+            f"The clan-chat line is {len(text)} characters — more than double the "
+            f"{limit}-character surface.",
+            "Write it at length for the surface, not as a paragraph to be truncated.",
+        )
+    return text
+
+
+__all__ = [
+    "DISCORD_HARD_LIMIT",
+    "PostRejected",
+    "validate_clan_chat_post",
+    "validate_discord_post",
+]

@@ -123,6 +123,22 @@ _SCHEMA = (
         fired INTEGER NOT NULL DEFAULT 1
     )""",
     "CREATE INDEX IF NOT EXISTS idx_wake_obs_recorded ON wake_observations(recorded_at)",
+    # Agentic Loop v2 Phase 1: what a chassis turn thought and did. This is the
+    # substrate the nightly reflection loop will read — trigger, tool trace,
+    # posts, rejections, cost — and it lives here rather than the clan DB
+    # because an episode is observation, not clan state.
+    """CREATE TABLE IF NOT EXISTS wake_episodes (
+        episode_id INTEGER PRIMARY KEY,
+        recorded_at TEXT NOT NULL,
+        job TEXT,
+        workflow TEXT,
+        tier TEXT,
+        handled INTEGER NOT NULL DEFAULT 0,
+        delivered INTEGER NOT NULL DEFAULT 0,
+        reason TEXT,
+        episode_json TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_wake_episodes_recorded ON wake_episodes(recorded_at)",
 )
 
 
@@ -356,6 +372,7 @@ def purge_old(now: datetime | None = None) -> dict:
             ("db_lock_waits", "recorded_at", DB_METRIC_RETENTION_DAYS),
             ("db_stalls", "recorded_at", DB_METRIC_RETENTION_DAYS),
             ("wake_observations", "recorded_at", DB_METRIC_RETENTION_DAYS),
+            ("wake_episodes", "recorded_at", DB_METRIC_RETENTION_DAYS),
         ):
             cur = conn.execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff(days),))
             stats[f"{table}_purged"] = cur.rowcount

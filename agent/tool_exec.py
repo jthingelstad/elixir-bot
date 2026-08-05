@@ -1820,6 +1820,14 @@ ADVERTISED_TOOL_EXECUTOR_NAMES = frozenset(
     }
 )
 
+# Chassis surface tools (Agentic Loop v2): executable and dispatched, but
+# deliberately NOT advertised. "Advertised" means reachable through ALL_TOOLS by
+# any workflow that shares the standard toolset; a posting tool is handed out
+# per-turn by agent.chassis.surface_tools, gated on the attention's surfaces.
+# Keeping them out of ADVERTISED is what lets the entrypoint smoke test keep
+# asserting that every advertised tool is one a shared workflow may call.
+SURFACE_TOOL_EXECUTOR_NAMES = frozenset({"post_to_discord", "post_to_clan_chat"})
+
 # Old names remain executable for persisted traces and direct compatibility
 # tests, but no workflow advertises them to the model.
 LEGACY_TOOL_EXECUTOR_NAMES = frozenset(
@@ -1836,7 +1844,106 @@ LEGACY_TOOL_EXECUTOR_NAMES = frozenset(
         "schedule_revisit",
     }
 )
-TOOL_EXECUTOR_NAMES = ADVERTISED_TOOL_EXECUTOR_NAMES | LEGACY_TOOL_EXECUTOR_NAMES
+TOOL_EXECUTOR_NAMES = (
+    ADVERTISED_TOOL_EXECUTOR_NAMES | LEGACY_TOOL_EXECUTOR_NAMES | SURFACE_TOOL_EXECUTOR_NAMES
+)
+
+
+def _execute_post_to_discord(arguments):
+    """Validate a composed post and stage it for delivery.
+
+    Staging, not sending: the post reaches members through
+    ``runtime.awareness.deliver.deliver_posts`` after the turn, which is the one
+    path that owns the hard-post floor, the durable outbox, idempotency and the
+    clan-chat sibling. Delivering here would be a second delivery path — the
+    thing the v4 architecture died of.
+
+    What DOES happen here is the check, because immediate feedback is the whole
+    reason posting is a tool call: a rejection returns the reason to the model,
+    which fixes it and calls again. The rules are the failure modes measured in
+    the 2026-08-04 scoped-composer experiment, not guesses.
+    """
+    from agent import chassis
+    from agent.post_validation import PostRejected, validate_discord_post
+
+    staging = chassis.active_staging()
+    if staging is None:
+        return json.dumps({"error": "post_to_discord is only available inside a chassis turn"})
+    lane = str(arguments.get("lane") or "").strip()
+    if lane not in ("announcements", "elixir"):
+        return json.dumps({"error": f"unknown lane {lane!r}; use announcements or elixir"})
+    try:
+        from runtime.emoji import available_emoji_names
+
+        known = {name.lower() for name in available_emoji_names()}
+        content = validate_discord_post(
+            str(arguments.get("content") or ""),
+            lane=lane,
+            known_emoji=known,
+        )
+    except PostRejected as exc:
+        staging.rejections.append(str(exc))
+        return json.dumps({"error": "post_rejected", "reason": str(exc)})
+    post = staging.stage_discord(
+        lane=lane,
+        content=content,
+        covers=arguments.get("covers_signal_keys") or [],
+    )
+    return json.dumps(
+        {
+            "accepted": True,
+            "lane": lane,
+            "characters": len(content),
+            "covers": post["covers_signal_keys"],
+            "note": "Staged for delivery. Post the in-game clan-chat sibling if this "
+            "moment matters to the whole clan.",
+        }
+    )
+
+
+def _execute_post_to_clan_chat(arguments):
+    """Validate and attach the in-game line to its Discord sibling."""
+    from agent import chassis
+    from agent.post_validation import PostRejected, validate_clan_chat_post
+
+    staging = chassis.active_staging()
+    if staging is None:
+        return json.dumps({"error": "post_to_clan_chat is only available inside a chassis turn"})
+    try:
+        content = validate_clan_chat_post(str(arguments.get("content") or ""))
+    except PostRejected as exc:
+        staging.rejections.append(str(exc))
+        return json.dumps({"error": "post_rejected", "reason": str(exc)})
+
+    from runtime.clan_chat_copy import signed_valid_messages
+
+    signed = signed_valid_messages([content])
+    if not signed:
+        reason = (
+            "The clan-chat line did not survive in-game validation (links, mentions, "
+            "markdown, engine internals, or empty after signing). Write one plain "
+            "sentence a player reads mid-game, then call the tool again."
+        )
+        staging.rejections.append(reason)
+        return json.dumps({"error": "post_rejected", "reason": reason})
+
+    post = staging.attach_clan_chat(content)
+    if post is None:
+        return json.dumps(
+            {
+                "error": "no_discord_post_yet",
+                "reason": "The in-game line rides alongside its Discord sibling. "
+                "Call post_to_discord first, then call this.",
+            }
+        )
+    return json.dumps(
+        {
+            "accepted": True,
+            "characters": len(signed[0]),
+            "signed_preview": signed[0],
+            "note": "Staged. A '- E' signature is appended for you.",
+        }
+    )
 
 
 def _execute_tool(name, arguments, workflow=None):
@@ -1844,6 +1951,10 @@ def _execute_tool(name, arguments, workflow=None):
     if name not in TOOL_EXECUTOR_NAMES:
         return json.dumps({"error": f"Unknown tool: {name}"})
     try:
+        if name == "post_to_discord":
+            return _execute_post_to_discord(arguments)
+        if name == "post_to_clan_chat":
+            return _execute_post_to_clan_chat(arguments)
         if name == "resolve_member":
             # QA M1: don't hard-filter to active — a recently-departed or observed
             # player must resolve (each match carries its own status field) rather

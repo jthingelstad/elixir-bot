@@ -14,6 +14,10 @@ from datetime import date, datetime
 _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
 _AGENT_PROMPTS_DIR = os.path.join(_PROMPTS_DIR, "agents")
 _LANE_PROMPTS_DIR = os.path.join(_PROMPTS_DIR, "lanes")
+# Agentic Loop v2: one file per chassis job. A job file is the ONLY per-purpose
+# prose in a chassis turn — everything else (identity, knowledge, policy, lane
+# rules, surface guidance) is assembled from the same blocks for every job.
+_JOB_PROMPTS_DIR = os.path.join(_PROMPTS_DIR, "jobs")
 
 CHANNEL_LANE_CONFIG = {
     "recruiting": {
@@ -491,6 +495,19 @@ def lane_prompt(lane_key: str) -> str:
     if not key:
         return ""
     return _load_from_prompt_dir(_LANE_PROMPTS_DIR, f"{key}.md")
+
+
+def job_prompt(job_key: str) -> str:
+    """Load a chassis job prompt from prompts/jobs.
+
+    Hot-loads like every other prompt file, which is the point: a job's framing
+    can be corrected without a deploy, and a lesson the nightly reflection
+    writes reaches the next turn immediately.
+    """
+    key = (job_key or "").strip().lower().replace("_", "-")
+    if not key:
+        return ""
+    return _load_from_prompt_dir(_JOB_PROMPTS_DIR, f"{key}.md")
 
 
 def agent_prompt(agent_key: str) -> str:

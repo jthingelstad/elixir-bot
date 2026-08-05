@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Literal
 
-from agent.tool_defs import TOOLS
+from agent.tool_defs import SURFACE_TOOLS, TOOLS
 
 
 def _awareness_max_rounds() -> int:
@@ -41,19 +41,45 @@ _WRITE_TOOL_NAMES = {
     "record_leadership_followup",
 }
 
+# Posting is a write. These reach members, so they are the most consequential
+# writes Elixir has.
+_SURFACE_TOOL_NAMES = frozenset({"post_to_discord", "post_to_clan_chat"})
+
 AWARENESS_WRITE_TOOL_NAMES = {
     "save_clan_memory",
     "record_leadership_followup",
 }
 
 AWARENESS_WRITE_BUDGET_PER_TICK = 3
+
+# Per-workflow write budgets, and WHICH tools they apply to. A budget exists to
+# stop a loop from spending the clan's durable memory on one turn — it is not a
+# general brake on every write. The chassis posting tools are deliberately
+# absent from the budgeted set: a welcome legitimately calls two of them
+# (Discord + clan chat) and a validator bounce can legitimately cost a third, so
+# a shared 3-call cap would fail the very turn it was meant to protect.
+WRITE_BUDGET_BY_WORKFLOW = {
+    "awareness": AWARENESS_WRITE_BUDGET_PER_TICK,
+    "wake_response": AWARENESS_WRITE_BUDGET_PER_TICK,
+    "wake_response_chat": AWARENESS_WRITE_BUDGET_PER_TICK,
+}
+BUDGETED_WRITE_TOOLS_BY_WORKFLOW = {
+    "awareness": frozenset(AWARENESS_WRITE_TOOL_NAMES),
+    "wake_response": frozenset(AWARENESS_WRITE_TOOL_NAMES),
+    "wake_response_chat": frozenset(AWARENESS_WRITE_TOOL_NAMES),
+}
 EXTERNAL_LOOKUP_TOOL_NAMES = {"cr_api"}
 _NO_EXTERNAL_LOOKUP_WORKFLOWS = {"reception", "roster_bios"}
 
 TOOL_DEFINITIONS = []
-for _tool in TOOLS:
+# Surface tools are included so the write gate SEES them. They are not in TOOLS
+# (no shared workflow may call one), but a definition the gate cannot find
+# defaults to side_effect="read" — which would let any workflow that somehow got
+# the tool post to the clan unchecked. Declaring them here means posting is
+# permitted only for a spec that opted into writes.
+for _tool in list(TOOLS) + list(SURFACE_TOOLS):
     _name = _tool["name"]
-    _side_effect = "write" if _name in _WRITE_TOOL_NAMES else "read"
+    _side_effect = "write" if _name in _WRITE_TOOL_NAMES or _name in _SURFACE_TOOL_NAMES else "read"
     TOOL_DEFINITIONS.append(
         {
             "tool": _tool,
@@ -65,7 +91,16 @@ for _tool in TOOLS:
 TOOL_DEFINITIONS_BY_NAME = {d["name"]: d for d in TOOL_DEFINITIONS}
 
 READ_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "read"]
-WRITE_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "write"]
+# Surface tools are declared in TOOL_DEFINITIONS so the write gate can see them,
+# but they must never reach a shared toolset: WRITE_TOOLS feeds ALL_TOOLS, which
+# is clanops's surface, and a posting tool offered there would let a leadership
+# command post to the whole clan. They are handed out per-turn by
+# agent.chassis.surface_tools and nowhere else.
+WRITE_TOOLS = [
+    d["tool"]
+    for d in TOOL_DEFINITIONS
+    if d["side_effect"] == "write" and d["name"] not in _SURFACE_TOOL_NAMES
+]
 ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
 READ_TOOLS_NO_EXTERNAL = [t for t in READ_TOOLS if t["name"] not in EXTERNAL_LOOKUP_TOOL_NAMES]
 
@@ -167,6 +202,26 @@ _WORKFLOW_SPECS = (
         response_schema={"required": ["posts"]},
         tools=AWARENESS_TOOLS,
         max_tool_rounds=_awareness_max_rounds(),
+        write_tools_allowed=True,
+        model_family="chat",
+    ),
+    # Agentic Loop v2 chassis turns. Two specs rather than a model argument
+    # because model choice is registry data everywhere else in this file, and
+    # the escalation ladder is then just "run the same attention under the other
+    # workflow name". No response_schema: a chassis turn's output IS its tool
+    # calls, so there is no JSON envelope to validate — the caller passes
+    # allowed_tools explicitly (see the note on the derived-dict filter).
+    WorkflowSpec(
+        "wake_response",
+        tools=[],
+        max_tool_rounds=6,
+        write_tools_allowed=True,
+        model_family="lightweight",
+    ),
+    WorkflowSpec(
+        "wake_response_chat",
+        tools=[],
+        max_tool_rounds=6,
         write_tools_allowed=True,
         model_family="chat",
     ),
@@ -331,9 +386,14 @@ for _alias, _canonical in _ALIASES.items():
     if _canonical in TOOLSETS_BY_WORKFLOW:
         TOOLSETS_BY_WORKFLOW[_alias] = TOOLSETS_BY_WORKFLOW[_canonical]
 
-MAX_ROUNDS_BY_WORKFLOW = {
-    spec.name: spec.max_tool_rounds for spec in _WORKFLOW_SPECS if spec.response_schema is not None
-}
+# Every spec, schema or not. The round cap has nothing to do with whether a
+# workflow returns JSON, and filtering on response_schema silently discarded the
+# declared value: awareness_triage declares 1 and got 3, release_notes the same,
+# and a chassis turn declaring 6 got 3 — which cost it the retry round the
+# delivery validator's bounce-and-fix loop depends on. Both older cases have
+# tools_allowed=False so their cap was inert; making the declaration
+# authoritative is what a registry is for.
+MAX_ROUNDS_BY_WORKFLOW = {spec.name: spec.max_tool_rounds for spec in _WORKFLOW_SPECS}
 for _alias, _canonical in _ALIASES.items():
     if _canonical in MAX_ROUNDS_BY_WORKFLOW:
         MAX_ROUNDS_BY_WORKFLOW[_alias] = MAX_ROUNDS_BY_WORKFLOW[_canonical]

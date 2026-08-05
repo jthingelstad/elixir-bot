@@ -1604,7 +1604,72 @@ _SHARED_TOOL_NAMES = (
     "get_awards",
     "lookup_reference",
 )
+# Chassis surface tools (Agentic Loop v2). Deliberately NOT in
+# _SHARED_TOOL_NAMES: a posting tool is offered per-turn, gated by the
+# attention's `surfaces`, never handed to every workflow that happens to share
+# the standard toolset. `agent.chassis.surface_tools` is the only reader.
+SURFACE_TOOLS = [
+    {
+        "name": "post_to_discord",
+        "description": (
+            "Deliver a composed post to a Discord lane. Call this once the post is "
+            "written and grounded — the content is posted as-is. The post is checked "
+            "before delivery; if it comes back rejected, the reason says exactly what "
+            "to fix, and you should rewrite and call again."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "lane": {
+                    "type": "string",
+                    "enum": ["announcements", "elixir"],
+                    "description": (
+                        "announcements = who is in the clan and what changed "
+                        "(joins, leaves, role changes). elixir = war, milestones, "
+                        "player highlights."
+                    ),
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The post exactly as members will read it.",
+                },
+                "covers_signal_keys": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "The signal_key values from this wake that this post covers. "
+                        "Required signals must be covered or the wake fails."
+                    ),
+                },
+            },
+            "required": ["lane", "content", "covers_signal_keys"],
+        },
+    },
+    {
+        "name": "post_to_clan_chat",
+        "description": (
+            "Voice this moment in the in-game clan chat — the only surface that "
+            "reaches EVERY member, including those who never open Discord. One plain "
+            "sentence, no markdown, no emoji shortcodes, no links, under 200 "
+            "characters. It is a sibling of the Discord post, not a summary of it: "
+            "same distinguishing fact, said its own way. Call post_to_discord first."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "One plain-text line for in-game chat.",
+                }
+            },
+            "required": ["content"],
+        },
+    },
+]
+
 _TOOLS_BY_NAME = {tool["name"]: tool for tool in TOOLS}
 TOOLS = [_TOOLS_BY_NAME[name] for name in _SHARED_TOOL_NAMES]
 
-__all__ = ["TOOLS"]
+TOOLS_BY_NAME = {**_TOOLS_BY_NAME, **{tool["name"]: tool for tool in SURFACE_TOOLS}}
+
+__all__ = ["SURFACE_TOOLS", "TOOLS", "TOOLS_BY_NAME"]

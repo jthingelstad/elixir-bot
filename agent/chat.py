@@ -18,13 +18,14 @@ from agent.core import (
 from agent.tool_exec import _execute_tool
 from agent.tool_policy import (
     ALL_TOOLS,
-    AWARENESS_WRITE_BUDGET_PER_TICK,
-    AWARENESS_WRITE_TOOL_NAMES,
+    BUDGETED_WRITE_TOOLS_BY_WORKFLOW,
     EXTERNAL_LOOKUP_TOOL_NAMES,
     MAX_ROUNDS_BY_WORKFLOW,
     RESPONSE_SCHEMAS_BY_WORKFLOW,
     TOOL_DEFINITIONS_BY_NAME,
     TOOLSETS_BY_WORKFLOW,
+    WRITE_BUDGET_BY_WORKFLOW,
+    get_workflow_spec,
 )
 
 EXTERNAL_LOOKUP_CAP = 5
@@ -461,10 +462,21 @@ def _chat_with_tools(
         )
     allowed_tool_names = _tool_names(allowed_tools)
 
-    # Workflow policy owns clanops writes. Awareness writes are gated by a
-    # per-tick budget enforced in the tool-call loop below.
-    is_clanops_write_ok = workflow == "clanops"
-    is_awareness_write_ok = workflow == "awareness"
+    # Write policy is registry data: a spec opts in with write_tools_allowed.
+    # This used to be two hardcoded workflow-name comparisons, which is why
+    # `write_tools_allowed` had drifted into a declarative-only field that
+    # granted nothing. Only clanops and awareness set it, so reading it here is
+    # behaviour-preserving — and a new write-capable workflow is now a registry
+    # line instead of an edit to this file.
+    try:
+        spec_write_ok = bool(get_workflow_spec(workflow).write_tools_allowed)
+    except KeyError:
+        spec_write_ok = False
+    # Budgeted writes are a separate concern from permitted writes: the
+    # awareness brain's save/followup tools are capped per tick so a loop cannot
+    # spend the clan's memory on one turn.
+    write_budget = WRITE_BUDGET_BY_WORKFLOW.get(workflow)
+    budgeted_write_names = BUDGETED_WRITE_TOOLS_BY_WORKFLOW.get(workflow, frozenset())
 
     max_tool_rounds = MAX_ROUNDS_BY_WORKFLOW.get(workflow, MAX_TOOL_ROUNDS)
 
@@ -709,8 +721,10 @@ def _chat_with_tools(
                 )
             else:
                 side_effect = TOOL_DEFINITIONS_BY_NAME.get(fn_name, {}).get("side_effect", "read")
-                is_awareness_write = is_awareness_write_ok and fn_name in AWARENESS_WRITE_TOOL_NAMES
-                write_allowed = side_effect != "write" or is_clanops_write_ok or is_awareness_write
+                is_budgeted_write = (
+                    spec_write_ok and write_budget is not None and fn_name in budgeted_write_names
+                )
+                write_allowed = side_effect != "write" or spec_write_ok
                 if not write_allowed:
                     denied_tool_count += 1
                     log.warning(
@@ -725,24 +739,21 @@ def _chat_with_tools(
                             "workflow": workflow,
                         }
                     )
-                elif (
-                    is_awareness_write
-                    and tool_stats["write_calls_issued"] >= AWARENESS_WRITE_BUDGET_PER_TICK
-                ):
+                elif is_budgeted_write and tool_stats["write_calls_issued"] >= write_budget:
                     tool_stats["write_calls_denied"] += 1
                     denied_tool_count += 1
                     log.warning(
-                        "tool_denied workflow=%s tool=%s reason=awareness_write_budget issued=%d cap=%d",
+                        "tool_denied workflow=%s tool=%s reason=write_budget issued=%d cap=%d",
                         workflow,
                         fn_name,
                         tool_stats["write_calls_issued"],
-                        AWARENESS_WRITE_BUDGET_PER_TICK,
+                        write_budget,
                     )
                     result = json.dumps(
                         {
                             "error": "awareness_write_budget_reached",
                             "tool": fn_name,
-                            "cap": AWARENESS_WRITE_BUDGET_PER_TICK,
+                            "cap": write_budget,
                             "hint": (
                                 "You have already used your write budget for this tick. "
                                 "Skip further writes and finalize your post plan."
@@ -754,13 +765,13 @@ def _chat_with_tools(
                     tools_called.append(fn_name)
                     if fn_name in EXTERNAL_LOOKUP_TOOL_NAMES:
                         external_lookup_calls += 1
-                    if is_awareness_write:
+                    if is_budgeted_write:
                         tool_stats["write_calls_issued"] += 1
                     result = _build_tool_result_envelope(
                         fn_name,
                         _execute_tool(fn_name, fn_args, workflow=workflow),
                     )
-                    if is_awareness_write and _tool_result_succeeded(result):
+                    if is_budgeted_write and _tool_result_succeeded(result):
                         tool_stats["write_calls_succeeded"] += 1
                     if workflow == "awareness" and _tool_result_succeeded(result):
                         discovered_codes = _extract_reference_codes(result)

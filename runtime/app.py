@@ -718,15 +718,83 @@ async def _evaluate_wakes():
     that overlap is the point — the shadow report compares what a wake would
     have done against what the brain actually did.
     """
+    from runtime.awareness import respond as respond_mod
     from runtime.awareness import wake
 
     if not wake.wake_enabled():
         return None
     job = scheduler.get_job("awareness-loop") if scheduler.running else None
-    return await asyncio.to_thread(
+    summary = await asyncio.to_thread(
         wake.evaluate_and_observe,
         next_scheduled_at=getattr(job, "next_run_time", None),
     )
+    if not respond_mod.responder_enabled():
+        return summary
+
+    # Phase 1: the responder composes for the wakes a job claims. Everything it
+    # does not handle stays pending for the daily deliberation — the cursors are
+    # untouched here, so nothing is consumed by trying.
+    decision = await asyncio.to_thread(wake.evaluate, mode="live")
+    handled = []
+    for fired in decision.get("wakes") or []:
+        if respond_mod.job_for(fired.get("events") or []) is None:
+            continue
+        outcome = await _run_wake_responder(fired)
+        if outcome.get("handled"):
+            handled.append(fired["wake_class"])
+            await asyncio.to_thread(wake.mark_fired, fired["consumer_key"], fired["high_water"])
+    if handled:
+        summary = dict(summary or {})
+        summary["responded"] = handled
+    return summary
+
+
+async def _run_wake_responder(fired: dict) -> dict:
+    """Run one scoped responder turn, bound to the SAME delivery path the
+    awareness brain uses. A second delivery path is what v4 died of."""
+    import elixir_agent
+    from runtime.awareness import deliver as deliver_mod
+    from runtime.awareness import respond as respond_mod
+    from runtime.awareness import store as awareness_store
+
+    loop = asyncio.get_running_loop()
+
+    def _post_fn(channel_id, copy):
+        fut = asyncio.run_coroutine_threadsafe(_engine_send(int(channel_id), copy), loop)
+        return fut.result(timeout=120)
+
+    def _relay_fn(post, channel_name):
+        fut = asyncio.run_coroutine_threadsafe(
+            _awareness_relay_to_clan_chat(post, channel_name), loop
+        )
+        return fut.result(timeout=120)
+
+    def _deliver_fn(read, plan):
+        return deliver_mod.deliver_posts(
+            read,
+            plan,
+            post_fn=_post_fn,
+            record_fn=awareness_store.record_awareness_post,
+            relay_fn=_relay_fn,
+            repair_fn=elixir_agent.repair_awareness_plan,
+            intent_store=awareness_store,
+        )
+
+    try:
+        outcome = await asyncio.to_thread(respond_mod.respond, fired, deliver_fn=_deliver_fn)
+    except Exception as exc:
+        log.exception("wake responder: turn failed")
+        return {"handled": False, "reason": str(exc)}
+    episode = outcome.get("episode") or {}
+    if episode:
+        await asyncio.to_thread(respond_mod.record_episode, episode, outcome)
+    log.info(
+        "wake responder: %s (%s) — %s",
+        "handled" if outcome.get("handled") else "not handled",
+        outcome.get("tier") or "-",
+        outcome.get("reason") or f"delivered {outcome.get('delivered', 0)}",
+    )
+    return outcome
 
 
 async def _maybe_trigger_awareness_for_joins():
