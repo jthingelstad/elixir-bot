@@ -36,9 +36,10 @@ BROAD_EXCEPTION_BASELINE = {
     # ceiling. A counter that can fail an already-successful model call would
     # be a cost control causing the outage it exists to prevent.
     "agent/core.py": 4,
-    # The ceiling fails OPEN: an unreadable counter must never be what stops
-    # Elixir welcoming a new member.
-    "agent/spend_budget.py": 1,
+    # 2: the ceiling fails OPEN (an unreadable counter must never be what stops
+    # Elixir welcoming a new member), and the #leaders notice is best-effort —
+    # a cost control must not raise into the call it is declining.
+    "agent/spend_budget.py": 2,
     "agent/cr_api_tool.py": 1,
     "agent/factual_admission.py": 1,
     "agent/intent_router.py": 1,
@@ -67,7 +68,7 @@ BROAD_EXCEPTION_BASELINE = {
     "memory_store/__init__.py": 1,
     "runtime/activity_runner.py": 3,
     "runtime/admin.py": 2,  # -2: #212 retired the dead signal.publish-pending impl
-    "runtime/alerts.py": 2,  # +1: schedule_job_failure_alert best-effort loop-schedule guard
+    "runtime/alerts.py": 3,  # +1 each: job-failure and spend-ceiling loop-schedule guards
     # 38 -> 40 (2026-08-03): the join trigger's two guards. Both are the same
     # "a diagnostic must never fail its caller" shape as the rest of this file —
     # one keeps a trigger failure from failing the engine tick, the other keeps a

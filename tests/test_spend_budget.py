@@ -105,3 +105,36 @@ def test_cache_reads_are_a_tenth_of_input():
     full = spend_budget.call_cost_usd("claude-sonnet-5", 1_000_000, 0, 0, 0)
     cached = spend_budget.call_cost_usd("claude-sonnet-5", 0, 0, 0, 1_000_000)
     assert abs(cached - full * 0.1) < 1e-6
+
+
+def test_a_member_is_told_the_truth_not_told_to_retry():
+    """The generic router fallback is "try again in a sec". For the ceiling that
+    is a lie — retrying does not help until midnight UTC — and a member who
+    believes it retries until they give up, seeing a broken bot each time."""
+    from agent.core import SpendCeilingReached
+    from runtime.channel_router import _member_error_text
+
+    generic = "Hit an error reviewing the deck. Try again in a sec."
+    ceiling_text = _member_error_text(SpendCeilingReached("deck_review: ceiling"), generic)
+    assert ceiling_text != generic
+    assert "try again in a sec" not in ceiling_text.lower()
+    assert "midnight utc" in ceiling_text.lower(), "say WHEN it clears"
+    assert "welcome" in ceiling_text.lower(), "say what still works"
+
+    # A real error still reads like a real error.
+    assert _member_error_text(ValueError("boom"), generic) == generic
+
+
+def test_leadership_is_told_once_per_day_not_once_per_refusal(monkeypatch, engine_conn):
+    """A ceiling nobody is told about is indistinguishable from a fault — but a
+    busy afternoon must not become a notification storm."""
+    sent = []
+    from runtime import alerts
+
+    monkeypatch.setattr(alerts, "schedule_spend_ceiling_notice", lambda detail: sent.append(detail))
+    monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "1.00")
+    spend_budget._ANNOUNCED.clear()
+    spend_budget.record_spend_usd(5.0, now=NOW, conn=engine_conn)
+    for _ in range(4):
+        spend_budget.may_run("deck_review", conn=engine_conn)
+    assert len(sent) == 1, f"announced {len(sent)} times, expected once"

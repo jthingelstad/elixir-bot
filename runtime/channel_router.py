@@ -1037,8 +1037,28 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
                 discord_message_id=message.id,
                 detail=str(e),
             )
-            await app._safe_reply(message, "Hit an error reviewing the deck. Try again in a sec.")
+            await app._safe_reply(
+                message,
+                _member_error_text(e, "Hit an error reviewing the deck. Try again in a sec."),
+            )
     return True
+
+
+def _member_error_text(exc, generic: str) -> str:
+    """What to tell a member when their request failed.
+
+    The daily spend ceiling needs its own line. The generic "try again in a
+    sec" is actively wrong for it: retrying does not help until the day rolls at
+    midnight UTC, so a member who believes it retries until they give up, and
+    every retry looks to them like Elixir is broken. Say the true thing, and say
+    what still works.
+    """
+    from agent.core import SpendCeilingReached
+    from agent.spend_budget import member_facing_message
+
+    if isinstance(exc, SpendCeilingReached):
+        return member_facing_message()
+    return generic
 
 
 class _ReportRouteSpec(NamedTuple):
@@ -1472,7 +1492,9 @@ async def _handle_reception_message(app, message, ctx, channel_config, scope) ->
                 discord_message_id=message.id,
                 detail=str(e),
             )
-            await app._safe_reply(message, "Hit an error. Try again in a moment.")
+            await app._safe_reply(
+                message, _member_error_text(e, "Hit an error. Try again in a moment.")
+            )
 
 
 async def _handle_channel_llm_message(app, message, ctx, channel_config) -> None:
@@ -1664,7 +1686,9 @@ async def _handle_channel_llm_message(app, message, ctx, channel_config) -> None
                 detail=str(e),
             )
             if mentioned:
-                await app._safe_reply(message, "Hit an error. Try again in a moment.")
+                await app._safe_reply(
+                    message, _member_error_text(e, "Hit an error. Try again in a moment.")
+                )
 
 
 async def route_message(message):

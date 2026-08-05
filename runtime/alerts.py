@@ -274,3 +274,37 @@ def schedule_llm_failure_alert(context: str) -> None:
             )
 
     future.add_done_callback(_report_alert_outcome)
+
+
+async def _alert_spend_ceiling(detail: str) -> bool:
+    """Tell leadership the daily model-spend ceiling has been reached.
+
+    Not an error, so it is phrased as a status: Elixir is doing less on purpose,
+    hard posts are unaffected, and it clears at midnight UTC. Worth saying out
+    loud precisely because the alternative — deck reviews quietly refusing while
+    nobody is watching — looks exactly like a fault.
+    """
+    return await _alert_admin(
+        "\U0001f4b0 **Daily spend ceiling reached** — "
+        f"{detail}. Non-essential work (deck reviews, the daily insight) is paused "
+        "until midnight UTC. Joins, farewells, role changes and clan-chat siblings "
+        "are unaffected — those are never budget-gated. "
+        "Raise `ELIXIR_DAILY_SPEND_USD` if this is biting too often.",
+        "spend_ceiling",
+        detail,
+    )
+
+
+def schedule_spend_ceiling_notice(detail: str) -> None:
+    """Fire-and-forget the ceiling notice from sync code (the budget check runs
+    on worker threads). Best-effort — a cost control must never raise into the
+    call it is declining."""
+    from runtime import app as runtime_app
+
+    loop = getattr(runtime_app.bot, "loop", None)
+    if loop is None or loop.is_closed() or not loop.is_running():
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(_alert_spend_ceiling(detail), loop)
+    except Exception:
+        log.debug("could not schedule the spend-ceiling notice", exc_info=True)

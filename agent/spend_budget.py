@@ -140,6 +140,44 @@ def record_spend_usd(usd: float, *, now: datetime = None, conn=None) -> None:
     )
 
 
+_ANNOUNCED: dict[str, str] = {}
+
+
+def _announce_once(kind: str, detail: str) -> None:
+    """Tell #leaders the first time the ceiling bites on a given day.
+
+    A ceiling nobody is told about is indistinguishable from Elixir being
+    broken — especially with nobody watching. Once per day per kind, so a busy
+    afternoon does not turn into a notification storm.
+    """
+    stamp = f"{kind}:{_today()}"
+    if _ANNOUNCED.get(kind) == stamp:
+        return
+    _ANNOUNCED[kind] = stamp
+    try:
+        from runtime import alerts
+
+        alerts.schedule_spend_ceiling_notice(detail)
+    except Exception:
+        log.warning("spend budget: could not announce the ceiling (%s)", detail, exc_info=True)
+
+
+def member_facing_message() -> str:
+    """What a member sees when their request hits the ceiling.
+
+    Honest and specific, because the generic "try again in a sec" the router
+    falls back to is actively wrong here: retrying does not help until the day
+    rolls, and a member who believes it will retry until they give up. It also
+    says what still works, so nobody thinks Elixir is broken.
+    """
+    return (
+        "I've hit my spending limit for the day, so I'm holding off on the "
+        "bigger stuff until it resets at midnight UTC. Clan announcements and "
+        "welcomes still go out as normal \u2014 ask me again tomorrow and I'll "
+        "have room."
+    )
+
+
 def may_run(workflow: str, *, conn=None) -> tuple[bool, str]:
     """May this workflow spend right now? Returns ``(allowed, reason)``.
 
@@ -160,6 +198,7 @@ def may_run(workflow: str, *, conn=None) -> tuple[bool, str]:
         log.debug("spend budget: could not read today's total", exc_info=True)
         return True, ""
     if spent >= ceiling:
+        _announce_once("ceiling", f"${spent:.2f} of ${ceiling:.2f}")
         return False, f"daily spend ceiling reached (${spent:.2f} of ${ceiling:.2f})"
     if workflow in DEFERRABLE and spent >= ceiling * warn_fraction():
         return False, (
