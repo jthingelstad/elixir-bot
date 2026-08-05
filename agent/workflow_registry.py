@@ -168,7 +168,18 @@ _WORKFLOW_SPECS = (
         "deck_review",
         response_schema=_CHANNEL_SCHEMA,
         tools=INTERACTIVE_READ_TOOLS,
-        max_tool_rounds=10,
+        # 10 -> 6 (2026-08-05). Measured over 18 real reviews: the median takes
+        # 5 calls and the 75th percentile 5, but the tail ran to 11 and 16 — and
+        # a round is not cheap here, because each one writes ~14K tokens of
+        # accumulated tool results into the prompt cache at 1.25x input. Cache
+        # writes are 62% of this workflow's cost, so the round count IS the bill.
+        #
+        # 6 bounds the tail without touching the median. It is deliberately not
+        # 4 (interactive's cap): a deck review legitimately fetches deck
+        # intelligence, battle intelligence, the card collection and a
+        # recommendation, and squeezing that would trade cost for a worse answer
+        # rather than for less waste.
+        max_tool_rounds=6,
         model_family="chat",
     ),
     WorkflowSpec(
