@@ -82,6 +82,16 @@ class _FakeBot:
         self.tree = _FakeTree()
 
 
+async def _inline_to_thread(fn, *args, **kwargs):
+    """Stand-in for `asyncio.to_thread`: run the callable inline.
+
+    Every test that drives an async runtime entry point patches to_thread with
+    this, so the stubbed DB/LLM calls it wraps stay synchronous and their mocks
+    stay assertable after `asyncio.run()` returns.
+    """
+    return fn(*args, **kwargs)
+
+
 def _root(bot, name):
     """Fetch a top-level command group by name — the surface is now split into
     two roots: /elixir (member: email + help) and /clanops (leader ops)."""
@@ -133,6 +143,50 @@ CLANOPS_BEHAVIOR = {
 }
 
 
+# --- shared prompt-feedback (reaction) scaffolding ----------------------------
+#
+# A 👍/👎 on an Elixir reply is prompt feedback. Five tests drive it and all
+# five need the identical stored assistant row and channel behavior; only the
+# reaction, the reactor, and the feedback state differ.
+
+ASK_ELIXIR_FEEDBACK_BEHAVIOR = {
+    "id": ASK_ELIXIR_ID,
+    "name": "#ask-elixir",
+    "lane": "ask-elixir",
+}
+
+
+def _assistant_feedback_row(**overrides):
+    """The stored assistant message a reaction points back at."""
+    return {
+        "message_id": 77,
+        "discord_message_id": "987",
+        "thread_id": 5,
+        "channel_id": "1482368505058955467",
+        "discord_user_id": "123",
+        "author_type": "assistant",
+        "workflow": "interactive",
+        "event_type": "channel_response",
+        "content": "Try a faster cycle deck.",
+        "summary": "faster deck",
+        "created_at": "2026-03-15T12:00:00",
+        **overrides,
+    }
+
+
+def _reaction_payload(emoji, *, user_id=123, with_member=True):
+    """A raw reaction payload for on_raw_reaction_add / _remove."""
+    payload = SimpleNamespace(
+        channel_id=ASK_ELIXIR_ID,
+        message_id=987,
+        user_id=user_id,
+        emoji=emoji,
+    )
+    if with_member:
+        payload.member = SimpleNamespace(bot=False)
+    return payload
+
+
 def _behavior(base, **overrides):
     """A channel behavior with fields added/changed for one test."""
     return {**base, **overrides}
@@ -180,16 +234,13 @@ def _on_message_env(
     a single test needs beyond this stays a nested `patch()` at the call site.
     """
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with ExitStack() as stack:
         env = SimpleNamespace(
             process=stack.enter_context(
                 patch.object(elixir.bot, "process_commands", new=AsyncMock())
             ),
             to_thread=stack.enter_context(
-                patch("elixir.asyncio.to_thread", side_effect=fake_to_thread)
+                patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread)
             ),
             behavior=_stub(stack, "elixir._get_channel_behavior", behavior),
             upsert=_stub(stack, "elixir.db.upsert_discord_user", NEVER_CALLED),
@@ -580,11 +631,8 @@ def test_on_raw_reaction_add_marks_actions_action_done():
         member=SimpleNamespace(bot=False, roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)]),
     )
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
         patch(
             "elixir._get_channel_behavior",
             return_value={
@@ -630,12 +678,9 @@ def test_actions_reply_records_action_note():
     )
     message.reference = SimpleNamespace(message_id=987)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
         patch(
             "elixir._get_channel_behavior",
             return_value={
@@ -690,12 +735,9 @@ def test_actions_leader_screenshot_is_observed():
     )
     message.reply = AsyncMock(return_value=SimpleNamespace(id=990))
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
         patch(
             "elixir._get_channel_behavior",
             return_value={
@@ -771,12 +813,9 @@ def test_leader_screenshot_persists_structured_memories():
         }
     ]
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
         patch(
             "elixir._get_channel_behavior",
             return_value={
@@ -880,12 +919,9 @@ def test_actions_leader_multi_screenshot_corrects_media_types():
     )
     message.reply = AsyncMock(return_value=SimpleNamespace(id=990))
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
         patch(
             "elixir._get_channel_behavior",
             return_value={
@@ -968,45 +1004,17 @@ def test_on_raw_reaction_add_records_feedback(
     A thumbs-up that replied would turn every bit of praise into more noise in
     the channel, so the negative assertions on the up case are the point.
     """
-    payload = SimpleNamespace(
-        channel_id=1482368505058955467,
-        message_id=987,
-        user_id=123,
-        emoji=emoji,
-        member=SimpleNamespace(bot=False),
-    )
-    assistant_row = {
-        "message_id": 77,
-        "discord_message_id": "987",
-        "thread_id": 5,
-        "channel_id": "1482368505058955467",
-        "discord_user_id": "123",
-        "author_type": "assistant",
-        "workflow": "interactive",
-        "event_type": "channel_response",
-        "content": "Try a faster cycle deck.",
-        "summary": "faster deck",
-        "created_at": "2026-03-15T12:00:00",
-    }
+    payload = _reaction_payload(emoji)
+    assistant_row = _assistant_feedback_row()
     reacted_message = SimpleNamespace(
         add_reaction=AsyncMock(),
         reply=AsyncMock(return_value=SimpleNamespace(id=654)),
     )
     channel = SimpleNamespace(fetch_message=AsyncMock(return_value=reacted_message))
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-            },
-        ),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
+        patch("elixir._get_channel_behavior", return_value=ASK_ELIXIR_FEEDBACK_BEHAVIOR),
         patch(
             "runtime.prompt_feedback.db.get_message_by_discord_message_id",
             return_value=assistant_row,
@@ -1043,13 +1051,7 @@ def test_on_raw_reaction_add_emits_warning_on_active_thumbs_down(caplog):
     """Thumbs-down must hit elixir-v5.log at WARNING so log-triage surfaces it.
     Re-reactions (became_active_down=False) should drop to INFO so we don't
     spam triage with toggle-and-back churn."""
-    payload = SimpleNamespace(
-        channel_id=1482368505058955467,
-        message_id=987,
-        user_id=123,
-        emoji="👎",
-        member=SimpleNamespace(bot=False),
-    )
+    payload = _reaction_payload("\U0001f44e")
     assistant_row = {
         "discord_message_id": "987",
         "channel_id": "1482368505058955467",
@@ -1062,19 +1064,9 @@ def test_on_raw_reaction_add_emits_warning_on_active_thumbs_down(caplog):
     )
     channel = SimpleNamespace(fetch_message=AsyncMock(return_value=reacted_message))
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-            },
-        ),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
+        patch("elixir._get_channel_behavior", return_value=ASK_ELIXIR_FEEDBACK_BEHAVIOR),
         patch(
             "runtime.prompt_feedback.db.get_message_by_discord_message_id",
             return_value=assistant_row,
@@ -1104,40 +1096,12 @@ def test_on_raw_reaction_add_emits_warning_on_active_thumbs_down(caplog):
 
 
 def test_on_raw_reaction_add_ignores_non_owner_feedback():
-    payload = SimpleNamespace(
-        channel_id=1482368505058955467,
-        message_id=987,
-        user_id=9999,
-        emoji="👎",
-        member=SimpleNamespace(bot=False),
-    )
-    assistant_row = {
-        "message_id": 77,
-        "discord_message_id": "987",
-        "thread_id": 5,
-        "channel_id": "1482368505058955467",
-        "discord_user_id": "123",
-        "author_type": "assistant",
-        "workflow": "interactive",
-        "event_type": "channel_response",
-        "content": "Try a faster cycle deck.",
-        "summary": "faster deck",
-        "created_at": "2026-03-15T12:00:00",
-    }
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
+    payload = _reaction_payload("\U0001f44e", user_id=9999)
+    assistant_row = _assistant_feedback_row()
 
     with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-            },
-        ),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
+        patch("elixir._get_channel_behavior", return_value=ASK_ELIXIR_FEEDBACK_BEHAVIOR),
         patch(
             "runtime.prompt_feedback.db.get_message_by_discord_message_id",
             return_value=assistant_row,
@@ -1154,40 +1118,12 @@ def test_on_raw_reaction_add_ignores_non_owner_feedback():
 
 
 def test_on_raw_reaction_add_does_not_repeat_retry_invitation_for_active_down_feedback():
-    payload = SimpleNamespace(
-        channel_id=1482368505058955467,
-        message_id=987,
-        user_id=123,
-        emoji="👎",
-        member=SimpleNamespace(bot=False),
-    )
-    assistant_row = {
-        "message_id": 77,
-        "discord_message_id": "987",
-        "thread_id": 5,
-        "channel_id": "1482368505058955467",
-        "discord_user_id": "123",
-        "author_type": "assistant",
-        "workflow": "interactive",
-        "event_type": "channel_response",
-        "content": "Try a faster cycle deck.",
-        "summary": "faster deck",
-        "created_at": "2026-03-15T12:00:00",
-    }
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
+    payload = _reaction_payload("\U0001f44e")
+    assistant_row = _assistant_feedback_row()
 
     with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-            },
-        ),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
+        patch("elixir._get_channel_behavior", return_value=ASK_ELIXIR_FEEDBACK_BEHAVIOR),
         patch(
             "runtime.prompt_feedback.db.get_message_by_discord_message_id",
             return_value=assistant_row,
@@ -1209,39 +1145,12 @@ def test_on_raw_reaction_add_does_not_repeat_retry_invitation_for_active_down_fe
 
 
 def test_on_raw_reaction_remove_clears_matching_feedback():
-    payload = SimpleNamespace(
-        channel_id=1482368505058955467,
-        message_id=987,
-        user_id=123,
-        emoji="👍",
-    )
-    assistant_row = {
-        "message_id": 77,
-        "discord_message_id": "987",
-        "thread_id": 5,
-        "channel_id": "1482368505058955467",
-        "discord_user_id": "123",
-        "author_type": "assistant",
-        "workflow": "interactive",
-        "event_type": "channel_response",
-        "content": "Try a faster cycle deck.",
-        "summary": "faster deck",
-        "created_at": "2026-03-15T12:00:00",
-    }
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
+    payload = _reaction_payload("\U0001f44d", with_member=False)
+    assistant_row = _assistant_feedback_row()
 
     with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-            },
-        ),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
+        patch("elixir._get_channel_behavior", return_value=ASK_ELIXIR_FEEDBACK_BEHAVIOR),
         patch(
             "runtime.prompt_feedback.db.get_message_by_discord_message_id",
             return_value=assistant_row,
@@ -1366,9 +1275,6 @@ def test_post_to_elixir_resolves_custom_emoji_shortcodes():
 
 
 def test_post_startup_message_posts_build_hash_to_elixir_log_webhook():
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
 
     proactive_channels = [
@@ -1377,7 +1283,7 @@ def test_post_startup_message_posts_build_hash_to_elixir_log_webhook():
     ]
 
     with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
         patch(
             "elixir.prompts.discord_channels_by_workflow",
             return_value=[{"id": 200, "name": "#leader-lounge"}],
@@ -1415,13 +1321,10 @@ def test_post_startup_message_posts_build_hash_to_elixir_log_webhook():
 
 
 def test_post_startup_message_fetches_channel_when_not_cached():
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
 
     with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
         patch(
             "elixir.prompts.discord_channels_by_workflow",
             return_value=[{"id": 200, "name": "#leader-lounge"}],
@@ -1460,13 +1363,10 @@ def test_post_startup_message_fetches_channel_when_not_cached():
 
 
 def test_post_startup_message_falls_back_to_clanops_when_webhook_unavailable():
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
 
     with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
         patch(
             "elixir.prompts.discord_channels_by_workflow",
             return_value=[{"id": 200, "name": "#leader-lounge"}],
@@ -3174,11 +3074,8 @@ def test_api_sentinel_tick_is_record_only_no_leader_posts():
     # The sentinel now RECORDS drift into api_sentinel_observations (the product
     # team's data source + the game-level stream's feed) and no longer posts to
     # #leader-lounge — the clan-facing news moved to the #announcements stream.
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch("runtime.jobs._maintenance.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._maintenance.asyncio.to_thread", side_effect=_inline_to_thread),
         patch(
             "runtime.jobs._maintenance.db.bootstrap_api_sentinel_baseline",
             return_value={
@@ -3874,11 +3771,8 @@ def test_build_clan_status_report_prefers_live_recent_join_delta():
 
 
 def test_load_live_clan_context_attaches_same_cycle_recent_joins():
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
         patch(
             "elixir.cr_api.get_clan",
             return_value={
@@ -3909,11 +3803,8 @@ def test_load_live_clan_context_attaches_same_cycle_recent_joins():
 
 
 def test_load_live_clan_context_does_not_mark_existing_members_new_when_db_tags_keep_hash():
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
         patch(
             "elixir.cr_api.get_clan",
             return_value={
@@ -4309,14 +4200,11 @@ def test_share_channel_result_rewrites_member_refs_before_posting():
     channel.name = "announcements"
     channel.type = "text"
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     def fake_format_member_reference(tag, conn=None, **_kwargs):
         return "King Levy" if tag == "#ABC123" else tag
 
     with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
         patch(
             "elixir.db.format_member_reference",
             side_effect=fake_format_member_reference,
@@ -4368,11 +4256,8 @@ def _make_inbound_dm_message(discord_user_id, content):
 def test_inbound_dm_routes_to_outreach():
     message = _make_inbound_dm_message(922500832962957343, "sure — storie@gmail.com")
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch("runtime.channel_router.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.channel_router.asyncio.to_thread", side_effect=_inline_to_thread),
         patch("runtime.channel_router.db.upsert_discord_user"),
         patch("runtime.app._handle_outreach_dm", new=AsyncMock()) as mock_handle,
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
