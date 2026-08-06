@@ -50,12 +50,13 @@ Identify unusual increases, regressions, or waste.
      can name the cause of the `database is locked` wedges (2026-08-02, 2026-08-03), which
      until now were only ever cleared by a restart that destroyed the evidence. If a row
      exists, read the dump, file it, and do not let the process be restarted before you have.
-   - There is **no lock-wait table**, and the `db_lock_waits` that a pre-2026-08-06
-     telemetry file still carries is an empty orphan — it never recorded a row, because
-     nothing ever called its writer. Do not read "no contention" from it. Waiting is not
-     observable from Python anyway: `PRAGMA busy_timeout` makes SQLite block inside the C
-     layer and there is no busy-handler callback to hook. Contention shows up as
-     `database is locked` in `logs/elixir-error.log`; its **cause** is a long hold below.
+   - There is **no lock-wait table**. `db_lock_waits` existed from 2026-08-03 to
+     2026-08-06, never recorded a single row because nothing called its writer, and was
+     dropped. If you meet it in an older copy of the file, do not read "no contention"
+     off it. Waiting is not observable from Python anyway: `PRAGMA busy_timeout` makes
+     SQLite block inside the C layer and there is no busy-handler callback to hook.
+     Contention shows up as `database is locked` in `logs/elixir-error.log`; its
+     **cause** is a long hold, which is what the next two entries measure.
    - **`db_transactions`** — write-lock hold time. `call_site` names only whoever
      **opened** the transaction; `sites_json` is the per-site breakdown of who actually
      spent it, heaviest first. Read the breakdown, not the opener:

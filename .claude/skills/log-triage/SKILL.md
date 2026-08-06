@@ -42,7 +42,7 @@ Split out of the clan DB on 2026-08-03 because every model call was taking the c
 
 Retention: LLM calls 90 d (prompt/response blobs 14 d), DB metrics 30 d.
 
-**There is no lock-wait table.** A `db_lock_waits` table existed from the 2026-08-03 split until it was removed on 2026-08-06, and it recorded zero rows for its whole life because nothing ever called its writer. A telemetry file older than that still carries the empty orphan — never read "no lock contention" off it, because it measures nothing. Waiting on the lock is not observable from Python at all: `PRAGMA busy_timeout` makes SQLite block inside the C layer, and `sqlite3` exposes no busy-handler callback. Contention surfaces as `database is locked` in `logs/elixir-error.log`; the **cause** is a long hold, which `db_transactions` and `db_stalls` do measure.
+**There is no lock-wait table, and waiting is not measured anywhere.** A `db_lock_waits` table existed from the 2026-08-03 split until 2026-08-06 and recorded zero rows for its whole life, because nothing ever called its writer; it was dropped from the live file along with the code. Should you meet it in an older copy of the telemetry DB, do not read "no lock contention" off it — it measures nothing. Waiting on the lock is not observable from Python at all: `PRAGMA busy_timeout` makes SQLite block inside the C layer, and `sqlite3` exposes no busy-handler callback. Contention surfaces as `database is locked` in `logs/elixir-error.log`; its **cause** is a long hold, which `db_transactions` and `db_stalls` do measure.
 
 ### Clan DB — `elixir-v51.db`
 

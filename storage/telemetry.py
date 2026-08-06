@@ -92,7 +92,8 @@ _SCHEMA = (
     "CREATE INDEX IF NOT EXISTS idx_db_txn_held ON db_transactions(held_ms)",
     # There is no `db_lock_waits` table. One existed from the 2026-08-03 split
     # until 2026-08-06 and recorded zero rows the whole time, because nothing
-    # ever called its writer. It cannot be revived as written: `PRAGMA
+    # ever called its writer; it was dropped from the live file too, so this is
+    # not a table waiting to be refilled. It cannot be revived as written: `PRAGMA
     # busy_timeout` (db/__init__.py) makes SQLite block inside the C layer, and
     # Python's sqlite3 exposes no `sqlite3_busy_handler`, so there is no wait
     # boundary to observe and no retry loop to instrument. Measuring waits would
