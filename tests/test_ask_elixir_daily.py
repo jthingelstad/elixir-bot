@@ -9,9 +9,12 @@ from unittest.mock import AsyncMock, patch
 # ------------------------------------------------------------- brain-powered daily
 
 
-def _run_daily_with(generated):
+def _run_daily_with(generated, status=None):
     """Run _ask_elixir_daily_insight with the brain composer stubbed to return
-    ``generated`` (a {"post","topic"} dict or None). Returns (mock_post, saved)."""
+    ``generated`` (a {"post","topic"} dict, None, or an {"_error": ...} dict).
+
+    Returns (mock_post, saved). Pass ``status`` — a dict — to collect the job
+    status calls the run made under the keys "success" and "failure"."""
     import runtime.jobs._core as core
 
     channel = SimpleNamespace(id=1482368505058955467, name="ask-elixir", type="text")
@@ -20,9 +23,18 @@ def _run_daily_with(generated):
         return fn(*args, **kwargs)
 
     saved = {}
+    recorded = status if status is not None else {}
+    recorded.setdefault("success", [])
+    recorded.setdefault("failure", [])
 
     def fake_save_message(*args, **kwargs):
         saved.update(kwargs)
+
+    fake_status = SimpleNamespace(
+        mark_job_start=lambda name: None,
+        mark_job_success=lambda name, summary=None: recorded["success"].append((name, summary)),
+        mark_job_failure=lambda name, error: recorded["failure"].append((name, error)),
+    )
 
     with (
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
@@ -31,6 +43,7 @@ def _run_daily_with(generated):
             "runtime.jobs._core._bot",
             return_value=SimpleNamespace(get_channel=lambda _id: channel),
         ),
+        patch("runtime.jobs._core.runtime_status", fake_status),
         patch("runtime.awareness.read.build_read", return_value={"time": None}),
         patch(
             "runtime.jobs._core.elixir_agent.generate_ask_elixir_daily",
@@ -62,11 +75,104 @@ def test_daily_posts_brain_composed_hook():
 
 def test_daily_skips_when_no_hook():
     """No worthwhile hook (composer returns None) → nothing is posted; fail-open
-    to silence, never filler."""
-    mock_post, saved = _run_daily_with(None)
+    to silence, never filler. A CHOSEN silence is still a successful run."""
+    status = {}
+    mock_post, saved = _run_daily_with(None, status=status)
 
     assert mock_post.await_count == 0
     assert saved == {}
+    assert status["failure"] == []
+    assert [s for _n, s in status["success"]] == ["no hook today — skipped"]
+
+
+def test_daily_compose_failure_is_a_failure_not_a_skip():
+    """A FORCED silence must not be reported as a successful quiet day.
+
+    Until 2026-08-06 the composer returned a bare None for both "no hook" and
+    "composition failed", so a truncating composer produced `mark_job_success(...,
+    "no hook today — skipped")` every morning. #ask-elixir went silent from
+    2026-07-26 to 2026-08-06 and the job's success_count kept climbing.
+    """
+    status = {}
+    mock_post, saved = _run_daily_with(
+        {"_error": {"kind": "truncation", "detail": "LLM response truncated by max_tokens=1400"}},
+        status=status,
+    )
+
+    assert mock_post.await_count == 0, "a failed compose must not post"
+    assert saved == {}
+    assert status["success"] == [], "a failed compose must NOT be recorded as a success"
+    assert len(status["failure"]) == 1
+    _name, error = status["failure"][0]
+    assert "truncation" in error
+
+
+def test_daily_compose_exception_is_a_failure_not_a_skip():
+    """Same rule when the compose thread raises rather than returning an error."""
+    import runtime.jobs._core as core
+
+    channel = SimpleNamespace(id=1482368505058955467, name="ask-elixir", type="text")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    recorded = {"success": [], "failure": []}
+    fake_status = SimpleNamespace(
+        mark_job_start=lambda name: None,
+        mark_job_success=lambda name, summary=None: recorded["success"].append((name, summary)),
+        mark_job_failure=lambda name, error: recorded["failure"].append((name, error)),
+    )
+
+    with (
+        patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core._get_singleton_channel_id", return_value=channel.id),
+        patch(
+            "runtime.jobs._core._bot",
+            return_value=SimpleNamespace(get_channel=lambda _id: channel),
+        ),
+        patch("runtime.jobs._core.runtime_status", fake_status),
+        patch("runtime.awareness.read.build_read", side_effect=RuntimeError("read exploded")),
+        patch("runtime.jobs._core._post_to_elixir", new=AsyncMock()) as mock_post,
+    ):
+        asyncio.run(core._ask_elixir_daily_insight())
+
+    assert mock_post.await_count == 0
+    assert recorded["success"] == []
+    assert len(recorded["failure"]) == 1
+
+
+def test_daily_composer_surfaces_error_instead_of_collapsing_to_none():
+    """generate_ask_elixir_daily must distinguish its two silences at the source."""
+    import agent.workflows as workflows
+
+    truncated = {"_error": {"kind": "truncation", "detail": "truncated by max_tokens=1400"}}
+    with patch.object(workflows, "_chat_with_tools", return_value=truncated):
+        assert workflows.generate_ask_elixir_daily({}) == truncated
+
+    # An empty post with no error is the genuine no-hook day, and stays None.
+    with patch.object(workflows, "_chat_with_tools", return_value={"post": "  "}):
+        assert workflows.generate_ask_elixir_daily({}) is None
+
+
+def test_daily_ceiling_covers_a_tool_round():
+    """The ceiling must leave room for tool rounds, not just the final post.
+
+    Every recorded truncation stopped at exactly 1400 tokens while emitting a
+    `tool_use` block — it died mid-tool-call on round one. This is a floor, not
+    an exact value: raising it further is fine, dropping back is the regression.
+    """
+    import agent.workflows as workflows
+
+    seen = {}
+
+    def capture(*args, **kwargs):
+        seen.update(kwargs)
+        return {"post": "x", "topic": "t"}
+
+    with patch.object(workflows, "_chat_with_tools", side_effect=capture):
+        workflows.generate_ask_elixir_daily({})
+
+    assert seen["max_tokens"] >= 4096
 
 
 # --- rehearsal-driven tool fixes (2026-07-04) -------------------------------

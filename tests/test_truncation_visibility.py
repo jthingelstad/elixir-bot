@@ -25,6 +25,7 @@ operator and `scripts/confidence_report.py` read to decide Elixir is healthy.
 from __future__ import annotations
 
 import logging
+from unittest.mock import patch
 
 import agent.core as core
 import runtime.status as runtime_status
@@ -141,3 +142,68 @@ def test_mark_job_failure_logs_at_error(monkeypatch, caplog):
     message = errors[0].getMessage()
     assert "memory_synthesis" in message
     assert "retry agent truncation" in message
+
+
+# ------------------------------------------------- ceilings raised on evidence (2026-08-06)
+
+
+def test_distill_summary_discards_a_truncated_summary(monkeypatch):
+    """A cut-off summary reads as complete and becomes the durable record of what
+    a member said. 12 of 71 calls truncated against max_tokens=100 while the
+    successful ones averaged 71 tokens and peaked at 99 — finishing flush against
+    the wall. The caller treats None as "no summary" and falls back safely, so
+    discarding is strictly better than storing half a sentence."""
+    from agent import memory_tasks
+
+    monkeypatch.setattr(
+        memory_tasks,
+        "_create_chat_completion",
+        lambda **kw: _Resp("The member asked about their ranked deck and whether", "max_tokens"),
+    )
+    assert memory_tasks.distill_summary("x" * 400) is None
+
+
+def test_distill_summary_keeps_a_complete_summary(monkeypatch):
+    from agent import memory_tasks
+
+    monkeypatch.setattr(
+        memory_tasks,
+        "_create_chat_completion",
+        lambda **kw: _Resp("The member asked about their ranked deck.", "end_turn"),
+    )
+    assert memory_tasks.distill_summary("x" * 400) == "The member asked about their ranked deck."
+
+
+def test_distill_ceiling_is_not_flush_against_typical_output(monkeypatch):
+    """Floor, not an exact value — dropping back toward 100 is the regression."""
+    from agent import memory_tasks
+
+    seen = {}
+
+    def capture(**kw):
+        seen.update(kw)
+        return _Resp("summary.", "end_turn")
+
+    monkeypatch.setattr(memory_tasks, "_create_chat_completion", capture)
+    memory_tasks.distill_summary("x" * 400)
+    assert seen["max_tokens"] >= 256
+
+
+def test_member_report_ceiling_clears_its_largest_observed_output():
+    """The largest successful member_report was 1367 output tokens against a
+    1400 ceiling. A 2% margin is not a margin."""
+    import agent.workflows as workflows
+
+    seen = {}
+
+    def capture(*args, **kwargs):
+        seen.update(kwargs)
+        return ""
+
+    with (
+        patch.object(workflows, "_generate_simple_message", side_effect=capture),
+        patch.object(workflows, "_member_report_system", return_value="sys"),
+    ):
+        workflows.generate_member_report("facts about one member")
+
+    assert seen["max_tokens"] >= 2048

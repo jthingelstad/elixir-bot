@@ -26,7 +26,12 @@ _DISTILL_SYSTEM = (
 
 
 def distill_summary(text: str) -> str | None:
-    """Generate a 1-2 sentence summary of the given text via a lightweight LLM call."""
+    """Generate a 1-2 sentence summary of the given text via a lightweight LLM call.
+
+    Returns None when no trustworthy summary could be produced. Callers already
+    treat None as "no summary" and fall back safely, so None is always preferable
+    to a summary that stops mid-sentence.
+    """
     text = (text or "").strip()
     if not text:
         return None
@@ -43,9 +48,19 @@ def distill_summary(text: str) -> str | None:
                 {"role": "user", "content": text[:2000]},
             ],
             temperature=0.3,
-            max_tokens=100,
+            # 100 -> 256 (2026-08-06). 12 of 71 calls hit the ceiling, and the
+            # successful ones averaged 71 output tokens with a maximum of 99 —
+            # they were finishing flush against the wall, which is the shape of a
+            # limit that is binding rather than generous. The 1-2 sentence budget
+            # is set by the system prompt; this is only the safety net.
+            max_tokens=256,
             timeout=15,
         )
+        # A truncated summary is worse than no summary: it reads as complete and
+        # is stored as the durable record of what a member said. Discard it and
+        # let the caller fall back.
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            return None
         content = response_text(resp)
         if content and content.strip():
             return content.strip()

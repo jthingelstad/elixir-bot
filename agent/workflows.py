@@ -512,9 +512,16 @@ def generate_ask_elixir_daily(
     the clan read plus the recent topics to avoid, it spotlights a fresh capability
     area with a real hook and answerable sample questions.
 
-    Returns ``{"post": str, "topic": str|None}`` on success, or ``None`` when
-    there's no worthwhile hook / composition failed — the caller then posts
-    nothing that day (no filler, fail-open-to-silence)."""
+    Returns ``{"post": str, "topic": str|None}`` on success, ``None`` when there
+    is genuinely no worthwhile hook (fail-open-to-silence, no filler), or
+    ``{"_error": {...}}`` when composition FAILED.
+
+    Those last two were one `None` until 2026-08-06, and the caller marked both
+    a job success. The result: this post stopped appearing in #ask-elixir on
+    2026-07-26 and nobody heard about it for eleven days, while
+    `daily_clan_insight` reported `success_count` rising and "no hook today —
+    skipped" every morning. A composer that cannot say "I failed" makes its
+    caller's health reporting a lie."""
     public = {k: v for k, v in (read or {}).items() if not k.startswith("_")}
     recent = ", ".join(str(t) for t in (recent_topics or []) if t) or "(none yet)"
     user_msg = (
@@ -532,17 +539,29 @@ def generate_ask_elixir_daily(
         _ask_elixir_daily_system(),
         user_msg,
         workflow="ask_elixir_daily",
-        max_tokens=1400,
+        # 1400 -> 4096 (2026-08-06). This workflow calls TOOLS (max_tool_rounds=6)
+        # and the ceiling has to cover a tool round, not just the final post.
+        # Every one of the 12 recorded truncations stopped at EXACTLY 1400 tokens
+        # while emitting a `tool_use` block, i.e. it died mid-tool-call on round
+        # one and never reached a second call — from 2026-07-26 to 2026-08-06 the
+        # job made exactly one LLM call a day and that call always truncated.
+        # Sized against its tool-using siblings (deck_review 4096, awareness 8192);
+        # successful final posts average 574 output tokens, so the headroom is for
+        # the tool rounds, which is where it was actually being spent.
+        max_tokens=4096,
         allowed_tools=TOOLSETS_BY_WORKFLOW["ask_elixir_daily"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["ask_elixir_daily"],
         strict_json=True,
         return_errors=True,
         tool_stats=tool_stats,
     )
-    if not isinstance(result, dict) or "_error" in result:
-        return None
+    if not isinstance(result, dict):
+        return {"_error": {"kind": "no_response", "detail": "composer returned no result"}}
+    if "_error" in result:
+        return result
     post = str(result.get("post") or "").strip()
     if not post:
+        # The one legitimate silence: the model composed fine and had no hook.
         return None
     return {"post": post, "topic": result.get("topic")}
 
@@ -1566,7 +1585,11 @@ def generate_member_report(facts: str) -> dict:
             user_msg,
             workflow="member_report",
             temperature=0.85,
-            max_tokens=1400,
+            # 1400 -> 2048 (2026-08-06). Two of 28 calls truncated, and the
+            # largest SUCCESSFUL response was 1367 tokens — a 2% margin under the
+            # ceiling is not a margin. The report is one tagged block per battle
+            # type, so its length scales with how many types a member played.
+            max_tokens=2048,
             error_label="Member report",
         )
         or ""

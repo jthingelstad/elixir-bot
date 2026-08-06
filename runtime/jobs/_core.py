@@ -333,17 +333,30 @@ async def _ask_elixir_daily_insight():
 
     def _compose():
         """Build the clan read and compose the daily post. Runs in a thread;
-        returns {"post", "topic"} or None. Never raises."""
+        returns {"post", "topic"}, None for a genuine no-hook day, or
+        {"_error": ...} when composition failed. Never raises."""
         try:
             from runtime.awareness import read as awareness_read
 
             read = awareness_read.build_read()
             return elixir_agent.generate_ask_elixir_daily(read, recent_topics=recent_topics)
-        except Exception:
+        except Exception as exc:
             log.error("Ask Elixir daily compose failed", exc_info=True)
-            return None
+            return {"_error": {"kind": "exception", "detail": str(exc)}}
 
     composed = await asyncio.to_thread(_compose)
+    # A failed compose is NOT a quiet day. Conflating them is why this post went
+    # missing from 2026-07-26 to 2026-08-06 while the job recorded a success and
+    # "no hook today — skipped" every morning (the composer was truncating on its
+    # first tool round). Same lesson as 674b21a6 for the weekly report: silence
+    # that was chosen and silence that was forced must not share a code path.
+    if isinstance(composed, dict) and composed.get("_error"):
+        err = composed["_error"]
+        runtime_status.mark_job_failure(
+            "daily_clan_insight",
+            f"compose failed: {err.get('kind')}: {err.get('detail')}",
+        )
+        return
     if not composed or not composed.get("post"):
         runtime_status.mark_job_success("daily_clan_insight", "no hook today — skipped")
         return
