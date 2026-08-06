@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+
+log = logging.getLogger("elixir")
 
 
 def _utcnow() -> str:
@@ -178,6 +181,15 @@ def mark_job_success(name: str, summary: str | None = None) -> None:
 
 
 def mark_job_failure(name: str, error: str) -> None:
+    # ERROR, and here rather than at the 50 call sites, because only 11 of them
+    # logged anything themselves — so a job could fail, set last_error, and
+    # increment failure_count while producing no line at all in
+    # logs/elixir-error.log, which is the file an operator (and
+    # scripts/confidence_report.py) reads to decide whether Elixir is healthy.
+    # memory_synthesis failed that way on 2026-08-03 and sat unnoticed with zero
+    # lifetime successes. A job that marks failure has not degraded, it has
+    # stopped, so WARNING was the wrong severity wherever it was used.
+    log.error("job_failed job=%s error=%s", name, error)
     with _LOCK:
         state = _JOB_STATUS.setdefault(name, _default_job_state())
         now = _utcnow()

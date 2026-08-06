@@ -433,6 +433,25 @@ def _create_chat_completion(
         cache_creation_tokens = getattr(usage, "cache_creation_input_tokens", None)
         cache_read_tokens = getattr(usage, "cache_read_input_tokens", None)
         duration = round((time.perf_counter() - started) * 1000, 2)
+        # A truncated answer is a failed call that the API reports as a success,
+        # so nothing above raises and every caller sees a plausible short string.
+        # This is the ONLY point every call passes through — `_chat_with_tools`
+        # catches truncation for the workflows that pass `return_errors=True`,
+        # but direct `chat()` callers (memory_distill, member_report,
+        # release_notes) had no detection at all. Telemetry recorded 39
+        # truncations between 2026-07-28 and 2026-08-06 while the log held 16,
+        # all at WARNING, so none reached logs/elixir-error.log and none were
+        # ever acted on. ERROR because the output was cut off mid-thought: the
+        # job did not degrade, it produced a wrong answer.
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            log.error(
+                "llm_truncated workflow=%s model=%s max_tokens=%d completion_tokens=%s — "
+                "output was cut off; raise max_tokens for this workflow",
+                workflow,
+                selected_model,
+                max_tokens,
+                completion_tokens,
+            )
         # Charge the clan-DB spend counter. Wrapped because a counter that can
         # fail a successful call is worse than one that undercounts by one.
         try:
