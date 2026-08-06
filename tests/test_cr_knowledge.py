@@ -45,16 +45,6 @@ def test_is_war_battle_day():
     assert not cr_knowledge.is_war_battle_day(2)  # Wednesday
 
 
-def test_inactivity_threshold():
-    """Inactivity threshold is loaded from CLAN.md."""
-    assert cr_knowledge.INACTIVITY_DAYS == 3
-
-
-def test_donation_highlight_hour():
-    """Donation highlight hour is loaded from CLAN.md."""
-    assert cr_knowledge.DONATION_HIGHLIGHT_HOUR == 20
-
-
 def test_deck_usage_knowledge():
     """Knowledge block mentions 4 decks per day."""
     block = prompts.knowledge_block()
@@ -113,3 +103,37 @@ def test_season_naming_knowledge():
     block = prompts.knowledge_block()
     assert "SEASON-WEEK" in block
     assert "130-1" in block
+
+
+def test_the_kick_watch_line_matches_the_one_leaders_are_told():
+    """`KICK_WATCH_DAYS = 3  # CLAN.md inactivity_days` is a hand-copied mirror
+    with no drift protection — structurally the same failure as the "2-3 elders"
+    string that sat false in POLICY.md for a month.
+
+    This is the number leaders read as "the getting-quiet line". If CLAN.md and
+    the engine disagree, leadership is watching a different threshold than the
+    engine applies, and nothing else in the suite would notice.
+
+    Replaces two deleted tests that asserted `INACTIVITY_DAYS == 3` and
+    `DONATION_HIGHLIGHT_HOUR == 20`. Both were dead twice over: neither constant
+    is read anywhere in production, and both are loaded with a fallback EQUAL to
+    the asserted value — so a renamed CLAN.md section or a broken parser would
+    have left them passing.
+    """
+    from engine.management import KICK_WATCH_DAYS
+
+    assert KICK_WATCH_DAYS == prompts.thresholds()["inactivity_days"]
+
+
+def test_the_identity_block_carries_both_safety_rules():
+    """The name-safety rule is injection defence and rides on every
+    member-facing surface — and until 2026-08-05 no test asserted it at all.
+
+    Asserted by REFERENCE, not by wording: dropping either rule from the
+    f-string in `prompts.identity_block` fails here, while rewording one does
+    not. A member who names their account an instruction is the threat; a silent
+    drop would not break anything visible until they did.
+    """
+    block = prompts.identity_block()
+    assert prompts._NAME_SAFETY_RULE in block
+    assert prompts._PRONOUN_RULE in block

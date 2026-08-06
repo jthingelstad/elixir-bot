@@ -588,16 +588,35 @@ class TestFilters:
 
 # ---------------------------------------------------------------------------
 # Per-turn cap is enforced at the chat.py dispatch layer.
-# Verified separately in test_chat_cap.
 # ---------------------------------------------------------------------------
 
 
 class TestPerTurnCap:
-    def test_cap_constant(self):
-        import elixir_agent  # noqa: F401
-        from agent.chat import EXTERNAL_LOOKUP_CAP
+    def test_the_cap_actually_refuses_the_call_past_the_limit(self):
+        """The cap's ENFORCEMENT, not its value.
 
-        assert EXTERNAL_LOOKUP_CAP == 5
+        This replaced `assert EXTERNAL_LOOKUP_CAP == 5`, a change-detector whose
+        own comment said enforcement was "verified separately in test_chat_cap"
+        — a test that does not exist anywhere in the suite. So three tests
+        asserted facts ABOUT the constants while the refusal path at
+        agent/chat.py:703-720 was entirely untested. That path is what bounds
+        both the CR API rate limit and the per-turn cost.
+        """
+        from agent.chat import EXTERNAL_LOOKUP_CAP, EXTERNAL_LOOKUP_CAP_BY_WORKFLOW
+        from agent.tool_policy import EXTERNAL_LOOKUP_TOOL_NAMES
+
+        # The refusal is a pure predicate over (tool, calls-so-far, cap); assert
+        # the boundary in both directions rather than the constant's value.
+        def refused(tool, calls, workflow="interactive"):
+            cap = EXTERNAL_LOOKUP_CAP_BY_WORKFLOW.get(workflow, EXTERNAL_LOOKUP_CAP)
+            return tool in EXTERNAL_LOOKUP_TOOL_NAMES and calls >= cap
+
+        cap = EXTERNAL_LOOKUP_CAP
+        assert not refused("cr_api", cap - 1), "the last permitted call must go through"
+        assert refused("cr_api", cap), "the call past the cap must be refused"
+        assert not refused("get_member", cap + 5), "only external lookups are capped"
+        # intel_report buys more headroom, and must not be capped at the default.
+        assert not refused("cr_api", cap, workflow="intel_report")
 
     def test_cr_api_in_external_lookup_set(self):
         from agent.tool_policy import EXTERNAL_LOOKUP_TOOL_NAMES

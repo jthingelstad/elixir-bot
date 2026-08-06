@@ -24,15 +24,15 @@ def test_a_hard_post_workflow_is_never_budget_gated(monkeypatch, engine_conn):
     monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "1.00")
     spend_budget.record_spend_usd(999.0, now=NOW, conn=engine_conn)
     for workflow in sorted(spend_budget.ESSENTIAL):
-        allowed, why = spend_budget.may_run(workflow, conn=engine_conn)
+        allowed, why = spend_budget.may_run(workflow, conn=engine_conn, now=NOW)
         assert allowed, f"{workflow} was gated at ${999.0}: {why}"
 
 
 def test_discretionary_work_stops_at_the_ceiling(monkeypatch, engine_conn):
     monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "3.20")
-    assert spend_budget.may_run("interactive", conn=engine_conn)[0] is True
+    assert spend_budget.may_run("interactive", conn=engine_conn, now=NOW)[0] is True
     spend_budget.record_spend_usd(3.25, now=NOW, conn=engine_conn)
-    allowed, why = spend_budget.may_run("interactive", conn=engine_conn)
+    allowed, why = spend_budget.may_run("interactive", conn=engine_conn, now=NOW)
     assert allowed is False
     assert "ceiling reached" in why
 
@@ -44,8 +44,8 @@ def test_deferrable_work_sheds_earlier_than_member_conversation(monkeypatch, eng
     monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "4.00")
     monkeypatch.setenv("ELIXIR_SPEND_WARN_AT", "0.75")
     spend_budget.record_spend_usd(3.10, now=NOW, conn=engine_conn)  # 77% of ceiling
-    assert spend_budget.may_run("deck_review", conn=engine_conn)[0] is False
-    assert spend_budget.may_run("interactive", conn=engine_conn)[0] is True, (
+    assert spend_budget.may_run("deck_review", conn=engine_conn, now=NOW)[0] is False
+    assert spend_budget.may_run("interactive", conn=engine_conn, now=NOW)[0] is True, (
         "conversation outlives analysis"
     )
 
@@ -64,7 +64,7 @@ def test_the_ceiling_fails_open(monkeypatch):
 def test_setting_the_ceiling_to_zero_disables_it(monkeypatch, engine_conn):
     monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "0")
     spend_budget.record_spend_usd(500.0, now=NOW, conn=engine_conn)
-    assert spend_budget.may_run("deck_review", conn=engine_conn)[0] is True
+    assert spend_budget.may_run("deck_review", conn=engine_conn, now=NOW)[0] is True
 
 
 def test_the_counter_lives_in_the_clan_db_not_telemetry(engine_conn):
@@ -136,7 +136,7 @@ def test_leadership_is_told_once_per_day_not_once_per_refusal(monkeypatch, engin
     spend_budget._ANNOUNCED.clear()
     spend_budget.record_spend_usd(5.0, now=NOW, conn=engine_conn)
     for _ in range(4):
-        spend_budget.may_run("deck_review", conn=engine_conn)
+        spend_budget.may_run("deck_review", conn=engine_conn, now=NOW)
     assert len(sent) == 1, f"announced {len(sent)} times, expected once"
 
 
@@ -189,3 +189,24 @@ def test_startup_budget_line_never_breaks_the_boot_message(monkeypatch):
     monkeypatch.setattr(spend_budget, "spend_today_usd", _boom)
     line = startup._startup_budget_summary()
     assert "unreadable" in line and "fails open" in line
+
+
+def test_the_budget_is_not_pinned_to_the_day_the_tests_were_written(engine_conn):
+    """Regression: these tests were green when written and failed a few hours
+    later, when UTC rolled past midnight.
+
+    The counter is keyed by UTC DATE. The tests wrote with a fixed `now` and
+    read with the real clock, so they only agreed on 2026-08-05. That is the
+    date-boundary flake class this repo already knows from the battle-rollup
+    tests — worth a guard rather than a second discovery.
+    """
+    from datetime import timedelta
+
+    for offset in (-40, -1, 0, 1, 40):
+        day = NOW + timedelta(days=offset)
+        spend_budget.record_spend_usd(1.0, now=day, conn=engine_conn)
+        assert abs(spend_budget.spend_today_usd(now=day, conn=engine_conn) - 1.0) < 1e-9, (
+            f"spend must be readable on its own day ({day:%Y-%m-%d}), not just today"
+        )
+    # And days do not bleed into each other.
+    assert abs(spend_budget.spend_today_usd(now=NOW, conn=engine_conn) - 1.0) < 1e-9

@@ -28,6 +28,8 @@ import pytest
 from engine.management import (
     FULL_DAY_BONUS,
     SWAP_MARGIN,
+    _elder_band,
+    _elder_scores,
     _participation_percentile,
     _percentile,
     _war_day_credit,
@@ -128,24 +130,77 @@ def test_four_half_days_do_not_equal_two_full_days(engine_conn):
 # ------------------------------------------------------------------- tenure
 
 
-def test_tenure_decides_a_close_call_but_never_invents_a_promotion():
-    """Inside the deadband tenure decides; a challenger who is BEHIND still
-    loses. The deadband stops being a shield only for the shorter-tenured."""
-    import inspect
+def test_tenure_decides_a_close_call(engine_conn):
+    """Inside the deadband the seat goes to the longer-tenured player.
 
-    from engine.management import _elder_band
+    Rewritten 2026-08-05. The first version of this test asserted substrings of
+    `inspect.getsource(_elder_band)` — it would have passed on a reformat that
+    broke the rule and failed on a harmless rename. It tested the source text,
+    not the behaviour, which is the exact class of test this audit was about.
+    """
+    from tests.test_engine_management import ANCHOR, ANCHOR_NOW, _seed_ranked
 
-    source = inspect.getsource(_elder_band)
-    assert "tenure_wins" in source
-    assert "0 < margin < SWAP_MARGIN" in source, (
-        "a challenger at or below the incumbent's score must not win on tenure"
+    for i in range(6):
+        _seed_ranked(engine_conn, f"#F{i}", war_used=4, war_avail=16, war_days=2, donations=100)
+    # A near-tie inside SWAP_MARGIN, where the CHALLENGER is longer-tenured.
+    _seed_ranked(
+        engine_conn, "#CHAL", tenure=400, war_used=12, war_avail=16, war_days=3, donations=300
     )
-    assert "scores[m]['tenure'] > scores[e]['tenure']".replace("'", '"') in source or (
-        'scores[m]["tenure"] > scores[e]["tenure"]' in source
+    _seed_ranked(
+        engine_conn,
+        "#INC",
+        role="elder",
+        tenure=60,
+        war_used=12,
+        war_avail=16,
+        war_days=3,
+        donations=295,
+    )
+    _seed_ranked(
+        engine_conn, "#E2", role="elder", war_used=13, war_avail=16, war_days=3, donations=350
+    )
+    _seed_ranked(
+        engine_conn, "#E3", role="elder", war_used=14, war_avail=16, war_days=3, donations=380
     )
 
+    scores = _elder_scores(engine_conn, ANCHOR_NOW, ANCHOR)
+    margin = scores["#CHAL"]["score"] - scores["#INC"]["score"]
+    assert 0 < margin < SWAP_MARGIN, f"test needs a near-tie inside the deadband, got {margin:.3f}"
 
-def test_the_swap_margin_still_guards_the_ordinary_case():
-    """Tenure is the tiebreak inside the band, not a replacement for it: a
-    challenger clearly ahead still wins regardless of tenure."""
-    assert SWAP_MARGIN > 0
+    band = _elder_band(engine_conn, scores, ANCHOR_NOW)
+    assert "#CHAL" in band["promotable"], "the longer-tenured challenger takes the close call"
+    assert "#INC" in band["demotable"], "and the shorter-tenured incumbent yields the seat"
+
+
+def test_tenure_never_invents_a_promotion_for_a_challenger_who_is_behind(engine_conn):
+    """Tenure breaks a tie; it does not manufacture one.
+
+    A challenger BEHIND on score loses no matter how long they have been here —
+    otherwise "tenure wins" would quietly become "tenure outranks participation",
+    which is the opposite of the rule Elder is built on.
+    """
+    from tests.test_engine_management import ANCHOR, ANCHOR_NOW, _seed_ranked
+
+    for i in range(6):
+        _seed_ranked(engine_conn, f"#F{i}", war_used=4, war_avail=16, war_days=2, donations=100)
+    # The challenger is the LONGEST-tenured member on the roster and still behind.
+    _seed_ranked(
+        engine_conn, "#OLD", tenure=900, war_used=9, war_avail=16, war_days=3, donations=200
+    )
+    for tag, used, don in (("#E1", 13, 350), ("#E2", 14, 380), ("#E3", 15, 400)):
+        _seed_ranked(
+            engine_conn,
+            tag,
+            role="elder",
+            tenure=60,
+            war_used=used,
+            war_avail=16,
+            war_days=3,
+            donations=don,
+        )
+
+    scores = _elder_scores(engine_conn, ANCHOR_NOW, ANCHOR)
+    assert scores["#OLD"]["score"] < scores["#E1"]["score"], "test needs the veteran behind"
+
+    band = _elder_band(engine_conn, scores, ANCHOR_NOW)
+    assert "#OLD" not in band["promotable"], "900 days of tenure must not buy a seat"

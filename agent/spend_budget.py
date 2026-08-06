@@ -178,14 +178,18 @@ def member_facing_message() -> str:
     )
 
 
-def may_run(workflow: str, *, conn=None) -> tuple[bool, str]:
+def may_run(workflow: str, *, conn=None, now: datetime = None) -> tuple[bool, str]:
     """May this workflow spend right now? Returns ``(allowed, reason)``.
 
     Fails OPEN on any error. An unreadable counter must never be what stops
     Elixir from welcoming a new member.
 
     ``conn`` follows the repo convention — pass one in tests, omit in
-    production, where the managed connection is opened per read.
+    production, where the managed connection is opened per read. ``now`` makes
+    the clock injectable, which matters because the counter is keyed by UTC
+    DATE: a test that writes with a fixed date and reads with the real one
+    passes only on the day it was written. (It did exactly that — these tests
+    were green until UTC rolled past midnight a few hours later.)
     """
     ceiling = daily_ceiling_usd()
     if not ceiling:
@@ -193,7 +197,9 @@ def may_run(workflow: str, *, conn=None) -> tuple[bool, str]:
     if workflow in ESSENTIAL:
         return True, ""
     try:
-        spent = spend_today_usd(conn=conn) if conn is not None else spend_today_usd()
+        spent = (
+            spend_today_usd(conn=conn, now=now) if conn is not None else spend_today_usd(now=now)
+        )
     except Exception:
         log.debug("spend budget: could not read today's total", exc_info=True)
         return True, ""
