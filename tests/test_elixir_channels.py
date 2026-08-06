@@ -4,6 +4,7 @@ import asyncio
 import base64
 import io
 import json
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, PropertyMock, patch
@@ -87,55 +88,176 @@ def _root(bot, name):
     return next(c for c in bot.tree.commands if c.name == name)
 
 
-def test_on_message_routes_interactive_channel_when_mentioned():
-    message = _make_message(100, "member-chat", "<@999> how am I doing?")
+# --- shared on_message scaffolding -------------------------------------------
+#
+# `on_message` is the widest entry point in the runtime: one call reads channel
+# config, writes two rows, may classify intent, may call the LLM, and replies.
+# Every test of it therefore needs the same block of stubs, and that block --
+# not the assertions -- used to be the bulk of this file (~1,200 lines of
+# copy-pasted `with (patch...)`). `_on_message_env` is that block, once.
+
+_UNSET = object()
+
+# Pass as a stub's value to mean "patch it so nothing real runs, but give it no
+# canned return" -- for the tests whose point is that it is never called.
+NEVER_CALLED = object()
+
+# The channel behaviors on_message tests route through. Copied from the real
+# prompts.discord_channel_configs() shapes; ids 100/200 are synthetic stand-ins
+# for a member lane and the leader lane.
+MEMBER_CHAT_BEHAVIOR = {
+    "id": 100,
+    "name": "#member-chat",
+    "role": "interactive",
+    "workflow": "interactive",
+    "mention_required": True,
+    "allow_proactive": False,
+}
+
+ASK_ELIXIR_ID = 1482368505058955467
+ASK_ELIXIR_BEHAVIOR = {
+    "id": ASK_ELIXIR_ID,
+    "name": "#ask-elixir",
+    "lane": "ask-elixir",
+    "workflow": "interactive",
+    "reply_policy": "open_channel",
+}
+
+CLANOPS_BEHAVIOR = {
+    "id": 200,
+    "name": "#clan-ops",
+    "role": "clanops",
+    "workflow": "clanops",
+    "mention_required": False,
+    "allow_proactive": True,
+}
+
+
+def _behavior(base, **overrides):
+    """A channel behavior with fields added/changed for one test."""
+    return {**base, **overrides}
+
+
+def _stub(stack, target, value, **patch_kwargs):
+    """Enter `patch(target)`, wiring `value` as the return unless it is the
+    NEVER_CALLED sentinel."""
+    if value is NEVER_CALLED:
+        return stack.enter_context(patch(target, **patch_kwargs))
+    return stack.enter_context(patch(target, return_value=value, **patch_kwargs))
+
+
+@contextmanager
+def _on_message_env(
+    behavior,
+    *,
+    mentioned=_UNSET,
+    bot_user_id=_UNSET,
+    history=_UNSET,
+    memory_context=_UNSET,
+    clan_context=_UNSET,
+    classify=_UNSET,
+    respond=_UNSET,
+    share=False,
+    reply_text=_UNSET,
+):
+    """Stub the process-level surface an `on_message` test needs.
+
+    Always stubbed (no test of on_message can run without these):
+      * `bot.process_commands` — the slash-command fall-through; tests assert it
+        was or was not awaited.
+      * `asyncio.to_thread` — runs the callable inline so the stubbed DB calls
+        stay synchronous and assertable.
+      * `_get_channel_behavior` — the channel config under test.
+      * `db.upsert_discord_user` / `db.save_message` — the live DB is a real
+        file next to the tests; nothing here may write to it.
+
+    Opt-in stubs (pass the keyword to enable; omit to leave the real thing in
+    place). Pass NEVER_CALLED for one to stub it with no canned return:
+      mentioned, bot_user_id, history, memory_context, clan_context, classify,
+      respond, share, reply_text.
+
+    Yields a namespace of the mocks (`env.save`, `env.respond`, ...). Anything
+    a single test needs beyond this stays a nested `patch()` at the call site.
+    """
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch(
-            "runtime.helpers._common.bot",
-            new=SimpleNamespace(user=SimpleNamespace(id=999)),
-        ),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 100,
-                "name": "#member-chat",
-                "role": "interactive",
-                "workflow": "interactive",
-                "mention_required": True,
-                "allow_proactive": False,
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]) as mock_history,
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message"),
-        patch(
-            "elixir._load_live_clan_context",
-            new=AsyncMock(return_value=({"memberList": []}, {})),
-        ),
-        patch(
-            "elixir.elixir_agent.respond_in_channel",
-            return_value={
-                "event_type": "channel_response",
-                "content": "You look solid.",
-                "summary": "solid",
-            },
-        ) as mock_respond,
-        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
-    ):
+    with ExitStack() as stack:
+        env = SimpleNamespace(
+            process=stack.enter_context(
+                patch.object(elixir.bot, "process_commands", new=AsyncMock())
+            ),
+            to_thread=stack.enter_context(
+                patch("elixir.asyncio.to_thread", side_effect=fake_to_thread)
+            ),
+            behavior=_stub(stack, "elixir._get_channel_behavior", behavior),
+            upsert=_stub(stack, "elixir.db.upsert_discord_user", NEVER_CALLED),
+            save=_stub(stack, "elixir.db.save_message", NEVER_CALLED),
+            mentioned=None,
+            bot=None,
+            history=None,
+            memory=None,
+            clan=None,
+            classify=None,
+            respond=None,
+            share=None,
+            reply_text=None,
+        )
+        if mentioned is not _UNSET:
+            env.mentioned = _stub(stack, "elixir._is_bot_mentioned", mentioned)
+        if bot_user_id is not _UNSET:
+            env.bot = stack.enter_context(
+                patch(
+                    "runtime.helpers._common.bot",
+                    new=SimpleNamespace(user=SimpleNamespace(id=bot_user_id)),
+                )
+            )
+        if history is not _UNSET:
+            env.history = _stub(stack, "elixir.db.list_thread_messages", history)
+        if memory_context is not _UNSET:
+            env.memory = _stub(stack, "elixir.db.build_memory_context", memory_context)
+        if clan_context is not _UNSET:
+            env.clan = stack.enter_context(
+                patch(
+                    "elixir._load_live_clan_context",
+                    new=AsyncMock(return_value=clan_context),
+                )
+            )
+        if classify is not _UNSET:
+            env.classify = _stub(stack, "agent.intent_router.classify_intent", classify)
+        if respond is not _UNSET:
+            env.respond = _stub(stack, "elixir.elixir_agent.respond_in_channel", respond)
+        if share:
+            env.share = stack.enter_context(patch("elixir._share_channel_result", new=AsyncMock()))
+        if reply_text is not _UNSET:
+            env.reply_text = stack.enter_context(patch("elixir._reply_text", new=reply_text))
+        yield env
+
+
+def test_on_message_routes_interactive_channel_when_mentioned():
+    message = _make_message(100, "member-chat", "<@999> how am I doing?")
+
+    with _on_message_env(
+        MEMBER_CHAT_BEHAVIOR,
+        bot_user_id=999,
+        history=[],
+        memory_context={},
+        clan_context=({"memberList": []}, {}),
+        respond={
+            "event_type": "channel_response",
+            "content": "You look solid.",
+            "summary": "solid",
+        },
+        share=True,
+    ) as env:
         asyncio.run(elixir.on_message(message))
 
-    assert mock_respond.call_args.kwargs["workflow"] == "interactive"
-    mock_history.assert_called_once_with("channel_user:100:123", elixir.CHANNEL_CONVERSATION_LIMIT)
+    assert env.respond.call_args.kwargs["workflow"] == "interactive"
+    env.history.assert_called_once_with("channel_user:100:123", elixir.CHANNEL_CONVERSATION_LIMIT)
     message.reply.assert_awaited_once_with("You look solid.")
-    mock_share.assert_awaited_once()
-    mock_process.assert_not_awaited()
+    env.share.assert_awaited_once()
+    env.process.assert_not_awaited()
 
 
 def test_on_message_routes_ask_elixir_without_mention():
@@ -143,55 +265,33 @@ def test_on_message_routes_ask_elixir_without_mention():
     sent_message = SimpleNamespace(id=987)
     message.reply = AsyncMock(return_value=sent_message)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=False),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-                "workflow": "interactive",
-                "reply_policy": "open_channel",
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]) as mock_history,
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message") as mock_save,
-        patch(
-            "elixir._load_live_clan_context",
-            new=AsyncMock(return_value=({"memberList": []}, {})),
-        ),
-        patch(
-            "elixir.elixir_agent.respond_in_channel",
-            return_value={
-                "event_type": "channel_response",
-                "content": "Try a deck with faster cycles so you can learn matchups quicker.",
-                "summary": "learn a faster deck",
-            },
-        ) as mock_respond,
-        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
-    ):
+    with _on_message_env(
+        ASK_ELIXIR_BEHAVIOR,
+        mentioned=False,
+        history=[],
+        memory_context={},
+        clan_context=({"memberList": []}, {}),
+        respond={
+            "event_type": "channel_response",
+            "content": "Try a deck with faster cycles so you can learn matchups quicker.",
+            "summary": "learn a faster deck",
+        },
+        share=True,
+    ) as env:
         asyncio.run(elixir.on_message(message))
 
-    assert mock_respond.call_args.kwargs["workflow"] == "interactive"
-    assert mock_respond.call_args.kwargs["channel_name"] == "#ask-elixir"
-    mock_history.assert_called_once_with(
+    assert env.respond.call_args.kwargs["workflow"] == "interactive"
+    assert env.respond.call_args.kwargs["channel_name"] == "#ask-elixir"
+    env.history.assert_called_once_with(
         "channel_user:1482368505058955467:123", elixir.CHANNEL_CONVERSATION_LIMIT
     )
     message.reply.assert_awaited_once_with(
         "Try a deck with faster cycles so you can learn matchups quicker."
     )
-    assistant_save = [call for call in mock_save.call_args_list if call.args[1] == "assistant"][0]
+    assistant_save = [call for call in env.save.call_args_list if call.args[1] == "assistant"][0]
     assert assistant_save.kwargs["discord_message_id"] == "987"
-    mock_share.assert_awaited_once()
-    mock_process.assert_not_awaited()
+    env.share.assert_awaited_once()
+    env.process.assert_not_awaited()
 
 
 def test_on_message_keeps_open_ask_elixir_not_for_bot_in_llm_path():
@@ -200,100 +300,59 @@ def test_on_message_keeps_open_ask_elixir_not_for_bot_in_llm_path():
     )
     message.reply = AsyncMock(return_value=SimpleNamespace(id=990))
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=False),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-                "workflow": "interactive",
-                "reply_policy": "open_channel",
-                "memory_scope": "public",
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]),
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message"),
-        patch(
-            "agent.intent_router.classify_intent",
-            return_value={
-                "route": "not_for_bot",
-                "confidence": 0.95,
-                "rationale": "asking clan members about donations",
-            },
-        ) as mock_classify,
-        patch(
-            "elixir._load_live_clan_context",
-            new=AsyncMock(return_value=({"memberList": []}, {})),
-        ),
-        patch(
-            "elixir.elixir_agent.respond_in_channel",
-            return_value={
-                "event_type": "channel_response",
-                "content": "I can check donation leaders from the current clan data.",
-                "summary": "donations",
-            },
-        ) as mock_respond,
-        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
-    ):
+    with _on_message_env(
+        _behavior(ASK_ELIXIR_BEHAVIOR, memory_scope="public"),
+        mentioned=False,
+        history=[],
+        memory_context={},
+        clan_context=({"memberList": []}, {}),
+        classify={
+            "route": "not_for_bot",
+            "confidence": 0.95,
+            "rationale": "asking clan members about donations",
+        },
+        respond={
+            "event_type": "channel_response",
+            "content": "I can check donation leaders from the current clan data.",
+            "summary": "donations",
+        },
+        share=True,
+    ) as env:
         asyncio.run(elixir.on_message(message))
 
-    mock_classify.assert_called_once()
-    assert mock_classify.call_args.kwargs["allows_open_channel_reply"] is True
-    mock_respond.assert_called_once()
+    env.classify.assert_called_once()
+    assert env.classify.call_args.kwargs["allows_open_channel_reply"] is True
+    env.respond.assert_called_once()
     message.reply.assert_awaited_once_with(
         "I can check donation leaders from the current clan data."
     )
-    mock_share.assert_awaited_once()
-    mock_process.assert_not_awaited()
+    env.share.assert_awaited_once()
+    env.process.assert_not_awaited()
 
 
 def test_on_message_ignores_blank_ask_elixir_mention_before_intent_routing():
     message = _make_message(1482368505058955467, "ask-elixir", "<@1477043197443182832>")
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=True),
+        _on_message_env(
+            _behavior(ASK_ELIXIR_BEHAVIOR, memory_scope="public"),
+            mentioned=True,
+            history=NEVER_CALLED,
+            classify=NEVER_CALLED,
+            respond=NEVER_CALLED,
+        ) as env,
         patch("elixir._strip_bot_mentions", return_value=""),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-                "workflow": "interactive",
-                "reply_policy": "open_channel",
-                "memory_scope": "public",
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages") as mock_history,
-        patch("elixir.db.save_message") as mock_save,
-        patch("agent.intent_router.classify_intent") as mock_classify,
         patch("elixir.elixir_agent.respond_in_deck_review") as mock_review,
-        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
     ):
         asyncio.run(elixir.on_message(message))
 
-    mock_history.assert_not_called()
-    mock_classify.assert_not_called()
+    env.history.assert_not_called()
+    env.classify.assert_not_called()
     mock_review.assert_not_called()
-    mock_respond.assert_not_called()
-    mock_save.assert_not_called()
+    env.respond.assert_not_called()
+    env.save.assert_not_called()
     message.reply.assert_not_awaited()
-    mock_process.assert_not_awaited()
+    env.process.assert_not_awaited()
 
 
 def test_on_message_routes_ask_elixir_image_only_screenshot():
@@ -312,53 +371,28 @@ def test_on_message_routes_ask_elixir_image_only_screenshot():
     sent_message = SimpleNamespace(id=988)
     message.reply = AsyncMock(return_value=sent_message)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=False),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-                "workflow": "interactive",
-                "reply_policy": "open_channel",
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]),
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message") as mock_save,
-        patch(
-            "elixir._load_live_clan_context",
-            new=AsyncMock(return_value=({"memberList": []}, {})),
-        ),
-        patch(
-            "agent.intent_router.classify_intent",
-            return_value={
-                "route": "llm_chat",
-                "confidence": 0.75,
-                "rationale": "screenshot question",
-            },
-        ),
-        patch(
-            "elixir.elixir_agent.respond_in_channel",
-            return_value={
-                "event_type": "channel_response",
-                "content": "I can read this clan chat screenshot.",
-                "summary": "screenshot",
-            },
-        ) as mock_respond,
-        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
-    ):
+    with _on_message_env(
+        ASK_ELIXIR_BEHAVIOR,
+        mentioned=False,
+        history=[],
+        memory_context={},
+        clan_context=({"memberList": []}, {}),
+        classify={
+            "route": "llm_chat",
+            "confidence": 0.75,
+            "rationale": "screenshot question",
+        },
+        respond={
+            "event_type": "channel_response",
+            "content": "I can read this clan chat screenshot.",
+            "summary": "screenshot",
+        },
+        share=True,
+    ) as env:
         asyncio.run(elixir.on_message(message))
 
     attachment.read.assert_awaited_once()
-    kwargs = mock_respond.call_args.kwargs
+    kwargs = env.respond.call_args.kwargs
     assert "Shared Clash Royale screenshot image" in kwargs["question"]
     assert "clan-chat.jpg" in kwargs["question"]
     assert kwargs["image_blocks"] == [
@@ -371,11 +405,11 @@ def test_on_message_routes_ask_elixir_image_only_screenshot():
             },
         }
     ]
-    user_save = [call for call in mock_save.call_args_list if call.args[1] == "user"][0]
+    user_save = [call for call in env.save.call_args_list if call.args[1] == "user"][0]
     assert "Shared Clash Royale screenshot image" in user_save.args[2]
     message.reply.assert_awaited_once_with("I can read this clan chat screenshot.")
-    mock_share.assert_awaited_once()
-    mock_process.assert_not_awaited()
+    env.share.assert_awaited_once()
+    env.process.assert_not_awaited()
 
 
 def test_on_message_corrects_mislabeled_screenshot_media_type():
@@ -393,54 +427,29 @@ def test_on_message_corrects_mislabeled_screenshot_media_type():
     )
     message.reply = AsyncMock(return_value=SimpleNamespace(id=988))
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=False),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-                "workflow": "interactive",
-                "reply_policy": "open_channel",
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]),
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message"),
-        patch(
-            "elixir._load_live_clan_context",
-            new=AsyncMock(return_value=({"memberList": []}, {})),
-        ),
-        patch(
-            "agent.intent_router.classify_intent",
-            return_value={
-                "route": "llm_chat",
-                "confidence": 0.75,
-                "rationale": "screenshot question",
-            },
-        ),
-        patch(
-            "elixir.elixir_agent.respond_in_channel",
-            return_value={
-                "event_type": "channel_response",
-                "content": "I can read this clan chat screenshot.",
-                "summary": "screenshot",
-            },
-        ) as mock_respond,
-        patch("elixir._share_channel_result", new=AsyncMock()),
-    ):
+    with _on_message_env(
+        ASK_ELIXIR_BEHAVIOR,
+        mentioned=False,
+        history=[],
+        memory_context={},
+        clan_context=({"memberList": []}, {}),
+        classify={
+            "route": "llm_chat",
+            "confidence": 0.75,
+            "rationale": "screenshot question",
+        },
+        respond={
+            "event_type": "channel_response",
+            "content": "I can read this clan chat screenshot.",
+            "summary": "screenshot",
+        },
+        share=True,
+    ) as env:
         asyncio.run(elixir.on_message(message))
 
-    kwargs = mock_respond.call_args.kwargs
+    kwargs = env.respond.call_args.kwargs
     assert kwargs["image_blocks"][0]["source"]["media_type"] == "image/png"
-    mock_process.assert_not_awaited()
+    env.process.assert_not_awaited()
 
 
 def test_on_message_passes_screenshot_to_deck_review():
@@ -459,40 +468,22 @@ def test_on_message_passes_screenshot_to_deck_review():
     sent_message = SimpleNamespace(id=989)
     message.reply = AsyncMock(return_value=sent_message)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=False),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-                "workflow": "interactive",
-                "reply_policy": "open_channel",
-                "memory_scope": "public",
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]),
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message"),
-        patch("elixir._extract_member_deck_target", return_value="#ABC123"),
-        patch("elixir.db.get_member_profile", return_value={"current_name": "King Thing"}),
-        patch(
-            "agent.intent_router.classify_intent",
-            return_value={
+        _on_message_env(
+            _behavior(ASK_ELIXIR_BEHAVIOR, memory_scope="public"),
+            mentioned=False,
+            history=[],
+            memory_context={},
+            classify={
                 "route": "deck_review",
                 "mode": "regular",
                 "target_member": "self",
                 "confidence": 0.92,
                 "rationale": "asking for deck review",
             },
-        ),
+        ) as env,
+        patch("elixir._extract_member_deck_target", return_value="#ABC123"),
+        patch("elixir.db.get_member_profile", return_value={"current_name": "King Thing"}),
         patch(
             "elixir.elixir_agent.respond_in_deck_review",
             return_value={
@@ -512,22 +503,15 @@ def test_on_message_passes_screenshot_to_deck_review():
     assert kwargs["image_blocks"][0]["source"]["media_type"] == "image/png"
     assert kwargs["image_blocks"][0]["source"]["data"] == "ZGVja3BpYw=="
     message.reply.assert_awaited_once_with("This deck has a clear win condition.")
-    mock_process.assert_not_awaited()
+    env.process.assert_not_awaited()
 
 
 def test_on_message_routes_reception_without_mention():
     message = _make_message(1476456514121109514, "reception", "how do I get verified?")
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=False),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
+        _on_message_env(
+            {
                 "id": 1476456514121109514,
                 "name": "#welcome",
                 "lane": "reception",
@@ -535,10 +519,10 @@ def test_on_message_routes_reception_without_mention():
                 "reply_policy": "open_channel",
                 "memory_scope": "public",
             },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message"),
+            mentioned=False,
+            memory_context={},
+            reply_text=AsyncMock(),
+        ) as env,
         patch(
             "runtime.channel_router.cr_api.get_clan",
             return_value={"memberList": [{"tag": "#ABC123", "name": "King Levy"}]},
@@ -550,68 +534,41 @@ def test_on_message_routes_reception_without_mention():
                 "content": "Set your server nickname to your Clash name and I can help verify you.",
             },
         ) as mock_respond,
-        patch("elixir._reply_text", new=AsyncMock()) as mock_reply,
     ):
         asyncio.run(elixir.on_message(message))
 
     assert mock_respond.call_args.kwargs["question"] == "how do I get verified?"
-    mock_reply.assert_awaited_once_with(
+    env.reply_text.assert_awaited_once_with(
         message,
         "Set your server nickname to your Clash name and I can help verify you.",
     )
-    mock_process.assert_not_awaited()
+    env.process.assert_not_awaited()
 
 
 def test_on_message_does_not_save_unsent_interactive_reply():
     message = _make_message(100, "member-chat", "<@999> how am I doing?")
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch(
-            "runtime.helpers._common.bot",
-            new=SimpleNamespace(user=SimpleNamespace(id=999)),
-        ),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 100,
-                "name": "#member-chat",
-                "role": "interactive",
-                "workflow": "interactive",
-                "mention_required": True,
-                "allow_proactive": False,
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]),
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message") as mock_save,
-        patch(
-            "elixir._load_live_clan_context",
-            new=AsyncMock(return_value=({"memberList": []}, {})),
-        ),
-        patch(
-            "elixir.elixir_agent.respond_in_channel",
-            return_value={
-                "event_type": "channel_response",
-                "content": "You look solid.",
-                "summary": "solid",
-            },
-        ),
-        patch("elixir._reply_text", new=AsyncMock(side_effect=RuntimeError("send failed"))),
-        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
-    ):
+    with _on_message_env(
+        MEMBER_CHAT_BEHAVIOR,
+        bot_user_id=999,
+        history=[],
+        memory_context={},
+        clan_context=({"memberList": []}, {}),
+        respond={
+            "event_type": "channel_response",
+            "content": "You look solid.",
+            "summary": "solid",
+        },
+        share=True,
+        reply_text=AsyncMock(side_effect=RuntimeError("send failed")),
+    ) as env:
         asyncio.run(elixir.on_message(message))
 
-    assistant_saves = [call for call in mock_save.call_args_list if call.args[1] == "assistant"]
+    assistant_saves = [call for call in env.save.call_args_list if call.args[1] == "assistant"]
     assert assistant_saves == []
-    mock_share.assert_not_awaited()
+    env.share.assert_not_awaited()
     message.reply.assert_awaited_once_with("Hit an error. Try again in a moment.")
-    mock_process.assert_not_awaited()
+    env.process.assert_not_awaited()
 
 
 def test_on_raw_reaction_add_marks_actions_action_done():
@@ -996,12 +953,26 @@ def test_collect_screenshot_payload_resizes_large_images():
     )
 
 
-def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():
+@pytest.mark.parametrize(
+    "emoji,feedback_id,became_active_down,invites_retry",
+    [
+        pytest.param("\U0001f44e", 44, True, True, id="thumbs_down_invites_a_retry"),
+        pytest.param("\U0001f44d", 45, False, False, id="thumbs_up_acknowledges_receipt_only"),
+    ],
+)
+def test_on_raw_reaction_add_records_feedback(
+    emoji, feedback_id, became_active_down, invites_retry
+):
+    """Both reactions record feedback and acknowledge with the same check mark;
+    only the thumbs-down offers a retry and records that the retry was invited.
+    A thumbs-up that replied would turn every bit of praise into more noise in
+    the channel, so the negative assertions on the up case are the point.
+    """
     payload = SimpleNamespace(
         channel_id=1482368505058955467,
         message_id=987,
         user_id=123,
-        emoji="👎",
+        emoji=emoji,
         member=SimpleNamespace(bot=False),
     )
     assistant_row = {
@@ -1042,7 +1013,10 @@ def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():
         ),
         patch(
             "runtime.prompt_feedback.db.upsert_prompt_feedback",
-            return_value={"prompt_feedback_id": 44, "became_active_down": True},
+            return_value={
+                "prompt_feedback_id": feedback_id,
+                "became_active_down": became_active_down,
+            },
         ) as mock_upsert,
         patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
         patch(
@@ -1056,9 +1030,13 @@ def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():
 
     mock_upsert.assert_called_once()
     channel.fetch_message.assert_awaited_once_with(987)
-    reacted_message.add_reaction.assert_awaited_once_with("✅")
-    reacted_message.reply.assert_awaited_once()
-    mock_mark.assert_called_once_with(44, retry_message_id=654)
+    reacted_message.add_reaction.assert_awaited_once_with("\u2705")
+    if invites_retry:
+        reacted_message.reply.assert_awaited_once()
+        mock_mark.assert_called_once_with(feedback_id, retry_message_id=654)
+    else:
+        reacted_message.reply.assert_not_awaited()
+        mock_mark.assert_not_called()
 
 
 def test_on_raw_reaction_add_emits_warning_on_active_thumbs_down(caplog):
@@ -1123,68 +1101,6 @@ def test_on_raw_reaction_add_emits_warning_on_active_thumbs_down(caplog):
     assert "thumbs_down" in rec.message
     assert "channel=#ask-elixir" in rec.message
     assert "workflow=interactive" in rec.message
-
-
-def test_on_raw_reaction_add_records_positive_feedback_and_acknowledges_receipt():
-    payload = SimpleNamespace(
-        channel_id=1482368505058955467,
-        message_id=987,
-        user_id=123,
-        emoji="👍",
-        member=SimpleNamespace(bot=False),
-    )
-    assistant_row = {
-        "message_id": 77,
-        "discord_message_id": "987",
-        "thread_id": 5,
-        "channel_id": "1482368505058955467",
-        "discord_user_id": "123",
-        "author_type": "assistant",
-        "workflow": "interactive",
-        "event_type": "channel_response",
-        "content": "Try a faster cycle deck.",
-        "summary": "faster deck",
-        "created_at": "2026-03-15T12:00:00",
-    }
-    reacted_message = SimpleNamespace(add_reaction=AsyncMock(), reply=AsyncMock())
-    channel = SimpleNamespace(fetch_message=AsyncMock(return_value=reacted_message))
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-            },
-        ),
-        patch(
-            "runtime.prompt_feedback.db.get_message_by_discord_message_id",
-            return_value=assistant_row,
-        ),
-        patch(
-            "runtime.prompt_feedback.db.upsert_prompt_feedback",
-            return_value={"prompt_feedback_id": 45, "became_active_down": False},
-        ) as mock_upsert,
-        patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
-        patch(
-            "runtime.app.bot",
-            new=SimpleNamespace(
-                user=SimpleNamespace(id=999), get_channel=lambda _channel_id: channel
-            ),
-        ),
-    ):
-        asyncio.run(elixir.on_raw_reaction_add(payload))
-
-    mock_upsert.assert_called_once()
-    channel.fetch_message.assert_awaited_once_with(987)
-    reacted_message.add_reaction.assert_awaited_once_with("✅")
-    reacted_message.reply.assert_not_awaited()
-    mock_mark.assert_not_called()
 
 
 def test_on_raw_reaction_add_ignores_non_owner_feedback():
@@ -1353,52 +1269,27 @@ def test_on_message_saves_primary_discord_message_id_for_multipart_ask_elixir_re
     ]
     message.reply = AsyncMock(side_effect=sent_messages)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=False),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-                "workflow": "interactive",
-                "reply_policy": "open_channel",
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]),
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message") as mock_save,
-        patch(
-            "elixir._load_live_clan_context",
-            new=AsyncMock(return_value=({"memberList": []}, {})),
-        ),
-        patch(
-            "agent.intent_router.classify_intent",
-            return_value={"route": "llm_chat", "confidence": 1.0, "rationale": "test"},
-        ),
-        patch(
-            "elixir.elixir_agent.respond_in_channel",
-            return_value={
-                "event_type": "channel_response",
-                "content": ["Part one.", "Part two."],
-                "summary": "two-part answer",
-            },
-        ),
-        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
-    ):
+    with _on_message_env(
+        ASK_ELIXIR_BEHAVIOR,
+        mentioned=False,
+        history=[],
+        memory_context={},
+        clan_context=({"memberList": []}, {}),
+        classify={"route": "llm_chat", "confidence": 1.0, "rationale": "test"},
+        respond={
+            "event_type": "channel_response",
+            "content": ["Part one.", "Part two."],
+            "summary": "two-part answer",
+        },
+        share=True,
+    ) as env:
         asyncio.run(elixir.on_message(message))
 
-    assistant_save = [call for call in mock_save.call_args_list if call.args[1] == "assistant"][0]
+    assistant_save = [call for call in env.save.call_args_list if call.args[1] == "assistant"][0]
     assert assistant_save.kwargs["discord_message_id"] == "2001"
     assert assistant_save.args[2] == "Part one.\n\nPart two."
-    mock_share.assert_awaited_once()
-    mock_process.assert_not_awaited()
+    env.share.assert_awaited_once()
+    env.process.assert_not_awaited()
 
 
 def test_is_bot_mentioned_requires_leading_mention():
@@ -1671,7 +1562,7 @@ def test_startup_channel_audit_reports_missing_or_unwritable_channels():
     blocked_perms = SimpleNamespace(view_channel=True, send_messages=False)
     blocked_channel = SimpleNamespace(
         id=400,
-        name="river-race",
+        name="actions",
         type="text",
         guild=SimpleNamespace(id=1, me=object()),
         permissions_for=lambda member: blocked_perms,
@@ -1700,7 +1591,7 @@ def test_startup_channel_audit_reports_missing_or_unwritable_channels():
             return_value=[
                 {"id": 200, "name": "#leader-lounge", "workflow": "clanops"},
                 {"id": 300, "name": "#ask-elixir", "workflow": "interactive"},
-                {"id": 400, "name": "#river-race", "workflow": "channel_update"},
+                {"id": 400, "name": "#actions", "workflow": "channel_update"},
                 {"id": 500, "name": "#missing", "workflow": "channel_update"},
             ],
         ),
@@ -1708,7 +1599,7 @@ def test_startup_channel_audit_reports_missing_or_unwritable_channels():
         summary = asyncio.run(elixir._startup_channel_audit_summary())
 
     assert "Channel audit: 2/4 active channels reachable and writable." in summary
-    assert "#river-race not writable" in summary
+    assert "#actions not writable" in summary
     assert "#missing missing or unreachable" in summary
 
 
@@ -1866,38 +1757,17 @@ def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
         "<@999> What is my current war participation rate over the last 4 weeks?",
     )
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch(
-            "runtime.helpers._common.bot",
-            new=SimpleNamespace(user=SimpleNamespace(id=999)),
-        ),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 200,
-                "name": "#clan-ops",
-                "role": "clanops",
-                "workflow": "clanops",
-                "mention_required": False,
-                "allow_proactive": True,
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]),
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message"),
+        _on_message_env(
+            CLANOPS_BEHAVIOR,
+            bot_user_id=999,
+            history=[],
+            memory_context={},
+            clan_context=({"memberList": []}, {}),
+            respond=None,
+            share=True,
+        ) as env,
         patch("elixir.db.record_prompt_failure", return_value=17) as mock_failure,
-        patch(
-            "elixir._load_live_clan_context",
-            new=AsyncMock(return_value=({"memberList": []}, {})),
-        ),
-        patch("elixir.elixir_agent.respond_in_channel", return_value=None),
-        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
         patch(
             "elixir.runtime_status.snapshot",
             return_value={
@@ -1930,46 +1800,21 @@ def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
         llm_last_call_at="2026-03-07T19:12:00",
         raw_json=None,
     )
-    mock_share.assert_not_awaited()
-    mock_process.assert_not_awaited()
+    env.share.assert_not_awaited()
+    env.process.assert_not_awaited()
 
 
 def test_on_message_logs_agent_failure_payload_details():
     message = _make_message(200, "clan-ops", "<@999> Who is on the hottest streak right now?")
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch(
-            "runtime.helpers._common.bot",
-            new=SimpleNamespace(user=SimpleNamespace(id=999)),
-        ),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 200,
-                "name": "#clan-ops",
-                "role": "clanops",
-                "workflow": "clanops",
-                "mention_required": False,
-                "allow_proactive": True,
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]),
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message"),
-        patch("elixir.db.record_prompt_failure", return_value=18) as mock_failure,
-        patch(
-            "elixir._load_live_clan_context",
-            new=AsyncMock(return_value=({"memberList": []}, {})),
-        ),
-        patch(
-            "elixir.elixir_agent.respond_in_channel",
-            return_value={
+        _on_message_env(
+            CLANOPS_BEHAVIOR,
+            bot_user_id=999,
+            history=[],
+            memory_context={},
+            clan_context=({"memberList": []}, {}),
+            respond={
                 "_error": {
                     "kind": "schema_error",
                     "detail": "missing required field: content",
@@ -1978,8 +1823,9 @@ def test_on_message_logs_agent_failure_payload_details():
                     "raw_json": {"event_type": "channel_response"},
                 }
             },
-        ),
-        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
+            share=True,
+        ) as env,
+        patch("elixir.db.record_prompt_failure", return_value=18) as mock_failure,
         patch(
             "elixir.runtime_status.snapshot",
             return_value={
@@ -2012,82 +1858,50 @@ def test_on_message_logs_agent_failure_payload_details():
         llm_last_call_at="2026-03-11T07:00:00",
         raw_json={"event_type": "channel_response"},
     )
-    mock_share.assert_not_awaited()
-    mock_process.assert_not_awaited()
+    env.share.assert_not_awaited()
+    env.process.assert_not_awaited()
 
 
 def test_on_message_ignores_unmentioned_clanops_chat():
     message = _make_message(200, "clan-ops", "I think we need to review promotions this week.")
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=False),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 200,
-                "name": "#clan-ops",
-                "role": "clanops",
-                "workflow": "clanops",
-                "mention_required": False,
-                "allow_proactive": True,
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]) as mock_history,
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message") as mock_save,
-        patch(
-            "elixir._load_live_clan_context",
-            new=AsyncMock(return_value=({"memberList": []}, {})),
-        ),
-        patch(
-            "elixir.elixir_agent.respond_in_channel",
-            return_value={
-                "event_type": "channel_response",
-                "content": "I can pull the current promotion candidates if you want.",
-                "summary": "ops",
-            },
-        ) as mock_respond,
-        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
-    ):
+    with _on_message_env(
+        CLANOPS_BEHAVIOR,
+        mentioned=False,
+        history=[],
+        memory_context={},
+        clan_context=({"memberList": []}, {}),
+        respond={
+            "event_type": "channel_response",
+            "content": "I can pull the current promotion candidates if you want.",
+            "summary": "ops",
+        },
+        share=True,
+    ) as env:
         asyncio.run(elixir.on_message(message))
 
-    mock_history.assert_not_called()
-    mock_save.assert_not_called()
-    mock_respond.assert_not_called()
-    mock_share.assert_not_awaited()
+    env.history.assert_not_called()
+    env.save.assert_not_called()
+    env.respond.assert_not_called()
+    env.share.assert_not_awaited()
     message.reply.assert_not_awaited()
-    mock_process.assert_awaited_once_with(message)
+    env.process.assert_awaited_once_with(message)
 
 
 def test_on_message_handles_explicit_member_deck_request_without_llm():
     message = _make_message(200, "clan-ops", "<@999> what cards are in @Vijay deck?")
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=True),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 200,
-                "name": "#clan-ops",
-                "role": "clanops",
-                "workflow": "clanops",
-                "mention_required": False,
-                "allow_proactive": True,
+        _on_message_env(
+            CLANOPS_BEHAVIOR,
+            mentioned=True,
+            classify={
+                "route": "deck_display",
+                "confidence": 1.0,
+                "rationale": "test",
             },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.save_message") as mock_save,
+            respond=NEVER_CALLED,
+        ) as env,
         patch(
             "elixir.db.resolve_member",
             return_value=[
@@ -2101,14 +1915,6 @@ def test_on_message_handles_explicit_member_deck_request_without_llm():
                 }
             ],
         ) as mock_resolve,
-        patch(
-            "agent.intent_router.classify_intent",
-            return_value={
-                "route": "deck_display",
-                "confidence": 1.0,
-                "rationale": "test",
-            },
-        ),
         patch(
             "elixir.db.get_member_current_deck",
             return_value={
@@ -2131,7 +1937,6 @@ def test_on_message_handles_explicit_member_deck_request_without_llm():
                 ],
             },
         ),
-        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
     ):
         asyncio.run(elixir.on_message(message))
 
@@ -2143,10 +1948,10 @@ def test_on_message_handles_explicit_member_deck_request_without_llm():
         "_Activation depends on deck slot; these labels show what the card supports or has unlocked._\n"
         "_Snapshot: 2026-03-07 06:00 AM CT_"
     )
-    assert mock_save.call_count == 2
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "member_deck_report"
-    mock_respond.assert_not_called()
-    mock_process.assert_not_awaited()
+    assert env.save.call_count == 2
+    assert env.save.call_args_list[1].kwargs["event_type"] == "member_deck_report"
+    env.respond.assert_not_called()
+    env.process.assert_not_awaited()
 
 
 def test_on_message_keeps_interpretive_main_deck_questions_in_llm_path():
@@ -2156,111 +1961,66 @@ def test_on_message_keeps_interpretive_main_deck_questions_in_llm_path():
         "What is the average level of the cards I use in my current main deck?",
     )
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=False),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 1482368505058955467,
-                "name": "#ask-elixir",
-                "lane": "ask-elixir",
-                "workflow": "interactive",
-                "reply_policy": "open_channel",
-                "memory_scope": "public",
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]),
-        patch(
-            "elixir.db.build_memory_context",
-            return_value={"channel": {"state": None, "episodes": []}},
-        ),
-        patch("elixir.db.save_message"),
-        patch(
-            "elixir._load_live_clan_context",
-            new=AsyncMock(return_value=({"memberList": []}, {})),
-        ),
-        patch(
-            "elixir.elixir_agent.respond_in_channel",
-            return_value={
+        _on_message_env(
+            _behavior(ASK_ELIXIR_BEHAVIOR, memory_scope="public"),
+            mentioned=False,
+            history=[],
+            memory_context={"channel": {"state": None, "episodes": []}},
+            clan_context=({"memberList": []}, {}),
+            respond={
                 "event_type": "channel_response",
                 "content": "LLM answer",
                 "summary": "llm",
             },
-        ) as mock_respond,
+            share=True,
+        ) as env,
         patch("elixir.db.resolve_member") as mock_resolve,
         patch("elixir.db.get_member_current_deck") as mock_current_deck,
-        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
     ):
         asyncio.run(elixir.on_message(message))
 
     mock_current_deck.assert_not_called()
     mock_resolve.assert_not_called()
-    mock_respond.assert_called_once()
+    env.respond.assert_called_once()
     message.reply.assert_awaited_once_with("LLM answer")
-    mock_share.assert_awaited_once()
-    mock_process.assert_not_awaited()
+    env.share.assert_awaited_once()
+    env.process.assert_not_awaited()
 
 
 def test_on_message_rewrites_member_refs_before_reply_and_save():
     message = _make_message(100, "member-chat", "<@999> how is King Levy doing?")
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     def fake_format_member_reference(tag, conn=None, **_kwargs):
         return "King Levy" if tag == "#ABC123" else tag
 
     with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=True),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 100,
-                "name": "#member-chat",
-                "role": "interactive",
-                "workflow": "interactive",
-                "mention_required": True,
-                "allow_proactive": False,
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]),
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch(
-            "elixir.db.format_member_reference",
-            side_effect=fake_format_member_reference,
-        ),
-        patch("elixir.db.save_message") as mock_save,
-        patch(
-            "elixir._load_live_clan_context",
-            new=AsyncMock(return_value=({"memberList": []}, {})),
-        ),
-        patch(
-            "elixir.elixir_agent.respond_in_channel",
-            return_value={
+        _on_message_env(
+            MEMBER_CHAT_BEHAVIOR,
+            mentioned=True,
+            history=[],
+            memory_context={},
+            clan_context=({"memberList": []}, {}),
+            respond={
                 "event_type": "channel_response",
                 "content": "King Levy is trending up.",
                 "summary": "up",
                 "member_tags": ["#ABC123"],
             },
-        ) as mock_respond,
-        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
+            share=True,
+        ) as env,
+        patch(
+            "elixir.db.format_member_reference",
+            side_effect=fake_format_member_reference,
+        ),
     ):
         asyncio.run(elixir.on_message(message))
 
     message.reply.assert_awaited_once_with("King Levy is trending up.")
-    assert mock_save.call_args_list[1].args[2] == "King Levy is trending up."
-    mock_respond.assert_called_once()
-    mock_share.assert_awaited_once()
-    mock_process.assert_not_awaited()
+    assert env.save.call_args_list[1].args[2] == "King Levy is trending up."
+    env.respond.assert_called_once()
+    env.share.assert_awaited_once()
+    env.process.assert_not_awaited()
 
 
 def test_slash_help_does_not_save_conversation_history():
@@ -2314,6 +2074,10 @@ def test_command_surface_is_split_member_vs_leader():
 
 
 def test_command_specs_cover_every_registered_leaf_command():
+    """The registered leaf set must EQUAL COMMAND_SPECS — neither side may carry
+    a command the other doesn't. Equality is what makes per-command "is
+    /clanops relay status registered?" tests redundant: a leaf that stopped
+    being registered breaks this, and so does one registered without a spec."""
     bot = _FakeBot()
     register_elixir_app_commands(bot)
 
@@ -2405,15 +2169,6 @@ def test_member_email_commands_record_telemetry_before_identity_resolution(
         write_requested=write_requested,
         accepted=True,
     )
-
-
-def test_register_elixir_app_commands_includes_relay_status():
-    bot = _FakeBot()
-    register_elixir_app_commands(bot)
-    root = _root(bot, "clanops")
-    relay_group = root.get_command("relay")
-    assert relay_group is not None
-    assert relay_group.get_command("status") is not None
 
 
 def test_slash_relay_status_allowed_in_actions():
@@ -2514,15 +2269,6 @@ def test_slash_non_relay_command_still_rejected_in_actions():
         write_requested=False,
         accepted=False,
     )
-
-
-def test_register_elixir_app_commands_includes_member_audit_discord():
-    bot = _FakeBot()
-    register_elixir_app_commands(bot)
-    root = _root(bot, "clanops")
-    member_group = root.get_command("member")
-    assert member_group is not None
-    assert member_group.get_command("audit-discord") is not None
 
 
 def test_dispatch_admin_command_handles_member_audit_discord():
@@ -2740,7 +2486,47 @@ def test_dispatch_admin_command_handles_set_discord_with_resolved_guild_member()
     }
 
 
-def test_dispatch_admin_command_handles_set_note_and_writes_contextual_memory():
+@pytest.mark.parametrize(
+    "admin_key,args,expected_reply,expected_db_call,expected_memory_fn,expected_memory_kwargs",
+    [
+        pytest.param(
+            "member.set",
+            {"member": "King Levy", "field": "note", "value": "Reliable war leader."},
+            "Set note for King Levy.",
+            ("set_member_note", "#ABC123", None, "Reliable war leader."),
+            "upsert_member_note_memory",
+            {
+                "member_tag": "#ABC123",
+                "member_label": "King Levy",
+                "note": "Reliable war leader.",
+                "created_by": "leader:admin-command",
+                "metadata": {"command": "set-note"},
+            },
+            id="set_note_writes_contextual_memory",
+        ),
+        pytest.param(
+            "member.clear",
+            {"member": "King Levy", "field": "note"},
+            "Cleared note for King Levy.",
+            ("clear_member_note", "#ABC123", None),
+            "archive_member_note_memory",
+            {"member_tag": "#ABC123", "actor": "leader:admin-command"},
+            id="clear_note_archives_contextual_memory",
+        ),
+    ],
+)
+def test_dispatch_admin_command_note_writes_and_mirrors_to_memory(
+    admin_key,
+    args,
+    expected_reply,
+    expected_db_call,
+    expected_memory_fn,
+    expected_memory_kwargs,
+):
+    """A leader note is written twice on purpose: to the member row AND to
+    durable contextual memory, in that order, off one command. The memory
+    mirror is what makes the note reachable by the brain later, so the second
+    to_thread call is as load-bearing as the first."""
     from runtime import admin as runtime_admin
 
     with patch(
@@ -2748,62 +2534,14 @@ def test_dispatch_admin_command_handles_set_note_and_writes_contextual_memory():
         new=AsyncMock(side_effect=[("#ABC123", "King Levy"), None, None]),
     ) as mock_to_thread:
         result = asyncio.run(
-            elixir.dispatch_admin_command(
-                "member.set",
-                preview=False,
-                short=False,
-                args={
-                    "member": "King Levy",
-                    "field": "note",
-                    "value": "Reliable war leader.",
-                },
-            )
+            elixir.dispatch_admin_command(admin_key, preview=False, short=False, args=args)
         )
 
-    assert result == "Set note for King Levy."
-    assert mock_to_thread.await_args_list[1].args == (
-        elixir.db.set_member_note,
-        "#ABC123",
-        None,
-        "Reliable war leader.",
-    )
-    assert mock_to_thread.await_args_list[2].args == (runtime_admin.upsert_member_note_memory,)
-    assert mock_to_thread.await_args_list[2].kwargs == {
-        "member_tag": "#ABC123",
-        "member_label": "King Levy",
-        "note": "Reliable war leader.",
-        "created_by": "leader:admin-command",
-        "metadata": {"command": "set-note"},
-    }
-
-
-def test_dispatch_admin_command_handles_clear_note_and_archives_contextual_memory():
-    from runtime import admin as runtime_admin
-
-    with patch(
-        "runtime.admin.asyncio.to_thread",
-        new=AsyncMock(side_effect=[("#ABC123", "King Levy"), None, None]),
-    ) as mock_to_thread:
-        result = asyncio.run(
-            elixir.dispatch_admin_command(
-                "member.clear",
-                preview=False,
-                short=False,
-                args={"member": "King Levy", "field": "note"},
-            )
-        )
-
-    assert result == "Cleared note for King Levy."
-    assert mock_to_thread.await_args_list[1].args == (
-        elixir.db.clear_member_note,
-        "#ABC123",
-        None,
-    )
-    assert mock_to_thread.await_args_list[2].args == (runtime_admin.archive_member_note_memory,)
-    assert mock_to_thread.await_args_list[2].kwargs == {
-        "member_tag": "#ABC123",
-        "actor": "leader:admin-command",
-    }
+    assert result == expected_reply
+    db_fn, *db_args = expected_db_call
+    assert mock_to_thread.await_args_list[1].args == (getattr(elixir.db, db_fn), *db_args)
+    assert mock_to_thread.await_args_list[2].args == (getattr(runtime_admin, expected_memory_fn),)
+    assert mock_to_thread.await_args_list[2].kwargs == expected_memory_kwargs
 
 
 def test_resolve_member_tag_accepts_name_with_tag_label():
@@ -2869,133 +2607,76 @@ def test_dispatch_admin_command_handles_war_status():
     mock_report.assert_called_once_with({"name": "POAP KINGS"}, {"clans": [{}, {}]})
 
 
-def test_slash_clan_members_full_passes_flag_to_admin_dispatch():
-    bot = _FakeBot()
-    register_elixir_app_commands(bot)
-    root = _root(bot, "clanops")
-    clan_group = root.get_command("clan")
-    clan_list_command = clan_group.get_command("members")
-
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
-    followup = SimpleNamespace(send=AsyncMock())
-    interaction = SimpleNamespace(
-        channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
-        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[]),
-        response=response,
-        followup=followup,
-        edit_original_response=AsyncMock(),
-    )
-
-    with (
-        patch("runtime.app._is_clanops_channel", return_value=True),
-        patch(
-            "runtime.discord_commands.dispatch_admin_command",
-            new=AsyncMock(return_value="full list"),
-        ) as mock_dispatch,
-    ):
-        asyncio.run(clan_list_command.callback(interaction, detail="full"))
-
-    mock_dispatch.assert_awaited_once_with(
+# Every leader slash command that is a thin shell over dispatch_admin_command:
+# find the leaf, defer ephemerally, dispatch, edit the deferred response with
+# whatever came back. Four tests asserted that same shape with different nouns.
+#
+# (group, leaf, callback kwargs, leader role required, admin key, expected args)
+SLASH_DISPATCH_CASES = [
+    pytest.param(
+        "clan",
+        "members",
+        {"detail": "full"},
+        False,
         "clan.members",
-        preview=False,
-        short=False,
-        args={"detail": "full"},
-    )
-    response.defer.assert_awaited_once_with(ephemeral=True)
-    interaction.edit_original_response.assert_awaited_once_with(content="full list")
-    followup.send.assert_not_awaited()
-
-
-def test_slash_clan_war_dispatches_to_admin():
-    bot = _FakeBot()
-    register_elixir_app_commands(bot)
-    root = _root(bot, "clanops")
-    clan_group = root.get_command("clan")
-    war_status_command = clan_group.get_command("war")
-
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
-    followup = SimpleNamespace(send=AsyncMock())
-    interaction = SimpleNamespace(
-        channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
-        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[]),
-        response=response,
-        followup=followup,
-        edit_original_response=AsyncMock(),
-    )
-
-    with (
-        patch("runtime.app._is_clanops_channel", return_value=True),
-        patch(
-            "runtime.discord_commands.dispatch_admin_command",
-            new=AsyncMock(return_value="war report"),
-        ) as mock_dispatch,
-    ):
-        asyncio.run(war_status_command.callback(interaction))
-
-    mock_dispatch.assert_awaited_once_with(
+        {"detail": "full"},
+        "full list",
+        id="clan_members_passes_detail_flag",
+    ),
+    pytest.param(
+        "clan",
+        "war",
+        {},
+        False,
         "clan.war",
-        preview=False,
-        short=False,
-        args={},
-    )
-    response.defer.assert_awaited_once_with(ephemeral=True)
-    interaction.edit_original_response.assert_awaited_once_with(content="war report")
-    followup.send.assert_not_awaited()
-
-
-def test_slash_member_set_discord_passes_identity_to_admin_dispatch():
-    bot = _FakeBot()
-    register_elixir_app_commands(bot)
-    root = _root(bot, "clanops")
-    member_group = root.get_command("member")
-    set_discord_command = member_group.get_command("set")
-
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
-    followup = SimpleNamespace(send=AsyncMock())
-    interaction = SimpleNamespace(
-        channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
-        user=SimpleNamespace(
-            id=123,
-            name="jamie",
-            display_name="Jamie",
-            roles=[SimpleNamespace(name="Leader")],
-        ),
-        response=response,
-        followup=followup,
-        edit_original_response=AsyncMock(),
-    )
-
-    with (
-        patch("runtime.app._is_clanops_channel", return_value=True),
-        patch("runtime.app._has_leader_role", return_value=True),
-        patch(
-            "runtime.discord_commands.dispatch_admin_command",
-            new=AsyncMock(return_value="linked"),
-        ) as mock_dispatch,
-    ):
-        asyncio.run(
-            set_discord_command.callback(
-                interaction, member="King Levy", field="discord", value="@kinglevy"
-            )
-        )
-
-    mock_dispatch.assert_awaited_once_with(
+        {},
+        "war report",
+        id="clan_war_takes_no_options",
+    ),
+    pytest.param(
+        "member",
+        "set",
+        {"member": "King Levy", "field": "discord", "value": "@kinglevy"},
+        True,
         "member.set",
-        preview=False,
-        short=False,
-        args={"member": "King Levy", "field": "discord", "value": "@kinglevy"},
-    )
-    response.defer.assert_awaited_once_with(ephemeral=True)
-    interaction.edit_original_response.assert_awaited_once_with(content="linked")
-    followup.send.assert_not_awaited()
+        {"member": "King Levy", "field": "discord", "value": "@kinglevy"},
+        "linked",
+        id="member_set_passes_identity_through",
+    ),
+    pytest.param(
+        "activity",
+        "run",
+        {"activity": "weekly-recap", "preview": False},
+        True,
+        "activity.run",
+        {"activity": "weekly-recap"},
+        "job failed",
+        id="activity_run_defers_before_dispatching",
+    ),
+]
 
 
-def test_slash_activity_run_defers_before_dispatching():
+@pytest.mark.parametrize(
+    "group_name,leaf_name,callback_kwargs,needs_leader,admin_key,expected_args,reply_text",
+    SLASH_DISPATCH_CASES,
+)
+def test_slash_command_dispatches_to_admin(
+    group_name,
+    leaf_name,
+    callback_kwargs,
+    needs_leader,
+    admin_key,
+    expected_args,
+    reply_text,
+):
+    """A /clanops leaf defers ephemerally FIRST, then dispatches, then edits the
+    deferred response. The defer-before-dispatch order is the point: admin work
+    can outrun Discord's 3s interaction window, and a late first response is an
+    'application did not respond' error the leader sees instead of the answer."""
     bot = _FakeBot()
     register_elixir_app_commands(bot)
-    root = _root(bot, "clanops")
-    jobs_group = root.get_command("activity")
-    run_command = jobs_group.get_command("run")
+    group = _root(bot, "clanops").get_command(group_name)
+    command = group.get_command(leaf_name)
 
     response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
@@ -3005,7 +2686,7 @@ def test_slash_activity_run_defers_before_dispatching():
             id=123,
             name="jamie",
             display_name="Jamie",
-            roles=[SimpleNamespace(name="Leader")],
+            roles=[SimpleNamespace(name="Leader")] if needs_leader else [],
         ),
         response=response,
         followup=followup,
@@ -3014,22 +2695,22 @@ def test_slash_activity_run_defers_before_dispatching():
 
     with (
         patch("runtime.app._is_clanops_channel", return_value=True),
-        patch("runtime.app._has_leader_role", return_value=True),
+        patch("runtime.app._has_leader_role", return_value=needs_leader),
         patch(
             "runtime.discord_commands.dispatch_admin_command",
-            new=AsyncMock(return_value="job failed"),
+            new=AsyncMock(return_value=reply_text),
         ) as mock_dispatch,
     ):
-        asyncio.run(run_command.callback(interaction, activity="weekly-recap", preview=False))
+        asyncio.run(command.callback(interaction, **callback_kwargs))
 
-    response.defer.assert_awaited_once_with(ephemeral=True)
     mock_dispatch.assert_awaited_once_with(
-        "activity.run",
+        admin_key,
         preview=False,
         short=False,
-        args={"activity": "weekly-recap"},
+        args=expected_args,
     )
-    interaction.edit_original_response.assert_awaited_once_with(content="job failed")
+    response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.edit_original_response.assert_awaited_once_with(content=reply_text)
     followup.send.assert_not_awaited()
 
 
@@ -3324,7 +3005,7 @@ def test_llm_outage_alert_dedupes_on_signature():
                 "llm": {
                     "last_ok": False,
                     "last_error": "invalid_request_error: usage limits reached",
-                    "last_workflow": "site_home_message",
+                    "last_workflow": "weekly_recap",
                     "last_model": "claude-haiku-4-5-20251001",
                     "consecutive_error_count": 1,
                 }
@@ -3333,8 +3014,8 @@ def test_llm_outage_alert_dedupes_on_signature():
     ):
         runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
         try:
-            first = asyncio.run(runtime_app._maybe_alert_llm_failure("home message"))
-            second = asyncio.run(runtime_app._maybe_alert_llm_failure("home message"))
+            first = asyncio.run(runtime_app._maybe_alert_llm_failure("weekly recap"))
+            second = asyncio.run(runtime_app._maybe_alert_llm_failure("weekly recap"))
         finally:
             runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
 
@@ -3345,72 +3026,43 @@ def test_llm_outage_alert_dedupes_on_signature():
     mock_post.assert_not_awaited()
 
 
-def test_build_schedule_report_includes_promotion_content_sync():
-    scheduler = SimpleNamespace(
-        running=True,
-        get_jobs=lambda: [],
-    )
+def test_build_schedule_report_lists_every_scheduled_activity():
+    """One `_build_schedule_report()` call, every line it owes.
+
+    This was four tests that built the identical report from the identical
+    scheduler stub and each asserted a different slice of it. The report is one
+    string; assert the whole contract in one place so a rendering change fails
+    once with the full picture instead of four times with a quarter each.
+    """
+    scheduler = SimpleNamespace(running=True, get_jobs=lambda: [])
 
     with (
         patch("elixir.scheduler", scheduler),
         patch.object(elixir, "PROMOTION_CONTENT_DAY", "fri"),
         patch.object(elixir, "PROMOTION_CONTENT_HOUR", 9),
+        patch.object(elixir, "WEEKLY_RECAP_DAY", "mon"),
+        patch.object(elixir, "WEEKLY_RECAP_HOUR", 9),
+        patch.object(elixir, "ENGINE_TICK_MINUTES", 10),
+        patch.object(elixir, "AWARENESS_LOOP_MINUTE", 5),
     ):
         report = elixir._build_schedule_report()
 
+    # promotion-content sync: lane, Discord destination, and cadence
     assert "recruiting" in report
     assert "promotion-content" in report
     assert "Discord: #recruiting" in report
     assert "Every Fri at 09:00 CT." in report
 
-
-def test_build_schedule_report_includes_weekly_clan_recap():
-    scheduler = SimpleNamespace(
-        running=True,
-        get_jobs=lambda: [],
-    )
-
-    with (
-        patch("elixir.scheduler", scheduler),
-        patch.object(elixir, "WEEKLY_RECAP_DAY", "mon"),
-        patch.object(elixir, "WEEKLY_RECAP_HOUR", 9),
-    ):
-        report = elixir._build_schedule_report()
-
+    # weekly clan recap
     assert "weekly-recap" in report
     assert "Every Mon at 09:00 CT." in report
 
-
-def test_build_schedule_report_shows_engine_tick_interval():
-    scheduler = SimpleNamespace(
-        running=True,
-        get_jobs=lambda: [],
-    )
-
-    with (
-        patch("elixir.scheduler", scheduler),
-        patch.object(elixir, "ENGINE_TICK_MINUTES", 10),
-    ):
-        report = elixir._build_schedule_report()
-
+    # engine tick renders its interval, not a fixed string
     assert "elixir-log" in report
     assert "engine-tick" in report
     assert "Every 10 minutes." in report
 
-
-def test_build_schedule_report_includes_awareness_owner():
-    scheduler = SimpleNamespace(
-        running=True,
-        get_jobs=lambda: [],
-    )
-
-    with (
-        patch("elixir.scheduler", scheduler),
-        patch.object(elixir, "AWARENESS_LOOP_MINUTE", 5),
-    ):
-        report = elixir._build_schedule_report()
-
-    assert "elixir-log" in report
+    # the awareness loop names its owner and its member-facing lane selection
     assert "awareness-loop" in report
     assert "Daily at 09:05, 21:05 CT." in report
     assert "member-facing lanes selected by the validated awareness plan" in report
@@ -3686,35 +3338,18 @@ def test_build_status_report_omits_job_schedule_section():
 def test_on_message_handles_interactive_help_directly():
     message = _make_message(100, "member-chat", "help")
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
     with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=True),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 100,
-                "name": "#member-chat",
-                "role": "interactive",
-                "workflow": "interactive",
-                "mention_required": True,
-                "allow_proactive": False,
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message") as mock_save,
-        patch(
-            "agent.intent_router.classify_intent",
-            return_value={
+        _on_message_env(
+            MEMBER_CHAT_BEHAVIOR,
+            mentioned=True,
+            memory_context={},
+            classify={
                 "route": "help",
                 "confidence": 0.95,
                 "rationale": "asking for help",
             },
-        ),
+            respond=NEVER_CALLED,
+        ) as env,
         patch(
             "elixir.elixir_agent.respond_to_help_request",
             return_value={
@@ -3723,7 +3358,6 @@ def test_on_message_handles_interactive_help_directly():
                 "summary": "...",
             },
         ) as mock_help,
-        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
     ):
         asyncio.run(elixir.on_message(message))
 
@@ -3731,166 +3365,85 @@ def test_on_message_handles_interactive_help_directly():
     message.reply.assert_awaited_once_with(
         "Ask me about your deck, war participation, or recent form."
     )
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "interactive_help"
-    mock_respond.assert_not_called()
-    mock_process.assert_not_awaited()
+    assert env.save.call_args_list[1].kwargs["event_type"] == "interactive_help"
+    env.respond.assert_not_called()
+    env.process.assert_not_awaited()
 
 
-def test_on_message_handles_roster_join_dates_directly():
-    message = _make_message(
-        200,
-        "clan-ops",
-        "<@999> Who are the members of the clan and when did they join?",
-    )
+# Every table-driven report route, as production declares it. The route tuple
+# (allowed workflows, builder, event name) lives in runtime/channel_router.py --
+# reading it here instead of restating it means a new route is covered the day
+# it is added, and a renamed event name cannot pass a stale copy in the test.
+ALL_REPORT_ROUTES = {
+    **channel_router._REPORT_ROUTES,
+    **channel_router._LOGGED_REPORT_ROUTES,
+}
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch(
-            "runtime.helpers._common.bot",
-            new=SimpleNamespace(user=SimpleNamespace(id=999)),
-        ),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 200,
-                "name": "#clan-ops",
-                "role": "clanops",
-                "workflow": "clanops",
-                "mention_required": False,
-                "allow_proactive": True,
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.save_message") as mock_save,
-        patch(
-            "agent.intent_router.classify_intent",
-            return_value={
-                "route": "roster_join_dates",
-                "confidence": 0.95,
-                "rationale": "asking for join dates",
-            },
-        ),
-        patch(
-            "elixir._build_roster_join_dates_report",
-            return_value="**Clan Roster + Join Dates**\n1. King Levy (coLeader) — joined 2024-01-15",
-        ) as mock_build,
-        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
-    ):
-        asyncio.run(elixir.on_message(message))
-
-    mock_build.assert_called_once_with()
-    message.reply.assert_awaited_once_with(
-        "**Clan Roster + Join Dates**\n1. King Levy (coLeader) — joined 2024-01-15"
-    )
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "roster_join_dates_report"
-    mock_respond.assert_not_called()
-    mock_process.assert_not_awaited()
-
-
-def test_on_message_handles_kick_risk_directly():
-    message = _make_message(
-        200,
-        "clan-ops",
+# The only per-route things a test has to supply: a plausible question and the
+# text its builder returns. Everything else comes from the spec above.
+REPORT_ROUTE_FIXTURES = {
+    "roster_join_dates": (
+        "Who are the members of the clan and when did they join?",
+        "**Clan Roster + Join Dates**\n1. King Levy (coLeader) — joined 2024-01-15",
+    ),
+    "kick_risk": (
         "Who is at risk of being kicked based on participation thresholds?",
-    )
+        "**Kick Risk (Inactive 7+ Days)**\n- Vijay — last seen 8 days ago",
+    ),
+    "top_war_contributors": (
+        "Who are the top 5 contributors to clan wars this season?",
+        "**Top War Contributors (Season 130)**\n1. King Levy — 3,200 fame across 4 race(s)",
+    ),
+    "status_report": (
+        "What is your current status?",
+        "**Elixir Status**\nUptime 4h — last engine tick 2 minutes ago",
+    ),
+    "schedule_report": (
+        "What is on the schedule this week?",
+        "**Scheduled Activities**\n- weekly-recap — Every Mon at 09:00 CT.",
+    ),
+}
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
+
+def test_report_route_fixtures_cover_every_production_route():
+    """The parametrization below is only as good as this table. A route added to
+    _REPORT_ROUTES / _LOGGED_REPORT_ROUTES with no fixture here would silently
+    go untested through on_message — which is exactly how status_report and
+    schedule_report went untested until 2026-08-06."""
+    assert set(REPORT_ROUTE_FIXTURES) == set(ALL_REPORT_ROUTES)
+
+
+@pytest.mark.parametrize("route", sorted(ALL_REPORT_ROUTES))
+def test_on_message_handles_report_route_directly(route):
+    """A classified report route must build its report and reply with it — no
+    LLM channel call — and store the reply under the route's own event_type.
+
+    Driven off the production route tables so all five routes are covered:
+    _REPORT_ROUTES (build + reply) and _LOGGED_REPORT_ROUTES (build + log +
+    reply) run different code in _dispatch_intent but owe the same observable
+    result, so one test asserts both.
+    """
+    spec = ALL_REPORT_ROUTES[route]
+    question, canned_report = REPORT_ROUTE_FIXTURES[route]
+    assert "clanops" in spec.workflows, "fixture routes through the clanops lane"
+    message = _make_message(200, "clan-ops", question)
 
     with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=True),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 200,
-                "name": "#clan-ops",
-                "role": "clanops",
-                "workflow": "clanops",
-                "mention_required": False,
-                "allow_proactive": True,
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.save_message") as mock_save,
-        patch(
-            "agent.intent_router.classify_intent",
-            return_value={
-                "route": "kick_risk",
-                "confidence": 0.95,
-                "rationale": "asking about kicks",
-            },
-        ),
-        patch(
-            "elixir._build_kick_risk_report",
-            return_value="**Kick Risk (Inactive 7+ Days)**\n- Vijay — last seen 8 days ago",
-        ) as mock_build,
-        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
+        _on_message_env(
+            CLANOPS_BEHAVIOR,
+            mentioned=True,
+            classify={"route": route, "confidence": 0.95, "rationale": question},
+            respond=NEVER_CALLED,
+        ) as env,
+        patch(f"elixir.{spec.builder}", return_value=canned_report) as mock_build,
     ):
         asyncio.run(elixir.on_message(message))
 
     mock_build.assert_called_once_with()
-    message.reply.assert_awaited_once_with(
-        "**Kick Risk (Inactive 7+ Days)**\n- Vijay — last seen 8 days ago"
-    )
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "kick_risk_report"
-    mock_respond.assert_not_called()
-    mock_process.assert_not_awaited()
-
-
-def test_on_message_handles_top_war_contributors_directly():
-    message = _make_message(
-        200, "clan-ops", "Who are the top 5 contributors to clan wars this season?"
-    )
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=True),
-        patch(
-            "elixir._get_channel_behavior",
-            return_value={
-                "id": 200,
-                "name": "#clan-ops",
-                "role": "clanops",
-                "workflow": "clanops",
-                "mention_required": False,
-                "allow_proactive": True,
-            },
-        ),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.save_message") as mock_save,
-        patch(
-            "agent.intent_router.classify_intent",
-            return_value={
-                "route": "top_war_contributors",
-                "confidence": 0.95,
-                "rationale": "asking for top contributors",
-            },
-        ),
-        patch(
-            "elixir._build_top_war_contributors_report",
-            return_value="**Top War Contributors (Season 130)**\n1. King Levy — 3,200 fame across 4 race(s)",
-        ) as mock_build,
-        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
-    ):
-        asyncio.run(elixir.on_message(message))
-
-    mock_build.assert_called_once_with()
-    message.reply.assert_awaited_once_with(
-        "**Top War Contributors (Season 130)**\n1. King Levy — 3,200 fame across 4 race(s)"
-    )
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "top_war_contributors_report"
-    mock_respond.assert_not_called()
-    mock_process.assert_not_awaited()
+    message.reply.assert_awaited_once_with(canned_report)
+    assert env.save.call_args_list[1].kwargs["event_type"] == spec.event
+    env.respond.assert_not_called()
+    env.process.assert_not_awaited()
 
 
 def test_build_clan_status_report_summarizes_operational_clan_state():

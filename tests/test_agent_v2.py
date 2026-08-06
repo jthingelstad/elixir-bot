@@ -5,6 +5,8 @@ import os
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import pytest
+
 import elixir_agent
 
 
@@ -706,40 +708,37 @@ def test_execute_tool_get_clan_game_modes_events_exposes_event_participation():
     capability.assert_called_once_with(days=30, mode_group="special_event", limit=10)
 
 
-def test_execute_tool_get_clan_health_sensitive_aspect_blocked_in_interactive():
-    result = json.loads(
-        elixir_agent._execute_tool(
+@pytest.mark.parametrize(
+    "tool,args,error_contains",
+    [
+        pytest.param(
             "get_clan_health",
             {"aspect": "at_risk"},
-            workflow="interactive",
-        )
-    )
-    assert "error" in result
-    assert "leadership channels" in result["error"]
-
-
-def test_execute_tool_get_elixir_state_blocks_leadership_scope_in_interactive():
-    result = json.loads(
-        elixir_agent._execute_tool(
+            "leadership channels",
+            id="clan_health_at_risk",
+        ),
+        pytest.param(
             "get_elixir_state",
             {"aspect": "recent_events", "scope": "leadership"},
-            workflow="interactive",
-        )
-    )
-
-    assert result["error"] == "leadership_state_unavailable"
-
-
-def test_execute_tool_get_elixir_state_blocks_leader_actions_in_interactive():
-    result = json.loads(
-        elixir_agent._execute_tool(
+            "leadership_state_unavailable",
+            id="elixir_state_leadership_scope",
+        ),
+        pytest.param(
             "get_elixir_state",
             {"aspect": "leader_actions"},
-            workflow="interactive",
-        )
-    )
+            "leadership_state_unavailable",
+            id="elixir_state_leader_actions",
+        ),
+    ],
+)
+def test_execute_tool_blocks_leadership_data_in_interactive(tool, args, error_contains):
+    """Leadership-scoped reads must fail closed in the member-facing workflow —
+    the interactive lane is public, so an at-risk list or a leader-action queue
+    leaking into it is a member reading their own kick case."""
+    result = json.loads(elixir_agent._execute_tool(tool, args, workflow="interactive"))
 
-    assert result["error"] == "leadership_state_unavailable"
+    assert "error" in result
+    assert error_contains in result["error"]
 
 
 def test_execute_tool_get_elixir_state_exposes_public_war_summary():
@@ -925,13 +924,53 @@ def test_execute_tool_get_war_season_win_rates_uses_db():
         )
 
 
-def test_execute_tool_get_war_season_standings_default_points():
+@pytest.mark.parametrize(
+    "args,db_method,db_return,expected_db_kwargs,expected_result,exact",
+    [
+        pytest.param(
+            {"aspect": "standings", "season_id": 129},
+            "get_war_champ_standings",
+            [{"name": "Player", "total_points": 5000}],
+            {"season_id": 129},
+            {
+                "season_id": 129,
+                "metric": "points",
+                "members": [{"name": "Player", "total_points": 5000}],
+            },
+            False,  # the points payload also carries rookie_mvps
+            id="default_metric_is_points_and_carries_freshness",
+        ),
+        pytest.param(
+            {"aspect": "standings", "metric": "win_rate", "season_id": 129, "limit": 30},
+            "get_war_battle_win_rates",
+            {"season_id": 129, "members": []},
+            {"season_id": 129, "limit": 30, "min_battles": 4},
+            {"season_id": 129, "members": []},
+            True,
+            id="win_rate_applies_the_min_battles_floor",
+        ),
+        pytest.param(
+            {"aspect": "standings", "metric": "attendance", "season_id": 129},
+            "get_members_without_war_participation",
+            {"season_id": 129, "members": []},
+            {"season_id": 129},
+            {"season_id": 129, "members": []},
+            True,
+            id="attendance_lists_non_participants",
+        ),
+    ],
+)
+def test_execute_tool_get_war_season_standings(
+    args, db_method, db_return, expected_db_kwargs, expected_result, exact
+):
+    """Each standings metric routes to its own db query with its own arguments,
+    and every one of them enriches with war player types before returning."""
     with (
         patch("elixir_agent.db") as mock_db,
         patch("agent.tool_exec._enrich_war_player_types") as mock_enrich,
         patch("capabilities.war._standings_freshness") as mock_fresh,
     ):
-        mock_db.get_war_champ_standings.return_value = [{"name": "Player", "total_points": 5000}]
+        getattr(mock_db, db_method).return_value = db_return
         mock_fresh.return_value = {
             "as_of": "2026-05-03T10:39:00",
             "current_week_included": True,
@@ -940,62 +979,22 @@ def test_execute_tool_get_war_season_standings_default_points():
             "finalized_races": 3,
             "narration_hint": "...",
         }
-        result = json.loads(
-            elixir_agent._execute_tool("get_war_season", {"aspect": "standings", "season_id": 129})
-        )
-        assert result["season_id"] == 129
-        assert result["metric"] == "points"
-        assert result["freshness"]["current_week_included"] is True
-        assert result["members"] == [{"name": "Player", "total_points": 5000}]
-        mock_db.get_war_champ_standings.assert_called_once_with(season_id=129)
-        mock_enrich.assert_called_once()
+        result = json.loads(elixir_agent._execute_tool("get_war_season", args))
 
-
-def test_execute_tool_get_war_season_standings_metric_win_rate():
-    with (
-        patch("elixir_agent.db") as mock_db,
-        patch("agent.tool_exec._enrich_war_player_types") as mock_enrich,
-    ):
-        mock_db.get_war_battle_win_rates.return_value = {
-            "season_id": 129,
-            "members": [],
-        }
-        result = json.loads(
-            elixir_agent._execute_tool(
-                "get_war_season",
-                {
-                    "aspect": "standings",
-                    "metric": "win_rate",
-                    "season_id": 129,
-                    "limit": 30,
-                },
-            )
-        )
-        assert result == {"season_id": 129, "members": []}
-        mock_db.get_war_battle_win_rates.assert_called_once_with(
-            season_id=129, limit=30, min_battles=4
-        )
-        mock_enrich.assert_called_once()
-
-
-def test_execute_tool_get_war_season_standings_metric_attendance():
-    with (
-        patch("elixir_agent.db") as mock_db,
-        patch("agent.tool_exec._enrich_war_player_types") as mock_enrich,
-    ):
-        mock_db.get_members_without_war_participation.return_value = {
-            "season_id": 129,
-            "members": [],
-        }
-        result = json.loads(
-            elixir_agent._execute_tool(
-                "get_war_season",
-                {"aspect": "standings", "metric": "attendance", "season_id": 129},
-            )
-        )
-        assert result == {"season_id": 129, "members": []}
-        mock_db.get_members_without_war_participation.assert_called_once_with(season_id=129)
-        mock_enrich.assert_called_once()
+    # The points metric is the only one that carries the freshness block; the
+    # others return their capability payload verbatim.
+    freshness = result.pop("freshness", None)
+    if db_method == "get_war_champ_standings":
+        assert freshness["current_week_included"] is True
+    else:
+        assert freshness is None
+    if exact:
+        assert result == expected_result
+    else:
+        for key, value in expected_result.items():
+            assert result[key] == value
+    getattr(mock_db, db_method).assert_called_once_with(**expected_db_kwargs)
+    mock_enrich.assert_called_once()
 
 
 def test_execute_tool_get_clan_roster_role_changes_uses_db():
@@ -1521,59 +1520,95 @@ def test_create_chat_completion_drops_empty_text_blocks():
     ]
 
 
-def test_create_chat_completion_caches_awareness():
-    """The awareness brain is now a multi-round Sonnet agentic loop (tool rounds
-    seconds apart within one tick), so caching the system+tools+message prefix
-    yields cache reads on rounds 2+ — a large net win. It must be cached."""
+@pytest.mark.parametrize(
+    "workflow,message,with_tools,expect_prefix_cached,expect_message_breakpoint",
+    [
+        pytest.param(
+            "awareness",
+            "the read",
+            True,
+            True,
+            True,
+            id="awareness_multi_round_loop_caches_prefix_and_message",
+        ),
+        pytest.param(
+            "interactive",
+            "q",
+            True,
+            True,
+            False,
+            id="session_workflow_keeps_the_5m_default",
+        ),
+        pytest.param(
+            "channel_update",
+            "u",
+            True,
+            True,
+            False,
+            id="other_workflows_cache_system_and_tools",
+        ),
+        pytest.param(
+            "leader_action_feedback",
+            "feedback",
+            False,
+            False,
+            False,
+            id="single_shot_leader_feedback_is_not_cached",
+        ),
+    ],
+)
+def test_create_chat_completion_cache_control(
+    workflow, message, with_tools, expect_prefix_cached, expect_message_breakpoint
+):
+    """Where the cache breakpoints land, per workflow.
+
+    Everything runs at the 5m default TTL. Awareness used the 1h TTL when it ran
+    hourly, but the cost gate (2026-07-12) makes the Sonnet brain run sparsely
+    (only on posts, >1h apart), so a 1h prefix always expired between ticks and
+    the 2x write premium bought nothing. LONG_CACHE_TTL_WORKFLOWS is now empty
+    and the 1h branch in agent/core.py is unreachable — which is why the
+    "session workflow uses 5m" case is just another row here rather than its own
+    test: with no long-TTL workflows, every workflow is that case.
+
+    The awareness brain is a multi-round agentic loop (tool rounds seconds apart
+    within one tick), so its system+tools+message prefix is cache-read on rounds
+    2+ — a large net win. The volatile message prefix (the read) is marked too,
+    since it is reused across those rounds. Single-shot leader feedback runs once
+    and never reads the cache back, so paying the write premium is pure loss.
+    """
     response = _mock_anthropic_response()
     create = Mock(return_value=response)
     mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    tools = (
+        [{"name": "noop", "description": "x", "input_schema": {"type": "object"}}]
+        if with_tools
+        else None
+    )
+    kwargs = {"tools": tools} if with_tools else {}
     with (
         patch("agent.core._get_client", return_value=mock_client),
         patch("elixir_agent.runtime_status.record_llm_call"),
     ):
         elixir_agent._create_chat_completion(
-            workflow="awareness",
+            workflow=workflow,
             system="sys",
-            messages=[{"role": "user", "content": "the read"}],
-            tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
+            messages=[{"role": "user", "content": message}],
+            **kwargs,
         )
 
-    # The stable prefix (system + tools) is cached at the 5m default. Awareness
-    # used the 1h TTL when it ran hourly, but the cost gate (2026-07-12) makes the
-    # Sonnet brain run sparsely (only on posts, >1h apart), so a 1h prefix always
-    # expires between ticks — the 2x write premium buys nothing. The 5m default
-    # still fully covers the within-tick multi-round loop (rounds seconds apart),
-    # which is where awareness caching earns its keep. It must still be cached.
     sys_block = create.call_args.kwargs["system"][0]
-    assert sys_block.get("cache_control") == {"type": "ephemeral"}
-    assert create.call_args.kwargs["tools"][-1].get("cache_control") == {"type": "ephemeral"}
-    # The volatile message prefix (the read) always stays at the 5m default — it
-    # changes every tick and is only reused across the multi-round tool loop.
+    if expect_prefix_cached:
+        assert sys_block.get("cache_control") == {"type": "ephemeral"}
+        assert create.call_args.kwargs["tools"][-1].get("cache_control") == {"type": "ephemeral"}
+    else:
+        assert "cache_control" not in sys_block
+
     last_msg = create.call_args.kwargs["messages"][-1]
-    assert last_msg["content"][-1].get("cache_control") == {"type": "ephemeral"}
-
-
-def test_create_chat_completion_session_workflow_uses_5m_cache():
-    """Session/bursty workflows (not in LONG_CACHE_TTL_WORKFLOWS) keep the 5m
-    default on the stable prefix — they complete in one burst, so the cheaper 5m
-    write beats a 1h write that would never be re-read."""
-    response = _mock_anthropic_response()
-    create = Mock(return_value=response)
-    mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
-    with (
-        patch("agent.core._get_client", return_value=mock_client),
-        patch("elixir_agent.runtime_status.record_llm_call"),
-    ):
-        elixir_agent._create_chat_completion(
-            workflow="interactive",
-            system="sys",
-            messages=[{"role": "user", "content": "q"}],
-            tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
-        )
-    sys_block = create.call_args.kwargs["system"][0]
-    assert sys_block.get("cache_control") == {"type": "ephemeral"}
-    assert create.call_args.kwargs["tools"][-1].get("cache_control") == {"type": "ephemeral"}
+    if expect_message_breakpoint:
+        assert last_msg["content"][-1].get("cache_control") == {"type": "ephemeral"}
+    elif not expect_prefix_cached:
+        # Uncached workflows leave the message untouched — still a plain string.
+        assert last_msg["content"] == message
 
 
 def test_message_cache_breakpoint_marks_last_block_of_last_message():
@@ -1603,45 +1638,6 @@ def test_message_cache_breakpoint_marks_last_block_of_last_message():
     tail = out[-1]["content"]
     assert "cache_control" not in tail[0]
     assert tail[1].get("cache_control") == {"type": "ephemeral"}
-
-
-def test_create_chat_completion_caches_other_workflows():
-    response = _mock_anthropic_response()
-    create = Mock(return_value=response)
-    mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
-    with (
-        patch("agent.core._get_client", return_value=mock_client),
-        patch("elixir_agent.runtime_status.record_llm_call"),
-    ):
-        elixir_agent._create_chat_completion(
-            workflow="channel_update",
-            system="sys",
-            messages=[{"role": "user", "content": "u"}],
-            tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
-        )
-
-    sys_block = create.call_args.kwargs["system"][0]
-    assert sys_block.get("cache_control") == {"type": "ephemeral"}
-    last_tool = create.call_args.kwargs["tools"][-1]
-    assert last_tool.get("cache_control") == {"type": "ephemeral"}
-
-
-def test_create_chat_completion_skips_cache_for_single_shot_leader_feedback():
-    response = _mock_anthropic_response()
-    create = Mock(return_value=response)
-    mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
-    with (
-        patch("agent.core._get_client", return_value=mock_client),
-        patch("elixir_agent.runtime_status.record_llm_call"),
-    ):
-        elixir_agent._create_chat_completion(
-            workflow="leader_action_feedback",
-            system="sys",
-            messages=[{"role": "user", "content": "feedback"}],
-        )
-
-    assert "cache_control" not in create.call_args.kwargs["system"][0]
-    assert create.call_args.kwargs["messages"][-1]["content"] == "feedback"
 
 
 def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
@@ -1771,22 +1767,6 @@ def test_generate_tournament_recap_returns_none_on_empty_parse():
         assert elixir_agent.generate_tournament_recap("ctx") is None
 
 
-def test_create_chat_completion_uses_content_model_for_site_workflows():
-    response = _mock_anthropic_response()
-    create = Mock(return_value=response)
-    mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
-    with (
-        patch("agent.core._get_client", return_value=mock_client),
-        patch("elixir_agent.runtime_status.record_llm_call"),
-    ):
-        elixir_agent._create_chat_completion(
-            workflow="site_home_message",
-            messages=[{"role": "user", "content": "status"}],
-        )
-
-    assert create.call_args.kwargs["model"] == "claude-haiku-4-5-20251001"
-
-
 def test_create_chat_completion_respects_model_env_overrides():
     response = _mock_anthropic_response()
     create = Mock(return_value=response)
@@ -1815,8 +1795,12 @@ def test_create_chat_completion_respects_model_env_overrides():
         )
         assert create.call_args.kwargs["model"] == "claude-test-chat"  # clanops is chat-tier
 
+        # An unknown workflow falls back to the lightweight default tier. This
+        # is the only place that fallback is asserted since the site-workflow
+        # test (which tested it by accident, via a workflow string deleted with
+        # site publishing on 2026-06-21) was removed.
         elixir_agent._create_chat_completion(
-            workflow="unregistered_workflow",  # unknown → lightweight default tier
+            workflow="unregistered_workflow",
             messages=[{"role": "user", "content": "status"}],
         )
         assert create.call_args.kwargs["model"] == "claude-test-lightweight"
@@ -2092,33 +2076,37 @@ def test_chat_with_tools_returns_empty_response_after_max_tool_rounds(caplog):
     )
 
 
-def test_execute_tool_update_member_birthday():
+@pytest.mark.parametrize(
+    "field,value,db_method,db_kwargs",
+    [
+        pytest.param(
+            "birthday",
+            {"month": 3, "day": 15},
+            "set_member_birthday",
+            {"name": None, "month": 3, "day": 15},
+            id="birthday_splits_the_value_dict_into_month_and_day",
+        ),
+        pytest.param(
+            "note",
+            "War Machine",
+            "set_member_note",
+            {"name": None, "note": "War Machine"},
+            id="note_passes_the_value_through",
+        ),
+    ],
+)
+def test_execute_tool_update_member(field, value, db_method, db_kwargs):
     with patch("elixir_agent.db") as mock_db:
         result = json.loads(
             elixir_agent._execute_tool(
                 "update_member",
-                {
-                    "member_tag": "#ABC123",
-                    "field": "birthday",
-                    "value": {"month": 3, "day": 15},
-                },
+                {"member_tag": "#ABC123", "field": field, "value": value},
             )
         )
-        assert result["success"] is True
-        assert result["field"] == "birthday"
-        mock_db.set_member_birthday.assert_called_once_with("#ABC123", name=None, month=3, day=15)
 
-
-def test_execute_tool_update_member_note():
-    with patch("elixir_agent.db") as mock_db:
-        result = json.loads(
-            elixir_agent._execute_tool(
-                "update_member",
-                {"member_tag": "#ABC123", "field": "note", "value": "War Machine"},
-            )
-        )
-        assert result["success"] is True
-        mock_db.set_member_note.assert_called_once_with("#ABC123", name=None, note="War Machine")
+    assert result["success"] is True
+    assert result["field"] == field
+    getattr(mock_db, db_method).assert_called_once_with("#ABC123", **db_kwargs)
 
 
 def test_no_card_tool_hands_the_model_the_api_level_scale():

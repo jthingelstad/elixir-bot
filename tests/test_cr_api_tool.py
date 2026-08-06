@@ -95,28 +95,55 @@ def execute_cr_api():
 
 
 class TestExecuteCrApiDispatch:
-    def test_missing_aspect(self, execute_cr_api):
-        assert execute_cr_api({"tag": "#PYLQ2"}) == {"error": "aspect is required"}
-
-    def test_missing_tag(self, execute_cr_api):
-        result = execute_cr_api({"aspect": "player"})
-        assert result["error"] == "invalid_tag"
-
-    def test_invalid_tag(self, execute_cr_api):
-        result = execute_cr_api({"aspect": "player", "tag": "#BATTLE123"})
-        assert result["error"] == "invalid_tag"
-
-    def test_unknown_aspect(self, execute_cr_api):
-        result = execute_cr_api({"aspect": "bogus", "tag": "#PYLQ2"})
-        assert "Unknown aspect" in result["error"]
-
-    def test_rejects_our_clan_for_clan_aspect(self, execute_cr_api):
-        result = execute_cr_api({"aspect": "clan", "tag": f"#{cr_api.CLAN_TAG}"})
-        assert result["error"] == "our_clan_use_local_tools"
-
-    def test_rejects_our_clan_for_clan_members_aspect(self, execute_cr_api):
-        result = execute_cr_api({"aspect": "clan_members", "tag": f"#{cr_api.CLAN_TAG}"})
-        assert result["error"] == "our_clan_use_local_tools"
+    # Every way the dispatcher refuses before it ever calls the API. One table:
+    # args in, error out. Nothing here touches the network, so the only thing
+    # each case ever asserted was the error string.
+    @pytest.mark.parametrize(
+        "args,expected_error,expected_keys",
+        [
+            pytest.param({"tag": "#PYLQ2"}, "aspect is required", {"error"}, id="missing_aspect"),
+            pytest.param(
+                {"aspect": "player"}, "invalid_tag", {"error", "detail"}, id="missing_tag"
+            ),
+            pytest.param(
+                {"aspect": "player", "tag": "#BATTLE123"},
+                "invalid_tag",
+                {"error", "detail"},
+                id="invalid_tag",
+            ),
+            pytest.param(
+                {"aspect": "bogus", "tag": "#PYLQ2"},
+                "Unknown aspect: bogus",
+                {"error"},
+                id="unknown_aspect",
+            ),
+            pytest.param(
+                {"aspect": "clan", "tag": f"#{cr_api.CLAN_TAG}"},
+                "our_clan_use_local_tools",
+                {"error", "hint"},
+                id="rejects_our_clan_for_clan_aspect",
+            ),
+            pytest.param(
+                {"aspect": "clan_members", "tag": f"#{cr_api.CLAN_TAG}"},
+                "our_clan_use_local_tools",
+                {"error", "hint"},
+                id="rejects_our_clan_for_clan_members_aspect",
+            ),
+            # Ordering matters here: the missing leaderboard_id must be reported
+            # BEFORE tag validation, or a leaderboard call with no tag gets the
+            # misleading "invalid_tag" instead of the field it actually needs.
+            pytest.param(
+                {"aspect": "leaderboard"},
+                "leaderboard_id is required",
+                {"error"},
+                id="leaderboard_missing_id_errors_before_tag_validation",
+            ),
+        ],
+    )
+    def test_dispatch_rejects_bad_args(self, execute_cr_api, args, expected_error, expected_keys):
+        result = execute_cr_api(args)
+        assert result["error"] == expected_error
+        assert set(result) == expected_keys
 
     def test_player_not_found_returns_structured_error(self, execute_cr_api):
         with patch("cr_api.get_player", return_value=None):
@@ -240,10 +267,6 @@ class TestExecuteCrApiDispatch:
             ],
             "count": 1,
         }
-
-    def test_leaderboard_missing_id_errors_before_tag_validation(self, execute_cr_api):
-        result = execute_cr_api({"aspect": "leaderboard"})
-        assert result == {"error": "leaderboard_id is required"}
 
 
 # ---------------------------------------------------------------------------

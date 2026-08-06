@@ -58,32 +58,43 @@ def test_state_reset_on_corruption_is_logged(caplog):
     assert not caplog.records
 
 
-def test_one_good_week_never_holding():
-    assert advance_layer1("none", [True]) == "building"
-    assert advance_layer1("building", [True]) == "building"  # window < 4
-
-
-def test_three_of_four_reaches_holding():
-    assert advance_layer1("building", [True, True, False, True]) == "holding"
-
-
-def test_two_of_four_stays_building():
-    assert advance_layer1("building", [True, False, False, True]) == "building"
-
-
-def test_holding_breaks_only_at_one_of_four():
-    assert advance_layer1("holding", [False, True, False, True]) == "holding"
-    assert advance_layer1("holding", [False, False, True, False]) == "lapsed"
-
-
-def test_lapsed_reenters_on_next_qualifying():
-    assert advance_layer1("lapsed", [False, False, False, True]) == "building"
-    assert advance_layer1("lapsed", [False, False, False, False]) == "lapsed"
-
-
-def test_skipped_weeks_excluded_from_window():
-    # training-only war weeks are None — not failures
-    assert advance_layer1("holding", [None, True, True, None, False, True]) == "holding"
+# advance_layer1 is a pure state machine: (state, week window) -> state. The
+# whole 3-of-4 hysteresis contract as a table — one row per transition, so a
+# rule change shows up as the exact rows that flipped.
+@pytest.mark.parametrize(
+    "state,weeks,expected",
+    [
+        pytest.param("none", [True], "building", id="one_good_week_enters_building"),
+        pytest.param(
+            "building", [True], "building", id="one_good_week_never_holding_window_under_4"
+        ),
+        pytest.param(
+            "building", [True, True, False, True], "holding", id="three_of_four_reaches_holding"
+        ),
+        pytest.param(
+            "building", [True, False, False, True], "building", id="two_of_four_stays_building"
+        ),
+        pytest.param(
+            "holding", [False, True, False, True], "holding", id="two_of_four_holds_once_holding"
+        ),
+        pytest.param(
+            "holding", [False, False, True, False], "lapsed", id="one_of_four_breaks_holding"
+        ),
+        pytest.param(
+            "lapsed", [False, False, False, True], "building", id="lapsed_reenters_on_qualifying"
+        ),
+        pytest.param("lapsed", [False, False, False, False], "lapsed", id="lapsed_stays_lapsed"),
+        # training-only war weeks are None — not failures
+        pytest.param(
+            "holding",
+            [None, True, True, None, False, True],
+            "holding",
+            id="skipped_weeks_excluded_from_window",
+        ),
+    ],
+)
+def test_advance_layer1_hysteresis(state, weeks, expected):
+    assert advance_layer1(state, weeks) == expected
 
 
 def test_sustained_donor_is_roster_median_relative():
@@ -270,21 +281,22 @@ def test_war_contributor_still_escalates_after_extended_window(engine_conn):
     assert any(t["player_tag"] == "#A" for t in transitions)
 
 
-def test_ranked_play_earns_grace_equally(engine_conn):
-    # Ranked counts the same as war (as it does for earning elder): a Champion
-    # with zero clan wars, idle 10 days, still gets the extended confirm window.
+@pytest.mark.parametrize(
+    "league,battles,expected_state",
+    [
+        # Ranked counts the same as war (as it does for earning elder): a
+        # Champion with zero clan wars, idle 10 days, still gets the extended
+        # confirm window.
+        pytest.param(5, 6, "at_risk", id="ranked_play_earns_grace_equally"),
+        # No war deck, no ranked participation → no grace → plain 8-day card at 10.
+        pytest.param(2, 0, "recommended", id="weak_record_does_not_earn_grace"),
+    ],
+)
+def test_ranked_participation_decides_kick_grace(engine_conn, league, battles, expected_state):
     _seed_member(engine_conn, trophies=5000, last_battle_days_ago=10)
-    _set_ranked(engine_conn, "#A", league=5)
+    _set_ranked(engine_conn, "#A", league=league, battles=battles)
     management.run_tick_evaluators(engine_conn, now=NOW)
-    assert _kick_state(engine_conn) == "at_risk"
-
-
-def test_weak_record_does_not_earn_grace(engine_conn):
-    # No war deck, no ranked participation → no grace → plain 8-day card at 10.
-    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=10)
-    _set_ranked(engine_conn, "#A", league=2, battles=0)
-    management.run_tick_evaluators(engine_conn, now=NOW)
-    assert _kick_state(engine_conn) == "recommended"
+    assert _kick_state(engine_conn) == expected_state
 
 
 def test_any_battle_resets_to_none(engine_conn):
@@ -364,31 +376,34 @@ def test_watch_inference_does_not_suppress_kick(engine_conn):
     assert _kick_state(engine_conn) == "recommended"
 
 
-def test_leave_hold_suppresses_kick(engine_conn):
-    # The LOA exception: an explicit `Hold:` memory (member told leaders they're
-    # away) caps the card at at_risk — grace until the hold expires.
-    #
-    # The expiry is computed from the REAL clock, not from NOW. _has_leadership_hold
-    # compares against julianday('now') because a hold is about wall-clock leave, so
-    # a hardcoded future date is a fuse: this test was written with 2026-08-01 and
-    # started failing the moment UTC rolled past it, with a diff that reads like a
-    # kick-logic regression rather than a stale fixture.
-    future = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
-    _seed_member(engine_conn, last_battle_days_ago=10)
-    _add_memory(engine_conn, "#A", title="Hold: #A", expires_at=future)
-    management.run_tick_evaluators(engine_conn, now=NOW)
-    assert _kick_state(engine_conn) == "at_risk"
+@pytest.mark.parametrize(
+    "expiry_offset_days,expected_state",
+    [
+        # The LOA exception: an explicit `Hold:` memory (member told leaders
+        # they're away) caps the card at at_risk — grace until the hold expires.
+        pytest.param(30, "at_risk", id="live_leave_hold_suppresses_kick"),
+        # Once the leave window passes, the clock resumes and the card fires.
+        pytest.param(-30, "recommended", id="expired_leave_hold_does_not_suppress"),
+    ],
+)
+def test_leave_hold_expiry_decides_kick(engine_conn, expiry_offset_days, expected_state):
+    """Hold expiry is computed from the REAL clock, not from NOW.
 
-
-def test_expired_leave_hold_does_not_suppress(engine_conn):
-    # Once the leave window passes, the clock resumes and the card fires. Also
-    # relative to the real clock — a past date only stays past by luck of never
-    # rewinding, and stating the intent beats relying on that.
-    past = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+    _has_leadership_hold compares against julianday('now') because a hold is
+    about wall-clock leave, so a hardcoded date is a fuse: this test was written
+    with a literal 2026-08-01 and started failing the moment UTC rolled past it,
+    with a diff that reads like a kick-logic regression rather than a stale
+    fixture. The past case is relative for the same reason — a past date only
+    stays past by luck of the clock never rewinding, and stating the intent
+    beats relying on that.
+    """
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=expiry_offset_days)).strftime(
+        "%Y-%m-%d"
+    )
     _seed_member(engine_conn, last_battle_days_ago=10)
-    _add_memory(engine_conn, "#A", title="Hold: #A", expires_at=past)
+    _add_memory(engine_conn, "#A", title="Hold: #A", expires_at=expires_at)
     management.run_tick_evaluators(engine_conn, now=NOW)
-    assert _kick_state(engine_conn) == "recommended"
+    assert _kick_state(engine_conn) == expected_state
 
 
 def test_elder_never_reactive_recommended(engine_conn):
