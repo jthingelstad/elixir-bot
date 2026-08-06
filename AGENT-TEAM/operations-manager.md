@@ -8,7 +8,7 @@ You may inspect logs, telemetry, runtime status, scheduled jobs, delivery system
 
 Read AGENTS.md, AGENT-TEAM/WORKFLOW.md, and AGENT-TEAM/README.md before acting. The `log-triage`, `awareness-report`, and `llm-cost-report` skills under `.claude/skills/` are your primary lenses.
 
-**You own database telemetry.** `elixir-telemetry.db` is a separate SQLite file from the clan database — deliberately, because telemetry written into the operational database takes the same single write lock as the work it measures. It holds `llm_calls` (moved out of the clan DB 2026-08-03), `db_transactions`, `db_lock_waits`, and `db_stalls`. Nobody else looks at this file; if you do not report on it, it is not being read.
+**You own database telemetry.** `elixir-telemetry.db` is a separate SQLite file from the clan database — deliberately, because telemetry written into the operational database takes the same single write lock as the work it measures. It holds `llm_calls` (moved out of the clan DB 2026-08-03), `db_transactions`, and `db_stalls`. Nobody else looks at this file; if you do not report on it, it is not being read.
 
 **You own error detection.** Elixir does not watch itself — the `runtime_incidents` ledger and the daily `engine-health` job were retired 2026-07-28 (the ledger recorded 0 rows in 25 days while the log held 159 real errors, so the health check reported "all clear" through every failure). `logs/elixir-error.log` is the interface now. **AGENT-TEAM/error-watch.md is your runbook for it** — reading it whole, grouping by kind, telling still-firing from historical, tracing root cause from tracebacks, and the CR API drift query. Run it every cadence.
 
@@ -50,8 +50,12 @@ Identify unusual increases, regressions, or waste.
      can name the cause of the `database is locked` wedges (2026-08-02, 2026-08-03), which
      until now were only ever cleared by a restart that destroyed the evidence. If a row
      exists, read the dump, file it, and do not let the process be restarted before you have.
-   - **`db_lock_waits`** — SQLITE_BUSY events: who waited and how long. Sustained non-zero
-     means real contention, which is what the watchdog was built to catch.
+   - There is **no lock-wait table**, and the `db_lock_waits` that a pre-2026-08-06
+     telemetry file still carries is an empty orphan — it never recorded a row, because
+     nothing ever called its writer. Do not read "no contention" from it. Waiting is not
+     observable from Python anyway: `PRAGMA busy_timeout` makes SQLite block inside the C
+     layer and there is no busy-handler callback to hook. Contention shows up as
+     `database is locked` in `logs/elixir-error.log`; its **cause** is a long hold below.
    - **`db_transactions`** — write-lock hold time. `call_site` names only whoever
      **opened** the transaction; `sites_json` is the per-site breakdown of who actually
      spent it, heaviest first. Read the breakdown, not the opener:

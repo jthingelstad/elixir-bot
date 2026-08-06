@@ -168,7 +168,9 @@ BROAD_EXCEPTION_BASELINE = {
     # rule as every other writer here. That policy hid a real NameError (json
     # was never imported) until a test asserted the row actually persisted —
     # which is the argument for asserting persistence, not for raising.
-    "storage/telemetry.py": 6,
+    # 6 -> 5 (2026-08-06): record_lock_wait deleted with the db_lock_waits table
+    # it wrote — no caller, and no row in its lifetime.
+    "storage/telemetry.py": 5,
     "storage/metadata.py": 1,  # telemetry retention never fails clan maintenance
     # storage/incidents.py removed with the ledger it wrote (2026-07-28).
     "storage/leader_actions.py": 2,

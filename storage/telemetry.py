@@ -21,8 +21,8 @@ workload is worse than no telemetry, so every public function swallows and logs.
 The primary database stays about the clan. This one holds:
   - `llm_calls`      — every model call (moved out of the clan DB, 2026-08-03)
   - `db_transactions`— write-lock hold time by call site
-  - `db_lock_waits`  — SQLITE_BUSY events, who waited and how long
   - `db_stalls`      — a stack dump per detected stall (see watchdog.py)
+  - `wake_observations` / `wake_episodes` — what the wake evaluator saw and did
 """
 
 from __future__ import annotations
@@ -90,14 +90,15 @@ _SCHEMA = (
     )""",
     "CREATE INDEX IF NOT EXISTS idx_db_txn_recorded ON db_transactions(recorded_at)",
     "CREATE INDEX IF NOT EXISTS idx_db_txn_held ON db_transactions(held_ms)",
-    """CREATE TABLE IF NOT EXISTS db_lock_waits (
-        wait_id INTEGER PRIMARY KEY,
-        recorded_at TEXT NOT NULL,
-        call_site TEXT,
-        waited_ms INTEGER NOT NULL,
-        resolved INTEGER NOT NULL
-    )""",
-    "CREATE INDEX IF NOT EXISTS idx_db_wait_recorded ON db_lock_waits(recorded_at)",
+    # There is no `db_lock_waits` table. One existed from the 2026-08-03 split
+    # until 2026-08-06 and recorded zero rows the whole time, because nothing
+    # ever called its writer. It cannot be revived as written: `PRAGMA
+    # busy_timeout` (db/__init__.py) makes SQLite block inside the C layer, and
+    # Python's sqlite3 exposes no `sqlite3_busy_handler`, so there is no wait
+    # boundary to observe and no retry loop to instrument. Measuring waits would
+    # mean hand-rolling retries around every write in the bot. Hold time is the
+    # cause and wait time only the symptom, so db_transactions/db_stalls below
+    # are the instrument that matters.
     """CREATE TABLE IF NOT EXISTS db_stalls (
         stall_id INTEGER PRIMARY KEY,
         recorded_at TEXT NOT NULL,
@@ -282,19 +283,6 @@ def record_transaction(
         return None
 
 
-def record_lock_wait(call_site: str, waited_ms: int, *, resolved: bool) -> None:
-    try:
-        conn = connect()
-        conn.execute(
-            "INSERT INTO db_lock_waits (recorded_at, call_site, waited_ms, resolved) "
-            "VALUES (?, ?, ?, ?)",
-            (_utcnow(), call_site, int(waited_ms), 1 if resolved else 0),
-        )
-        conn.commit()
-    except Exception:
-        log.debug("telemetry: lock wait record failed", exc_info=True)
-
-
 def record_stall(call_site: str, open_ms: int, thread_dump: str) -> None:
     try:
         conn = connect()
@@ -369,7 +357,6 @@ def purge_old(now: datetime | None = None) -> dict:
         for table, column, days in (
             ("llm_calls", "recorded_at", LLM_CALL_RETENTION_DAYS),
             ("db_transactions", "recorded_at", DB_METRIC_RETENTION_DAYS),
-            ("db_lock_waits", "recorded_at", DB_METRIC_RETENTION_DAYS),
             ("db_stalls", "recorded_at", DB_METRIC_RETENTION_DAYS),
             ("wake_observations", "recorded_at", DB_METRIC_RETENTION_DAYS),
             ("wake_episodes", "recorded_at", DB_METRIC_RETENTION_DAYS),
@@ -386,7 +373,6 @@ __all__ = [
     "connect",
     "purge_old",
     "record_llm_call",
-    "record_lock_wait",
     "record_stall",
     "record_transaction",
     "record_wake_observation",
