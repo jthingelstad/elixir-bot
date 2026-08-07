@@ -100,6 +100,20 @@ def _failure_payload(kind, detail=None, *, response_text=None, parsed_obj=None, 
     return {"_error": payload}
 
 
+# Model output only. `strict=False` permits raw control characters INSIDE JSON
+# strings and changes nothing else about the grammar — a model composing a
+# Discord post writes real paragraph breaks rather than escaping them as \n, and
+# strict parsing threw the whole answer away over it. On 2026-08-07 that killed
+# the #ask-elixir daily post: `Invalid control character at: line 1 column 548`,
+# five literal newlines in an otherwise valid {"post", "topic"} object.
+#
+# Deliberately NOT applied to tool-result envelopes or anything else we
+# serialized ourselves — that JSON is well formed by construction, so a control
+# character there is a bug worth failing on rather than tolerating.
+def _loads_model_json(text):
+    return json.loads(text, strict=False)
+
+
 def _parse_response(text):
     """Parse LLM JSON response, handling markdown fences.
 
@@ -115,7 +129,7 @@ def _parse_response(text):
             cleaned = cleaned.split("```")[1]
             if cleaned.startswith("json"):
                 cleaned = cleaned[4:]
-        return json.loads(cleaned.strip())
+        return _loads_model_json(cleaned.strip())
     except json.JSONDecodeError, ValueError, IndexError:
         if text:
             log.warning("LLM returned plain text instead of JSON, wrapping: %s", text[:120])
@@ -136,7 +150,7 @@ def _parse_json_response(text):
         return None
     # Fast path: bare JSON
     if text.startswith("{") or text.startswith("["):
-        return json.loads(text)
+        return _loads_model_json(text)
     # Extract from markdown code fence (handles preamble before ```)
     fence = text.find("```")
     if fence != -1:
@@ -146,13 +160,13 @@ def _parse_json_response(text):
             inner = inner[:end]
         if inner.startswith("json"):
             inner = inner[4:]
-        return json.loads(inner.strip())
+        return _loads_model_json(inner.strip())
     # Fallback: find first JSON object in the text
     brace = text.find("{")
     if brace != -1:
-        obj, _ = json.JSONDecoder().raw_decode(text, brace)
+        obj, _ = json.JSONDecoder(strict=False).raw_decode(text, brace)
         return obj
-    return json.loads(text)
+    return _loads_model_json(text)
 
 
 def _validate_response(workflow, parsed_obj, response_schema=None):

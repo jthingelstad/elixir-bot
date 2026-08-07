@@ -189,6 +189,32 @@ def test_distill_ceiling_is_not_flush_against_typical_output(monkeypatch):
     assert seen["max_tokens"] >= 256
 
 
+def test_recruiting_copy_ceiling_covers_five_channels_plus_thinking(monkeypatch):
+    """One call writes copy for all five channels, so 1500 was ~300 each.
+
+    It had no margin even when it worked: the 2026-07-31 run on claude-opus-4-8
+    finished at 1495 tokens, five under the ceiling. This is a `creative`
+    workflow (claude-opus-5), which draws extended thinking from max_tokens, and
+    the 2026-08-07 run truncated at exactly 1500 and failed
+    promotion_content_cycle. Floor, not an exact value.
+    """
+    import agent.workflows as workflows
+
+    seen = {}
+
+    def capture(**kw):
+        seen.update(kw)
+        return _Resp('{"discord": "copy"}', "end_turn")
+
+    monkeypatch.setattr(workflows, "_create_chat_completion", capture)
+    monkeypatch.setattr(workflows, "_promote_system", lambda **kw: "sys")
+    monkeypatch.setattr(workflows, "_clan_context", lambda *a, **k: "clan")
+    monkeypatch.setattr(workflows, "_promotion_context", lambda *a, **k: "promo")
+
+    workflows.generate_promote_content({"requiredTrophies": 2000})
+    assert seen["max_tokens"] >= 8192
+
+
 def test_member_report_ceiling_clears_its_largest_observed_output():
     """The largest successful member_report was 1367 output tokens against a
     1400 ceiling. A 2% margin is not a margin."""

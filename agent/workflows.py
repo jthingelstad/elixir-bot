@@ -1395,7 +1395,15 @@ def generate_promote_content(clan_data, war_data=None, roster_data=None):
             system=_promote_system(required_trophies=required_trophies),
             messages=messages,
             temperature=0.8,
-            max_tokens=1500,
+            # 1500 -> 8192 (2026-08-07). One call writes copy for all FIVE
+            # channels, so 1500 was ~300 tokens each before thinking. It had no
+            # margin even when it worked: the 2026-07-31 run on claude-opus-4-8
+            # finished at 1495 tokens, five under the ceiling. This workflow is
+            # model_family="creative" (claude-opus-5), which draws extended
+            # thinking from max_tokens, and the 2026-08-07 run truncated at
+            # exactly 1500 and failed promotion_content_cycle outright. Same
+            # diagnosis as memory_synthesis in 480316b9.
+            max_tokens=8192,
             timeout=60,
         )
         return _parse_response(response_text(resp) or "null")
