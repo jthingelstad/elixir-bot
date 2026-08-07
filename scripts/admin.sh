@@ -29,10 +29,26 @@ record_control_action() {
 }
 
 status() {
-    if launchctl list | grep -q "$LABEL"; then
-        echo "elixir-bot is running."
+    # Match the label EXACTLY, in the third column. `grep -q "$LABEL"` was a
+    # substring test, and the sibling agent com.poapkings.elixir-drop-cr-bridge
+    # contains this label — so on 2026-08-07, while the bot was crash-looping on
+    # a Discord 503 and genuinely down, restart still printed "elixir-bot is
+    # running." twice. A status check that cannot report "stopped" is worse than
+    # no status check.
+    #
+    # Column 1 is the PID, or "-" when the job is loaded but not running, which
+    # is exactly the crash-loop state. Column 2 is the LAST exit status, not the
+    # current one, so it is deliberately not consulted here.
+    local pid
+    pid="$(launchctl list | awk -v l="$LABEL" '$3 == l {print $1}')"
+    if [ -n "$pid" ] && [ "$pid" != "-" ]; then
+        echo "elixir-bot is running (pid $pid)."
+    elif [ -n "$pid" ]; then
+        echo "elixir-bot is STOPPED (loaded but not running — check elixir-v5.log)."
+        return 1
     else
-        echo "elixir-bot is stopped."
+        echo "elixir-bot is stopped (not loaded)."
+        return 1
     fi
 }
 
@@ -40,7 +56,9 @@ stop_bot() {
     echo "==> Stopping elixir-bot..."
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
     sleep 1
-    status
+    # "stopped" is the goal here, and status now exits non-zero to say so, which
+    # `set -e` would otherwise treat as a failed stop and abort the restart.
+    status || true
 }
 
 start_bot() {
@@ -52,6 +70,9 @@ start_bot() {
     echo "==> Starting elixir-bot..."
     launchctl bootstrap "gui/$(id -u)" "$PLIST"
     sleep 3
+    # Deliberately NOT `|| true`: if the process is not up a few seconds after
+    # bootstrap, `restart` should exit non-zero rather than print a reassuring
+    # line and return 0. That is what happened on 2026-08-07.
     status
 }
 

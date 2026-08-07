@@ -37,9 +37,17 @@ def _admin_script_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
     )
     python_stub.chmod(0o755)
 
+    # `launchctl list` has to emit a realistic table, because status() reads it.
+    # Real output is TAB-separated: PID, last exit status, label. Tests override
+    # ADMIN_TEST_LAUNCHCTL_LIST to simulate stopped / crash-looping states.
     launchctl_stub = tools_dir / "launchctl"
     launchctl_stub.write_text(
-        '#!/bin/bash\necho "launchctl $*" >> "$ADMIN_TEST_LOG"\nexit 0\n',
+        "#!/bin/bash\n"
+        'echo "launchctl $*" >> "$ADMIN_TEST_LOG"\n'
+        'if [ "$1" = "list" ]; then\n'
+        "  printf '%b\\n' \"${ADMIN_TEST_LAUNCHCTL_LIST-8537\\t0\\tcom.poapkings.elixir}\"\n"
+        "fi\n"
+        "exit 0\n",
         encoding="utf-8",
     )
     launchctl_stub.chmod(0o755)
@@ -53,6 +61,19 @@ def _admin_script_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
         }
     )
     return admin_script, env, log_path
+
+
+def _status(tmp_path: Path, listing: str):
+    """Run `admin.sh status` against a simulated `launchctl list` table."""
+    admin_script, env, _log = _admin_script_fixture(tmp_path)
+    env["ADMIN_TEST_LAUNCHCTL_LIST"] = listing
+    return subprocess.run(
+        ["bash", str(admin_script), "status"],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
 
 
 def test_restart_backs_up_before_stopping_service(tmp_path):
@@ -94,6 +115,52 @@ def test_restart_aborts_without_stopping_when_backup_fails(tmp_path):
     assert any(line.startswith("python ") for line in calls)
     assert not any(" bootout " in line for line in calls)
     assert not any(" bootstrap " in line for line in calls)
+
+
+def test_status_does_not_mistake_the_sibling_agent_for_the_bot(tmp_path):
+    """The bug this pins: `com.poapkings.elixir-drop-cr-bridge` CONTAINS the
+    bot's label, and status used a substring grep. On 2026-08-07 the bot was
+    crash-looping on a Discord 503 and `restart` printed "elixir-bot is
+    running." twice while it was down."""
+    result = _status(tmp_path, "1521\\t0\\tcom.poapkings.elixir-drop-cr-bridge")
+
+    assert "is running" not in result.stdout, result.stdout
+    assert result.returncode != 0, "a stopped bot must not report success"
+
+
+def test_status_reports_stopped_when_loaded_but_not_running(tmp_path):
+    """The crash-loop state exactly: launchd still has the job, but column 1 is
+    "-" because no process is alive. Column 2 is the LAST exit status, not the
+    current one, so a non-zero there next to a live PID is history."""
+    result = _status(tmp_path, "-\\t1\\tcom.poapkings.elixir")
+
+    assert "STOPPED" in result.stdout, result.stdout
+    assert result.returncode != 0
+
+
+def test_status_reports_running_with_pid(tmp_path):
+    result = _status(tmp_path, "8537\\t1\\tcom.poapkings.elixir")
+
+    assert "is running" in result.stdout
+    assert "8537" in result.stdout, "the pid makes the claim checkable"
+    assert result.returncode == 0
+
+
+def test_restart_fails_loudly_when_the_bot_does_not_come_up(tmp_path):
+    """A restart that leaves the bot down must exit non-zero rather than print a
+    reassuring line and return 0."""
+    admin_script, env, _log = _admin_script_fixture(tmp_path)
+    env["ADMIN_TEST_LAUNCHCTL_LIST"] = "-\\t1\\tcom.poapkings.elixir"
+
+    result = subprocess.run(
+        ["bash", str(admin_script), "restart"],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0, result.stdout
 
 
 def test_activity_run_uses_registered_activity_runner(tmp_path):
