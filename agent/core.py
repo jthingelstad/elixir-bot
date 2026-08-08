@@ -179,15 +179,48 @@ EFFORT_BY_WORKFLOW = {
     "reception": "low",
 }
 
-# `output_config.effort` is rejected outright on Haiku 4.5, which is the whole
-# `lightweight` family (memory_distill, triage, the wake responder's first
-# rung). Those models also do not think by default, so there is nothing to bound
-# — sending effort would turn a working call into a 400.
+# ── Model capability gates ───────────────────────────────────────────────────
+#
+# These are API *removals*, not style preferences: sending a parameter a model
+# has dropped is a 400, not a warning. Both are keyed on the model id prefix
+# because that is what the API validates against, and they point in opposite
+# directions — which is why they live together instead of being discovered one
+# outage at a time.
+#
+# `output_config.effort` is rejected on Haiku 4.5, the whole `lightweight`
+# family (memory_distill, triage, the wake responder's first rung). Those models
+# also do not think by default, so there is nothing to bound there anyway.
 _MODELS_WITHOUT_EFFORT = ("claude-haiku-4-5",)
+
+# `temperature` / `top_p` / `top_k` were removed on the Claude 5 generation and
+# on Opus 4.7/4.8. They remain live on Haiku 4.5 and Sonnet 4.6, so this cannot
+# be a blanket removal — dropping temperature everywhere would silently change
+# lightweight behaviour.
+#
+# Until 2026-08-08 this module sent temperature to every model and absorbed the
+# resulting 400 with a retry, so EVERY claude-sonnet-5 and claude-opus-5 call
+# made two API round trips: one guaranteed failure, then the real request.
+# Measured over the 7 days to 2026-08-08: 233 sonnet-5 + 16 opus-5 calls, i.e.
+# 249 wasted round trips, on a workload averaging 18s (sonnet) and 40s (opus)
+# per call. The retry below still exists as a backstop for a model whose rules
+# change under us, but it now logs when it fires instead of hiding the cost.
+_MODELS_WITHOUT_SAMPLING = (
+    "claude-fable-5",
+    "claude-mythos-5",
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-sonnet-5",
+)
 
 
 def _supports_effort(model: str) -> bool:
     return not any(model.startswith(prefix) for prefix in _MODELS_WITHOUT_EFFORT)
+
+
+def _supports_sampling(model: str) -> bool:
+    """False when the model rejects temperature/top_p/top_k outright."""
+    return not any(model.startswith(prefix) for prefix in _MODELS_WITHOUT_SAMPLING)
 
 
 def _effort_for_workflow(workflow: str) -> str:
@@ -466,14 +499,17 @@ def _create_chat_completion(
     kwargs = {
         "model": selected_model,
         "messages": sanitized_messages,
-        "temperature": temperature,
         "max_tokens": max_tokens,
         "timeout": effective_timeout,
     }
 
+    # Only send what this model still accepts. Both gates are cheap string
+    # checks that replace a round trip each.
+    if _supports_sampling(selected_model):
+        kwargs["temperature"] = temperature
+
     # Bound how much of max_tokens thinking may consume. See EFFORT_BY_WORKFLOW —
-    # this replaces the removed `budget_tokens`, and is skipped on the models that
-    # reject the parameter.
+    # this replaces the removed `budget_tokens`.
     if _supports_effort(selected_model):
         kwargs["output_config"] = {"effort": _effort_for_workflow(workflow)}
 
@@ -501,10 +537,19 @@ def _create_chat_completion(
         try:
             resp = _get_client().messages.create(**kwargs)
         except BadRequestError as e:
-            # Sonnet 5 rejects the temperature param outright ("`temperature`
-            # is deprecated for this model"). Retry once without it so one
-            # model family's API change can't 400 every chat-tier call.
+            # Backstop only. `_supports_sampling` should already have kept
+            # temperature off any model that rejects it, so reaching here means
+            # a model started refusing it without being in
+            # `_MODELS_WITHOUT_SAMPLING` — the request still succeeds, but every
+            # call to that model is now paying a wasted round trip until the
+            # list is updated. That is worth an ERROR: it was silent for months.
             if "temperature" in str(e) and "temperature" in kwargs:
+                log.error(
+                    "sampling_rejected model=%s — temperature was sent to a model that "
+                    "refuses it; add its prefix to _MODELS_WITHOUT_SAMPLING or every "
+                    "call to it costs an extra failed round trip",
+                    selected_model,
+                )
                 kwargs.pop("temperature")
                 resp = _get_client().messages.create(**kwargs)
             else:

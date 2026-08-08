@@ -160,6 +160,53 @@ def test_supports_effort_guard():
     assert not core._supports_effort("claude-haiku-4-5-20251001")
 
 
+def test_temperature_is_not_sent_to_models_that_reject_it(monkeypatch):
+    """Sending it cost a guaranteed failed round trip on EVERY call.
+
+    `temperature` was removed on the Claude 5 generation, so the API 400s and the
+    code retried without it — two round trips per call, one of them certain to
+    fail. Measured over the 7 days to 2026-08-08: 249 such calls.
+    """
+    for workflow in ("awareness", "recruiting_copy"):
+        kwargs = _kwargs_for(monkeypatch, workflow)
+        assert not kwargs["model"].startswith("claude-haiku")
+        assert "temperature" not in kwargs, f"{workflow} still sends a rejected parameter"
+
+
+def test_temperature_is_still_sent_where_it_works(monkeypatch):
+    """Not a blanket removal — it remains live on Haiku 4.5, so dropping it
+    everywhere would silently change lightweight behaviour."""
+    kwargs = _kwargs_for(monkeypatch, "memory_distill")
+    assert kwargs["model"].startswith("claude-haiku-4-5")
+    assert "temperature" in kwargs
+
+
+def test_supports_sampling_guard():
+    for rejects in ("claude-sonnet-5", "claude-opus-5", "claude-fable-5", "claude-opus-4-8"):
+        assert not core._supports_sampling(rejects), rejects
+    for accepts in ("claude-haiku-4-5-20251001", "claude-sonnet-4-6"):
+        assert core._supports_sampling(accepts), accepts
+
+
+def test_every_configured_model_family_is_covered_by_both_gates():
+    """The gates are keyed on id prefixes, so a model id change silently falls
+    through to the wrong branch. Pin the live families against both."""
+    families = {
+        "chat": core._chat_model_name(),
+        "creative": core._creative_model_name(),
+        "intensive": core._intensive_model_name(),
+        "lightweight": core._lightweight_model_name(),
+    }
+    # Claude 5 tiers: effort yes, sampling no. Haiku: the exact inverse.
+    for name in ("chat", "creative", "intensive"):
+        model = families[name]
+        assert core._supports_effort(model), f"{name}={model} lost effort"
+        assert not core._supports_sampling(model), f"{name}={model} would 400 on temperature"
+    light = families["lightweight"]
+    assert not core._supports_effort(light), f"lightweight={light} would 400 on effort"
+    assert core._supports_sampling(light)
+
+
 def test_capture_records_thinking_blocks_that_the_text_extractor_drops(monkeypatch):
     """A response that is ALL thinking must not serialize as "the model returned
     nothing".
