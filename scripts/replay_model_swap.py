@@ -93,6 +93,7 @@ def main() -> int:
     print(f"replaying {len(rows)} real {args.workflow} prompts on {args.candidate}")
     print(f"schema requires: {required or '(no schema)'}\n")
     ok_parse = ok_schema = 0
+    skipped_delta = 0
     deltas = []
     for i, r in enumerate(rows, 1):
         p = json.loads(r["prompt_json"])
@@ -113,20 +114,44 @@ def main() -> int:
         missing = [f for f in required if not (parsed or {}).get(f)]
         ok_parse += parsed is not None
         ok_schema += parsed is not None and not missing
-        d = len(text) - len(incumbent)
-        deltas.append(d)
+        # A captured call with no text is not a length comparison. That is the
+        # NORMAL shape for a tool round (the content is in the tool_use block)
+        # and for a thinking-only response, and counting those as "incumbent
+        # produced 0 chars" inflates the delta by the candidate's whole length.
+        # Measured 2026-08-08: intent_router had empty incumbent text in 309 of
+        # 309 captured rows, awareness in 255 of 370, deck_review in 94 of 131 —
+        # so this statistic was mostly comparing against nothing. Parse and
+        # schema checks below still use every row; only the delta skips them.
         status = "OK   " if parsed is not None and not missing else "FAIL "
-        print(
-            f"  [{i}] {status} parsed={parsed is not None!s:5} "
-            f"missing={missing or '-'}  len {len(incumbent)}->{len(text)} ({d:+})"
-        )
+        if incumbent:
+            d = len(text) - len(incumbent)
+            deltas.append(d)
+            print(
+                f"  [{i}] {status} parsed={parsed is not None!s:5} "
+                f"missing={missing or '-'}  len {len(incumbent)}->{len(text)} ({d:+})"
+            )
+        else:
+            skipped_delta += 1
+            print(
+                f"  [{i}] {status} parsed={parsed is not None!s:5} "
+                f"missing={missing or '-'}  len -->{len(text)} "
+                f"(no incumbent text — not length-comparable)"
+            )
     n = len(rows)
     print(f"\n  parses:          {ok_parse}/{n}")
     print(f"  schema-complete: {ok_schema}/{n}")
     if deltas:
         print(
-            f"  mean length delta vs incumbent ({rows[0]['model']}): {sum(deltas) / len(deltas):+.0f} chars"
+            f"  mean length delta vs incumbent ({rows[0]['model']}): "
+            f"{sum(deltas) / len(deltas):+.0f} chars over {len(deltas)}/{n} comparable calls"
         )
+    if skipped_delta:
+        print(
+            f"  ({skipped_delta}/{n} captured calls had no incumbent text — tool rounds or "
+            "thinking-only responses — and are excluded from the length delta)"
+        )
+    if not deltas:
+        print("  mean length delta vs incumbent: n/a — no captured call had text to compare")
     print("\n  VERDICT:", "safe to swap" if ok_schema == n else "DO NOT SWAP — schema failures")
     return 0
 

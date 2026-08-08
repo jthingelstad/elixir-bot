@@ -90,6 +90,57 @@ def test_truncated_response_logs_at_error(monkeypatch, caplog):
     assert "100" in message
 
 
+def test_capture_records_thinking_blocks_that_the_text_extractor_drops(monkeypatch):
+    """A response that is ALL thinking must not serialize as "the model returned
+    nothing".
+
+    These models emit `thinking` blocks unasked — nothing in this codebase sets
+    the `thinking` parameter — and response_text/response_tool_uses filter by
+    exact type. On 2026-08-08 an ask_elixir_daily call burned its entire 4096
+    ceiling on thinking and the stored response showed empty text and zero tool
+    calls, which read as an impossible result and cost a full diagnosis cycle to
+    explain.
+    """
+    import json as _json
+
+    class _Thinking:
+        type = "thinking"
+        thinking = "x" * 3117
+
+    class _AllThinking:
+        stop_reason = "max_tokens"
+        content = [_Thinking()]
+
+    captured = _json.loads(core._serialize_response(_AllThinking()))
+
+    assert captured["text"] in (None, ""), "premise: the text extractor sees nothing"
+    assert captured["tool_uses"] == []
+    census = captured["block_census"]
+    assert census["thinking"]["blocks"] == 1
+    assert census["thinking"]["chars"] == 3117, "the tokens must be accounted for somewhere"
+
+
+def test_capture_census_covers_text_and_tool_use_too(monkeypatch):
+    import json as _json
+
+    class _Text:
+        type = "text"
+        text = "hello"
+
+    class _Tool:
+        type = "tool_use"
+        name = "get_clan_roster"
+        input = {"aspect": "list"}
+
+    class _Mixed:
+        stop_reason = "tool_use"
+        content = [_Text(), _Tool()]
+
+    census = _json.loads(core._serialize_response(_Mixed()))["block_census"]
+    assert census["text"]["blocks"] == 1
+    assert census["tool_use"]["blocks"] == 1
+
+
 def test_untruncated_response_logs_no_error(monkeypatch, caplog):
     monkeypatch.setattr(
         core, "_get_client", lambda: _FakeClient(_Resp("a full answer", "end_turn"))

@@ -312,17 +312,40 @@ def _serialize_prompt(system, messages, tools, max_tokens, temperature):
 
 def _serialize_response(resp):
     """The model's response (text + requested tool calls + stop reason) as a
-    JSON string — or None on failure."""
+    JSON string — or None on failure.
+
+    Also records a census of every content block. These models emit `thinking`
+    blocks without being asked to (nothing here ever sets the `thinking`
+    parameter), and `response_text`/`response_tool_uses` filter by exact type, so
+    a response that was ALL thinking used to serialize as empty text and no tool
+    calls. On 2026-08-08 that made a 4096-token ask_elixir_daily truncation look
+    like the model had returned literally nothing, and the cause was only found
+    by re-running the workflow and inspecting the live blocks. Sizes, not
+    content: enough to explain where the tokens went, cheap to store.
+    """
     if resp is None:
         return None
     try:
         import json as _json
+
+        census: dict[str, dict] = {}
+        for block in getattr(resp, "content", None) or []:
+            kind = getattr(block, "type", None) or "unknown"
+            entry = census.setdefault(kind, {"blocks": 0, "chars": 0})
+            entry["blocks"] += 1
+            if kind == "text":
+                entry["chars"] += len(getattr(block, "text", "") or "")
+            elif kind == "tool_use":
+                entry["chars"] += len(str(getattr(block, "input", "") or ""))
+            else:
+                entry["chars"] += len(str(getattr(block, "thinking", "") or ""))
 
         return _json.dumps(
             {
                 "stop_reason": getattr(resp, "stop_reason", None),
                 "text": response_text(resp),
                 "tool_uses": [{"name": b.name, "input": b.input} for b in response_tool_uses(resp)],
+                "block_census": census,
             },
             default=str,
         )
