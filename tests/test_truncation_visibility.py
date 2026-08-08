@@ -90,6 +90,76 @@ def test_truncated_response_logs_at_error(monkeypatch, caplog):
     assert "100" in message
 
 
+# --------------------------------------------------------- thinking is bounded (2026-08-08)
+
+
+def _kwargs_for(monkeypatch, workflow):
+    """Capture the kwargs core sends to the API for one workflow."""
+    seen = {}
+
+    class _Client:
+        @property
+        def messages(self):
+            class _M:
+                def create(self, **kw):
+                    seen.update(kw)
+                    return _Resp("ok", "end_turn")
+
+            return _M()
+
+    monkeypatch.setattr(core, "_get_client", lambda: _Client())
+    core._create_chat_completion(
+        workflow=workflow, messages=[{"role": "user", "content": "x"}], max_tokens=512
+    )
+    return seen
+
+
+def test_effort_bounds_thinking_on_models_that_support_it(monkeypatch):
+    """`budget_tokens` was REMOVED and 400s on claude-sonnet-5 / claude-opus-5, so
+    effort is the only way to bound thinking. Nothing set it until 2026-08-08,
+    which is why one ask_elixir_daily call spent its whole 4096-token ceiling on
+    thinking and emitted no text and no tool call at all."""
+    kwargs = _kwargs_for(monkeypatch, "awareness")
+    assert kwargs["model"] == "claude-sonnet-5"
+    assert kwargs["output_config"] == {"effort": "high"}
+    assert "budget_tokens" not in str(kwargs), "budget_tokens is a 400 on this model"
+
+
+def test_effort_is_per_workflow(monkeypatch):
+    """A short daily post does not need the brain's reasoning depth."""
+    assert _kwargs_for(monkeypatch, "ask_elixir_daily")["output_config"] == {"effort": "medium"}
+    assert _kwargs_for(monkeypatch, "awareness")["output_config"] == {"effort": "high"}
+
+
+def test_unlisted_workflow_gets_the_default_effort():
+    """The effort lookup falls back rather than raising on an unknown workflow."""
+    assert core._effort_for_workflow("some_workflow_with_no_entry") == core.DEFAULT_EFFORT
+
+
+def test_an_unregistered_workflow_routes_to_haiku_and_so_sends_no_effort(monkeypatch):
+    """Worth pinning because it is a two-step fallback that is easy to misread:
+    an unknown workflow resolves to the LIGHTWEIGHT family, and that model rejects
+    effort — so the default effort above is never actually sent for one."""
+    kwargs = _kwargs_for(monkeypatch, "some_workflow_with_no_entry")
+    assert kwargs["model"].startswith("claude-haiku-4-5")
+    assert "output_config" not in kwargs
+
+
+def test_effort_is_never_sent_to_haiku(monkeypatch):
+    """`output_config.effort` is rejected outright on Haiku 4.5 — sending it would
+    turn every working lightweight call into a 400. Those models also do not think
+    by default, so there is nothing to bound."""
+    kwargs = _kwargs_for(monkeypatch, "memory_distill")
+    assert kwargs["model"].startswith("claude-haiku-4-5")
+    assert "output_config" not in kwargs
+
+
+def test_supports_effort_guard():
+    assert core._supports_effort("claude-sonnet-5")
+    assert core._supports_effort("claude-opus-5")
+    assert not core._supports_effort("claude-haiku-4-5-20251001")
+
+
 def test_capture_records_thinking_blocks_that_the_text_extractor_drops(monkeypatch):
     """A response that is ALL thinking must not serialize as "the model returned
     nothing".

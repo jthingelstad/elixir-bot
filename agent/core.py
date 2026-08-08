@@ -140,6 +140,60 @@ def _model_for_workflow(workflow, model=None):
     return _lightweight_model_name()
 
 
+# How hard each workflow may think. This is the ONLY supported way to bound
+# thinking on these models: `thinking={"type": "enabled", "budget_tokens": N}`
+# was removed and returns a 400 on claude-sonnet-5 and claude-opus-5, so there
+# is no token budget to set. Depth is `output_config.effort` instead.
+#
+# Until 2026-08-08 nothing here set effort at all, so every call ran at the API
+# default (`high`) and thinking was unbounded in practice — which is how one
+# ask_elixir_daily call spent its entire 4096-token ceiling on thinking and
+# emitted no text and no tool call at all.
+#
+# `high` is the API default, so naming it changes nothing today; it is written
+# down so the value is visible and tunable rather than inherited. Lower entries
+# are the deliberate ones, and each is a claim that the workflow does not need
+# deep reasoning — routing a message, or composing one short post.
+DEFAULT_EFFORT = "high"
+EFFORT_BY_WORKFLOW = {
+    # The deliberative brain and the long-form writing keep full depth.
+    "awareness": "high",
+    "awareness_repair": "high",
+    "memory_synthesis": "high",
+    "weekly_recap": "high",
+    "weekly_recap_email": "high",
+    # Conversation and composition: real judgment, not deep reasoning.
+    "interactive": "medium",
+    "clanops": "medium",
+    "deck_review": "medium",
+    "recruiting_copy": "medium",
+    "member_report": "medium",
+    "leader_action_feedback": "medium",
+    # One short Discord post from a prepared read. This is the workflow whose
+    # thinking ran away on 2026-08-08.
+    "ask_elixir_daily": "medium",
+    # Pick a route / answer one scoped event. Deep reasoning is pure latency.
+    "intent_router": "low",
+    "wake_response": "low",
+    "wake_response_chat": "low",
+    "reception": "low",
+}
+
+# `output_config.effort` is rejected outright on Haiku 4.5, which is the whole
+# `lightweight` family (memory_distill, triage, the wake responder's first
+# rung). Those models also do not think by default, so there is nothing to bound
+# — sending effort would turn a working call into a 400.
+_MODELS_WITHOUT_EFFORT = ("claude-haiku-4-5",)
+
+
+def _supports_effort(model: str) -> bool:
+    return not any(model.startswith(prefix) for prefix in _MODELS_WITHOUT_EFFORT)
+
+
+def _effort_for_workflow(workflow: str) -> str:
+    return EFFORT_BY_WORKFLOW.get(workflow, DEFAULT_EFFORT)
+
+
 MAX_TOOL_ROUNDS = 3
 MAX_CONTEXT_MEMBERS_DEFAULT = 30
 MAX_CONTEXT_MEMBERS_FULL = 50
@@ -416,6 +470,12 @@ def _create_chat_completion(
         "max_tokens": max_tokens,
         "timeout": effective_timeout,
     }
+
+    # Bound how much of max_tokens thinking may consume. See EFFORT_BY_WORKFLOW —
+    # this replaces the removed `budget_tokens`, and is skipped on the models that
+    # reject the parameter.
+    if _supports_effort(selected_model):
+        kwargs["output_config"] = {"effort": _effort_for_workflow(workflow)}
 
     # System prompt with optional prompt caching
     if system:
