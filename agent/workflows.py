@@ -539,16 +539,27 @@ def generate_ask_elixir_daily(
         _ask_elixir_daily_system(),
         user_msg,
         workflow="ask_elixir_daily",
-        # 1400 -> 4096 (2026-08-06). This workflow calls TOOLS (max_tool_rounds=6)
-        # and the ceiling has to cover a tool round, not just the final post.
-        # Every one of the 12 recorded truncations stopped at EXACTLY 1400 tokens
-        # while emitting a `tool_use` block, i.e. it died mid-tool-call on round
-        # one and never reached a second call — from 2026-07-26 to 2026-08-06 the
-        # job made exactly one LLM call a day and that call always truncated.
-        # Sized against its tool-using siblings (deck_review 4096, awareness 8192);
-        # successful final posts average 574 output tokens, so the headroom is for
-        # the tool rounds, which is where it was actually being spent.
-        max_tokens=4096,
+        # 1400 -> 4096 (2026-08-06) -> 16384 (2026-08-08). Two different causes,
+        # and the first raise fixed only the first one.
+        #
+        # At 1400 it died mid-tool-call: all 12 truncations stopped at exactly
+        # 1400 while emitting a `tool_use` block, so from 2026-07-26 the job made
+        # one call a day and that call always truncated. 4096 fixed that — on
+        # 2026-08-07 it ran three calls (905 with a tool_use, then 743 and 350
+        # of text) and reached the JSON parse for the first time.
+        #
+        # Then on 2026-08-08 it truncated at exactly 4096 having emitted NO text
+        # and NO tool_use at all: the entire budget went to extended thinking
+        # before a single visible character. That is the memory_synthesis
+        # signature (see the 16384 comment on that call), and it is why sizing
+        # this against the visible answer keeps being wrong — thinking is drawn
+        # from max_tokens and its size is not something the prompt controls.
+        #
+        # 16384 is the number that has actually held in this repo: weekly_recap
+        # and weekly_recap_email have not truncated since moving to it, and
+        # awareness — the closest sibling, tool-using on the same sonnet-5 — has
+        # legitimately produced 14,890 tokens in one call.
+        max_tokens=16384,
         allowed_tools=TOOLSETS_BY_WORKFLOW["ask_elixir_daily"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["ask_elixir_daily"],
         strict_json=True,

@@ -154,12 +154,18 @@ def test_daily_composer_surfaces_error_instead_of_collapsing_to_none():
         assert workflows.generate_ask_elixir_daily({}) is None
 
 
-def test_daily_ceiling_covers_a_tool_round():
-    """The ceiling must leave room for tool rounds, not just the final post.
+def test_daily_ceiling_covers_thinking_not_just_the_visible_post():
+    """The ceiling has been wrong twice, for two different reasons.
 
-    Every recorded truncation stopped at exactly 1400 tokens while emitting a
-    `tool_use` block — it died mid-tool-call on round one. This is a floor, not
-    an exact value: raising it further is fine, dropping back is the regression.
+    At 1400 it died mid-tool-call — every truncation stopped at exactly 1400
+    while emitting a `tool_use` block. Raised to 4096, it then truncated at
+    exactly 4096 having emitted NO text and NO tool_use: the whole budget went
+    to extended thinking before a single visible character. Sizing this against
+    the ~574-token post is what keeps failing, because thinking is drawn from
+    max_tokens and the prompt does not control how much of it happens.
+
+    A floor, not an exact value: raising it further is fine, dropping back is
+    the regression.
     """
     import agent.workflows as workflows
 
@@ -172,7 +178,7 @@ def test_daily_ceiling_covers_a_tool_round():
     with patch.object(workflows, "_chat_with_tools", side_effect=capture):
         workflows.generate_ask_elixir_daily({})
 
-    assert seen["max_tokens"] >= 4096
+    assert seen["max_tokens"] >= 16384
 
 
 # --- rehearsal-driven tool fixes (2026-07-04) -------------------------------
