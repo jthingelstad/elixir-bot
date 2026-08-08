@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+from typing import NamedTuple
 
 from anthropic import Anthropic, APIConnectionError, APIError, BadRequestError
 
@@ -140,44 +141,114 @@ def _model_for_workflow(workflow, model=None):
     return _lightweight_model_name()
 
 
-# How hard each workflow may think. This is the ONLY supported way to bound
-# thinking on these models: `thinking={"type": "enabled", "budget_tokens": N}`
-# was removed and returns a 400 on claude-sonnet-5 and claude-opus-5, so there
-# is no token budget to set. Depth is `output_config.effort` instead.
+# ── The model-call policy ────────────────────────────────────────────────────
 #
-# Until 2026-08-08 nothing here set effort at all, so every call ran at the API
-# default (`high`) and thinking was unbounded in practice — which is how one
-# ask_elixir_daily call spent its entire 4096-token ceiling on thinking and
-# emitted no text and no tool call at all.
+# One row per workflow: how long its answer may be, and how hard it may think.
+# This is the single place either number is chosen.
 #
-# `high` is the API default, so naming it changes nothing today; it is written
-# down so the value is visible and tunable rather than inherited. Lower entries
-# are the deliberate ones, and each is a claim that the workflow does not need
-# deep reasoning — routing a message, or composing one short post.
+# It is centralized because the alternative was tried and failed quietly. Until
+# 2026-08-08 `max_tokens` was a literal at ~25 call sites across six files —
+# 200, 300, 400, 512, 600, 900, 1200, 1600, 2000, 2048, 2500, 4096, 8192, 9000,
+# 16384 — almost none carrying a reason, and `effort` was set nowhere at all.
+# Nobody could see the set, so nobody could tell a deliberate ceiling from a
+# copied one, and three separate workflows silently truncated for weeks.
+#
+# max_tokens is a CEILING (what the answer may not exceed) and effort is the
+# SPEND (how much thinking actually happens). They are different levers and the
+# common mistake is to reach for the first when you mean the second: raising a
+# ceiling never shortens an answer, and lowering one truncates rather than
+# tightens. Keep ceilings generous — an unused ceiling is free — and control
+# cost with effort.
+#
+# `budget_tokens` is deliberately absent: it was removed from these models and
+# now returns a 400, so effort is the only thinking control that exists.
 DEFAULT_EFFORT = "high"
-EFFORT_BY_WORKFLOW = {
-    # The deliberative brain and the long-form writing keep full depth.
-    "awareness": "high",
-    "awareness_repair": "high",
-    "memory_synthesis": "high",
-    "weekly_recap": "high",
-    "weekly_recap_email": "high",
-    # Conversation and composition: real judgment, not deep reasoning.
-    "interactive": "medium",
-    "clanops": "medium",
-    "deck_review": "medium",
-    "recruiting_copy": "medium",
-    "member_report": "medium",
-    "leader_action_feedback": "medium",
-    # One short Discord post from a prepared read. This is the workflow whose
-    # thinking ran away on 2026-08-08.
-    "ask_elixir_daily": "medium",
-    # Pick a route / answer one scoped event. Deep reasoning is pure latency.
-    "intent_router": "low",
-    "wake_response": "low",
-    "wake_response_chat": "low",
-    "reception": "low",
+DEFAULT_MAX_TOKENS = 4096
+
+
+class CallPolicy(NamedTuple):
+    max_tokens: int
+    effort: str = DEFAULT_EFFORT
+
+
+# Effort is only named where it differs from the API default, so a row with just
+# a ceiling reads as "nothing special about this one".
+MODEL_CALL_POLICY: dict[str, CallPolicy] = {
+    # ── The brain and the long-form writing: full depth, room to finish ──
+    #
+    # The 16384s are not guesses. Each of these ran on an Opus-tier model with a
+    # ceiling sized for its visible answer, spent the whole budget on thinking
+    # before writing a character, and failed silently: memory_synthesis returned
+    # completion_chars=0 against a 3000 ceiling (2026-08-02), and weekly_recap
+    # did the same at 1600 and never sent the Monday clan report (2026-08-03).
+    # These run weekly or less, so headroom is a rounding error against the cost
+    # of the output silently not existing — and an unused ceiling is not billed.
+    "awareness": CallPolicy(8192),
+    "awareness_repair": CallPolicy(8192),
+    "memory_synthesis": CallPolicy(16384),
+    "weekly_recap": CallPolicy(16384),
+    "weekly_recap_email": CallPolicy(16384),
+    "release_notes": CallPolicy(8192),
+    "screenshot_readout": CallPolicy(9000),
+    # ── Conversation and composition: real judgment, not deep reasoning ──
+    "interactive": CallPolicy(4096, "medium"),
+    "clanops": CallPolicy(8192, "medium"),
+    "deck_review": CallPolicy(4096, "medium"),
+    # One call writes copy for all FIVE channels, so its old 1500 was ~300 each
+    # before thinking — and it truncated at exactly 1500 on 2026-08-07, failing
+    # promotion_content_cycle outright.
+    "recruiting_copy": CallPolicy(8192, "medium"),
+    # Its largest SUCCESSFUL response was 1367 tokens against a 1400 ceiling; a
+    # 2% margin is not a margin. Length scales with how many battle types a
+    # member played.
+    "member_report": CallPolicy(2048, "medium"),
+    "leader_action_feedback": CallPolicy(1200, "medium"),
+    "intel_report": CallPolicy(4096, "medium"),
+    "tournament_recap": CallPolicy(2500, "medium"),
+    # Never had a ceiling of its own — it inherited _chat_with_tools' 4096
+    # default, which nobody chose for it. Written down at the value it was
+    # already getting; surfaced by the policy-coverage test, not by an outage.
+    "tournament_update": CallPolicy(4096, "medium"),
+    "war_intel": CallPolicy(2000, "medium"),
+    "game_factual_repair": CallPolicy(1600, "medium"),
+    "elder_standing": CallPolicy(1200, "medium"),
+    "clan_chat_copy": CallPolicy(900, "medium"),
+    # One short Discord post from an already-assembled read, and the worked
+    # example for why these are two separate levers. Sized against its visible
+    # answer it failed twice: at 1400 it died mid-tool-call every day for two
+    # weeks, and at 4096 it truncated having emitted no text and no tool call at
+    # all — the whole budget gone to thinking. The ceiling is generous because
+    # ceilings are free; `medium` is what actually holds the spend down, and it
+    # cut a real run from 1708 tokens to 788.
+    "ask_elixir_daily": CallPolicy(16384, "medium"),
+    # ── Scoped: pick a route, answer one event, write one line ──
+    "help": CallPolicy(600, "low"),
+    "intent_router": CallPolicy(512, "low"),
+    "reception": CallPolicy(400, "low"),
+    "leader_note_interpret": CallPolicy(400, "low"),
+    "member_outreach_ask": CallPolicy(300, "low"),
+    "wake_response": CallPolicy(4096, "low"),
+    "wake_response_chat": CallPolicy(4096, "low"),
+    # ── Lightweight family (Haiku 4.5): effort is REJECTED on these models and
+    # is dropped before the request, so the value here is inert. See
+    # `_supports_effort`. ──
+    "memory_inference": CallPolicy(1500),
+    # 12 of 71 calls hit the old 100 ceiling while successful ones averaged 71
+    # tokens and peaked at 99 — finishing flush against the wall. The 1-2
+    # sentence budget is set by the system prompt; this is only the safety net.
+    "memory_distill": CallPolicy(256),
+    "lightweight": CallPolicy(200),
 }
+
+
+def policy_for(workflow: str) -> CallPolicy:
+    """The ceiling and thinking depth for one workflow.
+
+    Unknown workflows get the defaults rather than raising: a missing row should
+    degrade to a sane call, not take down the caller.
+    """
+    return MODEL_CALL_POLICY.get(workflow, CallPolicy(DEFAULT_MAX_TOKENS, DEFAULT_EFFORT))
+
 
 # ── Model capability gates ───────────────────────────────────────────────────
 #
@@ -224,7 +295,7 @@ def _supports_sampling(model: str) -> bool:
 
 
 def _effort_for_workflow(workflow: str) -> str:
-    return EFFORT_BY_WORKFLOW.get(workflow, DEFAULT_EFFORT)
+    return policy_for(workflow).effort
 
 
 MAX_TOOL_ROUNDS = 3
@@ -451,18 +522,26 @@ def _create_chat_completion(
     system=None,
     model=None,
     temperature=0.7,
-    max_tokens=4096,
+    max_tokens=None,
     timeout=60,
     tools=None,
     tool_choice=None,
 ):
     """Call the Anthropic Messages API and return the native Message response.
 
+    `max_tokens=None` — the normal case — takes the workflow's ceiling from
+    MODEL_CALL_POLICY. Pass a number only for a genuine per-call override, such
+    as a retry that needs more headroom than the workflow's usual ceiling.
+
     messages: native Anthropic messages (user/assistant roles only; content is
     a string or a list of content blocks — SDK block objects from a prior
     response are fine). The system prompt goes in `system`, not a message.
     """
     started = time.perf_counter()
+
+    policy = policy_for(workflow)
+    if max_tokens is None:
+        max_tokens = policy.max_tokens
 
     # The daily spend ceiling. Refused BEFORE the call, because the point is to
     # not spend. Hard-post workflows are exempt by name — a floor is never
@@ -511,7 +590,7 @@ def _create_chat_completion(
     # Bound how much of max_tokens thinking may consume. See EFFORT_BY_WORKFLOW —
     # this replaces the removed `budget_tokens`.
     if _supports_effort(selected_model):
-        kwargs["output_config"] = {"effort": _effort_for_workflow(workflow)}
+        kwargs["output_config"] = {"effort": policy.effort}
 
     # System prompt with optional prompt caching
     if system:

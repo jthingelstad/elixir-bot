@@ -48,12 +48,6 @@ def distill_summary(text: str) -> str | None:
                 {"role": "user", "content": text[:2000]},
             ],
             temperature=0.3,
-            # 100 -> 256 (2026-08-06). 12 of 71 calls hit the ceiling, and the
-            # successful ones averaged 71 output tokens with a maximum of 99 —
-            # they were finishing flush against the wall, which is the shape of a
-            # limit that is binding rather than generous. The 1-2 sentence budget
-            # is set by the system prompt; this is only the safety net.
-            max_tokens=256,
             timeout=15,
         )
         # A truncated summary is worse than no summary: it reads as complete and
@@ -118,7 +112,6 @@ def extract_inference_facts(content: str, context_label: str | None = None) -> l
                 {"role": "user", "content": user_msg},
             ],
             temperature=0.2,
-            max_tokens=1500,
             timeout=20,
         )
         raw = (response_text(resp) or "").strip()

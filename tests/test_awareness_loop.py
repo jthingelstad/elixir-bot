@@ -385,13 +385,17 @@ def test_repair_awareness_plan_has_headroom_for_multi_post_plans():
     """#177 regression (2026-07-16): the repair truncated a 2-post plan at
     max_tokens=4096, dropping a post → deliver rejected repair.changed_post_count
     → failed tick. The repair must echo the FULL plan back, so it needs headroom
-    for multiple posts."""
+    for multiple posts.
+
+    The ceiling moved into agent.core.MODEL_CALL_POLICY on 2026-08-08, so the
+    call site no longer passes it and this asserts the policy instead."""
+    import agent.core as core
     import agent.workflows as workflows
 
     captured = {}
 
     def _capture(*args, **kwargs):
-        captured["max_tokens"] = kwargs.get("max_tokens")
+        captured["called"] = True
         return {"posts": []}
 
     two_post_plan = {
@@ -407,7 +411,8 @@ def test_repair_awareness_plan_has_headroom_for_multi_post_plans():
             ["post[1].current_rank_while_unranked"],
         )
 
-    assert captured["max_tokens"] >= 8192
+    assert captured.get("called"), "repair should have issued a model call"
+    assert core.policy_for("awareness_repair").max_tokens >= 8192
 
 
 def test_run_awareness_tick_serializes_the_full_read_compactly():

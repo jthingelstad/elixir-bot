@@ -40,14 +40,15 @@ def test_no_job_reports_success_for_an_empty_composition():
 
 
 def test_weekly_recap_has_room_to_think():
-    """max_tokens must cover thinking AND the answer, not just the answer."""
-    body = (ROOT / "agent/workflows.py").read_text()
-    # Scan from the workflow marker to its first max_tokens, however much
-    # explanatory comment sits between them.
-    block = body[body.index('workflow="weekly_recap"') :]
-    found = re.search(r"max_tokens=(\d+)", block)
-    assert found, "weekly_recap should set max_tokens explicitly"
-    assert int(found.group(1)) >= 8192, (
+    """max_tokens must cover thinking AND the answer, not just the answer.
+
+    Reads the policy rather than scraping the source: since 2026-08-08 the
+    ceiling lives in agent.core.MODEL_CALL_POLICY, which is both where it is
+    actually chosen and a far less brittle thing to assert against than a regex
+    over a file that happened to contain the number."""
+    import agent.core as core
+
+    assert core.policy_for("weekly_recap").max_tokens >= 8192, (
         "1600 was exhausted entirely by extended thinking on claude-opus-5, "
         "yielding an empty recap and a silently missing weekly report"
     )

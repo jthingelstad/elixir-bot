@@ -186,7 +186,6 @@ def classify_intent(
             ],
             model=selected_model,
             temperature=0.0,
-            max_tokens=512,
             tools=[_SELECT_ROUTE_TOOL],
             tool_choice="required",
         )

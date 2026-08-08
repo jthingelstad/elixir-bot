@@ -222,7 +222,6 @@ def coin_release_name(material: dict) -> str:
             "You answer with the name only.",
             messages=[{"role": "user", "content": user}],
             temperature=0.7,
-            max_tokens=200,
         )
         name = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
         name = name.strip().strip('"').strip("'")
@@ -366,7 +365,6 @@ def release_notes_draft(*, days: int | None = None, since_ref: str | None = None
         workflow="release_notes",
         messages=[{"role": "user", "content": release_notes_prompt(material)}],
         temperature=0.7,
-        max_tokens=8192,
         timeout=300,
     )
     out = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")

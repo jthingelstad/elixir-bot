@@ -25,7 +25,6 @@ operator and `scripts/confidence_report.py` read to decide Elixir is healthy.
 from __future__ import annotations
 
 import logging
-from unittest.mock import patch
 
 import agent.core as core
 import runtime.status as runtime_status
@@ -342,19 +341,9 @@ def test_distill_summary_keeps_a_complete_summary(monkeypatch):
     assert memory_tasks.distill_summary("x" * 400) == "The member asked about their ranked deck."
 
 
-def test_distill_ceiling_is_not_flush_against_typical_output(monkeypatch):
+def test_distill_ceiling_is_not_flush_against_typical_output():
     """Floor, not an exact value — dropping back toward 100 is the regression."""
-    from agent import memory_tasks
-
-    seen = {}
-
-    def capture(**kw):
-        seen.update(kw)
-        return _Resp("summary.", "end_turn")
-
-    monkeypatch.setattr(memory_tasks, "_create_chat_completion", capture)
-    memory_tasks.distill_summary("x" * 400)
-    assert seen["max_tokens"] >= 256
+    assert core.policy_for("memory_distill").max_tokens >= 256
 
 
 def test_recruiting_copy_ceiling_covers_five_channels_plus_thinking(monkeypatch):
@@ -366,38 +355,10 @@ def test_recruiting_copy_ceiling_covers_five_channels_plus_thinking(monkeypatch)
     the 2026-08-07 run truncated at exactly 1500 and failed
     promotion_content_cycle. Floor, not an exact value.
     """
-    import agent.workflows as workflows
-
-    seen = {}
-
-    def capture(**kw):
-        seen.update(kw)
-        return _Resp('{"discord": "copy"}', "end_turn")
-
-    monkeypatch.setattr(workflows, "_create_chat_completion", capture)
-    monkeypatch.setattr(workflows, "_promote_system", lambda **kw: "sys")
-    monkeypatch.setattr(workflows, "_clan_context", lambda *a, **k: "clan")
-    monkeypatch.setattr(workflows, "_promotion_context", lambda *a, **k: "promo")
-
-    workflows.generate_promote_content({"requiredTrophies": 2000})
-    assert seen["max_tokens"] >= 8192
+    assert core.policy_for("recruiting_copy").max_tokens >= 8192
 
 
 def test_member_report_ceiling_clears_its_largest_observed_output():
     """The largest successful member_report was 1367 output tokens against a
     1400 ceiling. A 2% margin is not a margin."""
-    import agent.workflows as workflows
-
-    seen = {}
-
-    def capture(*args, **kwargs):
-        seen.update(kwargs)
-        return ""
-
-    with (
-        patch.object(workflows, "_generate_simple_message", side_effect=capture),
-        patch.object(workflows, "_member_report_system", return_value="sys"),
-    ):
-        workflows.generate_member_report("facts about one member")
-
-    assert seen["max_tokens"] >= 2048
+    assert core.policy_for("member_report").max_tokens >= 2048

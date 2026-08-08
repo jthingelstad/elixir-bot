@@ -165,20 +165,16 @@ def test_daily_ceiling_covers_thinking_not_just_the_visible_post():
     max_tokens and the prompt does not control how much of it happens.
 
     A floor, not an exact value: raising it further is fine, dropping back is
-    the regression.
+    the regression. Since 2026-08-08 the ceiling lives in
+    agent.core.MODEL_CALL_POLICY, so that is what this asserts.
     """
-    import agent.workflows as workflows
+    import agent.core as core
 
-    seen = {}
-
-    def capture(*args, **kwargs):
-        seen.update(kwargs)
-        return {"post": "x", "topic": "t"}
-
-    with patch.object(workflows, "_chat_with_tools", side_effect=capture):
-        workflows.generate_ask_elixir_daily({})
-
-    assert seen["max_tokens"] >= 16384
+    policy = core.policy_for("ask_elixir_daily")
+    assert policy.max_tokens >= 16384
+    # The ceiling alone was never the fix — effort is what bounds the thinking
+    # that exhausted it. Both halves have to hold.
+    assert policy.effort in ("low", "medium")
 
 
 # --- rehearsal-driven tool fixes (2026-07-04) -------------------------------

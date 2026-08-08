@@ -105,7 +105,6 @@ def _repair_channel_game_facts(response: dict, findings: list[dict], facts: dict
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["game_factual_repair"],
         strict_json=True,
         return_errors=True,
-        max_tokens=1600,
     )
 
 
@@ -412,7 +411,6 @@ def generate_clan_chat_copy(request: dict):
         allowed_tools=TOOLSETS_BY_WORKFLOW["clan_chat_copy"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["clan_chat_copy"],
         strict_json=True,
-        max_tokens=900,
     )
 
 
@@ -444,19 +442,9 @@ def run_memory_synthesis(context: dict):
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["memory_synthesis"],
         strict_json=True,
         return_errors=True,
-        # 3000 -> 16384 (2026-08-05). Extended thinking is drawn from max_tokens,
-        # so on an Opus-tier model a ceiling sized for the visible answer can be
-        # spent before a single character is written. This job has not succeeded
-        # once since it moved to claude-opus-5: on 2026-08-02 the first attempt
-        # logged `completion_chars=0` against a 177K-char prompt, and the retry
-        # managed 609 chars before truncating again — both returned EXACTLY 3000
-        # completion tokens, the ceiling's fingerprint.
-        #
-        # Same failure the weekly recap hit on 2026-08-03 at max_tokens=1600.
-        # Note the retry path reduces the INPUT context, which cannot help when
-        # the constraint is the OUTPUT ceiling — that is why attempt two failed
-        # the same way. The ceiling is the fix; the retry stays as a backstop.
-        max_tokens=16384,
+        # Ceiling and effort: MODEL_CALL_POLICY["memory_synthesis"]. The retry
+        # path below reduces the INPUT context, which cannot help when the
+        # constraint is the OUTPUT ceiling; it stays as a backstop only.
     )
 
 
@@ -477,7 +465,6 @@ def synthesize_leader_action_feedback(context: dict):
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["leader_action_feedback"],
         strict_json=True,
         return_errors=True,
-        max_tokens=1200,
     )
 
 
@@ -499,7 +486,6 @@ def interpret_leader_note(context: dict):
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["leader_note_interpret"],
         strict_json=True,
         return_errors=True,
-        max_tokens=400,
     )
 
 
@@ -539,27 +525,6 @@ def generate_ask_elixir_daily(
         _ask_elixir_daily_system(),
         user_msg,
         workflow="ask_elixir_daily",
-        # 1400 -> 4096 (2026-08-06) -> 16384 (2026-08-08). Two different causes,
-        # and the first raise fixed only the first one.
-        #
-        # At 1400 it died mid-tool-call: all 12 truncations stopped at exactly
-        # 1400 while emitting a `tool_use` block, so from 2026-07-26 the job made
-        # one call a day and that call always truncated. 4096 fixed that — on
-        # 2026-08-07 it ran three calls (905 with a tool_use, then 743 and 350
-        # of text) and reached the JSON parse for the first time.
-        #
-        # Then on 2026-08-08 it truncated at exactly 4096 having emitted NO text
-        # and NO tool_use at all: the entire budget went to extended thinking
-        # before a single visible character. That is the memory_synthesis
-        # signature (see the 16384 comment on that call), and it is why sizing
-        # this against the visible answer keeps being wrong — thinking is drawn
-        # from max_tokens and its size is not something the prompt controls.
-        #
-        # 16384 is the number that has actually held in this repo: weekly_recap
-        # and weekly_recap_email have not truncated since moving to it, and
-        # awareness — the closest sibling, tool-using on the same sonnet-5 — has
-        # legitimately produced 14,890 tokens in one call.
-        max_tokens=16384,
         allowed_tools=TOOLSETS_BY_WORKFLOW["ask_elixir_daily"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["ask_elixir_daily"],
         strict_json=True,
@@ -734,7 +699,6 @@ def repair_awareness_plan(situation: dict, plan: dict, violations: list[str]):
         # except the reworded copy). 4096 truncated a 2-post plan mid-response,
         # dropping a post → deliver.py rejected it as repair.changed_post_count
         # and failed the tick (#177, 2026-07-16). 8192 fits a multi-post plan.
-        max_tokens=8192,
     )
 
 
@@ -751,7 +715,6 @@ def respond_in_reception(question, author_name, clan_data, memory_context=None):
         _reception_system(),
         user_msg,
         temperature=0.7,
-        max_tokens=400,
         workflow="reception",
         allowed_tools=TOOLSETS_BY_WORKFLOW["reception"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["reception"],
@@ -1133,7 +1096,6 @@ def respond_to_help_request(
             system=system_prompt,
             messages=messages,
             temperature=0.7,
-            max_tokens=600,
             timeout=60,
         )
         text = (response_text(resp) or "").strip()
@@ -1192,7 +1154,6 @@ def analyze_leader_screenshot(
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["screenshot_readout"],
         strict_json=True,
         return_errors=True,
-        max_tokens=9000,
     )
 
 
@@ -1340,9 +1301,12 @@ def generate_message(event, context, recent_posts=None):
     return _generate_simple_message(
         _event_system(),
         user_msg,
+        # `event:<name>` is an open-ended family, so it can never have a policy
+        # row of its own and would otherwise fall through to the 4096 default.
+        # These are one-line event blurbs; 300 is the deliberate ceiling.
         workflow=f"event:{event}",
-        temperature=0.7,
         max_tokens=300,
+        temperature=0.7,
         error_label=f"generate_message({event})",
     )
 
@@ -1356,10 +1320,12 @@ def _generate_simple_message(
     *,
     workflow,
     temperature=0.8,
-    max_tokens=300,
+    max_tokens=None,
     error_label="LLM",
 ):
-    """Shared pattern: system+user message -> text or None."""
+    """Shared pattern: system+user message -> text or None.
+
+    max_tokens defaults to the workflow's ceiling in MODEL_CALL_POLICY."""
     messages = [
         {"role": "user", "content": user_msg},
     ]
@@ -1406,15 +1372,6 @@ def generate_promote_content(clan_data, war_data=None, roster_data=None):
             system=_promote_system(required_trophies=required_trophies),
             messages=messages,
             temperature=0.8,
-            # 1500 -> 8192 (2026-08-07). One call writes copy for all FIVE
-            # channels, so 1500 was ~300 tokens each before thinking. It had no
-            # margin even when it worked: the 2026-07-31 run on claude-opus-4-8
-            # finished at 1495 tokens, five under the ceiling. This workflow is
-            # model_family="creative" (claude-opus-5), which draws extended
-            # thinking from max_tokens, and the 2026-08-07 run truncated at
-            # exactly 1500 and failed promotion_content_cycle outright. Same
-            # diagnosis as memory_synthesis in 480316b9.
-            max_tokens=8192,
             timeout=60,
         )
         return _parse_response(response_text(resp) or "null")
@@ -1458,18 +1415,6 @@ def generate_weekly_recap(
         _weekly_recap_system(),
         user_msg,
         workflow="weekly_recap",
-        # 8192, not 1600. On 2026-08-03 this ran on claude-opus-5 and spent the
-        # ENTIRE 1600-token budget on extended thinking: stop_reason=max_tokens,
-        # completion_tokens=1600, completion_chars=0. The API call succeeded, the
-        # recap came back empty, and the Monday clan report silently never sent.
-        # Thinking tokens come out of this budget, so a cap sized for the visible
-        # answer alone is a cap the model can exhaust before it starts writing.
-        #
-        # Sized generously on purpose (Jamie, 2026-08-03): this runs ONCE A WEEK,
-        # so the marginal cost of headroom is a rounding error against the cost of
-        # the report silently not existing. Only tokens actually produced are
-        # billed — a large cap buys room, not spend.
-        max_tokens=16384,
         allowed_tools=TOOLSETS_BY_WORKFLOW["weekly_recap"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["weekly_recap"],
         strict_json=True,
@@ -1524,9 +1469,6 @@ def generate_weekly_recap_email(
         _weekly_recap_email_system(),
         user_msg,
         workflow="weekly_recap_email",
-        # Weekly, and deliberately the longest thing Elixir writes. Thinking
-        # tokens come out of this budget too — see generate_weekly_recap.
-        max_tokens=16384,
         allowed_tools=TOOLSETS_BY_WORKFLOW["weekly_recap_email"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["weekly_recap_email"],
         strict_json=True,
@@ -1558,7 +1500,6 @@ def generate_elder_standing(facts: str) -> str:
             user_msg,
             workflow="elder_standing",
             temperature=0.7,
-            max_tokens=1200,
             error_label="Elder standing",
         )
         or ""
@@ -1580,7 +1521,6 @@ def generate_outreach_ask(facts: str) -> str:
             user_msg,
             workflow="member_outreach_ask",
             temperature=0.8,
-            max_tokens=300,
             error_label="Member outreach ask",
         )
         or ""
@@ -1604,11 +1544,6 @@ def generate_member_report(facts: str) -> dict:
             user_msg,
             workflow="member_report",
             temperature=0.85,
-            # 1400 -> 2048 (2026-08-06). Two of 28 calls truncated, and the
-            # largest SUCCESSFUL response was 1367 tokens — a 2% margin under the
-            # ceiling is not a margin. The report is one tagged block per battle
-            # type, so its length scales with how many types a member played.
-            max_tokens=2048,
             error_label="Member report",
         )
         or ""
@@ -1679,7 +1614,6 @@ def generate_tournament_recap(recap_context):
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["tournament_recap"],
         strict_json=True,
         temperature=0.8,
-        max_tokens=2500,
     )
     if not parsed:
         return None
@@ -1710,7 +1644,6 @@ def generate_war_intel_narrative(facts: str) -> dict:
             user_msg,
             workflow="war_intel",
             temperature=0.8,
-            max_tokens=2000,
             error_label="War intel",
         )
         or ""
@@ -1787,7 +1720,6 @@ def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_co
         allowed_tools=TOOLSETS_BY_WORKFLOW["intel_report"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["intel_report"],
         strict_json=True,
-        max_tokens=4096,
     )
 
 

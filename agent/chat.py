@@ -12,6 +12,7 @@ from agent.core import (
     TOOL_RESULT_MAX_ITEMS,
     _create_chat_completion,
     log,
+    policy_for,
     response_text,
     response_tool_uses,
 )
@@ -436,7 +437,7 @@ def _chat_with_tools(
     user_message,
     conversation_history=None,
     temperature=0.7,
-    max_tokens=4096,
+    max_tokens=None,
     workflow="generic",
     allowed_tools=None,
     response_schema=None,
@@ -455,6 +456,12 @@ def _chat_with_tools(
         so the caller can persist the awareness-loop tool trace.
     Returns the final parsed response dict, or None.
     """
+    # Resolve the workflow's ceiling once, here, because this function also
+    # reports it in its truncation messages — passing None straight through
+    # would leave those logs saying "max_tokens=None".
+    if max_tokens is None:
+        max_tokens = policy_for(workflow).max_tokens
+
     messages = []
     # Inject prior conversation turns if provided
     if conversation_history:
