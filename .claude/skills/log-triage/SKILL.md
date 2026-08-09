@@ -46,7 +46,23 @@ Retention: LLM calls 90 d (prompt/response blobs 14 d), DB metrics 30 d.
 
 ### Clan DB — `elixir-v51.db`
 
-Read-only here too (`file:elixir-v51.db?mode=ro`). Opening the live production DB read-write from a triage session contends for the very write lock you may be diagnosing.
+**`?mode=ro` on this file fails most of the time — that is expected, not a fault.** The runtime opens the clan DB per operation and closes it, and SQLite deletes the `-shm` sidecar on the last clean close. A WAL database needs `-shm` to be read, and a *read-only* handle is not permitted to create one, so between operations you get:
+
+```
+Error: in prepare, unable to open database file (14)
+```
+
+Open it plainly and issue only `SELECT`s:
+
+```bash
+cd /Users/otto/Projects/elixir-bot && sqlite3 -header elixir-v51.db "SELECT ..."
+```
+
+This is safe: in WAL mode readers never block the writer and a `SELECT` takes no write lock. The read-write *handle* only buys the right to create the `-shm` file, which is exactly what was missing. (An earlier version of this skill claimed the opposite and told you to use `mode=ro`; that advice blocked two triage passes before it was measured.)
+
+**Never use `immutable=1` on the live clan DB.** It reads, but it tells SQLite the file cannot change, disabling locking entirely; against a database the bot is actively writing that can return torn or inconsistent rows. It is correct only for the frozen cold archive, which never changes.
+
+The telemetry DB does not have this problem — the runtime holds a per-thread connection open, so `file:elixir-telemetry.db?mode=ro` works and stays the right way to read it.
 
 | Table | Triage value |
 |---|---|
@@ -73,7 +89,7 @@ sqlite3 "file:elixir-telemetry.db?mode=ro" "SELECT count(*) FROM db_transactions
 
 ```bash
 # clan DB (no suffix)
-sqlite3 "file:elixir-v51.db?mode=ro" "SELECT count(*) FROM prompt_failures WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%S','now','-1 day');"
+sqlite3 elixir-v51.db "SELECT count(*) FROM prompt_failures WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%S','now','-1 day');"
 ```
 
 ## Scope
@@ -130,7 +146,7 @@ GROUP BY job, workflow, tier, handled, delivered;"
 ```
 
 ```bash
-cd /Users/otto/Projects/elixir-bot && sqlite3 -header "file:elixir-v51.db?mode=ro" "
+cd /Users/otto/Projects/elixir-bot && sqlite3 -header elixir-v51.db "
 SELECT job_name, updated_at,
        json_extract(status_json,'\$.failure_count') failures,
        json_extract(status_json,'\$.last_failure_at') last_failure,
@@ -139,7 +155,7 @@ FROM runtime_job_status ORDER BY updated_at DESC;"
 ```
 
 ```bash
-cd /Users/otto/Projects/elixir-bot && sqlite3 -header "file:elixir-v51.db?mode=ro" "
+cd /Users/otto/Projects/elixir-bot && sqlite3 -header elixir-v51.db "
 SELECT recorded_at, workflow, failure_type, failure_stage, channel_name, substr(question,1,60) q
 FROM prompt_failures WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%S','now','-2 day')
 ORDER BY recorded_at DESC LIMIT 20;"

@@ -242,6 +242,30 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         _schema_ready = True
 
 
+# No HTTP round trip to the API completes in under a millisecond, so a call that
+# fast is an in-process stub — a probe script or an ad-hoc harness pointed at the
+# real telemetry file instead of a temp one. That has happened at least four
+# times (2026-07-10, 07-11, 08-03, 08-09), leaving 21 fabricated rows that skew
+# exactly the averages this table exists to produce.
+#
+# The gap is unambiguous, so the threshold does not have to be clever: the
+# fastest REAL call ever recorded is 80.9ms (Haiku), the slowest stub 0.57ms.
+#
+# Only enforced against the DEFAULT path. Tests legitimately record stub calls
+# and read them back, and they run against an ELIXIR_TELEMETRY_DB_PATH override —
+# the thing being protected is the production file, not the mechanism.
+_MIN_PLAUSIBLE_CALL_MS = 10.0
+
+
+def _is_stub_call(duration_ms) -> bool:
+    if duration_ms is None or telemetry_path() != DEFAULT_PATH:
+        return False
+    try:
+        return float(duration_ms) < _MIN_PLAUSIBLE_CALL_MS
+    except TypeError, ValueError:
+        return False
+
+
 def record_llm_call(
     workflow: str,
     model: str,
@@ -273,6 +297,16 @@ def record_llm_call(
     Everything after ``response_json`` is the call's configuration and outcome as
     first-class columns rather than fields buried in the two blobs, which are
     pruned at 14 days while the row itself lives 90. See ``_ADDED_COLUMNS``."""
+    if _is_stub_call(duration_ms):
+        log.warning(
+            "telemetry: refusing an implausibly fast llm_call (workflow=%s, %.3fms) — this is a "
+            "stubbed client writing to the REAL telemetry file. Set ELIXIR_TELEMETRY_DB_PATH "
+            "before running a probe against the repo.",
+            workflow,
+            duration_ms,
+        )
+        return
+
     try:
         telemetry = connect()
         telemetry.execute(
