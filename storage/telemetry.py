@@ -179,7 +179,52 @@ def connect() -> sqlite3.Connection:
 # no-op against an existing file, so a new column needs an explicit ALTER. This
 # file is disposable telemetry, not clan data — no version counter, just make the
 # shape current and move on.
-_ADDED_COLUMNS = (("db_transactions", "sites_json", "TEXT"),)
+_ADDED_COLUMNS = (
+    ("db_transactions", "sites_json", "TEXT"),
+    # ── Call configuration (2026-08-09) ──
+    # What the call was ASKED to do. Every one of these was needed to explain an
+    # incident this week and none of them were recorded, so each answer came
+    # from re-running the workflow or wrapping the client by hand:
+    #   effort      — the thinking lever; introduced 2026-08-08 with no visibility
+    #                 at all, so there was no way to relate depth to cost.
+    #   max_tokens  — a stop_reason of max_tokens is uninterpretable without the
+    #                 ceiling it hit; it previously appeared only inside an error
+    #                 string, and only when the caller asked for errors.
+    #   timeout_s   — the 60s default was inferred from a cluster of failures at
+    #                 181.7s (60 x 3 retries) rather than read off a column.
+    ("llm_calls", "effort", "TEXT"),
+    ("llm_calls", "max_tokens", "INTEGER"),
+    ("llm_calls", "timeout_s", "INTEGER"),
+    # ── Call outcome (2026-08-09) ──
+    #   stop_reason    — promoted OUT of response_json, which is pruned at 14
+    #                    days while the row lives 90. Truncation history was
+    #                    readable for 2,092 of 9,297 rows; the outcome that
+    #                    matters most was the first thing thrown away.
+    #   block_census   — same promotion: per-type block counts, which is how you
+    #                    tell "the model returned nothing" from "the model spent
+    #                    the whole budget thinking". Store the counts, NOT a
+    #                    character length: `thinking.display` defaults to
+    #                    "omitted", so a thinking block's text is always empty
+    #                    and any char count of it reads as 0 whether or not
+    #                    thinking happened. The block being PRESENT is the
+    #                    signal; pair it with completion_tokens for the size.
+    #   attempts       — API round trips. Every claude-5 call was making two (a
+    #                    guaranteed 400 on temperature, then the real request)
+    #                    and nothing recorded it; it took live instrumentation
+    #                    to see. A retry after a timeout is equally invisible.
+    #   cost_usd       — already computed on every call for the spend budget and
+    #                    then discarded, so reports recomputed it from a second
+    #                    pricing table. Priced at write time, history stays
+    #                    correct when rates change.
+    ("llm_calls", "stop_reason", "TEXT"),
+    ("llm_calls", "block_census", "TEXT"),
+    ("llm_calls", "attempts", "INTEGER"),
+    ("llm_calls", "cost_usd", "REAL"),
+    # Correlates the N calls of one agent turn. A tool-using workflow makes
+    # several calls per turn, so per-workflow totals could never answer "what
+    # did one awareness tick cost?" — only "what did awareness cost all week".
+    ("llm_calls", "turn_id", "TEXT"),
+)
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -211,18 +256,31 @@ def record_llm_call(
     cache_read_tokens: Optional[int] = None,
     prompt_json: Optional[str] = None,
     response_json: Optional[str] = None,
+    effort: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+    timeout_s: Optional[int] = None,
+    stop_reason: Optional[str] = None,
+    block_census: Optional[str] = None,
+    attempts: Optional[int] = None,
+    cost_usd: Optional[float] = None,
+    turn_id: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> None:
     """Record one model call. Signature matches the clan-DB version it replaced,
     including the ignored ``conn`` — callers used to hand it the clan connection
-    and that is exactly the coupling this move removes."""
+    and that is exactly the coupling this move removes.
+
+    Everything after ``response_json`` is the call's configuration and outcome as
+    first-class columns rather than fields buried in the two blobs, which are
+    pruned at 14 days while the row itself lives 90. See ``_ADDED_COLUMNS``."""
     try:
         telemetry = connect()
         telemetry.execute(
             "INSERT INTO llm_calls (recorded_at, workflow, model, ok, error, duration_ms, "
             "prompt_tokens, completion_tokens, total_tokens, cache_creation_tokens, "
-            "cache_read_tokens, prompt_json, response_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "cache_read_tokens, prompt_json, response_json, effort, max_tokens, timeout_s, "
+            "stop_reason, block_census, attempts, cost_usd, turn_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 _utcnow(),
                 workflow,
@@ -237,6 +295,14 @@ def record_llm_call(
                 cache_read_tokens,
                 prompt_json,
                 response_json,
+                effort,
+                max_tokens,
+                timeout_s,
+                stop_reason,
+                block_census,
+                attempts,
+                cost_usd,
+                turn_id,
             ),
         )
         telemetry.commit()

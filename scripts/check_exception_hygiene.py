@@ -35,7 +35,10 @@ BROAD_EXCEPTION_BASELINE = {
     # 3 -> 4 (2026-08-05): recording a call's cost against the daily spend
     # ceiling. A counter that can fail an already-successful model call would
     # be a cost control causing the outage it exists to prevent.
-    "agent/core.py": 4,
+    # 4 -> 5 (2026-08-09): reading the block census off the serialized response
+    # for telemetry. Same rule — a reporting detail must not fail a call that
+    # already succeeded; the row still records without it.
+    "agent/core.py": 5,
     # 2: the ceiling fails OPEN (an unreadable counter must never be what stops
     # Elixir welcoming a new member), and the #leaders notice is best-effort —
     # a cost control must not raise into the call it is declining.

@@ -1,4 +1,5 @@
 import copy
+import functools
 import json
 import re
 import time
@@ -15,6 +16,7 @@ from agent.core import (
     policy_for,
     response_text,
     response_tool_uses,
+    turn,
 )
 from agent.tool_exec import _execute_tool
 from agent.tool_policy import (
@@ -432,6 +434,22 @@ def _tool_result_succeeded(envelope_json: str) -> bool:
     return bool(envelope.get("ok")) and envelope.get("error") is None
 
 
+def _in_turn(fn):
+    """Group every model call this function makes under one turn id.
+
+    A decorator rather than a `with` around the body: this function has a dozen
+    return paths and reindenting it to add a block is the riskier edit.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with turn():
+            return fn(*args, **kwargs)
+
+    return wrapper
+
+
+@_in_turn
 def _chat_with_tools(
     system_prompt,
     user_message,

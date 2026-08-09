@@ -1,11 +1,13 @@
 """Shared core state for the agent package."""
 
+import contextvars
 import logging
 import os
 import sqlite3
 import subprocess
 import threading
 import time
+import uuid
 from typing import NamedTuple
 
 from anthropic import Anthropic, APIConnectionError, APIError, BadRequestError
@@ -265,6 +267,42 @@ MODEL_CALL_POLICY: dict[str, CallPolicy] = {
     "memory_distill": CallPolicy(256, timeout=15),
     "lightweight": CallPolicy(200),
 }
+
+
+# One agent turn can be several API calls — a tool-using workflow loops until the
+# model stops asking for tools. Without a shared id, per-workflow totals answer
+# "what did awareness cost this week" but never "what did one tick cost", which
+# is the question a cost report actually needs. A ContextVar rather than a
+# parameter so nothing in the call chain has to thread it through, and so
+# concurrent turns on different asyncio tasks cannot borrow each other's id.
+_turn_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "elixir_turn_id", default=None
+)
+
+
+class turn:
+    """Group every model call made inside this block under one turn id.
+
+    Re-entrant on purpose: a workflow that calls another workflow stays part of
+    the outer turn, because the outer turn is what actually cost the money.
+    """
+
+    def __init__(self):
+        self._token = None
+
+    def __enter__(self):
+        if _turn_id.get() is None:
+            self._token = _turn_id.set(uuid.uuid4().hex[:16])
+        return self
+
+    def __exit__(self, *exc):
+        if self._token is not None:
+            _turn_id.reset(self._token)
+        return False
+
+
+def current_turn_id() -> str | None:
+    return _turn_id.get()
 
 
 def policy_for(workflow: str) -> CallPolicy:
@@ -639,6 +677,12 @@ def _create_chat_completion(
         if translated_tc:
             kwargs["tool_choice"] = translated_tc
 
+    # API round trips this call cost. Anything above 1 is waste worth seeing:
+    # a rejected-parameter retry, and (invisibly to us, inside the SDK) a
+    # timeout retry. It stayed at 2 for every claude-5 call for months with
+    # nothing recording it.
+    attempts = 1
+
     try:
         try:
             resp = _get_client().messages.create(**kwargs)
@@ -657,6 +701,7 @@ def _create_chat_completion(
                     selected_model,
                 )
                 kwargs.pop("temperature")
+                attempts += 1
                 resp = _get_client().messages.create(**kwargs)
             else:
                 raise
@@ -688,20 +733,40 @@ def _create_chat_completion(
             )
         # Charge the clan-DB spend counter. Wrapped because a counter that can
         # fail a successful call is worse than one that undercounts by one.
+        # `cost_usd` is kept rather than discarded: it was already being computed
+        # here on every call, and storing it prices each row at the rates in
+        # force when it ran, so history stays correct when rates change and
+        # reports stop maintaining a second copy of the pricing table.
+        cost_usd = None
         try:
             from agent.spend_budget import call_cost_usd, record_spend_usd
 
-            record_spend_usd(
-                call_cost_usd(
-                    selected_model,
-                    prompt_tokens,
-                    completion_tokens,
-                    cache_creation_tokens,
-                    cache_read_tokens,
-                )
+            cost_usd = call_cost_usd(
+                selected_model,
+                prompt_tokens,
+                completion_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
             )
+            record_spend_usd(cost_usd)
         except Exception:
             log.debug("spend budget: could not record call cost", exc_info=True)
+
+        response_json = _serialize_response(resp)
+        # Promote the block census to its own column. response_json is pruned at
+        # 14 days while the row lives 90, and the census is how you tell "the
+        # model returned nothing" from "the model spent the budget thinking" —
+        # so it must outlive the blob it is currently carried in.
+        census_json = None
+        try:
+            import json as _json
+
+            census = (_json.loads(response_json) or {}).get("block_census")
+            census_json = _json.dumps(census) if census else None
+        except Exception:  # noqa: BLE001
+            # hygiene: the census is a reporting detail on an optional blob. The
+            # row still records without it.
+            census_json = None
         runtime_status.record_llm_call(
             workflow,
             ok=True,
@@ -725,7 +790,15 @@ def _create_chat_completion(
                 cache_creation_tokens=cache_creation_tokens,
                 cache_read_tokens=cache_read_tokens,
                 prompt_json=prompt_json,
-                response_json=_serialize_response(resp),
+                response_json=response_json,
+                effort=policy.effort if _supports_effort(selected_model) else None,
+                max_tokens=max_tokens,
+                timeout_s=timeout,
+                stop_reason=getattr(resp, "stop_reason", None),
+                block_census=census_json,
+                attempts=attempts,
+                cost_usd=cost_usd,
+                turn_id=current_turn_id(),
             )
         except OSError, sqlite3.Error:
             log.warning("llm_call_persist_failed workflow=%s", workflow, exc_info=True)
@@ -748,6 +821,14 @@ def _create_chat_completion(
                 duration_ms=duration,
                 prompt_json=prompt_json,
                 response_json=None,
+                # A failure is exactly when the configuration matters most: the
+                # 181.7s timeout cluster was only diagnosable once you knew the
+                # timeout was 60 and the SDK retries twice.
+                effort=policy.effort if _supports_effort(selected_model) else None,
+                max_tokens=max_tokens,
+                timeout_s=timeout,
+                attempts=attempts,
+                turn_id=current_turn_id(),
             )
         except OSError, sqlite3.Error:
             log.warning("llm_call_persist_failed workflow=%s", workflow, exc_info=True)
