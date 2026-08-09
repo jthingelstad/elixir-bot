@@ -49,7 +49,7 @@ def _format_size(size_bytes):
 
 
 def _build_maintenance_report(
-    size_before, size_after, purge_stats, backup_result=None, pruned_count=0
+    size_before, size_after, purge_stats, backup_result=None, pruned_count=0, backups=None
 ):
     freed = size_before - size_after
     pct = (freed / size_before * 100) if size_before > 0 else 0
@@ -60,8 +60,21 @@ def _build_maintenance_report(
         "",
     ]
 
-    # Backup section.
-    if backup_result is not None:
+    # Backup section. `backups` is the per-database result list; name each one,
+    # because "Backup: 1.2 GB -> 133 MB" gave no way to tell whether the
+    # telemetry database was covered at all.
+    if backups:
+        ok = [b for b in backups if b["ok"]]
+        failed = [b for b in backups if not b["ok"]]
+        lines.append(f"**Backup:** {len(ok)}/{len(backups)} database(s)")
+        for b in ok:
+            lines.append(f"  {b['prefix']}")
+        for b in failed:
+            lines.append(f"  **{b['prefix']}: FAILED** — {b.get('error', 'unknown error')}")
+        if pruned_count > 0:
+            lines.append(f"  Pruned {pruned_count} old backup(s)")
+        lines.append("")
+    elif backup_result is not None:
         if backup_result["ok"]:
             compressed_mb = backup_result["size_compressed"] / 1_048_576
             original_mb = backup_result["size_original"] / 1_048_576
@@ -133,7 +146,7 @@ async def _api_sentinel_tick():
 
 
 async def _db_maintenance_cycle():
-    from scripts.backup_db import create_backup, prune_backups
+    from scripts.backup_db import backup_all
 
     runtime_status.mark_job_start("db_maintenance")
 
@@ -141,11 +154,16 @@ async def _db_maintenance_cycle():
         db_path = db.DB_PATH
         size_before = os.path.getsize(db_path)
 
-        # 1. Backup before any destructive operations.
-        backup_result = await asyncio.to_thread(create_backup)
-        pruned = await asyncio.to_thread(prune_backups) if backup_result["ok"] else []
-        if not backup_result["ok"]:
-            log.error("DB backup failed: %s", backup_result["error"])
+        # 1. Backup before any destructive operations. backup_all covers every
+        # database in the backup set, which is the same set `admin.sh restart`
+        # covers — this used to call create_backup() bare and so backed up only
+        # the clan DB, leaving telemetry snapshotted on restarts and never on
+        # the weekly schedule.
+        backup = await asyncio.to_thread(backup_all, log_progress=False)
+        pruned = [p for r in backup["results"] for p in (r.get("pruned") or [])]
+        for entry in backup["results"]:
+            if not entry["ok"]:
+                log.error("DB backup failed for %s: %s", entry["prefix"], entry.get("error"))
 
         # 2. Purge expired rows.
         purge_stats = await asyncio.to_thread(db.purge_old_data)
@@ -177,7 +195,7 @@ async def _db_maintenance_cycle():
             size_before,
             size_after,
             purge_stats,
-            backup_result=backup_result,
+            backups=backup["results"],
             pruned_count=len(pruned),
         )
 

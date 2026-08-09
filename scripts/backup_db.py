@@ -57,11 +57,85 @@ def _filename_re(prefix: str) -> re.Pattern:
     return re.compile(rf"^{re.escape(prefix)}-(\d{{4}}-\d{{2}}-\d{{2}}-\d{{6}})\.db\.gz$")
 
 
+def _telemetry_path() -> Path:
+    from storage import telemetry
+
+    return Path(telemetry.telemetry_path())
+
+
 def _databases() -> list[tuple[str, Path, bool]]:
-    """(filename_prefix, source_path, required) for every DB the restart backup
-    covers. v5.1 has one operational database; pre-cut stores are immutable
-    archives and need no recurring backup."""
-    return [("elixir-v51", _db_path(), True)]
+    """(filename_prefix, source_path, required) for every DB a backup covers.
+
+    Pre-cut stores are immutable archives and need no recurring backup.
+
+    `elixir-telemetry` is not required: it is admin-only, Elixir's behaviour may
+    never depend on it, and a fresh install legitimately has none. But losing it
+    costs every answer about what Elixir has spent and how its model calls have
+    behaved — the whole cost history, the truncation record, the DB hold times.
+    AGENTS.md called its absence here "a known gap, not a design decision"; this
+    closes it."""
+    return [
+        ("elixir-v51", _db_path(), True),
+        ("elixir-telemetry", _telemetry_path(), False),
+    ]
+
+
+def backup_all(*, log_progress: bool = True) -> dict:
+    """Back up and prune every database in `_databases()`.
+
+    Both callers go through here — the CLI that `scripts/admin.sh restart` runs
+    and the weekly `db-maintenance` job. They used to diverge: the CLI iterated
+    the list while the job called `create_backup()` bare, so the job silently
+    covered only whichever database happened to be the default. A second target
+    would have been backed up on restarts and never on the schedule.
+
+    Returns {"ok": bool, "results": [{prefix, ok, path, error, pruned}]}.
+    """
+    results = []
+    ok = True
+    for prefix, db_path, required in _databases():
+        if not db_path.exists():
+            if required:
+                log.error("Database not found: %s", db_path)
+                ok = False
+                results.append({"prefix": prefix, "ok": False, "error": "missing"})
+            elif log_progress:
+                log.info("Skipping %s (not present): %s", prefix, db_path)
+            continue
+
+        if log_progress:
+            log.info("Backing up %s ...", db_path)
+        result = create_backup(db_path, prefix=prefix)
+        entry = {"prefix": prefix, "ok": result["ok"], "path": result.get("path")}
+
+        if not result["ok"]:
+            log.error("Backup failed for %s: %s", db_path, result["error"])
+            entry["error"] = result["error"]
+            ok = False
+            results.append(entry)
+            continue
+
+        if log_progress:
+            ratio = (
+                result["size_compressed"] / result["size_original"] * 100
+                if result["size_original"]
+                else 0
+            )
+            log.info(
+                "Backup complete: %s (%.1f MB -> %.1f MB, %.0f%%)",
+                result["path"],
+                result["size_original"] / 1_048_576,
+                result["size_compressed"] / 1_048_576,
+                ratio,
+            )
+
+        removed = prune_backups(prefix=prefix)
+        entry["pruned"] = removed
+        if removed and log_progress:
+            log.info("Pruned %d old %s backup(s): %s", len(removed), prefix, ", ".join(removed))
+        results.append(entry)
+
+    return {"ok": ok, "results": results}
 
 
 # Retention thresholds in days.
@@ -259,48 +333,7 @@ def prune_backups(backup_dir: Path | None = None, prefix: str = _DEFAULT_PREFIX)
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-
-    failed = False
-    for prefix, db_path, required in _databases():
-        if not db_path.exists():
-            if required:
-                log.error("Database not found: %s", db_path)
-                failed = True
-            else:
-                log.info("Skipping %s (not present): %s", prefix, db_path)
-            continue
-
-        log.info("Backing up %s ...", db_path)
-        result = create_backup(db_path, prefix=prefix)
-
-        if not result["ok"]:
-            log.error("Backup failed for %s: %s", db_path, result["error"])
-            failed = True
-            continue
-
-        ratio = (
-            result["size_compressed"] / result["size_original"] * 100
-            if result["size_original"]
-            else 0
-        )
-        log.info(
-            "Backup complete: %s (%.1f MB -> %.1f MB, %.0f%%)",
-            result["path"],
-            result["size_original"] / 1_048_576,
-            result["size_compressed"] / 1_048_576,
-            ratio,
-        )
-
-        removed = prune_backups(prefix=prefix)
-        if removed:
-            log.info(
-                "Pruned %d old %s backup(s): %s",
-                len(removed),
-                prefix,
-                ", ".join(removed),
-            )
-
-    if failed:
+    if not backup_all()["ok"]:
         log.error("One or more backups failed.")
         return 1
     return 0
