@@ -41,6 +41,7 @@ DEFAULT_PATH = "elixir-telemetry.db"
 LLM_CALL_RETENTION_DAYS = 90
 LLM_BLOB_RETENTION_DAYS = 14
 DB_METRIC_RETENTION_DAYS = 30
+OWNER_ONLY_MODE = 0o600
 
 _local = threading.local()
 _schema_lock = threading.Lock()
@@ -53,6 +54,39 @@ def telemetry_path() -> str:
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _narrow_owner_only_family(path: str) -> None:
+    """Create/narrow the telemetry SQLite family without relying on umask.
+
+    ``os.open(..., 0o600)`` can only be narrowed further by a restrictive
+    umask, never widened by a permissive one. Pre-creating the database this
+    way closes the creation-time exposure in ``sqlite3.connect``. Existing
+    database/WAL/SHM files are reconciled before open; the second call after
+    WAL activation catches sidecars SQLite created during this connection.
+
+    Permission hardening remains fail-soft like the rest of this store. A
+    read-only or otherwise unfixable telemetry file must be visible to an
+    operator, but must not break the clan workload.
+    """
+    if path == ":memory:":
+        return
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, OWNER_ONLY_MODE)
+    except FileExistsError:
+        pass
+    except OSError:
+        log.warning("telemetry: could not securely pre-create database", exc_info=True)
+    else:
+        os.close(fd)
+
+    for candidate in (path, f"{path}-wal", f"{path}-shm"):
+        try:
+            os.chmod(candidate, OWNER_ONLY_MODE)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            log.warning("telemetry: could not narrow permissions for %s", candidate, exc_info=True)
 
 
 _SCHEMA = (
@@ -163,9 +197,12 @@ def connect() -> sqlite3.Connection:
             # turns every later write into a hard error, and telemetry must never
             # be the thing that breaks — reopen instead.
             _local.conn = None
-    conn = sqlite3.connect(telemetry_path(), timeout=10)
+    path = telemetry_path()
+    _narrow_owner_only_family(path)
+    conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")
+    _narrow_owner_only_family(path)
     conn.execute("PRAGMA busy_timeout = 10000")
     # Durability is not worth a fsync per row for telemetry: losing the last few
     # observations to a hard crash costs nothing, and the writes are frequent.
