@@ -138,7 +138,10 @@ BROAD_EXCEPTION_BASELINE = {
     # river race log): one bad clan must degrade that section of the scouting
     # report, never sink the whole thing.
     "runtime/war_intel.py": 3,
-    "runtime/jobs/_maintenance.py": 4,
+    # 4 -> 5 (2026-08-09): the scheduled-period sweep marks its own job failed
+    # if candidate discovery breaks. A broken reliability monitor must surface
+    # without escaping into APScheduler and disappearing as framework noise.
+    "runtime/jobs/_maintenance.py": 5,
     "runtime/jobs/_memory.py": 23,  # +1: optional contradiction-card channel lookup fails soft (#229)
     "runtime/jobs/_promotion.py": 3,
     "runtime/jobs/_tournament.py": 7,  # autowatch scan + clan-chat relay
@@ -153,6 +156,9 @@ BROAD_EXCEPTION_BASELINE = {
     # that line, never suppress the message.
     "runtime/startup.py": 4,
     "runtime/status.py": 3,
+    # One catch isolates eligible jobs inside the catch-up sweep. Each job's
+    # failure is logged and persisted, while later owed periods still run.
+    "runtime/scheduled_catchup.py": 1,
     "runtime/system_signals.py": 1,
     # was runtime/webapp/ticks.py — the Observatory went, the tick record stayed.
     "runtime/tick_history.py": 2,

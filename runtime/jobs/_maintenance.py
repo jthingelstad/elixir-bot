@@ -7,6 +7,7 @@ __all__ = [
     "_card_catalog_sync",
     "_api_sentinel_tick",
     "_db_maintenance_cycle",
+    "_scheduled_catch_up_cycle",
 ]
 
 import asyncio
@@ -143,6 +144,26 @@ async def _api_sentinel_tick():
     except Exception as exc:
         log.error("API sentinel failed: %s", exc, exc_info=True)
         runtime_status.mark_job_failure("api_sentinel", str(exc))
+
+
+async def _scheduled_catch_up_cycle():
+    """Run the registry's owed-period sweep without hiding individual failures."""
+    from runtime.scheduled_catchup import run_catch_up_sweep
+
+    runtime_status.mark_job_start("scheduled_catch_up")
+    try:
+        results = await run_catch_up_sweep(_runtime_app())
+    except Exception as exc:  # noqa: BLE001 - the sweep itself must be visible
+        log.error("Scheduled catch-up sweep failed: %s", exc, exc_info=True)
+        runtime_status.mark_job_failure("scheduled_catch_up", str(exc))
+        return []
+    counts: dict[str, int] = {}
+    for result in results:
+        outcome = result["outcome"]
+        counts[outcome] = counts.get(outcome, 0) + 1
+    summary = ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))
+    runtime_status.mark_job_success("scheduled_catch_up", summary or "no eligible periods")
+    return results
 
 
 async def _db_maintenance_cycle():

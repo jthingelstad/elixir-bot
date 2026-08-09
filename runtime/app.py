@@ -322,6 +322,7 @@ from runtime.jobs._maintenance import (  # noqa: E402,F401
     _card_catalog_sync,
     _db_maintenance_cycle,
     _format_size,
+    _scheduled_catch_up_cycle,
 )
 from runtime.jobs._memory import (  # noqa: E402,F401
     MEMORY_SYNTHESIS_DAY,
@@ -1678,6 +1679,10 @@ async def on_ready():
             create_task=lambda job_callable: job_callable,
         )
         scheduler.start()
+        # APScheduler's memory job store cannot see cron slots that elapsed
+        # while the process was down. The durable period sweep supplies that
+        # missing history and is also registered hourly for long-lived runs.
+        bot.loop.create_task(_scheduled_catch_up_cycle())
         # v5.1 startup (runtime.md §6): missing consumer cursors initialize at
         # the current stream head — replay is safe (durable ledger) but wasteful.
         try:

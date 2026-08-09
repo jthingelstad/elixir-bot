@@ -8,7 +8,9 @@ import logging
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger("elixir")
 
@@ -21,6 +23,7 @@ _LOCK = threading.Lock()
 _STATUS_WRITER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="elixir-status")
 _STATUS_FUTURES = set()
 _STATUS_FUTURES_LOCK = threading.Lock()
+_JOB_PERIOD: ContextVar[dict | None] = ContextVar("elixir_job_period", default=None)
 STARTED_AT = _utcnow()
 
 _JOB_STATUS = {}
@@ -69,8 +72,22 @@ def _default_job_state() -> dict:
         "last_failure_at": None,
         "last_error": None,
         "last_summary": None,
+        "last_started_period": None,
+        "last_success_period": None,
+        "last_catch_up_period": None,
+        "last_catch_up_at": None,
         "running": False,
     }
+
+
+@contextmanager
+def job_period(period_key: str, *, catch_up: bool = False):
+    """Attach a durable schedule period to one async job execution."""
+    token = _JOB_PERIOD.set({"key": str(period_key), "catch_up": bool(catch_up)})
+    try:
+        yield
+    finally:
+        _JOB_PERIOD.reset(token)
 
 
 def _persist_job_status(name: str, state: dict) -> None:
@@ -189,6 +206,11 @@ def mark_job_start(name: str) -> None:
         state = _state_for(name)
         state["run_count"] += 1
         state["last_started_at"] = _utcnow()
+        period = _JOB_PERIOD.get()
+        if period:
+            state["last_started_period"] = period["key"]
+            if period["catch_up"]:
+                state["last_catch_up_period"] = period["key"]
         state["running"] = True
         snapshot_state = copy.deepcopy(state)
     _persist_job_status(name, snapshot_state)
@@ -203,6 +225,9 @@ def mark_job_success(name: str, summary: str | None = None) -> None:
         state["last_success_at"] = now
         state["last_error"] = None
         state["last_summary"] = summary
+        period = _JOB_PERIOD.get()
+        if period:
+            state["last_success_period"] = period["key"]
         state["running"] = False
         snapshot_state = copy.deepcopy(state)
     _persist_job_status(name, snapshot_state)
@@ -237,6 +262,44 @@ def mark_job_failure(name: str, error: str) -> None:
     from runtime import alerts
 
     alerts.schedule_job_failure_alert(name, str(error))
+
+
+def job_state(name: str) -> dict:
+    """Return one job's current durable/in-memory state without mutating it."""
+    with _LOCK:
+        return copy.deepcopy(_state_for(name))
+
+
+def claim_catch_up_period(
+    name: str,
+    period_key: str,
+    *,
+    attempted_at: str | None = None,
+    retry_after: timedelta = timedelta(hours=6),
+) -> str:
+    """Atomically reserve a catch-up attempt, with bounded failure retries."""
+    key = str(period_key)
+    attempted_at = attempted_at or _utcnow()
+    with _LOCK:
+        state = _state_for(name)
+        if state.get("running"):
+            return "busy"
+        if state.get("last_success_period") == key:
+            return "current"
+        if state.get("last_catch_up_period") == key and state.get("last_catch_up_at"):
+            try:
+                previous = datetime.fromisoformat(str(state["last_catch_up_at"]))
+                current = datetime.fromisoformat(str(attempted_at))
+            except ValueError:
+                pass
+            else:
+                if current - previous < retry_after:
+                    return "cooldown"
+        state["last_catch_up_period"] = key
+        state["last_catch_up_at"] = attempted_at
+        snapshot_state = copy.deepcopy(state)
+    _persist_job_status(name, snapshot_state)
+    return "claimed"
 
 
 def record_api_call(

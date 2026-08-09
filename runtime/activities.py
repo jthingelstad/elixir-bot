@@ -36,6 +36,8 @@ class ActivityDefinition:
     schedule_config: dict[str, Any]
     delivery_targets: tuple[str, ...]
     activity_role: str = "communicator"
+    status_name: str | None = None
+    catch_up_period: str | None = None
     manual_trigger_allowed: bool = True
     enabled_by_default: bool = True
     active_window: dict[str, Any] | None = None
@@ -126,6 +128,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=("Discord: #actions weekly review + recommendation cards",),
         activity_role="observer+communicator",
+        catch_up_period="weekly",
     ),
     ActivityDefinition(
         activity_key="war-attendance-snapshot",
@@ -143,6 +146,8 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "max_instances": 1,
             "coalesce": True,
         },
+        # Not generic catch-up eligible: after the CR boundary, `_current_clock`
+        # points at the new day and a late run would finalize that day too early.
         delivery_targets=("Storage: finalized war_attendance_days rows",),
         activity_role="observer",
         manual_trigger_allowed=False,
@@ -164,6 +169,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=("Storage: leader-action outcome/feedback rows",),
         activity_role="observer",
+        catch_up_period="daily",
     ),
     ActivityDefinition(
         activity_key="daily-clan-insight",
@@ -228,6 +234,8 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "hour": _attr("MEMORY_SYNTHESIS_HOUR", 22),
             "minute": 0,
         },
+        # The context builder is anchored to live `now`, not the owed slot. It
+        # must accept an explicit period before a late run can be correct.
         delivery_targets=("Discord: #leaders",),
         activity_role="observer+communicator",
     ),
@@ -245,6 +253,8 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=("Discord: #announcements",),
         activity_role="communicator",
+        status_name="weekly_clan_recap",
+        catch_up_period="weekly",
     ),
     ActivityDefinition(
         activity_key="weekly-member-report",
@@ -262,6 +272,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=("Email: each member (To:, individual)",),
         activity_role="communicator",
+        catch_up_period="weekly",
     ),
     ActivityDefinition(
         activity_key="weekly-elder-standing",
@@ -280,6 +291,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=("Discord: #announcements",),
         activity_role="communicator",
+        catch_up_period="weekly",
     ),
     # site-content (POAP KINGS website publishing) was removed entirely 2026-06-21
     # — the website has its own standalone update script now.
@@ -297,6 +309,8 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=("Discord: #recruiting",),
         activity_role="communicator",
+        status_name="promotion_content_cycle",
+        catch_up_period="weekly",
     ),
     ActivityDefinition(
         activity_key="card-catalog-sync",
@@ -311,6 +325,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=("Storage: card_catalog table",),
         activity_role="observer",
+        catch_up_period="daily",
     ),
     ActivityDefinition(
         activity_key="api-sentinel",
@@ -344,6 +359,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=("Backup: timestamped iCloud database snapshot",),
         activity_role="observer",
+        catch_up_period="daily",
     ),
     # player-pulse retired 2026-07-10: its #battle-feed posts rode the engine
     # delivery pipeline (now off) and battle-mode momentum is brain-owned in
@@ -371,6 +387,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=("Discord webhook: #elixir-log",),
         activity_role="observer+communicator",
+        catch_up_period="weekly",
     ),
     ActivityDefinition(
         activity_key="clan-wars-intel",
@@ -442,6 +459,22 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         manual_trigger_allowed=True,
         enabled_by_default=True,
     ),
+    ActivityDefinition(
+        activity_key="scheduled-catch-up",
+        owner_lane="elixir-log",
+        purpose="Run an elapsed daily/weekly cron period once when downtime hid its slot.",
+        job_id="scheduled-catch-up",
+        job_function="_scheduled_catch_up_cycle",
+        schedule_kind="interval",
+        schedule_config={
+            "minutes": 60,
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=("Runtime: explicitly eligible scheduled activity executors",),
+        activity_role="observer",
+        manual_trigger_allowed=False,
+    ),
 )
 
 
@@ -500,6 +533,8 @@ def resolve_activity(activity_key: str, runtime_module: Any) -> dict[str, Any]:
         "job_id": activity.job_id,
         "job_function": activity.job_function,
         "job_callable": getattr(runtime_module, activity.job_function),
+        "status_name": activity.status_name or activity.job_id.replace("-", "_"),
+        "catch_up_period": activity.catch_up_period,
         "schedule_kind": activity.schedule_kind,
         "schedule_config": _resolve_mapping(activity.schedule_config, runtime_module),
         "active_window": _resolve_mapping(activity.active_window, runtime_module)
@@ -567,6 +602,8 @@ def schedule_specs_from_registry(runtime_module: Any) -> list[dict[str, Any]]:
                 "purpose": activity.purpose,
                 "job_id": activity.job_id,
                 "job_function": activity.job_function,
+                "status_name": resolved["status_name"],
+                "catch_up_period": resolved["catch_up_period"],
                 "schedule_kind": activity.schedule_kind,
                 "schedule_config": resolved["schedule_config"],
                 "active_window": resolved["active_window"],
@@ -590,13 +627,15 @@ def manual_activity_choices() -> list[tuple[str, str]]:
 def register_scheduled_activities(
     *, scheduler: Any, runtime_module: Any, create_task: Any
 ) -> list[dict[str, Any]]:
+    from runtime.scheduled_catchup import wrap_scheduled_activity
+
     registered: list[dict[str, Any]] = []
     for activity in _ACTIVITIES:
         if not activity.enabled_by_default:
             continue
         resolved = resolve_activity(activity.activity_key, runtime_module)
         scheduler.add_job(
-            create_task(resolved["job_callable"]),
+            create_task(wrap_scheduled_activity(resolved)),
             resolved["schedule_kind"],
             id=resolved["job_id"],
             name=resolved["activity_key"],

@@ -20,6 +20,7 @@ from unittest.mock import patch
 import discord
 
 from runtime.activities import get_activity, resolve_activity
+from runtime.scheduled_catchup import wrap_scheduled_activity
 
 
 class ActivityRunError(RuntimeError):
@@ -87,7 +88,7 @@ def _validate_manual_activity(activity_key: str):
 async def run_activity_once(activity_key: str, *, runtime_module: Any) -> ActivityRunResult:
     activity = _validate_manual_activity(activity_key)
     resolved = resolve_activity(activity.activity_key, runtime_module)
-    job_callable = resolved["job_callable"]
+    job_callable = wrap_scheduled_activity(resolved)
     result = job_callable()
     if inspect.isawaitable(result):
         result = await result

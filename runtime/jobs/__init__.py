@@ -40,6 +40,7 @@ from runtime.jobs._maintenance import (  # noqa: F401
     _card_catalog_sync,
     _db_maintenance_cycle,
     _format_size,
+    _scheduled_catch_up_cycle,
 )
 from runtime.jobs._memory import (  # noqa: F401
     MEMORY_SYNTHESIS_DAY,
