@@ -1324,6 +1324,8 @@ async def _member_outreach_propose():
     """
     from runtime import outreach
 
+    runtime_status.mark_job_start("member_outreach_propose")
+
     loop = asyncio.get_running_loop()
 
     def _raise_sync(target, copy):
@@ -1362,8 +1364,9 @@ async def _member_outreach_propose():
         proposed = await asyncio.to_thread(
             outreach.propose_cards, raise_card=_raise_sync, compose=_compose
         )
-    except Exception:
+    except Exception as exc:
         log.exception("member outreach propose failed")
+        runtime_status.mark_job_failure("member_outreach_propose", f"propose failed: {exc}")
         return
     runtime_status.mark_job_success("member_outreach_propose", f"proposed {len(proposed)}")
     if proposed:
