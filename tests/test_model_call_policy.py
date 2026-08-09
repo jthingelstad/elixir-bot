@@ -54,6 +54,7 @@ def _call_sites():
                 node.lineno,
                 workflow,
                 "max_tokens" in kw,
+                "timeout" in kw,
             )
 
 
@@ -61,7 +62,7 @@ def test_no_call_site_reintroduces_a_literal_ceiling():
     """A new hardcoded max_tokens is the drift this refactor exists to stop."""
     offenders = [
         f"{path}:{line} (workflow={workflow})"
-        for path, line, workflow, has_mt in _call_sites()
+        for path, line, workflow, has_mt, _has_to in _call_sites()
         if has_mt and (path, workflow) not in ALLOWED_EXPLICIT
     ]
     assert not offenders, (
@@ -71,6 +72,26 @@ def test_no_call_site_reintroduces_a_literal_ceiling():
     )
 
 
+def test_no_call_site_reintroduces_a_literal_timeout():
+    """Timeouts sprawled the same way ceilings did, and worse: a module-level
+    override map and ~6 call-site literals disagreed about precedence, with the
+    map silently winning over an explicit argument."""
+    offenders = [
+        f"{path}:{line} (workflow={workflow})"
+        for path, line, workflow, _has_mt, has_to in _call_sites()
+        if has_to and (path, workflow) not in ALLOWED_EXPLICIT
+    ]
+    assert not offenders, (
+        "these call sites set timeout themselves instead of taking it from "
+        f"agent.core.MODEL_CALL_POLICY: {offenders}"
+    )
+
+
+def test_the_old_timeout_override_map_is_gone():
+    """It was a second, competing source of truth for the same number."""
+    assert not hasattr(core, "WORKFLOW_TIMEOUT_OVERRIDES")
+
+
 def test_every_named_workflow_that_calls_the_model_has_a_policy_row():
     """A missing row silently falls back to the 4096 default, which is wrong in
     both directions — too small for the weekly writing, far too large for a
@@ -78,7 +99,7 @@ def test_every_named_workflow_that_calls_the_model_has_a_policy_row():
     missing = sorted(
         {
             workflow
-            for _p, _l, workflow, _mt in _call_sites()
+            for _p, _l, workflow, _mt, _to in _call_sites()
             if workflow and workflow not in core.MODEL_CALL_POLICY
         }
     )
@@ -91,6 +112,59 @@ def test_policy_values_are_sane(workflow, policy):
     # 200 is the smallest real ceiling in use (a one-line release blurb); 16384
     # is the largest. Outside that range is a typo, not a decision.
     assert 200 <= policy.max_tokens <= 16384, workflow
+    # A timeout is retried twice by the SDK, so the real wall clock before the
+    # caller learns anything is timeout x 3. 300s is already 15 minutes; more
+    # than that is a hang, not a slow call.
+    assert 15 <= policy.timeout <= 300, workflow
+
+
+# Longest SUCCESSFUL call observed per workflow, in seconds, from the telemetry
+# database on 2026-08-09. A timeout at or under these has already been proven to
+# clip real work — and clipping costs 3x the timeout in wall clock, because the
+# SDK retries twice before giving up. All five recorded timeout failures took
+# ~181.7s, which is 60 x 3 exactly.
+OBSERVED_MAX_SECONDS = {
+    "awareness": 152.4,
+    "release_notes": 111.1,
+    "deck_review": 104.8,
+    "weekly_recap_email": 102.8,
+    "memory_synthesis": 87.3,
+    "leader_action_feedback": 60.0,
+    "weekly_recap": 53.8,
+    "ask_elixir_daily": 53.7,
+    "wake_response_chat": 49.7,
+    "interactive": 41.0,
+    "awareness_repair": 38.1,
+    "recruiting_copy": 30.2,
+    "intel_report": 25.8,
+    "member_report": 24.7,
+    "clanops": 23.6,
+    "screenshot_readout": 21.8,
+}
+
+
+@pytest.mark.parametrize("workflow,observed", sorted(OBSERVED_MAX_SECONDS.items()))
+def test_timeout_clears_the_longest_observed_call(workflow, observed):
+    """Every one of these has actually taken this long and succeeded."""
+    timeout = core.policy_for(workflow).timeout
+    assert timeout > observed, (
+        f"{workflow} has completed in {observed}s but its timeout is {timeout}s; "
+        "a timeout under the working duration costs 3x the timeout in wall clock "
+        "(two SDK retries) and then fails anyway"
+    )
+
+
+def test_timeouts_leave_real_margin_over_observed_work():
+    """Not just above the maximum — comfortably above it. Two workflows used to
+    sit right on the line: deck_review ran at the 60s default with a 104.8s
+    success (a retry-rescued call), and leader_action_feedback's longest success
+    is 60.0s to the tenth of a second."""
+    tight = {
+        workflow: (observed, core.policy_for(workflow).timeout)
+        for workflow, observed in OBSERVED_MAX_SECONDS.items()
+        if core.policy_for(workflow).timeout < observed * 1.3
+    }
+    assert not tight, f"timeout within 30% of observed working duration: {tight}"
 
 
 def test_unknown_workflow_falls_back_instead_of_raising():

@@ -48,7 +48,6 @@ def distill_summary(text: str) -> str | None:
                 {"role": "user", "content": text[:2000]},
             ],
             temperature=0.3,
-            timeout=15,
         )
         # A truncated summary is worse than no summary: it reads as complete and
         # is stored as the durable record of what a member said. Discard it and
@@ -112,7 +111,6 @@ def extract_inference_facts(content: str, context_label: str | None = None) -> l
                 {"role": "user", "content": user_msg},
             ],
             temperature=0.2,
-            timeout=20,
         )
         raw = (response_text(resp) or "").strip()
         if not raw:

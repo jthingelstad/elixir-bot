@@ -536,7 +536,10 @@ def _chat_with_tools(
             messages=call_messages,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=60,
+            # No timeout= here: it was a hardcoded 60 that every workflow routed
+            # through this function inherited, which is the reason a separate
+            # override map had to exist and had to win over explicit arguments.
+            # The policy now supplies it.
             tools=allowed_tools if use_tools else None,
             tool_choice="auto" if use_tools else None,
         )

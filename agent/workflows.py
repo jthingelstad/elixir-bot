@@ -1096,7 +1096,6 @@ def respond_to_help_request(
             system=system_prompt,
             messages=messages,
             temperature=0.7,
-            timeout=60,
         )
         text = (response_text(resp) or "").strip()
         if not text:
@@ -1372,7 +1371,6 @@ def generate_promote_content(clan_data, war_data=None, roster_data=None):
             system=_promote_system(required_trophies=required_trophies),
             messages=messages,
             temperature=0.8,
-            timeout=60,
         )
         return _parse_response(response_text(resp) or "null")
     except (APIError, APIConnectionError) as e:

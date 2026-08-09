@@ -365,7 +365,6 @@ def release_notes_draft(*, days: int | None = None, since_ref: str | None = None
         workflow="release_notes",
         messages=[{"role": "user", "content": release_notes_prompt(material)}],
         temperature=0.7,
-        timeout=300,
     )
     out = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
     return {

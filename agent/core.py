@@ -53,18 +53,12 @@ WORKFLOWS_WITHOUT_CACHE: set[str] = {"leader_action_feedback"}
 # they complete in one burst, so the cheaper 5m write is better for them too.
 LONG_CACHE_TTL_WORKFLOWS: set[str] = set()
 
-# Per-workflow request timeouts (seconds) override the 60s default. Sonnet 4.6
-# on the weekly memory_synthesis batch (~75K input tokens) routinely completes
-# in 55-120s, which trips the default timeout and triggers SDK retries that
-# the model can't outrun — three Sunday runs failed in a row (2026-05-03/10/17)
-# before this override was added.
-WORKFLOW_TIMEOUT_OVERRIDES = {
-    "memory_synthesis": 300,
-    # The awareness loop is Sonnet deliberating over the full read plus a tool
-    # round-trip (get_elixir_state); like memory_synthesis it can run past the
-    # 60s default, and a timeout there silently collapses the tick to "silence."
-    "awareness": 180,
-}
+# Per-workflow timeouts live in MODEL_CALL_POLICY below, alongside the ceiling
+# and the effort level. They used to be split across this module-level map and
+# ~6 literals at call sites, and the two disagreed about precedence: the map won
+# over an explicit per-call `timeout=`, so a caller asking for more time on a
+# mapped workflow was silently ignored. The policy has one rule instead — an
+# explicit argument always wins, because that is what "override" means.
 
 
 def _get_build_hash():
@@ -162,13 +156,30 @@ def _model_for_workflow(workflow, model=None):
 #
 # `budget_tokens` is deliberately absent: it was removed from these models and
 # now returns a 400, so effort is the only thinking control that exists.
+# A too-low timeout does not just fail — it fails EXPENSIVELY. `max_retries` is
+# left at the SDK default of 2, which is what we want for 429/529/5xx, but it
+# also applies to timeouts: a request that times out is retried twice, so the
+# real wall clock before the caller learns anything is timeout x 3.
+#
+# That is not theoretical. Every timeout failure in the telemetry — all five of
+# them, across awareness, deck_review and memory_synthesis — took ~181.7s, which
+# is 60s x 3 exactly. And several SUCCESSES sit above 60s (deck_review at 104.8,
+# weekly_recap_email at 102.8): those are first attempts that timed out and were
+# silently rescued by a retry, at double the latency, with nothing logged.
+#
+# So the rule for these values is: clear the workflow's observed maximum with
+# real margin. Timeouts are not a cost control — effort is. A timeout's only job
+# is to stop a genuinely wedged call, and setting it near the working duration
+# buys 3x latency and a failure instead.
 DEFAULT_EFFORT = "high"
 DEFAULT_MAX_TOKENS = 4096
+DEFAULT_TIMEOUT = 60
 
 
 class CallPolicy(NamedTuple):
     max_tokens: int
     effort: str = DEFAULT_EFFORT
+    timeout: int = DEFAULT_TIMEOUT
 
 
 # Effort is only named where it differs from the API default, so a row with just
@@ -183,26 +194,36 @@ MODEL_CALL_POLICY: dict[str, CallPolicy] = {
     # did the same at 1600 and never sent the Monday clan report (2026-08-03).
     # These run weekly or less, so headroom is a rounding error against the cost
     # of the output silently not existing — and an unused ceiling is not billed.
-    "awareness": CallPolicy(8192),
-    "awareness_repair": CallPolicy(8192),
-    "memory_synthesis": CallPolicy(16384),
-    "weekly_recap": CallPolicy(16384),
-    "weekly_recap_email": CallPolicy(16384),
-    "release_notes": CallPolicy(8192),
-    "screenshot_readout": CallPolicy(9000),
+    #
+    # Timeouts here are 300s against observed maxima of 152s (awareness), 111s
+    # (release_notes), 103s (weekly_recap_email) and 87s (memory_synthesis).
+    # These are background jobs on a weekly or twice-daily cadence, so latency
+    # costs nothing and a timeout costs the whole deliverable.
+    "awareness": CallPolicy(8192, timeout=300),
+    "awareness_repair": CallPolicy(8192, timeout=300),
+    "memory_synthesis": CallPolicy(16384, timeout=300),
+    "weekly_recap": CallPolicy(16384, timeout=300),
+    "weekly_recap_email": CallPolicy(16384, timeout=300),
+    "release_notes": CallPolicy(8192, timeout=300),
+    "screenshot_readout": CallPolicy(9000, timeout=120),
     # ── Conversation and composition: real judgment, not deep reasoning ──
-    "interactive": CallPolicy(4096, "medium"),
-    "clanops": CallPolicy(8192, "medium"),
-    "deck_review": CallPolicy(4096, "medium"),
+    "interactive": CallPolicy(4096, "medium", timeout=90),
+    "clanops": CallPolicy(8192, "medium", timeout=90),
+    # Ran at the 60s default and its longest SUCCESS was 104.8s — i.e. a first
+    # attempt that timed out and was rescued by a retry — plus one outright
+    # failure at 181.6s (60 x 3).
+    "deck_review": CallPolicy(4096, "medium", timeout=180),
     # One call writes copy for all FIVE channels, so its old 1500 was ~300 each
     # before thinking — and it truncated at exactly 1500 on 2026-08-07, failing
     # promotion_content_cycle outright.
-    "recruiting_copy": CallPolicy(8192, "medium"),
+    "recruiting_copy": CallPolicy(8192, "medium", timeout=90),
     # Its largest SUCCESSFUL response was 1367 tokens against a 1400 ceiling; a
     # 2% margin is not a margin. Length scales with how many battle types a
     # member played.
     "member_report": CallPolicy(2048, "medium"),
-    "leader_action_feedback": CallPolicy(1200, "medium"),
+    # Its longest success is 60.0s to the tenth — sitting exactly on the old
+    # default, which means it has been clipping the wall rather than finishing.
+    "leader_action_feedback": CallPolicy(1200, "medium", timeout=120),
     "intel_report": CallPolicy(4096, "medium"),
     "tournament_recap": CallPolicy(2500, "medium"),
     # Never had a ceiling of its own — it inherited _chat_with_tools' 4096
@@ -220,29 +241,34 @@ MODEL_CALL_POLICY: dict[str, CallPolicy] = {
     # all — the whole budget gone to thinking. The ceiling is generous because
     # ceilings are free; `medium` is what actually holds the spend down, and it
     # cut a real run from 1708 tokens to 788.
-    "ask_elixir_daily": CallPolicy(16384, "medium"),
+    "ask_elixir_daily": CallPolicy(16384, "medium", timeout=120),
     # ── Scoped: pick a route, answer one event, write one line ──
+    #
+    # These sit on a member-facing path, so a short timeout is deliberate — but
+    # remember the retry multiplier: 30s here is 90s of wall clock before the
+    # caller falls back, which is why none of them go lower.
     "help": CallPolicy(600, "low"),
-    "intent_router": CallPolicy(512, "low"),
+    "intent_router": CallPolicy(512, "low", timeout=30),
     "reception": CallPolicy(400, "low"),
     "leader_note_interpret": CallPolicy(400, "low"),
     "member_outreach_ask": CallPolicy(300, "low"),
-    "wake_response": CallPolicy(4096, "low"),
-    "wake_response_chat": CallPolicy(4096, "low"),
+    "wake_response": CallPolicy(4096, "low", timeout=90),
+    "wake_response_chat": CallPolicy(4096, "low", timeout=90),
     # ── Lightweight family (Haiku 4.5): effort is REJECTED on these models and
     # is dropped before the request, so the value here is inert. See
     # `_supports_effort`. ──
-    "memory_inference": CallPolicy(1500),
+    # These run inline behind a member's message, so they keep tight timeouts.
+    "memory_inference": CallPolicy(1500, timeout=20),
     # 12 of 71 calls hit the old 100 ceiling while successful ones averaged 71
     # tokens and peaked at 99 — finishing flush against the wall. The 1-2
     # sentence budget is set by the system prompt; this is only the safety net.
-    "memory_distill": CallPolicy(256),
+    "memory_distill": CallPolicy(256, timeout=15),
     "lightweight": CallPolicy(200),
 }
 
 
 def policy_for(workflow: str) -> CallPolicy:
-    """The ceiling and thinking depth for one workflow.
+    """The ceiling, thinking depth and timeout for one workflow.
 
     Unknown workflows get the defaults rather than raising: a missing row should
     degrade to a sane call, not take down the caller.
@@ -523,15 +549,16 @@ def _create_chat_completion(
     model=None,
     temperature=0.7,
     max_tokens=None,
-    timeout=60,
+    timeout=None,
     tools=None,
     tool_choice=None,
 ):
     """Call the Anthropic Messages API and return the native Message response.
 
-    `max_tokens=None` — the normal case — takes the workflow's ceiling from
-    MODEL_CALL_POLICY. Pass a number only for a genuine per-call override, such
-    as a retry that needs more headroom than the workflow's usual ceiling.
+    `max_tokens=None` and `timeout=None` — the normal case — take the workflow's
+    values from MODEL_CALL_POLICY. Pass a number only for a genuine per-call
+    override, such as a retry that needs more headroom than the usual ceiling;
+    an explicit argument always wins over the policy.
 
     messages: native Anthropic messages (user/assistant roles only; content is
     a string or a list of content blocks — SDK block objects from a prior
@@ -542,6 +569,8 @@ def _create_chat_completion(
     policy = policy_for(workflow)
     if max_tokens is None:
         max_tokens = policy.max_tokens
+    if timeout is None:
+        timeout = policy.timeout
 
     # The daily spend ceiling. Refused BEFORE the call, because the point is to
     # not spend. Hard-post workflows are exempt by name — a floor is never
@@ -573,13 +602,11 @@ def _create_chat_completion(
         # not just system+tools — that payload is the bulk of the re-sent input.
         sanitized_messages = _with_message_cache_breakpoint(sanitized_messages)
 
-    effective_timeout = WORKFLOW_TIMEOUT_OVERRIDES.get(workflow, timeout)
-
     kwargs = {
         "model": selected_model,
         "messages": sanitized_messages,
         "max_tokens": max_tokens,
-        "timeout": effective_timeout,
+        "timeout": timeout,
     }
 
     # Only send what this model still accepts. Both gates are cheap string
