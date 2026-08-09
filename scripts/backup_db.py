@@ -6,7 +6,8 @@ the required ``elixir-v51.db`` plus optional admin-only ``elixir-telemetry.db``.
 Durable memory moved into the operational database in the v5.1 memory pass; the
 retired ``elixir-v5-memory.db`` archive is read-only and is not a runtime backup
 target. Uses sqlite3.Connection.backup() for safe online snapshots — no need to
-stop the bot.
+stop the bot. Published gzip artifacts are owner-only (`0600`) regardless of
+the invoking process's umask.
 
 create_backup() / prune_backups() default to the operational DB; pass
 `prefix=`/`db_path=` to target another store.
@@ -50,6 +51,7 @@ _DEFAULT_BACKUP_DIR = Path.home() / "elixir-backups"
 
 _TIMESTAMP_FMT = "%Y-%m-%d-%H%M%S"
 _DEFAULT_PREFIX = "elixir"
+_BACKUP_FILE_MODE = 0o600
 
 
 def _filename_re(prefix: str) -> re.Pattern:
@@ -237,7 +239,12 @@ def create_backup(
                         if not chunk:
                             break
                         f_out.write(chunk)
+                # The staging directory is private, so narrow the completed
+                # artifact before the atomic publish. The destination must
+                # never observe a recovery copy at the caller's ambient umask.
+                os.chmod(stage_gz, _BACKUP_FILE_MODE)
                 os.replace(stage_gz, dest)  # atomic move into (possibly iCloud) dest_dir
+                os.chmod(dest, _BACKUP_FILE_MODE)
 
                 result["size_compressed"] = os.path.getsize(dest)
                 result["ok"] = True

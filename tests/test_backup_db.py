@@ -3,7 +3,9 @@
 import asyncio
 import gzip
 import json
+import os
 import sqlite3
+import stat
 
 from scripts.backup_db import _databases, create_backup
 
@@ -17,12 +19,17 @@ def test_backup_leaves_no_temp_files_in_dest(tmp_path):
     conn.close()
 
     dest = tmp_path / "backups"
-    r = create_backup(db_path=src, backup_dir=dest, prefix="test")
+    prior_umask = os.umask(0)
+    try:
+        r = create_backup(db_path=src, backup_dir=dest, prefix="test")
+    finally:
+        os.umask(prior_umask)
     assert r["ok"] and r["error"] is None
 
     files = sorted(p.name for p in dest.iterdir())
     assert len(files) == 1 and files[0].endswith(".db.gz"), files  # ONLY the .gz
     assert not any(f.startswith("tmp") or f.endswith(".db-journal") for f in files)
+    assert stat.S_IMODE((dest / files[0]).stat().st_mode) == 0o600
     # and it's a real gzip of a real sqlite backup
     with gzip.open(dest / files[0], "rb") as f:
         assert f.read(16).startswith(b"SQLite format 3")
