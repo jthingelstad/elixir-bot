@@ -112,6 +112,38 @@ def flush_status_writes(timeout: float = 30.0) -> None:
             future.result(timeout=timeout)
 
 
+def _state_for(name: str) -> dict:
+    """In-memory state for one job, seeded from the persisted row on first touch.
+
+    Must be called under `_LOCK`.
+
+    The obvious `_JOB_STATUS.setdefault(name, _default_job_state())` is what this
+    replaces, and it silently destroyed history. `_JOB_STATUS` is empty after a
+    restart, so the first mark_job_* for a job built a FRESH default — with
+    `last_success_at = None` and the counters at zero — and then persisted it
+    over the real row. The record of when a job last succeeded therefore
+    survived a restart but not the job's own next run.
+
+    That is what makes this load-bearing rather than cosmetic: idempotent,
+    catch-up-able jobs need a durable answer to "has this period already run?",
+    and until now the answer was erased every week by the very run that should
+    have been checking it. Measured on 2026-08-09: weekly_member_report last
+    succeeded 2026-07-27 and silently skipped its 2026-08-03 slot, with nothing
+    anywhere recording that it had not run.
+    """
+    state = _JOB_STATUS.get(name)
+    if state is None:
+        persisted = _load_persisted_job_status().get(name)
+        state = _default_job_state()
+        if persisted:
+            # Merge onto the default so a row written by an older build, missing
+            # a key added since, cannot KeyError the counters.
+            state.update({k: v for k, v in persisted.items() if k in state})
+        state["running"] = False
+        _JOB_STATUS[name] = state
+    return state
+
+
 def _load_persisted_job_status() -> dict:
     try:
         import db
@@ -154,7 +186,7 @@ def clear_stale_running_jobs() -> list[str]:
 
 def mark_job_start(name: str) -> None:
     with _LOCK:
-        state = _JOB_STATUS.setdefault(name, _default_job_state())
+        state = _state_for(name)
         state["run_count"] += 1
         state["last_started_at"] = _utcnow()
         state["running"] = True
@@ -164,7 +196,7 @@ def mark_job_start(name: str) -> None:
 
 def mark_job_success(name: str, summary: str | None = None) -> None:
     with _LOCK:
-        state = _JOB_STATUS.setdefault(name, _default_job_state())
+        state = _state_for(name)
         now = _utcnow()
         state["success_count"] = int(state.get("success_count", 0)) + 1
         state["last_finished_at"] = now
@@ -191,7 +223,7 @@ def mark_job_failure(name: str, error: str) -> None:
     # stopped, so WARNING was the wrong severity wherever it was used.
     log.error("job_failed job=%s error=%s", name, error)
     with _LOCK:
-        state = _JOB_STATUS.setdefault(name, _default_job_state())
+        state = _state_for(name)
         now = _utcnow()
         state["failure_count"] = int(state.get("failure_count", 0)) + 1
         state["last_finished_at"] = now
