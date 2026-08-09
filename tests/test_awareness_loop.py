@@ -195,6 +195,98 @@ def test_run_awareness_loop_live_delivers_the_plan(monkeypatch):
     assert counters["posts_delivered"] == 1
 
 
+def test_run_awareness_loop_does_not_claim_concurrent_responder_receipt(monkeypatch):
+    """A wake responder can post after the brain read starts but before the
+    thought is persisted. Only the intent keys returned by this brain delivery
+    belong to the resulting loop; a timestamp range cannot establish ownership.
+    """
+    monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "0")
+    from runtime.awareness import loop as loop_mod
+    from runtime.awareness import store
+
+    plan = {
+        "posts": [
+            {
+                "channel": "elixir",
+                "content": "brain post",
+                "covers_signal_keys": ["brain-signal"],
+            }
+        ]
+    }
+    brain_post = {
+        "channel": "elixir",
+        "content": "brain post",
+        "covers_signal_keys": ["brain-signal"],
+        "_delivery_content": "brain post",
+    }
+    responder_post = {
+        "channel": "announcements",
+        "content": "responder post",
+        "covers_signal_keys": ["responder-signal"],
+        "_delivery_content": "responder post",
+    }
+    brain_intent = store.delivery_intent_key(brain_post, "brain post")
+    responder_intent = store.delivery_intent_key(responder_post, "responder post")
+
+    def _deliver(_read, _plan):
+        # Both receipts land inside the brain turn's time window. The explicit
+        # delivery result is the only evidence that distinguishes ownership.
+        store.prepare_delivery_intents([responder_post, brain_post])
+        store.record_awareness_post(
+            lane="announcements",
+            content="responder post",
+            covers=["responder-signal"],
+            message_id="responder-message",
+            intent_key=responder_intent,
+        )
+        store.record_awareness_post(
+            lane="elixir",
+            content="brain post",
+            covers=["brain-signal"],
+            message_id="brain-message",
+            intent_key=brain_intent,
+        )
+        return {
+            "delivered": 1,
+            "failed": False,
+            "intent_keys": [brain_intent],
+        }
+
+    with patch("agent.workflows.run_awareness_tick", return_value=plan):
+        counters = loop_mod.run_awareness_loop(deliver_fn=_deliver)
+
+    conn = db.get_connection()
+    try:
+        rows = {
+            row["discord_message_id"]: row["loop_number"]
+            for row in conn.execute(
+                "SELECT discord_message_id, loop_number FROM awareness_posts"
+            ).fetchall()
+        }
+        linked_count = conn.execute(
+            "SELECT COUNT(*) FROM awareness_posts WHERE loop_number = ?",
+            (counters["loop_number"],),
+        ).fetchone()[0]
+        thought_post_count = conn.execute(
+            "SELECT post_count FROM awareness_thoughts WHERE loop_number = ?",
+            (counters["loop_number"],),
+        ).fetchone()[0]
+        intent_loops = {
+            row["intent_key"]: row["loop_number"]
+            for row in conn.execute(
+                "SELECT intent_key, loop_number FROM awareness_delivery_intents"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert rows["brain-message"] == counters["loop_number"]
+    assert rows["responder-message"] is None
+    assert intent_loops[brain_intent] == counters["loop_number"]
+    assert intent_loops[responder_intent] is None
+    assert linked_count == thought_post_count == 1
+
+
 def test_run_awareness_loop_records_silence(monkeypatch):
     monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "0")  # exercise brain-chosen silence
     from runtime.awareness import loop as loop_mod

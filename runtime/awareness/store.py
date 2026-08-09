@@ -461,29 +461,30 @@ def mark_delivery_fulfilled(
 def attach_awareness_posts_to_loop(
     loop_number: int,
     *,
-    since: str,
+    intent_keys: list[str],
     conn: sqlite3.Connection = None,
 ) -> int:
-    """Link receipts written during this loop to its persisted thought.
+    """Link this delivery's exact durable receipts to its persisted thought.
 
     Delivery necessarily happens before the thought is committed, so the
-    receipt cannot know the future loop number when inserted. The awareness
-    job is single-instance; linking still-null receipts created after this
-    read began is deterministic and crash-safe.
+    receipt cannot know the future loop number when inserted. Intent keys come
+    back from the outbox delivery result and establish ownership without a
+    timestamp sweep that could claim a concurrent wake-responder receipt.
     """
+    keys = sorted({str(value) for value in (intent_keys or []) if value})
+    if not keys:
+        return 0
+    placeholders = ",".join("?" for _ in keys)
     cur = conn.execute(
         "UPDATE awareness_posts SET loop_number = ? "
-        "WHERE loop_number IS NULL AND datetime(posted_at) >= datetime(?)",
-        (int(loop_number), since),
+        f"WHERE loop_number IS NULL AND intent_key IN ({placeholders})",
+        (int(loop_number), *keys),
     )
     conn.execute(
-        """UPDATE awareness_delivery_intents
-           SET loop_number = COALESCE(loop_number, ?)
-           WHERE intent_key IN (
-               SELECT intent_key FROM awareness_posts
-               WHERE loop_number = ? AND intent_key IS NOT NULL
-           )""",
-        (int(loop_number), int(loop_number)),
+        "UPDATE awareness_delivery_intents "
+        "SET loop_number = COALESCE(loop_number, ?) "
+        f"WHERE intent_key IN ({placeholders})",
+        (int(loop_number), *keys),
     )
     return max(0, cur.rowcount)
 

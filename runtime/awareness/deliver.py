@@ -60,6 +60,10 @@ def deliver_posts(
     """Deliver every post in ``plan``. Returns a result dict:
     ``{"delivered": int, "failed": bool, "reason": str|None, "uncovered_hard": [...]}``.
 
+    With a durable ``intent_store``, the result also carries ``intent_keys``:
+    the exact outbox work represented by the final plan. The caller uses these
+    identities after persisting its thought, when the loop number is known.
+
     Fails the tick (``failed=True``) on: an unknown/absent channel, a send that
     raises or returns no message id, or a hard-post-floor signal left uncovered.
     A post that lands is recorded immediately, so a mid-plan failure still leaves
@@ -212,6 +216,10 @@ def deliver_posts(
         {key: value for key, value in item["post"].items() if key != "_delivery_content"}
         for item in work
     ]
+    # The caller persists the thought only after delivery, when its loop number
+    # is finally known. Return the exact durable identities that belonged to
+    # this outbox work so persistence never has to infer ownership by time.
+    intent_keys = [str(item["intent_key"]) for item in work if item.get("intent_key")]
     covered = {
         signal_key for item in work for signal_key in (item["post"].get("covers_signal_keys") or [])
     }
@@ -226,6 +234,7 @@ def deliver_posts(
             "failed": True,
             "reason": f"uncovered hard-post signals: {uncovered}",
             "uncovered_hard": uncovered,
+            "intent_keys": intent_keys,
         }
 
     delivered = 0
@@ -254,6 +263,7 @@ def deliver_posts(
                     "failed": True,
                     "reason": f"delivery intent claim failed: {exc}",
                     "uncovered_hard": [],
+                    "intent_keys": intent_keys,
                 }
 
         try:
@@ -273,6 +283,7 @@ def deliver_posts(
                 "failed": True,
                 "reason": f"send failed: {exc}",
                 "uncovered_hard": [],
+                "intent_keys": intent_keys,
             }
         if message_id is None:
             reason = f"send to #{cfg.get('channel_name') or channel} returned no id"
@@ -289,6 +300,7 @@ def deliver_posts(
                 "failed": True,
                 "reason": reason,
                 "uncovered_hard": [],
+                "intent_keys": intent_keys,
             }
 
         covers = post.get("covers_signal_keys") or []
@@ -321,6 +333,7 @@ def deliver_posts(
                     "failed": True,
                     "reason": f"delivery intent finalize failed: {exc}",
                     "uncovered_hard": [],
+                    "intent_keys": intent_keys,
                 }
         delivered += 1
 
@@ -345,6 +358,7 @@ def deliver_posts(
     }
     if intent_store is not None:
         result["replayed"] = replayed
+        result["intent_keys"] = intent_keys
     return result
 
 

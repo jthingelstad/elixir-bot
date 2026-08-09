@@ -184,6 +184,8 @@ def test_partial_delivery_retry_sends_only_unfulfilled_intent(engine_conn):
     assert first["delivered"] == 1
     assert second["failed"] is False
     assert second["delivered"] == 1
+    assert len(first["intent_keys"]) == 2
+    assert set(second["intent_keys"]) == set(first["intent_keys"])
     assert retry_sends == [(222, "Bravo reached a new best")]
     rows = engine_conn.execute(
         "SELECT lane, status, attempts FROM awareness_delivery_intents ORDER BY lane"
@@ -946,12 +948,22 @@ def test_recorded_post_is_idempotent_by_discord_message_id(engine_conn):
 
 
 def test_post_receipt_links_to_persisted_loop(engine_conn):
+    post = {
+        "channel": "elixir",
+        "content": "linked",
+        "covers_signal_keys": ["linked-signal"],
+        "_delivery_content": "linked",
+    }
+    intent_key = store.delivery_intent_key(post, "linked")
+    store.prepare_delivery_intents([post], conn=engine_conn)
     store.record_awareness_post(
-        lane="elixir", content="linked", message_id="link-1", conn=engine_conn
+        lane="elixir",
+        content="linked",
+        message_id="link-1",
+        intent_key=intent_key,
+        conn=engine_conn,
     )
-    linked = store.attach_awareness_posts_to_loop(
-        77, since="2000-01-01T00:00:00Z", conn=engine_conn
-    )
+    linked = store.attach_awareness_posts_to_loop(77, intent_keys=[intent_key], conn=engine_conn)
 
     row = engine_conn.execute(
         "SELECT loop_number FROM awareness_posts WHERE discord_message_id = 'link-1'"

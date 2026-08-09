@@ -133,6 +133,7 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
     # failed — we mark the plan so classify + persist agree, the cursor
     # (store.last_tick_at) doesn't advance, and the signals re-surface next
     # loop. Fail-hard, no fallback.
+    delivery_intent_keys: list[str] = []
     if outcome in {"posted", "silence"} and deliver_fn is not None:
         try:
             result = deliver_fn(read, plan) or {}
@@ -141,6 +142,7 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
             result = {"failed": True, "reason": f"deliver_fn raised: {exc}"}
         counters["posts_delivered"] = result.get("delivered", 0)
         counters["posts_replayed"] = result.get("replayed", 0)
+        delivery_intent_keys = [str(value) for value in (result.get("intent_keys") or []) if value]
         if result.get("failed"):
             plan["_error"] = {
                 "kind": "delivery",
@@ -201,7 +203,7 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
             try:
                 counters["post_receipts_linked"] = store.attach_awareness_posts_to_loop(
                     loop_number,
-                    since=read.get("generated_at") or "9999-12-31T23:59:59Z",
+                    intent_keys=delivery_intent_keys,
                 )
             except Exception as exc:
                 log.warning("awareness loop: post receipt linking failed", exc_info=True)
