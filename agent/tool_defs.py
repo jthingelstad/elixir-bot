@@ -1582,8 +1582,9 @@ TOOLS = [
 ]
 
 # Definitions kept above the export preserve direct-executor compatibility while
-# the LLM sees one canonical owner per question. Only this 17-tool block is ever
-# offered to shared workflows.
+# the LLM sees one canonical owner per question. This registry owns the shared
+# workflow surface; lookup_reference is filtered per turn until an exact R/L/M
+# code appears in conversation context.
 _SHARED_TOOL_NAMES = (
     "resolve_member",
     "get_member",

@@ -109,10 +109,20 @@ def get_awareness_activity(*, limit: int = 20, conn=None) -> dict:
         "discord_message_id FROM awareness_posts ORDER BY posted_at DESC, post_id DESC LIMIT ?",
         (cap,),
     ).fetchall()
-    return {
-        "thoughts": [dict(row) for row in thoughts],
-        "posts": [dict(row) for row in posts],
-    }
+    thought_items = []
+    for row in thoughts:
+        item = dict(row)
+        item["reference"] = f"L{row['loop_number']}"
+        thought_items.append(item)
+
+    post_items = []
+    for row in posts:
+        item = dict(row)
+        if row["loop_number"] is not None:
+            item["reference"] = f"L{row['loop_number']}"
+        post_items.append(item)
+
+    return {"thoughts": thought_items, "posts": post_items}
 
 
 __all__ = [

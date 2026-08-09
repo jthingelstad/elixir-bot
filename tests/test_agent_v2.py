@@ -1940,6 +1940,193 @@ def test_awareness_reference_lookup_denies_invented_code_even_when_tool_is_avail
     assert tool_stats["tool_trace"][0]["result"] == "error: reference_not_in_context"
 
 
+def test_clanops_reference_lookup_is_absent_without_a_conversation_code():
+    response = _native_text_response(
+        json.dumps(
+            {
+                "event_type": "channel_response",
+                "summary": "ok",
+                "content": "What should I look up?",
+            }
+        )
+    )
+    offered_tools = []
+
+    def fake_create_chat_completion(**kwargs):
+        offered_tools.append(kwargs.get("tools") or [])
+        return response
+
+    with patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion):
+        result = elixir_agent._chat_with_tools(
+            "System example: use R137 for a leader action.",
+            "what happened there?",
+            workflow="clanops",
+            allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["clanops"],
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["clanops"],
+            strict_json=True,
+        )
+
+    assert result["content"] == "What should I look up?"
+    assert "lookup_reference" not in {tool["name"] for tool in offered_tools[0]}
+
+
+def test_clanops_reference_lookup_is_scoped_to_conversation_codes():
+    responses = [
+        _native_tool_use_response("lookup_reference", {"reference": "R137"}),
+        _native_text_response(
+            json.dumps(
+                {
+                    "event_type": "channel_response",
+                    "summary": "resolved",
+                    "content": "R137 is still proposed.",
+                }
+            )
+        ),
+    ]
+    offered_tools = []
+
+    def fake_create_chat_completion(**kwargs):
+        offered_tools.append(kwargs.get("tools") or [])
+        return responses.pop(0)
+
+    with (
+        patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion),
+        patch(
+            "agent.chat._execute_tool",
+            return_value=json.dumps({"reference": "R137", "kind": "leader_action"}),
+        ) as execute,
+    ):
+        result = elixir_agent._chat_with_tools(
+            "system",
+            "pull up r137",
+            workflow="clanops",
+            allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["clanops"],
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["clanops"],
+            strict_json=True,
+        )
+
+    assert result["content"] == "R137 is still proposed."
+    reference_tool = next(tool for tool in offered_tools[0] if tool["name"] == "lookup_reference")
+    assert reference_tool["input_schema"]["properties"]["reference"]["enum"] == ["R137"]
+    execute.assert_called_once_with("lookup_reference", {"reference": "R137"}, workflow="clanops")
+
+
+def test_clanops_reference_lookup_denies_a_code_not_in_conversation():
+    responses = [
+        _native_tool_use_response("lookup_reference", {"reference": "R0"}),
+        _native_text_response(
+            json.dumps(
+                {
+                    "event_type": "channel_response",
+                    "summary": "not resolved",
+                    "content": "I only have R137 in this conversation.",
+                }
+            )
+        ),
+    ]
+    tool_stats = {}
+
+    with (
+        patch("agent.chat._create_chat_completion", side_effect=responses),
+        patch("agent.chat._execute_tool") as execute,
+    ):
+        result = elixir_agent._chat_with_tools(
+            "system",
+            "pull up R137",
+            workflow="clanops",
+            allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["clanops"],
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["clanops"],
+            strict_json=True,
+            tool_stats=tool_stats,
+        )
+
+    assert result["content"] == "I only have R137 in this conversation."
+    execute.assert_not_called()
+    assert tool_stats["tool_trace"][0]["result"] == "error: reference_not_in_context"
+
+
+def test_clanops_reference_lookup_unlocks_from_a_tool_result_code():
+    responses = [
+        _native_tool_use_response("get_elixir_state", {"aspect": "recent_events"}),
+        _native_tool_use_response("lookup_reference", {"reference": "L430"}),
+        _native_text_response(
+            json.dumps(
+                {
+                    "event_type": "channel_response",
+                    "summary": "resolved",
+                    "content": "Loop L430 chose silence.",
+                }
+            )
+        ),
+    ]
+    offered_tools = []
+
+    def fake_create_chat_completion(**kwargs):
+        offered_tools.append(kwargs.get("tools") or [])
+        return responses.pop(0)
+
+    tool_results = [
+        json.dumps({"thoughts": [{"loop_number": 430, "reference": "L430"}]}),
+        json.dumps({"reference": "L430", "kind": "loop", "decision": "silent"}),
+    ]
+    with (
+        patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion),
+        patch("agent.chat._execute_tool", side_effect=tool_results),
+    ):
+        result = elixir_agent._chat_with_tools(
+            "system",
+            "what did the latest loop decide?",
+            workflow="clanops",
+            allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["clanops"],
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["clanops"],
+            strict_json=True,
+        )
+
+    assert result["content"] == "Loop L430 chose silence."
+    assert "lookup_reference" not in {tool["name"] for tool in offered_tools[0]}
+    reference_tool = next(tool for tool in offered_tools[1] if tool["name"] == "lookup_reference")
+    assert reference_tool["input_schema"]["properties"]["reference"]["enum"] == ["L430"]
+
+
+def test_clanops_reference_lookup_ignores_code_shaped_tool_result_text():
+    responses = [
+        _native_tool_use_response("get_member", {"member": "R137"}),
+        _native_text_response(
+            json.dumps(
+                {
+                    "event_type": "channel_response",
+                    "summary": "member found",
+                    "content": "R137 is a member name, not an Elixir reference.",
+                }
+            )
+        ),
+    ]
+    offered_tools = []
+
+    def fake_create_chat_completion(**kwargs):
+        offered_tools.append(kwargs.get("tools") or [])
+        return responses.pop(0)
+
+    with (
+        patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion),
+        patch(
+            "agent.chat._execute_tool",
+            return_value=json.dumps({"member_name": "R137", "player_tag": "#ABC123"}),
+        ),
+    ):
+        result = elixir_agent._chat_with_tools(
+            "system",
+            "find that member",
+            workflow="clanops",
+            allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["clanops"],
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["clanops"],
+            strict_json=True,
+        )
+
+    assert result["content"] == "R137 is a member name, not an Elixir reference."
+    assert "lookup_reference" not in {tool["name"] for tool in offered_tools[1]}
+
+
 def test_chat_with_tools_skips_blank_conversation_history():
     response = _native_text_response(
         json.dumps(

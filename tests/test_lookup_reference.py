@@ -72,6 +72,11 @@ def test_resolve_loop_reference(engine_conn, _isolate_default_sqlite_db):
     assert out["posts"][0]["members"] == ["Gem"]
     assert out["read_health"]["hard_post_signal_count"] == 0
 
+    from storage.runtime_status import get_awareness_activity
+
+    activity = get_awareness_activity(conn=engine_conn)
+    assert activity["thoughts"][0]["reference"] == "L60"
+
 
 def test_resolve_memory_reference(_isolate_default_sqlite_db):
     from memory_store import create_memory

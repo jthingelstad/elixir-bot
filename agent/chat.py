@@ -254,20 +254,41 @@ def _extract_reference_codes(value) -> set[str]:
     }
 
 
-def _awareness_tools_with_reference_codes(tool_defs, reference_codes):
-    """Expose lookup_reference only for exact codes awareness has actually seen."""
+def _extract_tool_result_reference_codes(value) -> set[str]:
+    """Return codes carried by explicit reference fields in a tool result."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError, TypeError, ValueError:
+            return set()
+
+    codes = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in {"reference", "loop"}:
+                codes.update(_extract_reference_codes(item))
+            codes.update(_extract_tool_result_reference_codes(item))
+    elif isinstance(value, list):
+        for item in value:
+            codes.update(_extract_tool_result_reference_codes(item))
+    return codes
+
+
+def _tools_with_reference_codes(tool_defs, reference_codes):
+    """Expose lookup_reference only for exact codes this turn has actually seen."""
+    supports_reference_lookup = any(
+        tool["name"] == "lookup_reference" for tool in (tool_defs or [])
+    )
     tools = [tool for tool in (tool_defs or []) if tool["name"] != "lookup_reference"]
     codes = sorted(_extract_reference_codes(list(reference_codes or ())))
-    if not codes:
+    if not supports_reference_lookup or not codes:
         return tools
 
     reference_tool = copy.deepcopy(TOOL_DEFINITIONS_BY_NAME["lookup_reference"]["tool"])
     reference_input = reference_tool["input_schema"]["properties"]["reference"]
     reference_input["enum"] = codes
     reference_input["description"] = (
-        "Use exactly one reference code already present in this awareness turn: "
-        + ", ".join(codes)
-        + "."
+        "Use exactly one reference code already present in this turn: " + ", ".join(codes) + "."
     )
     tools.append(reference_tool)
     return tools
@@ -494,11 +515,14 @@ def _chat_with_tools(
 
     if allowed_tools is None:
         allowed_tools = TOOLSETS_BY_WORKFLOW.get(workflow, ALL_TOOLS)
-    awareness_reference_codes = _extract_reference_codes(list(reference_codes or ()))
+    base_allowed_tools = list(allowed_tools or [])
     if workflow == "awareness":
-        allowed_tools = _awareness_tools_with_reference_codes(
-            allowed_tools, awareness_reference_codes
-        )
+        context_reference_codes = _extract_reference_codes(list(reference_codes or ()))
+    else:
+        # System prompts contain illustrative R/L/M codes, so only conversation
+        # messages may unlock the resolver for regular workflows.
+        context_reference_codes = _extract_reference_codes(messages)
+    allowed_tools = _tools_with_reference_codes(base_allowed_tools, context_reference_codes)
     allowed_tool_names = _tool_names(allowed_tools)
 
     # Write policy is registry data: a spec opts in with write_tools_allowed.
@@ -725,21 +749,20 @@ def _chat_with_tools(
                     }
                 )
             elif (
-                workflow == "awareness"
-                and fn_name == "lookup_reference"
+                fn_name == "lookup_reference"
                 and str(fn_args.get("reference") or "").strip().upper()
-                not in awareness_reference_codes
+                not in context_reference_codes
             ):
                 denied_tool_count += 1
                 log.warning(
-                    "tool_denied workflow=awareness tool=lookup_reference "
-                    "reason=reference_not_in_context"
+                    "tool_denied workflow=%s tool=lookup_reference reason=reference_not_in_context",
+                    workflow,
                 )
                 result = json.dumps(
                     {
                         "error": "reference_not_in_context",
                         "tool": fn_name,
-                        "hint": "Use only an R/L/M code present in this awareness turn.",
+                        "hint": "Use only an R/L/M code present in this turn.",
                     }
                 )
             elif (
@@ -815,12 +838,12 @@ def _chat_with_tools(
                     )
                     if is_budgeted_write and _tool_result_succeeded(result):
                         tool_stats["write_calls_succeeded"] += 1
-                    if workflow == "awareness" and _tool_result_succeeded(result):
-                        discovered_codes = _extract_reference_codes(result)
-                        if not discovered_codes <= awareness_reference_codes:
-                            awareness_reference_codes.update(discovered_codes)
-                            allowed_tools = _awareness_tools_with_reference_codes(
-                                allowed_tools, awareness_reference_codes
+                    if _tool_result_succeeded(result):
+                        discovered_codes = _extract_tool_result_reference_codes(result)
+                        if not discovered_codes <= context_reference_codes:
+                            context_reference_codes.update(discovered_codes)
+                            allowed_tools = _tools_with_reference_codes(
+                                base_allowed_tools, context_reference_codes
                             )
                             allowed_tool_names = _tool_names(allowed_tools)
             trace_entry = {
