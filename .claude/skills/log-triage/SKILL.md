@@ -66,7 +66,7 @@ The telemetry DB does not have this problem — the runtime holds a per-thread c
 
 | Table | Triage value |
 |---|---|
-| `runtime_job_status` | One row per job, `status_json` carries `run_count` / `success_count` / `failure_count` / `last_success_at` / `last_failure_at` / `last_error` / `last_summary`. The authoritative "did the scheduler actually run it" answer. Counters reset on restart. |
+| `runtime_job_status` | One row per job, `status_json` carries `run_count` / `success_count` / `failure_count` / `last_success_at` / `last_failure_at` / `last_error` / `last_summary`. The authoritative "did the scheduler actually run it" answer. |
 | `prompt_failures` | Agent-response failures that reached a member: workflow, failure type/stage, channel, question text, `llm_last_error`. `scripts/review_agent_feedback.py` is the friendlier reader. |
 | `admin_command_invocations` | Leader/admin command use, including rejected ones (`accepted=0`). |
 
@@ -204,6 +204,7 @@ Routine engine ticks legitimately hold the lock in the hundreds of milliseconds 
 
 After triaging failures, spot-check these even if nothing errored:
 
+- **Does the row count match the registry?** `runtime/activities.py` holds 20 activities (plus the leader-started `tournament-watch`, which is dynamic and not registered). Nothing prunes `runtime_job_status`, so a retired activity leaves its row forever — `battle_intel_prose` sat there until 2026-08-09, four months after the job was deleted, making the table report a job that could never run. Do not automate this: `job_name` and `activity_key` are not the same string (`weekly-recap` writes `weekly_clan_recap`, `promotion-content` writes `promotion_content_cycle`), so a naive reconcile would delete live history. Compare by hand when the count looks wrong.
 - Is `engine-tick` firing roughly every 10 minutes, and `awareness-loop` on its twice-daily cadence? Compare `runtime_job_status.updated_at` against now; long gaps mean the scheduler stalled.
 - Any job in `runtime_job_status` with a non-zero `failure_count` or a `last_failure_at` newer than its `last_success_at`.
 - Is anything in `runtime_job_status` conspicuously stale relative to its registered schedule in `runtime/activities.py`?
