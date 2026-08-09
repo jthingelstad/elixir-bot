@@ -13,7 +13,7 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 35
+CURRENT_SCHEMA_VERSION = 36
 EXPECTED_TABLE_COUNT = 63  # 64 -> 63 (v34): llm_calls moved to the telemetry DB
 
 
@@ -1945,6 +1945,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 35
+    if version < 36:
+        try:
+            _apply_v36(conn)
+            conn.execute("PRAGMA user_version = 36")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -2127,6 +2136,46 @@ def _apply_v35(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_api_sentinel_endpoint "
         "ON api_sentinel_observations(endpoint, first_seen_at DESC)"
+    )
+
+
+def _apply_v36(conn: sqlite3.Connection) -> None:
+    """Repair Rage friendlies carried forward under the pre-taxonomy label.
+
+    The May 3 rolling backup retains every source payload behind these rows:
+    four matches, mirrored into eight player rollups, all ``type=friendly``
+    with no event or tournament tag.  The current classifier therefore calls
+    them ``friendly``; only the durable pre-June-19 rollups still say ``other``.
+
+    Do not generalize this UPDATE to every friendly-looking name.  Rollups do
+    not retain battle type or event/tournament tags, and several modes with a
+    ``_Friendly`` suffix legitimately ran as special events.  This exact
+    id/name/old-group cohort is the one whose source semantics were recovered.
+    """
+    collisions = conn.execute(
+        """SELECT COUNT(*)
+           FROM player_daily_battle_rollups stale
+           JOIN player_daily_battle_rollups current
+             ON current.player_tag = stale.player_tag
+            AND current.battle_date = stale.battle_date
+            AND current.game_mode_id = stale.game_mode_id
+            AND current.mode_group = 'friendly'
+           WHERE stale.game_mode_id = 72000071
+             AND stale.game_mode_name = 'Rage_Friendly'
+             AND stale.mode_group = 'other'"""
+    ).fetchone()[0]
+    if collisions:
+        raise RuntimeError(
+            "v36: Rage_Friendly historical repair would collide with "
+            f"{collisions} existing friendly rollup rows; resolve the duplicate "
+            "days before migrating"
+        )
+    conn.execute(
+        """UPDATE player_daily_battle_rollups
+           SET mode_group = 'friendly'
+           WHERE game_mode_id = 72000071
+             AND game_mode_name = 'Rage_Friendly'
+             AND mode_group = 'other'"""
     )
 
 

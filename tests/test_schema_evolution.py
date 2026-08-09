@@ -6,6 +6,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 import db
 from db.schema import (
     CURRENT_SCHEMA_FINGERPRINT,
@@ -446,6 +448,111 @@ def test_empty_get_connection_builds_complete_current_schema(tmp_path):
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='discord_users'"
         ).fetchone()
         assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
+    finally:
+        conn.close()
+
+
+def test_v36_repairs_only_the_proven_historical_rage_rollups(tmp_path):
+    path = tmp_path / "v35-rage.db"
+    build_database(str(path), None)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        now = "2026-08-09T12:00:00Z"
+        day = db.chicago_today()
+        tags = ("#STALE", "#CURRENT", "#EVENT", "#UNRELATED")
+        conn.executemany(
+            "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+            "VALUES (?, ?, ?, ?)",
+            [(tag, tag, now, now) for tag in tags],
+        )
+        conn.executemany(
+            """INSERT INTO player_daily_battle_rollups
+                   (player_tag, battle_date, mode_group, game_mode_id,
+                    game_mode_name, battles, wins, losses, draws,
+                    last_aggregated_at)
+               VALUES (?, ?, ?, ?, ?, 1, 1, 0, 0, ?)""",
+            (
+                ("#STALE", day, "other", 72000071, "Rage_Friendly", now),
+                ("#CURRENT", day, "friendly", 72000071, "Rage_Friendly", now),
+                ("#EVENT", day, "special_event", 72000071, "Rage_Friendly", now),
+                ("#UNRELATED", day, "other", 72000065, "Showdown_Friendly", now),
+            ),
+        )
+        conn.execute("PRAGMA user_version = 35")
+        conn.commit()
+
+        apply_schema_migrations(conn)
+
+        groups = {
+            row["player_tag"]: row["mode_group"]
+            for row in conn.execute(
+                "SELECT player_tag, mode_group FROM player_daily_battle_rollups"
+            )
+        }
+        assert groups == {
+            "#STALE": "friendly",
+            "#CURRENT": "friendly",
+            "#EVENT": "special_event",
+            "#UNRELATED": "other",
+        }
+        from storage.player import get_member_mode_activity
+
+        activity = get_member_mode_activity("#STALE", days=1, conn=conn)
+        assert activity["by_game_mode"] == [
+            {
+                "mode_group": "friendly",
+                "label": "Friendly",
+                "game_mode_id": 72000071,
+                "game_mode_name": "Rage_Friendly",
+                "battles": 1,
+                "wins": 1,
+                "losses": 0,
+                "draws": 0,
+                "trophy_delta": 0,
+                "win_rate": 1.0,
+            }
+        ]
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        apply_schema_migrations(conn)
+        assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
+    finally:
+        conn.close()
+
+
+def test_v36_refuses_an_ambiguous_rage_rollup_collision(tmp_path):
+    path = tmp_path / "v35-rage-collision.db"
+    build_database(str(path), None)
+    conn = sqlite3.connect(path)
+    try:
+        now = "2026-08-09T12:00:00Z"
+        conn.execute(
+            "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+            "VALUES ('#PLAYER', 'Player', ?, ?)",
+            (now, now),
+        )
+        conn.executemany(
+            """INSERT INTO player_daily_battle_rollups
+                   (player_tag, battle_date, mode_group, game_mode_id,
+                    game_mode_name, battles, wins, losses, draws,
+                    last_aggregated_at)
+               VALUES ('#PLAYER', '2026-04-12', ?, 72000071,
+                       'Rage_Friendly', 1, 1, 0, 0, ?)""",
+            (("other", now), ("friendly", now)),
+        )
+        conn.execute("PRAGMA user_version = 35")
+        conn.commit()
+
+        with pytest.raises(RuntimeError, match="would collide with 1 existing"):
+            apply_schema_migrations(conn)
+
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 35
+        assert {
+            row[0]
+            for row in conn.execute(
+                "SELECT mode_group FROM player_daily_battle_rollups WHERE player_tag = '#PLAYER'"
+            )
+        } == {"other", "friendly"}
     finally:
         conn.close()
 
