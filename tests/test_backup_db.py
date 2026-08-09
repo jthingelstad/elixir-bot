@@ -1,7 +1,8 @@
-"""Backup safety: the destination (often iCloud) must only ever receive a
-complete .gz — never temp turds, even if interrupted (live bug 2026-07-05)."""
+"""Backup safety: complete artifacts and one shared runtime backup set."""
 
+import asyncio
 import gzip
+import json
 import sqlite3
 
 from scripts.backup_db import _databases, create_backup
@@ -84,3 +85,96 @@ def test_both_databases_are_snapshotted_when_present(tmp_path, monkeypatch):
     ]
     written = sorted(p.name.split("-2")[0] for p in (tmp_path / "backups").glob("*.db.gz"))
     assert written == ["elixir", "elixir"] or len(written) == 2
+
+
+def test_daily_activity_uses_shared_backup_set(monkeypatch):
+    """The scheduler was the untested third caller and silently kept using the
+    one-database primitive after restart and weekly maintenance were unified."""
+    from runtime import app
+    from scripts import backup_db
+
+    backup_calls = []
+    pruned = []
+    successes = []
+    failures = []
+    outcome = {
+        "ok": True,
+        "results": [
+            {"prefix": "elixir-v51", "ok": True, "path": "/backup/clan.db.gz"},
+            {
+                "prefix": "elixir-telemetry",
+                "ok": True,
+                "path": "/backup/telemetry.db.gz",
+            },
+        ],
+    }
+
+    monkeypatch.setattr(
+        backup_db,
+        "backup_all",
+        lambda *, log_progress: backup_calls.append(log_progress) or outcome,
+    )
+    monkeypatch.setattr(
+        backup_db, "create_backup", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError)
+    )
+    monkeypatch.setattr(backup_db, "prune_backups", lambda *, prefix: pruned.append(prefix) or [])
+    monkeypatch.setattr(app.runtime_status, "mark_job_start", lambda name: None)
+    monkeypatch.setattr(
+        app.runtime_status,
+        "mark_job_success",
+        lambda name, summary: successes.append((name, json.loads(summary))),
+    )
+    monkeypatch.setattr(
+        app.runtime_status,
+        "mark_job_failure",
+        lambda name, error: failures.append((name, error)),
+    )
+
+    result = asyncio.run(app._db_backup())
+
+    assert backup_calls == [False]
+    assert pruned == ["elixir-v5-memory"]
+    assert failures == []
+    assert successes[0][0] == "db_backup"
+    assert set(successes[0][1]["databases"]) == {"elixir-v51", "elixir-telemetry"}
+    assert result == successes[0][1]
+
+
+def test_daily_activity_reports_partial_backup_as_failure(monkeypatch):
+    from runtime import app
+    from scripts import backup_db
+
+    successes = []
+    failures = []
+    outcome = {
+        "ok": False,
+        "results": [
+            {"prefix": "elixir-v51", "ok": True, "path": "/backup/clan.db.gz"},
+            {"prefix": "elixir-telemetry", "ok": False, "error": "disk full"},
+        ],
+    }
+
+    monkeypatch.setattr(backup_db, "backup_all", lambda *, log_progress: outcome)
+    monkeypatch.setattr(
+        backup_db,
+        "prune_backups",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not prune after failure")),
+    )
+    monkeypatch.setattr(app.runtime_status, "mark_job_start", lambda name: None)
+    monkeypatch.setattr(
+        app.runtime_status,
+        "mark_job_success",
+        lambda name, summary: successes.append((name, summary)),
+    )
+    monkeypatch.setattr(
+        app.runtime_status,
+        "mark_job_failure",
+        lambda name, error: failures.append((name, json.loads(error))),
+    )
+
+    result = asyncio.run(app._db_backup())
+
+    assert successes == []
+    assert failures[0][0] == "db_backup"
+    assert failures[0][1]["databases"]["elixir-telemetry"]["error"] == "disk full"
+    assert result == failures[0][1]

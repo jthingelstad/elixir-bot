@@ -165,7 +165,7 @@ Four database files exist, with distinct roles:
 
 - **`elixir-v51.db`** — the operational engine DB. `db/schema.py` is the canonical schema entrypoint for the private clean-break baseline and ordered post-cut evolution. `db.get_connection()` refuses databases without the v5.1 spine, migrates compatible v5.1 databases forward, and is the sole initializer.
 - Durable memory lives IN the engine DB since 2026-07-04 (the v5.1 memory pass, `docs/reference/v5.1/memory.md`): `memories` + `memory_tags` + `memories_fts`, accessed through the `memory_store` seam. `inference` rows carry a 90-day default TTL and are reclaimed by db-maintenance; curated kinds (`leader_note`, `synthesis`, `system`) never expire by default (#215). The old `elixir-v5-memory.db` is archived (`elixir-v5-memory-archive-2026H2.db`, read-only); `ELIXIR_V5_MEMORY_DB` is retired.
-- **`elixir-telemetry.db`** — operational telemetry, split out 2026-08-03 (`storage/telemetry.py`, `ELIXIR_TELEMETRY_DB_PATH`): `llm_calls`, `db_transactions`, `db_stalls`, `wake_observations`, `wake_episodes`. Schema v34 dropped `llm_calls` from the clan DB because **every model call was taking the clan database's single write lock**. ~116 MB and **not covered by `scripts/backup_db.py`** — a known gap, not a design decision.
+- **`elixir-telemetry.db`** — operational telemetry, split out 2026-08-03 (`storage/telemetry.py`, `ELIXIR_TELEMETRY_DB_PATH`): `llm_calls`, `db_transactions`, `db_stalls`, `wake_observations`, `wake_episodes`. Schema v34 dropped `llm_calls` from the clan DB because **every model call was taking the clan database's single write lock**. ~116 MB and backed up as the optional `elixir-telemetry` member of the shared runtime backup set.
 
   > **The rule: this file is admin-only, and Elixir's behaviour may never depend
   > on it.** Deleting it must cost operational *history* — never function. Reads
@@ -218,9 +218,10 @@ rather than trusting a number here. **A new `_apply_vN` is a deploy** — it run
 against the live database on the next connection, so rehearse it on a copy with
 `ELIXIR_DB_PATH` first.
 
-Backups: `scripts/backup_db.py` covers the operational DB only. The cold
-archive needs none (it never changes), but `elixir-telemetry.db` is genuinely
-uncovered.
+Backups: `scripts/backup_db.py:backup_all()` is the one shared backup-set owner
+for restart, the daily activity, and weekly maintenance. It covers the required
+operational DB plus the optional telemetry DB; the cold archive needs none
+because it never changes.
 
 ## Website Note
 

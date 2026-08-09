@@ -1451,23 +1451,30 @@ async def _handle_outreach_dm(message) -> None:
 
 
 async def _db_backup():
-    """Daily compressed snapshots of the single operational DB to
-    ELIXIR_BACKUP_DIR (iCloud Drive—offsite via sync). Uses the online backup
-    API with no downtime."""
-    from scripts.backup_db import create_backup, prune_backups
+    """Daily compressed snapshots of every runtime DB to ELIXIR_BACKUP_DIR.
+
+    ``backup_all`` is the single backup-set owner shared with restart and weekly
+    maintenance. Keeping the scheduled wrapper on that seam matters: telemetry
+    is admin-only, but losing it erases the evidence used to operate Elixir.
+    """
+    from scripts.backup_db import backup_all, prune_backups
 
     runtime_status.mark_job_start("db_backup")
 
     def _run():
-        # v5.1 memory pass (memory.md D1/M6): memories live in the engine DB,
-        # so ONE database covers everything — the separate memory-DB snapshot
-        # is retired (its history stays prunable under its old prefix).
-        results = {}
-        op = create_backup()  # defaults: ELIXIR_DB_PATH → ELIXIR_BACKUP_DIR
-        results["operational"] = {k: op.get(k) for k in ("path", "ok", "error")}
-        prune_backups()
-        prune_backups(prefix="elixir-v5-memory")
-        return results
+        backup = backup_all(log_progress=False)
+        # Durable memory now lives in the operational DB. Retain the old
+        # snapshot family's normal expiry, but never prune it on a run that
+        # failed to establish current recovery coverage.
+        if backup["ok"]:
+            prune_backups(prefix="elixir-v5-memory")
+        return {
+            "ok": backup["ok"],
+            "databases": {
+                entry["prefix"]: {key: entry.get(key) for key in ("path", "ok", "error")}
+                for entry in backup["results"]
+            },
+        }
 
     try:
         results = await asyncio.to_thread(_run)
@@ -1475,9 +1482,8 @@ async def _db_backup():
         runtime_status.mark_job_failure("db_backup", str(exc))
         log.exception("db backup failed")
         return
-    ok = all(v.get("ok") for v in results.values())
-    (runtime_status.mark_job_success if ok else runtime_status.mark_job_failure)(
-        "db_backup", json.dumps(results, default=str)[:400]
+    (runtime_status.mark_job_success if results["ok"] else runtime_status.mark_job_failure)(
+        "db_backup", json.dumps(results, default=str)[:900]
     )
     log.info("db backup: %s", results)
     return results

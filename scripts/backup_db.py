@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Backup Elixir's operational database with compression and retention pruning.
+"""Back up Elixir's runtime databases with compression and retention pruning.
 
-The CLI entry point (used by the restart script) snapshots ``elixir-v51.db``.
-Durable memory moved into that database in the v5.1 memory pass; the retired
-``elixir-v5-memory.db`` archive is read-only and is not a runtime backup target.
-Uses sqlite3.Connection.backup() for a safe online snapshot — no need to stop
-the bot.
+The CLI entry point, daily activity, and weekly maintenance share ``backup_all``:
+the required ``elixir-v51.db`` plus optional admin-only ``elixir-telemetry.db``.
+Durable memory moved into the operational database in the v5.1 memory pass; the
+retired ``elixir-v5-memory.db`` archive is read-only and is not a runtime backup
+target. Uses sqlite3.Connection.backup() for safe online snapshots — no need to
+stop the bot.
 
 create_backup() / prune_backups() default to the operational DB; pass
 `prefix=`/`db_path=` to target another store.
@@ -17,8 +18,9 @@ Retention tiers (weekly backup cadence assumed), applied per prefix:
   >365 days   delete
 
 Environment variables
-  ELIXIR_DB_PATH       operational database (default: <project>/elixir-v51.db)
-  ELIXIR_BACKUP_DIR    destination dir      (default: ~/elixir-backups)
+  ELIXIR_DB_PATH            operational database (default: <project>/elixir-v51.db)
+  ELIXIR_TELEMETRY_DB_PATH  telemetry database   (default: <project>/elixir-telemetry.db)
+  ELIXIR_BACKUP_DIR         destination dir      (default: ~/elixir-backups)
 """
 
 from __future__ import annotations
