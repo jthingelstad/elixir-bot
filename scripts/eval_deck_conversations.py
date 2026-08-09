@@ -5,20 +5,22 @@ The capability itself is covered by unit tests and direct audits. What those can
 test is the only thing that decides whether the feature exists for a member: does the
 model REACH for it, with the right view, when someone asks a deck question?
 
-Buckets mirror the four questions the tool was built for, plus the two failure modes
-that matter more than any routing statistic:
+Buckets mirror the five questions the tool was built for, plus the honesty failure
+mode that matters more than any routing statistic:
 
   1. **war_set**   "suggest war decks" -> get_deck_recommendations(view='war_set').
                    War forbids reusing a card across the four decks, so a hand-rolled
                    answer is wrong even when it looks plausible.
   2. **anchored**  "best deck around X" -> view='anchored' with card=X.
-  3. **discover**  "I'm bored of my deck" -> view='discover'.
-  4. **upgrade**   "what should I upgrade" -> the SHARED case. get_member_cards
+  3. **build**     "build N decks around these cards" -> view='build'. This must
+                   not inherit war-set constraints from the previous turn.
+  4. **discover**  "I'm bored of my deck" -> view='discover'.
+  5. **upgrade**   "what should I upgrade" -> the SHARED case. get_member_cards
                    (ready_to_upgrade) answers what they can afford now;
                    get_deck_recommendations(view='upgrades') answers what would most
                    improve the decks they field. Either is defensible, both is best;
                    this bucket exists to prove the new tool did not steal the old one.
-  5. **honesty**   Questions whose honest answer is a refusal or a null result — a
+  6. **honesty**   Questions whose honest answer is a refusal or a null result — a
                    card they do not own, a maxed player with nothing to upgrade.
                    Inventing an answer here is worse than not answering.
 
@@ -201,7 +203,12 @@ def script_for(member: dict) -> list[tuple[str, str]]:
 
 _CLAN: dict = {}
 _WAR: dict = {}
-_WIN_RATE = re.compile(r"\b\d{1,3}(\.\d+)?\s?%\s?(win|wr\b)|win\s?rate[^.]{0,24}\d", re.I)
+_WIN_RATE = re.compile(
+    r"(?:(?P<prefix>\d{1,3}(?:\.\d+)?)\s*%\s*(?:win(?:\s+rate)?|wr\b)|"
+    r"(?:win\s*rate|wr\b)[^.\d]{0,24}(?P<suffix>\d{1,3}(?:\.\d+)?)\s*%)",
+    re.I,
+)
+_PERSONAL_RATE_CONTEXT = re.compile(r"\b(?:you|your|yours|own)\b", re.I)
 
 
 def _tool_payload(value: Any) -> Any:
@@ -221,6 +228,36 @@ def _tool_error_count(trace: list[dict[str, Any]]) -> int:
         if isinstance(result, dict) and result.get("error") and not result.get("capability"):
             count += 1
     return count
+
+
+def _personal_field_win_rates(trace: list[dict[str, Any]]) -> set[float]:
+    """Percent win rates grounded in the member's own matchup history."""
+    rates = set()
+    for item in trace:
+        if item.get("name") != "get_deck_recommendations":
+            continue
+        result = _tool_payload(item.get("result"))
+        field = result.get("your_field") if isinstance(result, dict) else None
+        faced = field.get("faced") if isinstance(field, dict) else None
+        if not isinstance(faced, dict):
+            continue
+        for record in faced.values():
+            rate = record.get("win_rate") if isinstance(record, dict) else None
+            if isinstance(rate, int | float) and not isinstance(rate, bool):
+                rates.add(float(rate) * 100)
+    return rates
+
+
+def _has_borrowed_win_rate(content: str, trace: list[dict[str, Any]]) -> bool:
+    """Flag rates not grounded and labeled as the member's own field record."""
+    personal_rates = _personal_field_win_rates(trace)
+    for match in _WIN_RATE.finditer(content or ""):
+        value = float(match.group("prefix") or match.group("suffix"))
+        context = (content or "")[max(0, match.start() - 120) : match.end()]
+        grounded = any(abs(value - rate) <= 0.6 for rate in personal_rates)
+        if not grounded or not _PERSONAL_RATE_CONTEXT.search(context):
+            return True
+    return False
 
 
 def _rate(passing: int, total: int) -> float:
@@ -364,7 +401,7 @@ def score_results(results: list[dict[str, Any]], thresholds: Thresholds | None =
     required = [
         turn
         for turn in rows
-        if turn.get("bucket") in {"war_set", "anchored", "discover", "upgrade"}
+        if turn.get("bucket") in {"war_set", "anchored", "build", "discover", "upgrade"}
     ]
     honesty = [turn for turn in rows if turn.get("bucket") == "honesty"]
     war_sets = [turn for turn in rows if turn.get("bucket") == "war_set"]
@@ -401,13 +438,13 @@ def score_results(results: list[dict[str, Any]], thresholds: Thresholds | None =
             required_rate,
             {">=": thresholds.min_required_tool_view_rate},
             bool(required) and required_rate >= thresholds.min_required_tool_view_rate,
-            "War-set, anchored, and discover turns using get_deck_recommendations with the matching view, plus upgrade turns using upgrades or ready-to-upgrade lookup.",
+            "War-set, anchored, build, and discover turns using get_deck_recommendations with the matching view, plus upgrade turns using upgrades or ready-to-upgrade lookup.",
         ),
         "win_rate_leak_count": _metric(
             win_rate_count,
             {"<=": thresholds.max_win_rate_leak_count},
             win_rate_count <= thresholds.max_win_rate_leak_count,
-            "Responses that attach a numeric win rate or win-rate percentage to the answer.",
+            "Responses with a numeric win rate that is not both present in the member's own your_field matchup data and labeled as personal context.",
         ),
         "honesty_pass_rate": _metric(
             honesty_rate,
@@ -454,7 +491,11 @@ def run_turn(member, bucket, question, history):
             conversation_history=history,
             memory_context=None,
         )
-        text = result.get("content") if isinstance(result, dict) else str(result)
+        content = result.get("content") if isinstance(result, dict) else str(result)
+        if isinstance(content, list):
+            text = "\n\n".join(str(item) for item in content if item)
+        else:
+            text = content or ""
     except Exception as exc:  # noqa: BLE001 - an eval records failures, never raises
         row["error"] = f"{type(exc).__name__}: {exc}"
         trace = reset_tool_capture()
@@ -482,7 +523,7 @@ def run_turn(member, bucket, question, history):
     row["used_member_cards"] = "get_member_cards" in names
     row["views"] = [a.get("view") for n, a in calls if n == "get_deck_recommendations"]
     # The guarantee checks — these matter more than which tool fired.
-    row["win_rate_in_answer"] = bool(_WIN_RATE.search(text or ""))
+    row["win_rate_in_answer"] = _has_borrowed_win_rate(text, trace)
     if bucket == "war_set":
         row["war_set_check"] = _war_set_check(trace)
     if bucket == "honesty":

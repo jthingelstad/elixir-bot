@@ -128,8 +128,8 @@ Use `--save-corpus` once and `--corpus` on later builds to run the exact same
 versioned question set for a before/after comparison.
 
 ### `eval_deck_conversations.py`
-**Deck-conversation guarantees.** Runs fixed war-set, anchored, discovery,
-upgrade, and honesty turns for eligible members. The persisted summary defines
+**Deck-conversation guarantees.** Runs fixed war-set, anchored, multi-build,
+discovery, upgrade, and honesty turns for eligible members. The persisted summary defines
 and scores zero-error/non-empty output, required tool views, win-rate leakage,
 honest refusal evidence, and four-deck/32-distinct-card war-set output.
 

@@ -469,6 +469,62 @@ def test_eval_deck_conversations_counts_tool_execution_errors():
     assert summary["passed"] is False
 
 
+def test_eval_deck_conversations_allows_a_grounded_personal_matchup_rate():
+    from scripts import eval_deck_conversations
+
+    trace = [
+        {
+            "name": "get_deck_recommendations",
+            "arguments": {"view": "build"},
+            "result": {
+                "your_field": {"faced": {"bait": {"battles": 19, "wins": 7, "win_rate": 0.368}}}
+            },
+        }
+    ]
+
+    assert (
+        eval_deck_conversations._has_borrowed_win_rate(
+            "Your recent field data says bait is your worst matchup: 7-12, 37% win rate.",
+            trace,
+        )
+        is False
+    )
+
+
+def test_eval_deck_conversations_flags_an_ungrounded_deck_win_rate():
+    from scripts import eval_deck_conversations
+
+    assert (
+        eval_deck_conversations._has_borrowed_win_rate(
+            "This recommended deck has a 61% win rate.",
+            [],
+        )
+        is True
+    )
+
+
+def test_eval_deck_conversations_accepts_multi_message_content(monkeypatch):
+    from scripts import eval_deck_conversations
+
+    monkeypatch.setattr(
+        eval_deck_conversations.elixir_agent,
+        "respond_in_channel",
+        lambda **_kwargs: {"content": ["First message.", "Second message."]},
+    )
+    monkeypatch.setattr(eval_deck_conversations, "reset_tool_capture", lambda: [])
+
+    result = eval_deck_conversations.run_turn(
+        {"display_name": "Eval Alice", "player_tag": "#AAA111"},
+        "discover",
+        "suggest another deck",
+        [],
+    )
+
+    assert result["content"] == "First message.\n\nSecond message."
+    assert result["content_len"] == 31
+    assert result["win_rate_in_answer"] is False
+
+
 def test_eval_leader_actions_scores_exact_artifacts(tmp_path):
     from scripts import eval_leader_actions
 
