@@ -58,8 +58,85 @@ FROM llm_calls;
 ```
 llm_calls(call_id, recorded_at, workflow, model, ok, error, duration_ms,
           prompt_tokens, completion_tokens, total_tokens,
-          cache_creation_tokens, cache_read_tokens)
+          cache_creation_tokens, cache_read_tokens,
+          -- added 2026-08-09; NULL on rows written before that date
+          effort, max_tokens, timeout_s,          -- what the call was asked to do
+          stop_reason, block_census, attempts,    -- what happened
+          cost_usd, turn_id)
 ```
+
+### Prefer the stored `cost_usd`
+
+Every call now records its own cost, priced at the rates in force when it ran.
+**Use it instead of recomputing** — a stored figure stays correct across price
+changes, and the `CASE` ladder below is a second copy of the pricing table that
+has to be kept in sync by hand.
+
+Rows written before 2026-08-09 have `cost_usd` NULL, so a report spanning the
+boundary needs both. Prefer the column and fall back:
+
+```sql
+SELECT workflow,
+       ROUND(SUM(COALESCE(cost_usd, <CASE ladder>/1e6)), 4) AS cost
+FROM llm_calls
+WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-7 days')
+GROUP BY workflow ORDER BY cost DESC;
+```
+
+If the whole window is after 2026-08-09, drop the ladder entirely and just
+`SUM(cost_usd)`.
+
+### Cost per turn, not just per workflow
+
+`turn_id` groups the several calls one agent turn makes — a tool-using workflow
+loops until the model stops asking for tools, so per-workflow totals answer
+"what did awareness cost this week" but never "what did one tick cost". NULL
+means a standalone single call.
+
+```sql
+SELECT workflow,
+       COUNT(DISTINCT COALESCE(turn_id, 'call:' || call_id)) AS turns,
+       ROUND(SUM(cost_usd), 4) AS cost,
+       ROUND(SUM(cost_usd) / COUNT(DISTINCT COALESCE(turn_id, 'call:' || call_id)), 4)
+         AS cost_per_turn,
+       ROUND(1.0 * COUNT(*) / COUNT(DISTINCT COALESCE(turn_id, 'call:' || call_id)), 1)
+         AS calls_per_turn
+FROM llm_calls
+WHERE cost_usd IS NOT NULL
+  AND recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-7 days')
+GROUP BY workflow ORDER BY cost DESC;
+```
+
+A high `calls_per_turn` is a cost driver in its own right: each extra tool round
+re-sends the whole conversation.
+
+### Waste that is now directly visible
+
+Three things used to require live instrumentation to find. Check them before
+recommending model-tier cuts — they are cheaper wins.
+
+```sql
+-- Wasted API round trips. Anything above 1 is a rejected parameter or a
+-- retry; it was 2 on every claude-5 call for months before 2026-08-08.
+SELECT workflow, model, COUNT(*) n, SUM(attempts) trips
+FROM llm_calls WHERE attempts > 1 GROUP BY workflow, model;
+
+-- Truncation: spend that bought a cut-off answer. `max_tokens` is the ceiling
+-- it hit, so the fix is readable straight off the row.
+SELECT workflow, max_tokens, COUNT(*) n, ROUND(SUM(cost_usd), 4) wasted
+FROM llm_calls WHERE stop_reason = 'max_tokens' GROUP BY workflow, max_tokens;
+
+-- Effort vs what it bought. This is the lever for cost, not max_tokens.
+SELECT workflow, effort, COUNT(*) n,
+       ROUND(AVG(completion_tokens)) avg_out, ROUND(AVG(cost_usd), 5) avg_cost
+FROM llm_calls WHERE effort IS NOT NULL GROUP BY workflow, effort;
+```
+
+`block_census` carries per-type block COUNTS, not sizes. A response whose census
+shows a `thinking` block but no `text` or `tool_use` spent its budget thinking
+and returned nothing — that is a real failure wearing a successful stop_reason.
+Do not read a character count off it: `thinking.display` defaults to `omitted`,
+so thinking text is always empty and its char count is 0 either way.
 
 ## Pricing constants
 

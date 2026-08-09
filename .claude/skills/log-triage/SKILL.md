@@ -36,7 +36,7 @@ Split out of the clan DB on 2026-08-03 because every model call was taking the c
 |---|---|---|
 | `db_transactions` | Every write transaction held ≥250 ms (`ELIXIR_DB_REPORT_MS`): `call_site`, `held_ms`, `statements`, `outcome`, `sites_json` | The main SQL signal. Long holds are what starve the single writer. |
 | `db_stalls` | Write transactions open past 45 s (`ELIXIR_DB_STALL_SECONDS`), with a full `thread_dump` | Rare and decisive. One row names the culprit outright. |
-| `llm_calls` | Per-call workflow, model, `ok`, `error`, `duration_ms`, token and cache counts | Failed/slow model calls. Cost analysis belongs to `/llm-cost-report`, not here. |
+| `llm_calls` | Per-call workflow, model, `ok`, `error`, `duration_ms`, token and cache counts — plus, since 2026-08-09, what the call was *asked* to do (`effort`, `max_tokens`, `timeout_s`) and what happened (`stop_reason`, `block_census`, `attempts`, `cost_usd`, `turn_id`) | Failed/slow model calls. Cost analysis belongs to `/llm-cost-report`, not here. |
 | `wake_observations` | What the wake evaluator considered, `fired` 0/1, and `reason` when held | Scoped responder (Phase 2) holding back or firing too often. |
 | `wake_episodes` | Responder runs: `job`, `workflow`, `tier`, `handled`, `delivered`, `reason` | An episode that was handled but not delivered is a real failure. |
 
@@ -104,6 +104,23 @@ SELECT workflow, model, count(*) n, substr(max(error),1,80) sample
 FROM llm_calls WHERE ok=0 AND recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-1 day')
 GROUP BY workflow, model ORDER BY n DESC;"
 ```
+
+Three failure modes that used to need live instrumentation are now columns. A
+truncation or a wasted round trip is a *successful* call by `ok`, so these will
+not appear in the query above:
+
+```bash
+cd /Users/otto/Projects/elixir-bot && sqlite3 -header "file:elixir-telemetry.db?mode=ro" "
+SELECT workflow, stop_reason, max_tokens, effort, attempts, timeout_s, count(*) n
+FROM llm_calls
+WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-1 day')
+  AND (stop_reason = 'max_tokens' OR attempts > 1)
+GROUP BY workflow, stop_reason, max_tokens, effort, attempts, timeout_s;"
+```
+
+- `stop_reason = 'max_tokens'` — the answer was cut off; `max_tokens` is the ceiling it hit and `effort` is usually the real lever (see the two-levers note in `agent/core.py`).
+- `attempts > 1` — a wasted API round trip, from a rejected parameter. It was 2 on every Claude 5 call until 2026-08-08 with nothing recording it.
+- A `block_census` showing a `thinking` block but no `text` or `tool_use` is a response that spent its whole budget thinking and returned nothing — a real failure wearing a successful `stop_reason`.
 
 ```bash
 cd /Users/otto/Projects/elixir-bot && sqlite3 -header "file:elixir-telemetry.db?mode=ro" "
