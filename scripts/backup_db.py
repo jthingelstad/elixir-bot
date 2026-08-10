@@ -26,6 +26,7 @@ Environment variables
 
 from __future__ import annotations
 
+import argparse
 import gzip
 import logging
 import os
@@ -340,7 +341,9 @@ def prune_backups(backup_dir: Path | None = None, prefix: str = _DEFAULT_PREFIX)
 # ── CLI entry point ──────────────────────────────────────────────────────────
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if not backup_all()["ok"]:
         log.error("One or more backups failed.")

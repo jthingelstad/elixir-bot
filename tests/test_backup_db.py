@@ -7,7 +7,48 @@ import os
 import sqlite3
 import stat
 
+import pytest
+
+from scripts import backup_db
 from scripts.backup_db import _databases, create_backup
+
+
+def test_cli_help_exits_without_reaching_backup_or_pruning(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(backup_db, "backup_all", lambda: calls.append("backup"))
+    monkeypatch.setattr(backup_db, "prune_backups", lambda: calls.append("prune"))
+
+    with pytest.raises(SystemExit) as stopped:
+        backup_db.main(["--help"])
+
+    assert stopped.value.code == 0
+    assert "usage:" in capsys.readouterr().out
+    assert calls == []
+
+
+def test_cli_rejects_unknown_arguments_before_backup_or_pruning(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(backup_db, "backup_all", lambda: calls.append("backup"))
+    monkeypatch.setattr(backup_db, "prune_backups", lambda: calls.append("prune"))
+
+    with pytest.raises(SystemExit) as stopped:
+        backup_db.main(["--definitely-not-an-option"])
+
+    assert stopped.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err
+    assert calls == []
+
+
+def test_cli_without_arguments_runs_the_full_backup_set(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        backup_db,
+        "backup_all",
+        lambda: calls.append("backup") or {"ok": True, "results": []},
+    )
+
+    assert backup_db.main([]) == 0
+    assert calls == ["backup"]
 
 
 def test_backup_leaves_no_temp_files_in_dest(tmp_path):
