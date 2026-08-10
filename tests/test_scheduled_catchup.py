@@ -213,6 +213,21 @@ def test_explicitly_skipped_period_is_durable_and_never_runs(monkeypatch):
     assert state["last_skipped_period"] == "2026-W32"
 
 
+def test_skip_does_not_claim_success_when_the_durable_write_fails(monkeypatch):
+    monkeypatch.setattr(
+        db,
+        "save_runtime_job_status",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("store unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="store unavailable"):
+        runtime_status.mark_job_period_skipped(
+            "weekly_member_report", "2026-W32", "owner chose to skip"
+        )
+
+    assert runtime_status.job_state("weekly_member_report")["last_skipped_period"] is None
+
+
 def test_live_data_job_supersedes_old_period_instead_of_running_new_week_early(monkeypatch):
     calls = 0
 

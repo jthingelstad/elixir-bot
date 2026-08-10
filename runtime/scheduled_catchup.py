@@ -141,7 +141,14 @@ def wrap_scheduled_activity(resolved: dict[str, Any]):
                 return await job_callable()
             key = period_key(resolved["catch_up_period"], fired_at)
             with runtime_status.job_period(key):
-                return await job_callable()
+                result = await job_callable()
+            await asyncio.to_thread(runtime_status.flush_status_writes)
+            state = runtime_status.job_state(resolved["status_name"])
+            if state.get("last_success_period") == key:
+                await asyncio.to_thread(
+                    runtime_status.persist_job_state_strict, resolved["status_name"]
+                )
+            return result
 
     return run_scheduled_period
 
@@ -178,8 +185,9 @@ async def run_catch_up_sweep(runtime_module: Any, *, now: datetime | None = None
             current_key = period_key(resolved["catch_up_period"], current)
             if resolved.get("catch_up_same_period_only") and current_key != key:
                 reason = f"superseded by {current_key} before catch-up"
-                runtime_status.mark_job_period_skipped(status_name, key, reason)
-                await asyncio.to_thread(runtime_status.flush_status_writes)
+                await asyncio.to_thread(
+                    runtime_status.mark_job_period_skipped, status_name, key, reason
+                )
                 log.warning(
                     "scheduled catch-up skipped activity=%s period=%s reason=%s",
                     resolved["activity_key"],
@@ -205,6 +213,7 @@ async def run_catch_up_sweep(runtime_module: Any, *, now: datetime | None = None
             # Persist before executing member-facing or destructive work. A
             # crash must not turn the next hourly sweep into a blind duplicate.
             await asyncio.to_thread(runtime_status.flush_status_writes)
+            await asyncio.to_thread(runtime_status.persist_job_state_strict, status_name)
             log.warning(
                 "scheduled catch-up running activity=%s period=%s scheduled_at=%s",
                 resolved["activity_key"],
@@ -222,6 +231,8 @@ async def run_catch_up_sweep(runtime_module: Any, *, now: datetime | None = None
                 )
                 runtime_status.mark_job_failure(status_name, f"catch-up raised: {exc}")
 
+            await asyncio.to_thread(runtime_status.flush_status_writes)
+            await asyncio.to_thread(runtime_status.persist_job_state_strict, status_name)
             after = runtime_status.job_state(status_name)
             outcome = "succeeded" if after.get("last_success_period") == key else "failed"
             results.append(

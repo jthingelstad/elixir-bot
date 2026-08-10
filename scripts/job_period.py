@@ -11,6 +11,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+import db  # noqa: E402
 from runtime import status as runtime_status  # noqa: E402
 
 
@@ -28,8 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "skip":
         runtime_status.mark_job_period_skipped(args.job_name, args.period_key, args.reason)
-        runtime_status.flush_status_writes()
-        state = runtime_status.job_state(args.job_name)
+        state = db.list_runtime_job_status().get(args.job_name) or {}
         if state.get("last_skipped_period") != args.period_key:
             raise RuntimeError(
                 f"skip receipt did not persist for {args.job_name}/{args.period_key}"

@@ -291,16 +291,38 @@ def mark_job_period_skipped(name: str, period_key: str, reason: str) -> None:
     a newer member-facing period early. It is deliberately distinct from a job
     success so health counters and last-success timestamps stay truthful.
     """
+    key = str(period_key)
     with _LOCK:
-        state = _state_for(name)
-        if state.get("last_success_period") == str(period_key):
+        previous = _state_for(name)
+        if previous.get("last_success_period") == key:
             raise ValueError(f"period already succeeded: {name}/{period_key}")
         now = _utcnow()
-        state["last_skipped_period"] = str(period_key)
+        state = copy.deepcopy(previous)
+        state["last_skipped_period"] = key
         state["last_skipped_at"] = now
         state["last_skipped_reason"] = str(reason)
-        snapshot_state = copy.deepcopy(state)
-    _persist_job_status(name, snapshot_state)
+
+        # A skip controls whether a member-facing job runs, so fail-soft status
+        # persistence is not acceptable here. Persist first, then publish the
+        # new in-memory state; a write failure leaves both stores unskipped.
+        import db
+
+        db.save_runtime_job_status(name, state)
+        _JOB_STATUS[name] = state
+
+
+def persist_job_state_strict(name: str) -> dict:
+    """Persist one in-memory job state and propagate storage failures.
+
+    Normal health counters remain fail-soft. Scheduled period claims and
+    receipts call this at the wrapper boundary because their durability decides
+    whether a side effect may be retried after a restart.
+    """
+    with _LOCK:
+        state = copy.deepcopy(_state_for(name))
+    import db
+
+    return db.save_runtime_job_status(name, state)
 
 
 def claim_catch_up_period(
