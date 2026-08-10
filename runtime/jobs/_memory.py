@@ -55,7 +55,7 @@ def _bot():
 
 class _BotProxy:
     def get_channel(self, *args, **kwargs):
-        return bot.get_channel(*args, **kwargs)
+        return _bot().get_channel(*args, **kwargs)
 
 
 bot = _BotProxy()

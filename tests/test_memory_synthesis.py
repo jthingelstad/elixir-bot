@@ -58,6 +58,23 @@ def test_memory_synthesis_workflow_has_empty_toolset_and_strict_schema():
     assert required == {"arc_memories", "stale_memory_ids", "contradictions", "digest"}
 
 
+def test_memory_synthesis_bot_proxy_delegates_to_runtime_bot():
+    """The production proxy must reach Discord instead of recursing into itself."""
+    from types import SimpleNamespace
+
+    runtime_bot = MagicMock()
+    channel = object()
+    runtime_bot.get_channel.return_value = channel
+
+    with patch(
+        "runtime.jobs._memory._runtime_app",
+        return_value=SimpleNamespace(bot=runtime_bot),
+    ):
+        assert memory_job.bot.get_channel(900) is channel
+
+    runtime_bot.get_channel.assert_called_once_with(900)
+
+
 # ---------------------------------------------------------------------------
 # _apply_memory_synthesis_plan
 # ---------------------------------------------------------------------------
