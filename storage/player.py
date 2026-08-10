@@ -1016,28 +1016,52 @@ def _enrich_special_event_item(item: dict, context_index: dict[str, dict]) -> di
 
 
 def _special_event_activity(days: int, limit: int, conn) -> list[dict]:
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    window_days = max(1, int(days or 30))
+    now = datetime.now(timezone.utc)
+    current_cutoff = (now - timedelta(days=window_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    previous_cutoff = (now - timedelta(days=window_days * 2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     event_contexts = _special_event_context_index(conn)
     rows = conn.execute(
-        "SELECT CASE WHEN COUNT(DISTINCT bf.game_mode_id) = 1 THEN MIN(bf.game_mode_id) END AS game_mode_id, "
-        "CASE WHEN COUNT(DISTINCT bf.game_mode_name) = 1 THEN MIN(bf.game_mode_name) END AS game_mode_name, "
+        "SELECT CASE WHEN COUNT(DISTINCT CASE WHEN bf.battle_time >= ? THEN bf.game_mode_id END) = 1 "
+        "THEN MIN(CASE WHEN bf.battle_time >= ? THEN bf.game_mode_id END) END AS game_mode_id, "
+        "CASE WHEN COUNT(DISTINCT CASE WHEN bf.battle_time >= ? THEN bf.game_mode_name END) = 1 "
+        "THEN MIN(CASE WHEN bf.battle_time >= ? THEN bf.game_mode_name END) END AS game_mode_name, "
         "MIN(NULLIF(bf.event_tag, '')) AS event_tag, "
-        "COUNT(DISTINCT bf.player_tag) AS members_active, COUNT(*) AS battles, "
-        "SUM(CASE WHEN bf.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
-        "SUM(CASE WHEN bf.outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
-        "SUM(CASE WHEN bf.outcome = 'D' THEN 1 ELSE 0 END) AS draws, "
-        "SUM(COALESCE(bf.trophy_change, 0)) AS trophy_delta, "
-        "MAX(bf.battle_time) AS latest_battle "
+        "COUNT(DISTINCT CASE WHEN bf.battle_time >= ? THEN bf.player_tag END) AS members_active, "
+        "SUM(CASE WHEN bf.battle_time >= ? THEN 1 ELSE 0 END) AS battles, "
+        "SUM(CASE WHEN bf.battle_time >= ? AND bf.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
+        "SUM(CASE WHEN bf.battle_time >= ? AND bf.outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
+        "SUM(CASE WHEN bf.battle_time >= ? AND bf.outcome = 'D' THEN 1 ELSE 0 END) AS draws, "
+        "SUM(CASE WHEN bf.battle_time >= ? THEN COALESCE(bf.trophy_change, 0) ELSE 0 END) AS trophy_delta, "
+        "MAX(CASE WHEN bf.battle_time >= ? THEN bf.battle_time END) AS latest_battle, "
+        "COUNT(DISTINCT CASE WHEN bf.battle_time < ? THEN bf.player_tag END) AS previous_window_members_active, "
+        "SUM(CASE WHEN bf.battle_time < ? THEN 1 ELSE 0 END) AS previous_window_battles "
         "FROM battle_events bf "
         "WHERE bf.is_special_event = 1 AND bf.battle_time >= ? "
         "GROUP BY CASE WHEN COALESCE(bf.event_tag, '') <> '' "
         "THEN 'tag:' || bf.event_tag "
         "ELSE 'mode:' || COALESCE(CAST(bf.game_mode_id AS TEXT), '') || ':' || COALESCE(bf.game_mode_name, '') END "
+        "HAVING SUM(CASE WHEN bf.battle_time >= ? THEN 1 ELSE 0 END) > 0 "
         "ORDER BY battles DESC, latest_battle DESC, COALESCE(bf.game_mode_id, 0) ASC "
         "LIMIT ?",
-        (cutoff, limit),
+        (
+            current_cutoff,
+            current_cutoff,
+            current_cutoff,
+            current_cutoff,
+            current_cutoff,
+            current_cutoff,
+            current_cutoff,
+            current_cutoff,
+            current_cutoff,
+            current_cutoff,
+            current_cutoff,
+            current_cutoff,
+            current_cutoff,
+            previous_cutoff,
+            current_cutoff,
+            limit,
+        ),
     ).fetchall()
     activity = []
     for row in rows:
@@ -1054,7 +1078,15 @@ def _special_event_activity(days: int, limit: int, conn) -> list[dict]:
             "draws": int(row["draws"] or 0),
             "trophy_delta": int(row["trophy_delta"] or 0),
             "latest_battle": row["latest_battle"],
+            "previous_window_members_active": int(row["previous_window_members_active"] or 0),
+            "previous_window_battles": int(row["previous_window_battles"] or 0),
         }
+        previous_battles = item["previous_window_battles"]
+        item["battle_change"] = item["battles"] - previous_battles
+        item["current_to_previous_ratio"] = (
+            round(item["battles"] / previous_battles, 4) if previous_battles else None
+        )
+        item["new_in_window"] = previous_battles == 0
         item["win_rate"] = round(item["wins"] / item["battles"], 4) if item["battles"] else None
         activity.append(_enrich_special_event_item(item, event_contexts))
     return activity

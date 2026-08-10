@@ -90,6 +90,11 @@ _CAPABILITY = {
                 "win_rate": 0.5278,
                 "share_of_clan_battles": 0.36,
                 "share_of_special_event_battles": 0.9,
+                "previous_window_battles": 0,
+                "previous_window_members_active": 0,
+                "battle_change": 180,
+                "current_to_previous_ratio": None,
+                "new_in_window": True,
                 "latest_battle": "2026-08-09T12:00:00Z",
                 "top_members": [
                     {
@@ -112,6 +117,11 @@ _CAPABILITY = {
                 "win_rate": 0.4,
                 "share_of_clan_battles": 0.04,
                 "share_of_special_event_battles": 0.1,
+                "previous_window_battles": 10,
+                "previous_window_members_active": 2,
+                "battle_change": 10,
+                "current_to_previous_ratio": 2.0,
+                "new_in_window": False,
                 "latest_battle": "2026-08-09T10:00:00Z",
                 "top_members": [],
             },
@@ -148,6 +158,8 @@ def test_mode_pulse_surfaces_named_activity_across_all_modes():
         "Mirror Festival",
     ]
     assert mp["special_events"][0]["share_of_clan_battles"] == 0.36
+    assert mp["special_events"][0]["previous_window_battles"] == 0
+    assert mp["special_events"][0]["new_in_window"] is True
     assert mp["special_events"][0]["top_members"][0]["member_ref"] == "Alpha"
 
     # compact; no heavy summary keys leak.

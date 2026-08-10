@@ -236,7 +236,8 @@ def _mode_pulse(conn) -> dict:
         is grinding each mode, not just aggregates.
       - ``special_events``: each event-tagged activity kept distinct, with its
         share of total clan/event play and its own most-active members.
-    Both are compact (~1.5K vs the ~14K raw summary). The brain drills deeper via
+    The whole block stays compact (~6K on the live five-event window versus the
+    much larger raw capability). The brain drills deeper via
     the get_elixir_state(game_modes) tool."""
     snapshot = game_mode_capability.get_clan_game_modes(
         days=_MODE_PULSE_DAYS,
@@ -277,6 +278,11 @@ def _mode_pulse(conn) -> dict:
             "win_rate": event.get("win_rate"),
             "share_of_clan_battles": event.get("share_of_clan_battles"),
             "share_of_special_event_battles": event.get("share_of_special_event_battles"),
+            "previous_window_battles": event.get("previous_window_battles"),
+            "previous_window_members_active": event.get("previous_window_members_active"),
+            "battle_change": event.get("battle_change"),
+            "current_to_previous_ratio": event.get("current_to_previous_ratio"),
+            "new_in_window": event.get("new_in_window"),
             "latest_battle": event.get("latest_battle"),
             "top_members": [_event_member(member) for member in (event.get("top_members") or [])],
         }

@@ -129,6 +129,14 @@ def test_capability_keeps_special_events_distinct_with_per_event_context(engine_
             "VALUES (?, ?, ?, ?, 72000999, ?, 'special_event', ?, 1, ?)",
             (key, tag, _cr_time(), _cr_time(), mode_name, outcome, event_tag),
         )
+    engine_conn.execute(
+        "INSERT INTO battle_events "
+        "(dedup_key, player_tag, battle_time, observed_at, game_mode_id, "
+        "game_mode_name, mode_group, outcome, is_special_event, event_tag) "
+        "VALUES ('a-old', '#B', ?, ?, 72000999, 'DraftMode', "
+        "'special_event', 'L', 1, '#EVENT_A')",
+        (_cr_time(timedelta(days=8)), _cr_time()),
+    )
 
     result = get_clan_game_modes(days=7, limit=10, top_members=1, conn=engine_conn)
     events = {event["event_tag"]: event for event in result["events"]["activity"]}
@@ -139,7 +147,13 @@ def test_capability_keeps_special_events_distinct_with_per_event_context(engine_
     assert events["#EVENT_A"]["battles"] == 5
     assert events["#EVENT_A"]["share_of_clan_battles"] == 0.7143
     assert events["#EVENT_A"]["share_of_special_event_battles"] == 0.7143
+    assert events["#EVENT_A"]["previous_window_battles"] == 1
+    assert events["#EVENT_A"]["battle_change"] == 4
+    assert events["#EVENT_A"]["current_to_previous_ratio"] == 5.0
+    assert events["#EVENT_A"]["new_in_window"] is False
     assert events["#EVENT_A"]["top_members"][0]["member_ref"] == "Alpha"
     # The smaller simultaneous event still gets its own leader instead of being
     # crowded out by the busiest event's global leaderboard.
     assert events["#EVENT_B"]["top_members"][0]["member_ref"] == "Bravo"
+    assert events["#EVENT_B"]["previous_window_battles"] == 0
+    assert events["#EVENT_B"]["new_in_window"] is True
