@@ -234,6 +234,8 @@ def _mode_pulse(conn) -> dict:
       - ``top_by_mode``: the top-3 most-active NAMED members per mode (W/L, win
         rate, trophy delta; ranked rows carry PoL league) — so the brain sees WHO
         is grinding each mode, not just aggregates.
+      - ``special_events``: each event-tagged activity kept distinct, with its
+        share of total clan/event play and its own most-active members.
     Both are compact (~1.5K vs the ~14K raw summary). The brain drills deeper via
     the get_elixir_state(game_modes) tool."""
     snapshot = game_mode_capability.get_clan_game_modes(
@@ -252,6 +254,33 @@ def _mode_pulse(conn) -> dict:
             "trophy_delta": g.get("trophy_delta"),
         }
 
+    def _event_member(member: dict) -> dict:
+        return {
+            "member_ref": member.get("member_ref") or member.get("name"),
+            "battles": member.get("event_battles"),
+            "wins": member.get("wins"),
+            "losses": member.get("losses"),
+            "win_rate": member.get("win_rate"),
+            "latest_battle": member.get("latest_event_battle"),
+        }
+
+    def _event_row(event: dict) -> dict:
+        return {
+            "name": event.get("event_name")
+            or event.get("game_mode_name")
+            or event.get("event_tag"),
+            "event_tag": event.get("event_tag"),
+            "members_active": event.get("members_active"),
+            "battles": event.get("battles"),
+            "wins": event.get("wins"),
+            "losses": event.get("losses"),
+            "win_rate": event.get("win_rate"),
+            "share_of_clan_battles": event.get("share_of_clan_battles"),
+            "share_of_special_event_battles": event.get("share_of_special_event_battles"),
+            "latest_battle": event.get("latest_battle"),
+            "top_members": [_event_member(member) for member in (event.get("top_members") or [])],
+        }
+
     return {
         "window_days": snapshot.get("window_days"),
         "mode_mix": [_mode_row(g) for g in (snapshot.get("modes") or {}).values()],
@@ -259,6 +288,9 @@ def _mode_pulse(conn) -> dict:
             mode.get("label") or key: list(mode.get("top_members") or [])
             for key, mode in (snapshot.get("modes") or {}).items()
         },
+        "special_events": [
+            _event_row(event) for event in ((snapshot.get("events") or {}).get("activity") or [])
+        ],
     }
 
 
@@ -971,7 +1003,12 @@ def build_read(conn=None) -> dict:
             "mode_pulse": _load(
                 "mode_pulse",
                 lambda: _mode_pulse(conn),
-                {"mode_mix": [], "top_by_mode": {}, "window_days": _MODE_PULSE_DAYS},
+                {
+                    "mode_mix": [],
+                    "top_by_mode": {},
+                    "special_events": [],
+                    "window_days": _MODE_PULSE_DAYS,
+                },
             ),
             "cake_days_today": _load("cake_days_today", lambda: _cake_days_today(conn), []),
             "channel_memory": _load("channel_memory", lambda: _channel_memory(conn), {}),

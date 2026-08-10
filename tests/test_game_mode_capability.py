@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import db
 from capabilities.game_modes import get_clan_game_mode_windows, get_clan_game_modes
 
 
@@ -96,3 +97,49 @@ def test_multi_window_capability_uses_the_same_contract(engine_conn):
     assert result["contract_version"] == 1
     assert result["windows"]["7d"]["modes"]["ranked"]["battles"] == 1
     assert result["windows"]["28d"]["modes"]["ranked"]["battles"] == 2
+
+
+def test_capability_keeps_special_events_distinct_with_per_event_context(engine_conn):
+    _seed_player(engine_conn, "#A", "Alpha", 1, 100)
+    _seed_player(engine_conn, "#B", "Bravo", 1, 100)
+    db.upsert_game_mode_contexts_from_events(
+        [
+            {"eventTag": "#EVENT_A", "title": "Draft Festival"},
+            {"eventTag": "#EVENT_B", "title": "Mirror Festival"},
+        ],
+        conn=engine_conn,
+    )
+
+    battles = [
+        ("a1", "#A", "#EVENT_A", "DraftMode", "W"),
+        ("a2", "#A", "#EVENT_A", "DraftMode", "W"),
+        ("a3", "#A", "#EVENT_A", "DraftMode", "L"),
+        ("a4", "#B", "#EVENT_A", "DraftMode", "L"),
+        # One event tag may span more than one underlying battle mode. It is
+        # still one event in the clan activity read.
+        ("a5", "#A", "#EVENT_A", "MirrorBattle", "W"),
+        ("b1", "#B", "#EVENT_B", "DraftMode", "W"),
+        ("b2", "#B", "#EVENT_B", "DraftMode", "L"),
+    ]
+    for key, tag, event_tag, mode_name, outcome in battles:
+        engine_conn.execute(
+            "INSERT INTO battle_events "
+            "(dedup_key, player_tag, battle_time, observed_at, game_mode_id, "
+            "game_mode_name, mode_group, outcome, is_special_event, event_tag) "
+            "VALUES (?, ?, ?, ?, 72000999, ?, 'special_event', ?, 1, ?)",
+            (key, tag, _cr_time(), _cr_time(), mode_name, outcome, event_tag),
+        )
+
+    result = get_clan_game_modes(days=7, limit=10, top_members=1, conn=engine_conn)
+    events = {event["event_tag"]: event for event in result["events"]["activity"]}
+
+    assert set(events) == {"#EVENT_A", "#EVENT_B"}
+    assert events["#EVENT_A"]["event_name"] == "Draft Festival"
+    assert events["#EVENT_A"]["members_active"] == 2
+    assert events["#EVENT_A"]["battles"] == 5
+    assert events["#EVENT_A"]["share_of_clan_battles"] == 0.7143
+    assert events["#EVENT_A"]["share_of_special_event_battles"] == 0.7143
+    assert events["#EVENT_A"]["top_members"][0]["member_ref"] == "Alpha"
+    # The smaller simultaneous event still gets its own leader instead of being
+    # crowded out by the busiest event's global leaderboard.
+    assert events["#EVENT_B"]["top_members"][0]["member_ref"] == "Bravo"

@@ -60,6 +60,14 @@ def _duo_pairs(conn: sqlite3.Connection | None, *, days: int, limit: int) -> lis
     return [dict(row) for row in rows]
 
 
+def _event_identity(item: dict) -> tuple:
+    """Identity shared by event activity and its per-member leaders."""
+    tag = item.get("event_tag")
+    if tag:
+        return ("tag", str(tag))
+    return ("mode", item.get("game_mode_id"), item.get("game_mode_name"))
+
+
 def _get_clan_game_modes(
     *,
     days: int = 30,
@@ -92,6 +100,25 @@ def _get_clan_game_modes(
         mode["top_members"] = list(leaders.get(label) or [])
         modes[group.get("mode_group") or "other"] = mode
 
+    total_battles = sum(int(mode.get("battles") or 0) for mode in modes.values())
+    total_event_battles = int((modes.get("special_event") or {}).get("battles") or 0)
+    event_leaders: dict[tuple, list[dict]] = {}
+    for member in summary.get("event_top_members") or []:
+        event_leaders.setdefault(_event_identity(member), []).append(member)
+
+    event_activity = []
+    for raw_event in summary.get("event_activity") or []:
+        event = dict(raw_event)
+        battles = int(event.get("battles") or 0)
+        event["share_of_clan_battles"] = (
+            round(battles / total_battles, 4) if total_battles else None
+        )
+        event["share_of_special_event_battles"] = (
+            round(battles / total_event_battles, 4) if total_event_battles else None
+        )
+        event["top_members"] = list(event_leaders.get(_event_identity(event)) or [])[:top_members]
+        event_activity.append(event)
+
     ranked_profiles = list(summary.get("ranked_profiles") or [])
     side_progress = list(summary.get("side_mode_progress") or [])
     leaderboards = list(summary.get("leaderboards") or [])
@@ -117,7 +144,7 @@ def _get_clan_game_modes(
             "leaderboards_tracked": bool(leaderboards),
         },
         "events": {
-            "activity": list(summary.get("by_game_mode") or []),
+            "activity": event_activity,
             "participation": list(summary.get("event_participation") or []),
             "badge_completions": list(summary.get("event_badge_completions") or []),
             "active": list(summary.get("active_events") or []),

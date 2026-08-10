@@ -78,6 +78,45 @@ _CAPABILITY = {
         },
     },
     "game_modes": [{"x": "y"}] * 50,
+    "events": {
+        "activity": [
+            {
+                "event_name": "Draft Festival",
+                "event_tag": "#EVENT_A",
+                "members_active": 9,
+                "battles": 180,
+                "wins": 95,
+                "losses": 85,
+                "win_rate": 0.5278,
+                "share_of_clan_battles": 0.36,
+                "share_of_special_event_battles": 0.9,
+                "latest_battle": "2026-08-09T12:00:00Z",
+                "top_members": [
+                    {
+                        "member_ref": "Alpha",
+                        "event_battles": 42,
+                        "wins": 24,
+                        "losses": 18,
+                        "win_rate": 0.5714,
+                        "latest_event_battle": "2026-08-09T11:00:00Z",
+                    }
+                ],
+            },
+            {
+                "event_name": "Mirror Festival",
+                "event_tag": "#EVENT_B",
+                "members_active": 3,
+                "battles": 20,
+                "wins": 8,
+                "losses": 12,
+                "win_rate": 0.4,
+                "share_of_clan_battles": 0.04,
+                "share_of_special_event_battles": 0.1,
+                "latest_battle": "2026-08-09T10:00:00Z",
+                "top_members": [],
+            },
+        ]
+    },
     "side_modes": {"leaderboards": {"big": "blob"}},
 }
 
@@ -102,6 +141,15 @@ def test_mode_pulse_surfaces_named_activity_across_all_modes():
     assert tbm["Ranked"][0]["league"] == 5
     assert "league" not in tbm["2v2"][0]
 
+    # Event-tagged activities stay distinct and carry the comparative facts
+    # that let awareness notice the clan shifting into one event.
+    assert [event["name"] for event in mp["special_events"]] == [
+        "Draft Festival",
+        "Mirror Festival",
+    ]
+    assert mp["special_events"][0]["share_of_clan_battles"] == 0.36
+    assert mp["special_events"][0]["top_members"][0]["member_ref"] == "Alpha"
+
     # compact; no heavy summary keys leak.
     blob = json.dumps(mp, default=str)
     assert len(blob) < 3000
@@ -119,6 +167,7 @@ def test_mode_pulse_degrades_to_empty_shape_on_error():
     assert r["mode_pulse"] == {
         "mode_mix": [],
         "top_by_mode": {},
+        "special_events": [],
         "window_days": read_mod._MODE_PULSE_DAYS,
     }
     assert "mode_pulse" in r.get("_degraded", [])
