@@ -22,12 +22,14 @@ matches brain quality at 4–20× lower cost; the brain spends ~300K tokens/tick
 > to "save money" should read the cost table in the Phase 3 section first.
 >
 > **A hard daily spend ceiling now exists** (`agent/spend_budget.py`,
-> `ELIXIR_DAILY_SPEND_USD=3.20`), and it constrains every future phase:
-> `wake_response`, `wake_response_chat`, `awareness`, `clan_chat_copy`,
-> `reception` and `intent_router` are `ESSENTIAL` and never gated. **Any new
-> workflow that carries a hard post MUST be added to `ESSENTIAL`, or the ceiling
-> can silence a floor** — which would break design rule 3 from a direction the
-> rule never anticipated. See [[elixir-daily-spend-ceiling]].
+> `ELIXIR_DAILY_SPEND_USD=3.20`) for awareness and Ask Elixir only. Scheduled
+> jobs do not charge or read it. `wake_response`, `wake_response_chat`,
+> `clan_chat_copy`, `reception` and `intent_router` are `ESSENTIAL` and never
+> gated. Scheduled awareness is budgeted; the third-rung run after every scoped
+> responder failed an uncovered floor uses the explicit `required_work()`
+> context. **Any new workflow that carries a hard post MUST stay outside
+> `BUDGETED` or use that explicit floor context, or the ceiling can silence a
+> floor.** See [[elixir-daily-spend-ceiling]].
 
 ## Where this stands
 
@@ -84,7 +86,7 @@ re-invents.
 | Scoped responder | `runtime/awareness/respond.py` |
 | **Job registry (surfaces + event types)** | `runtime/awareness/respond.JOBS` — the per-event-type behaviour, as DATA |
 | **Divergence canary** | `runtime/awareness/divergence.py` → daily #leaders report |
-| **Spend ceiling** | `agent/spend_budget.py` — `ESSENTIAL` exempts every hard-post workflow |
+| **Spend ceiling** | `agent/spend_budget.py` — `BUDGETED` names awareness / Ask Elixir; jobs are absent |
 | Job prompts | `prompts/jobs/*.md` via `prompts.job_prompt()` |
 | Episodes / observations | `wake_episodes`, `wake_observations` (telemetry DB) |
 | Tier predicates | `engine/normalize.badge_tier`, `.ranked_league_tier` |
@@ -134,10 +136,10 @@ availability, validation, delivery, episode accounting — live exactly once.
    daily deliberation inherits. Same guarantee as today, relocated.
    > **Extended 2026-08-05.** This rule was written about the *wake* budget. A
    > second budget now exists — the daily **spend ceiling** — and it can refuse a
-   > model call outright. Every workflow that carries a hard post is therefore in
-   > `agent.spend_budget.ESSENTIAL` and exempt at any spend level, with a test
-   > asserting it at $999 spent. **Adding a floor-carrying workflow without
-   > adding it to `ESSENTIAL` is how this rule gets broken next.**
+   > model call outright. It applies only to `agent.spend_budget.BUDGETED`.
+   > Floor-carrying responder workflows stay outside that set; the normally
+   > budgeted awareness brain crosses it only inside the explicit
+   > `required_work()` third-rung context. Tests pin both paths.
 7. **A number that can change what Elixir does lives in the clan DB.**
    `elixir-telemetry.db` is admin history and must stay safe to delete. The wake
    budget violated this until 2026-08-05 (it counted fired wakes from
@@ -477,9 +479,10 @@ Sonnet wakes within minutes; the full brain becomes the daily judgment layer.
 > Two things that did not exist when this section was written and now gate it:
 > - **`week_finished`, `season_closed`, `clan_league_changed` and
 >   `tournament_finished` are hard posts on the `chat` tier.** Whatever workflow
->   composes them MUST be in `agent.spend_budget.ESSENTIAL` or the daily spend
->   ceiling can silence a season close. `wake_response_chat` is already there;
->   anything new is not.
+>   composes them MUST stay outside `agent.spend_budget.BUDGETED` or use the
+>   explicit `required_work()` floor context, or the daily spend ceiling can
+>   silence a season close. `wake_response_chat` is already outside; anything
+>   new must make the choice deliberately.
 > - **The war wakes share `(immediate, chat)` with `pol_season_podium`.** The
 >   grouping key is `(class, model, job)`, so a podium landing in the same tick as
 >   a week close now separates cleanly — but only because the podium has a job.

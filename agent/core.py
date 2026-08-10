@@ -26,8 +26,8 @@ class SpendCeilingReached(RuntimeError):
     An exception rather than a None return on purpose: every caller already
     handles a failed turn (the cursors hold, the daily deliberation inherits),
     whereas a silent empty result would look like "nothing to say" and quietly
-    consume the moment. Hard-post workflows never see this — see
-    agent/spend_budget.ESSENTIAL.
+    consume the moment. Hard-post workflows never see this — see the explicit
+    policy boundary in agent/spend_budget.py.
     """
 
 
@@ -612,10 +612,10 @@ def _create_chat_completion(
         timeout = policy.timeout
 
     # The daily spend ceiling. Refused BEFORE the call, because the point is to
-    # not spend. Hard-post workflows are exempt by name — a floor is never
-    # budget-gated, and this raising rather than returning is deliberate: a
-    # caller that silently treats "no budget" as "no news" would turn a cost
-    # control into missing clan history.
+    # not spend. Only awareness and Ask Elixir workflows participate; scheduled
+    # jobs and hard-post responders are outside this ledger. Raising rather than
+    # returning is deliberate: a caller that silently treats "no budget" as
+    # "no news" would turn a cost control into missing clan history.
     from agent.spend_budget import may_run
 
     allowed, why = may_run(workflow)
@@ -752,7 +752,7 @@ def _create_chat_completion(
                 cache_read_tokens,
                 effective_at=call_started_at,
             )
-            record_spend_usd(cost_usd, now=call_started_at)
+            record_spend_usd(workflow, cost_usd, now=call_started_at)
         except Exception:
             log.debug("spend budget: could not record call cost", exc_info=True)
 

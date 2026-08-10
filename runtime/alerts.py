@@ -286,9 +286,9 @@ async def _alert_spend_ceiling(detail: str) -> bool:
     """
     return await _alert_admin(
         "\U0001f4b0 **Daily spend ceiling reached** — "
-        f"{detail}. Non-essential work (deck reviews, the daily insight) is paused "
-        "until midnight UTC. Joins, farewells, role changes and clan-chat siblings "
-        "are unaffected — those are never budget-gated. "
+        f"{detail}. Scheduled awareness and Ask Elixir generation are paused "
+        "until midnight UTC. Jobs, joins, farewells, role changes and clan-chat "
+        "siblings are unaffected — those are never budget-gated. "
         "Raise `ELIXIR_DAILY_SPEND_USD` if this is biting too often.",
         "spend_ceiling",
         detail,

@@ -112,29 +112,32 @@ def _startup_budget_summary() -> str:
     Reports whatever is true, including "already spent" — a restart does not
     reset the day, and pretending otherwise would be the misleading version.
     """
-    from agent.spend_budget import DEFERRABLE, daily_ceiling_usd, spend_today_usd, warn_fraction
+    from agent.spend_budget import daily_ceiling_usd, spend_today_usd, warn_fraction
 
     ceiling = daily_ceiling_usd()
     if not ceiling:
-        return "Budget: no daily ceiling set — spend is unbounded."
+        return "Awareness / Ask Elixir budget: no daily ceiling set — spend is unbounded."
     try:
         spent = spend_today_usd()
     except Exception:
         log.debug("startup: could not read today's spend", exc_info=True)
-        return "Budget: today's spend is unreadable; the ceiling fails open."
+        return "Awareness / Ask Elixir budget: today's spend is unreadable; the ceiling fails open."
     remaining = max(0.0, ceiling - spent)
-    line = f"Budget: **${remaining:.2f}** of ${ceiling:.2f} left today (${spent:.2f} spent)."
+    line = (
+        "Awareness / Ask Elixir budget: "
+        f"**${remaining:.2f}** of ${ceiling:.2f} left today (${spent:.2f} spent)."
+    )
     if spent >= ceiling:
         # Name what is actually happening, not just the number — this is the
         # state a member would otherwise report as "Elixir is broken".
         return (
-            f"{line} Ceiling reached: discretionary work is paused until "
-            "midnight UTC. Hard posts are unaffected."
+            f"{line} Ceiling reached: scheduled awareness and Ask Elixir generation "
+            "are paused until midnight UTC. Jobs and hard posts are unaffected."
         )
     if spent >= ceiling * warn_fraction():
         return (
-            f"{line} Past the {warn_fraction():.0%} line, so deferrable work "
-            f"({len(DEFERRABLE)} workflows incl. deck reviews) is on hold."
+            f"{line} Past the {warn_fraction():.0%} line, so Ask Elixir deck reviews "
+            "and the daily discovery post are on hold."
         )
     return line
 

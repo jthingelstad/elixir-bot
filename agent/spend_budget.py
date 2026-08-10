@@ -1,35 +1,36 @@
-"""A hard daily ceiling on model spend, and what it sheds when it bites.
+"""A daily ceiling for awareness and Ask Elixir model spend.
 
 The problem this solves is not "Elixir costs money" — it is that the cost is
 UNBOUNDED. Measured over 14 days: a median day is $4.02 and the worst is $9.70,
 and the spikes are member-driven (one day: interactive $4.15 + deck_review
 $2.83). Nobody watching means nobody notices until the bill.
 
-So this converts an open-ended risk into a known worst case. Past the ceiling
-Elixir does less, deliberately and in a stated order, instead of doing
-everything until the money runs out.
+So this converts the two discretionary, open-ended surfaces into a known worst
+case. Scheduled reports and operational jobs are deliberately outside this
+ledger: a cost control for conversation must not make promised work disappear.
 
 **Two rules it must never break.**
 
 1. **A hard post is never budget-gated.** The floor guarantee predates this and
    outranks it: a join, a verified departure, a role change, a podium, a war
    week close MUST reach the clan. Those workflows are in `ESSENTIAL` and are
-   exempt at every level. If the ceiling could silence a farewell, the ceiling
-   would be a bug.
+   outside the ledger. The awareness brain is normally budgeted, but its
+   explicit third-rung floor recovery runs inside `required_work()`.
 2. **The counter lives in the CLAN database.** A number that can refuse a model
    call is a decision, and decisions may not depend on `elixir-telemetry.db`,
    which is admin history and safe to delete. Same rule that moved the wake
    budget on 2026-08-05.
 
-Shedding order, cheapest loss first. Everything not listed as ESSENTIAL is shed
-at the ceiling; `DEFERRABLE` is shed earlier, at the warning line, because it is
-the work a member will not miss.
+Only workflows in `BUDGETED` are charged or gated. `DEFERRABLE` Ask Elixir work
+is shed earlier, at the warning line, so direct conversation has the last room.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 
 from agent.pricing import call_cost_usd
@@ -37,7 +38,25 @@ from db import managed_connection
 
 log = logging.getLogger("elixir")
 
-SPEND_CURSOR_KEY = "budget:llm:spend_micros"
+SPEND_CURSOR_KEY = "budget:llm:awareness_ask_elixir_micros"
+
+# This is the policy boundary. Everything absent from this set always runs and
+# is not charged to the ceiling. Keep support calls that are part of these two
+# surfaces here too, or their real cost leaks outside the bound.
+BUDGETED = frozenset(
+    {
+        # Deliberative awareness (the scoped hard-post responder is essential).
+        "awareness",
+        "awareness_triage",
+        "awareness_repair",
+        # Member conversation and discovery on the Ask Elixir surface.
+        "interactive",
+        "help",
+        "deck_review",
+        "game_factual_repair",
+        "ask_elixir_daily",
+    }
+)
 
 # Never shed. These carry the hard-post floor to members, or are the cheap
 # routing that decides whether anything happens at all.
@@ -45,25 +64,37 @@ ESSENTIAL = frozenset(
     {
         "wake_response",  # the scoped responder — joins, farewells, role changes
         "wake_response_chat",  # its escalation rung
-        "awareness",  # the brain, which owns every floor the responder misses
         "clan_chat_copy",  # the in-game sibling of a floor post
         "intent_router",  # Haiku, ~$5/mo, decides if a turn is needed at all
         "reception",  # onboarding replies to a real person, waiting
     }
 )
 
-# Shed first, at the warning line rather than the ceiling: scheduled colour and
-# analysis nobody is waiting on. A member notices none of these are missing.
+# Shed first, at the warning line rather than the ceiling: optional Ask Elixir
+# depth and discovery, preserving the last room for a member's direct question.
 DEFERRABLE = frozenset(
     {
         "deck_review",
         "ask_elixir_daily",
-        "promotion_content",
-        "release_notes",
-        "memory_distill",
-        "leader_action_feedback",
     }
 )
+
+_REQUIRED_WORK: ContextVar[bool] = ContextVar("elixir_spend_required_work", default=False)
+
+
+@contextmanager
+def required_work():
+    """Let an explicit hard-post recovery cross the discretionary ceiling.
+
+    The call is still charged to the awareness/Ask Elixir ledger. This is not a
+    generic escape hatch: production uses it only after every scoped responder
+    tier failed while a mandatory signal remained uncovered.
+    """
+    token = _REQUIRED_WORK.set(True)
+    try:
+        yield
+    finally:
+        _REQUIRED_WORK.reset(token)
 
 
 def daily_ceiling_usd() -> float:
@@ -97,12 +128,7 @@ def spend_today_usd(*, now: datetime = None, conn=None) -> float:
 
 
 @managed_connection
-def record_spend_usd(usd: float, *, now: datetime = None, conn=None) -> None:
-    """Add one call's cost to today's total. Stored as integer micro-dollars.
-
-    Never raises into the caller: a spend counter that can fail a model call is
-    worse than one that occasionally undercounts.
-    """
+def _record_budgeted_spend_usd(usd: float, *, now: datetime = None, conn=None) -> None:
     micros = max(0, int(round((usd or 0) * 1_000_000)))
     if not micros:
         return
@@ -119,6 +145,21 @@ def record_spend_usd(usd: float, *, now: datetime = None, conn=None) -> None:
             datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         ),
     )
+
+
+def record_spend_usd(workflow: str, usd: float, *, now: datetime = None, conn=None) -> None:
+    """Charge a budgeted call to today's total as integer micro-dollars.
+
+    Never raises into the caller: a spend counter that can fail a model call is
+    worse than one that occasionally undercounts. Unbudgeted workflows return
+    before the managed-connection seam, so jobs do not even touch the ledger.
+    """
+    if workflow not in BUDGETED:
+        return
+    if conn is not None:
+        _record_budgeted_spend_usd(usd, now=now, conn=conn)
+    else:
+        _record_budgeted_spend_usd(usd, now=now)
 
 
 _ANNOUNCED: dict[str, str] = {}
@@ -172,10 +213,12 @@ def may_run(workflow: str, *, conn=None, now: datetime = None) -> tuple[bool, st
     passes only on the day it was written. (It did exactly that — these tests
     were green until UTC rolled past midnight a few hours later.)
     """
+    if workflow not in BUDGETED:
+        return True, ""
     ceiling = daily_ceiling_usd()
     if not ceiling:
         return True, ""
-    if workflow in ESSENTIAL:
+    if _REQUIRED_WORK.get():
         return True, ""
     try:
         spent = (
@@ -196,11 +239,13 @@ def may_run(workflow: str, *, conn=None, now: datetime = None) -> tuple[bool, st
 
 
 __all__ = [
+    "BUDGETED",
     "DEFERRABLE",
     "ESSENTIAL",
     "call_cost_usd",
     "daily_ceiling_usd",
     "may_run",
     "record_spend_usd",
+    "required_work",
     "spend_today_usd",
 ]

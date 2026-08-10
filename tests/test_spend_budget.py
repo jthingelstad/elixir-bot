@@ -1,4 +1,4 @@
-"""The daily spend ceiling: bounded cost that can never silence a floor.
+"""The awareness / Ask Elixir ceiling: bounded cost without starving jobs.
 
 Written the day the 14-day cost record showed a median day of $4.02 and a worst
 of $9.70 — the problem being unboundedness, not the average.
@@ -22,7 +22,7 @@ def test_a_hard_post_workflow_is_never_budget_gated(monkeypatch, engine_conn):
     bug — a member's arrival is not a discretionary purchase.
     """
     monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "1.00")
-    spend_budget.record_spend_usd(999.0, now=NOW, conn=engine_conn)
+    spend_budget.record_spend_usd("awareness", 999.0, now=NOW, conn=engine_conn)
     for workflow in sorted(spend_budget.ESSENTIAL):
         allowed, why = spend_budget.may_run(workflow, conn=engine_conn, now=NOW)
         assert allowed, f"{workflow} was gated at ${999.0}: {why}"
@@ -31,7 +31,7 @@ def test_a_hard_post_workflow_is_never_budget_gated(monkeypatch, engine_conn):
 def test_discretionary_work_stops_at_the_ceiling(monkeypatch, engine_conn):
     monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "3.20")
     assert spend_budget.may_run("interactive", conn=engine_conn, now=NOW)[0] is True
-    spend_budget.record_spend_usd(3.25, now=NOW, conn=engine_conn)
+    spend_budget.record_spend_usd("interactive", 3.25, now=NOW, conn=engine_conn)
     allowed, why = spend_budget.may_run("interactive", conn=engine_conn, now=NOW)
     assert allowed is False
     assert "ceiling reached" in why
@@ -43,7 +43,7 @@ def test_deferrable_work_sheds_earlier_than_member_conversation(monkeypatch, eng
     budget goes to the person who is actually waiting."""
     monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "4.00")
     monkeypatch.setenv("ELIXIR_SPEND_WARN_AT", "0.75")
-    spend_budget.record_spend_usd(3.10, now=NOW, conn=engine_conn)  # 77% of ceiling
+    spend_budget.record_spend_usd("interactive", 3.10, now=NOW, conn=engine_conn)
     assert spend_budget.may_run("deck_review", conn=engine_conn, now=NOW)[0] is False
     assert spend_budget.may_run("interactive", conn=engine_conn, now=NOW)[0] is True, (
         "conversation outlives analysis"
@@ -63,14 +63,14 @@ def test_the_ceiling_fails_open(monkeypatch):
 
 def test_setting_the_ceiling_to_zero_disables_it(monkeypatch, engine_conn):
     monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "0")
-    spend_budget.record_spend_usd(500.0, now=NOW, conn=engine_conn)
+    spend_budget.record_spend_usd("awareness", 500.0, now=NOW, conn=engine_conn)
     assert spend_budget.may_run("deck_review", conn=engine_conn, now=NOW)[0] is True
 
 
 def test_the_counter_lives_in_the_clan_db_not_telemetry(engine_conn):
     """Same rule that moved the wake budget: a number that can refuse a model
     call is a decision, and decisions may not depend on a deletable file."""
-    spend_budget.record_spend_usd(1.5, now=NOW, conn=engine_conn)
+    spend_budget.record_spend_usd("awareness", 1.5, now=NOW, conn=engine_conn)
     row = engine_conn.execute(
         "SELECT cursor_int FROM stream_cursors WHERE consumer_key = ? AND scope_key = ?",
         (spend_budget.SPEND_CURSOR_KEY, "2026-08-05"),
@@ -84,6 +84,53 @@ def test_the_counter_lives_in_the_clan_db_not_telemetry(engine_conn):
     assert "telemetry" not in source.split('"""', 2)[-1], (
         "the spend ceiling must not read the telemetry database"
     )
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        "member_report",
+        "weekly_recap",
+        "weekly_recap_email",
+        "memory_synthesis",
+        "recruiting_copy",
+        "release_notes",
+        "leader_action_feedback",
+        "clanops",
+    ],
+)
+def test_jobs_and_non_ask_surfaces_are_neither_charged_nor_gated(
+    workflow, monkeypatch, engine_conn
+):
+    """The source policy from #268: promised work cannot consume or be refused
+    by a budget that belongs to awareness and Ask Elixir."""
+    monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "0.01")
+    spend_budget.record_spend_usd(workflow, 999.0, now=NOW, conn=engine_conn)
+    assert spend_budget.spend_today_usd(now=NOW, conn=engine_conn) == 0
+    assert spend_budget.may_run(workflow, conn=engine_conn, now=NOW) == (True, "")
+
+
+def test_the_new_ledger_ignores_the_old_mixed_workflow_total(monkeypatch, engine_conn):
+    """Deploying the policy must release today's jobs and discretionary room;
+    the old key includes report and synthesis costs that cannot be separated
+    without making behavior depend on admin telemetry."""
+    monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "3.20")
+    engine_conn.execute(
+        "INSERT INTO stream_cursors (consumer_key, scope_key, cursor_int, updated_at) "
+        "VALUES (?, ?, ?, ?)",
+        ("budget:llm:spend_micros", "2026-08-05", 999_000_000, "2026-08-05T12:00:00Z"),
+    )
+    assert spend_budget.spend_today_usd(now=NOW, conn=engine_conn) == 0
+    assert spend_budget.may_run("awareness", conn=engine_conn, now=NOW) == (True, "")
+
+
+def test_required_floor_recovery_can_cross_the_awareness_ceiling(monkeypatch, engine_conn):
+    monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "1.00")
+    spend_budget.record_spend_usd("awareness", 2.0, now=NOW, conn=engine_conn)
+    assert spend_budget.may_run("awareness", conn=engine_conn, now=NOW)[0] is False
+    with spend_budget.required_work():
+        assert spend_budget.may_run("awareness", conn=engine_conn, now=NOW) == (True, "")
+    assert spend_budget.may_run("awareness", conn=engine_conn, now=NOW)[0] is False
 
 
 @pytest.mark.parametrize(
@@ -136,7 +183,7 @@ def test_leadership_is_told_once_per_day_not_once_per_refusal(monkeypatch, engin
     monkeypatch.setattr(alerts, "schedule_spend_ceiling_notice", lambda detail: sent.append(detail))
     monkeypatch.setenv("ELIXIR_DAILY_SPEND_USD", "1.00")
     spend_budget._ANNOUNCED.clear()
-    spend_budget.record_spend_usd(5.0, now=NOW, conn=engine_conn)
+    spend_budget.record_spend_usd("interactive", 5.0, now=NOW, conn=engine_conn)
     for _ in range(4):
         spend_budget.may_run("deck_review", conn=engine_conn, now=NOW)
     assert len(sent) == 1, f"announced {len(sent)} times, expected once"
@@ -168,7 +215,7 @@ def test_startup_names_the_paused_state_not_just_the_number(monkeypatch):
     line = startup._startup_budget_summary()
     assert "Ceiling reached" in line
     assert "midnight UTC" in line
-    assert "Hard posts are unaffected" in line
+    assert "Jobs and hard posts are unaffected" in line
 
 
 def test_startup_says_so_when_there_is_no_ceiling(monkeypatch):
@@ -206,7 +253,7 @@ def test_the_budget_is_not_pinned_to_the_day_the_tests_were_written(engine_conn)
 
     for offset in (-40, -1, 0, 1, 40):
         day = NOW + timedelta(days=offset)
-        spend_budget.record_spend_usd(1.0, now=day, conn=engine_conn)
+        spend_budget.record_spend_usd("interactive", 1.0, now=day, conn=engine_conn)
         assert abs(spend_budget.spend_today_usd(now=day, conn=engine_conn) - 1.0) < 1e-9, (
             f"spend must be readable on its own day ({day:%Y-%m-%d}), not just today"
         )

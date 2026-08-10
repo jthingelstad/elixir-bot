@@ -138,7 +138,8 @@ def test_cost_and_daily_counter_share_the_api_request_timestamp(monkeypatch):
         seen["priced_at"] = effective_at
         return 0.25
 
-    def _record_cost(usd, *, now):
+    def _record_cost(workflow, usd, *, now):
+        seen["workflow"] = workflow
         seen["recorded_usd"] = usd
         seen["recorded_at"] = now
 
@@ -147,6 +148,7 @@ def test_cost_and_daily_counter_share_the_api_request_timestamp(monkeypatch):
     row = _record(monkeypatch, "ask_elixir_daily", _Resp([_Block(type="text", text="hi")]))
 
     assert row["cost_usd"] == 0.25
+    assert seen["workflow"] == "ask_elixir_daily"
     assert seen["recorded_usd"] == 0.25
     assert seen["priced_at"] == seen["recorded_at"]
     assert seen["priced_at"].tzinfo is not None

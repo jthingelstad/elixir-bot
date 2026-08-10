@@ -1093,12 +1093,21 @@ async def _awareness_loop_body(trigger: str):
             intent_store=awareness_store,
         )
 
+    def _run_loop():
+        # Scheduled deliberation spends from the awareness/Ask Elixir budget.
+        # The explicit third rung is different: every scoped responder tier has
+        # failed while a mandatory signal is still uncovered, so the hard-post
+        # floor outranks the discretionary ceiling. The call is still charged.
+        from contextlib import nullcontext
+
+        from agent.spend_budget import required_work
+
+        budget_context = required_work() if trigger == "wake_floor" else nullcontext()
+        with budget_context:
+            return run_awareness_loop(progress_fn=_progress_fn, deliver_fn=_deliver_fn)
+
     try:
-        counters = await asyncio.to_thread(
-            run_awareness_loop,
-            progress_fn=_progress_fn,
-            deliver_fn=_deliver_fn,
-        )
+        counters = await asyncio.to_thread(_run_loop)
     except Exception as exc:
         runtime_status.mark_job_failure("awareness_loop", str(exc))
         log.exception("awareness loop failed")
