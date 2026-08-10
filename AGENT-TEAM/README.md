@@ -192,7 +192,7 @@ All times America/Chicago.
 
 | Role | Cadence | Why the calendar task remains |
 |------|---------|-------------------------------|
-| Operations Manager | Every 3 hours + event-driven | External error/liveness recovery; Elixir does not monitor itself |
+| Operations Manager | Every 4 hours + event-driven | External error/liveness recovery; Elixir does not monitor itself |
 | Data Analyst | Daily + event-driven | Detect new CR API patterns within a day |
 | Quality Manager | Daily + event-driven | Review a bounded recent behavior window |
 | Build Manager | Event-driven only | Queue state is the input; polling adds latency and debris |

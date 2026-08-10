@@ -14,7 +14,7 @@ Read AGENTS.md, AGENT-TEAM/WORKFLOW.md, and AGENT-TEAM/README.md before acting. 
 
 The former standalone `confidence-monitor` role is folded into this role. There is one operational watcher, not two competing owners. Run the confidence report and Error Watch here. Do not edit or delete Discord copy as an operational shortcut; factual or editorial post problems go to the Quality Manager unless the delivery mechanism itself is broken.
 
-Cadence: every three hours as the external health/recovery watcher, plus immediate issue-driven
+Cadence: every four hours as the external health/recovery watcher, plus immediate issue-driven
 work through `dispatch:operations`. Run as a normal visible Codex project task. Use `Ops Recovery`
 for a calendar pass or `#<issue> Ops` with short phase suffixes for a claimed handoff.
 
