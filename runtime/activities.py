@@ -38,6 +38,7 @@ class ActivityDefinition:
     activity_role: str = "communicator"
     status_name: str | None = None
     catch_up_period: str | None = None
+    catch_up_same_period_only: bool = False
     manual_trigger_allowed: bool = True
     enabled_by_default: bool = True
     active_window: dict[str, Any] | None = None
@@ -128,7 +129,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=("Discord: #actions weekly review + recommendation cards",),
         activity_role="observer+communicator",
-        catch_up_period="weekly",
+        # No generic catch-up until the Discord side has a period-keyed outbox.
     ),
     ActivityDefinition(
         activity_key="war-attendance-snapshot",
@@ -254,7 +255,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=("Discord: #announcements",),
         activity_role="communicator",
         status_name="weekly_clan_recap",
-        catch_up_period="weekly",
+        # No generic catch-up until the Discord side has a period-keyed outbox.
     ),
     ActivityDefinition(
         activity_key="weekly-member-report",
@@ -273,6 +274,10 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=("Email: each member (To:, individual)",),
         activity_role="communicator",
         catch_up_period="weekly",
+        # Reports compose from live facts. Once the ISO week changes, running
+        # the old obligation would really send the new week's report before its
+        # Monday slot, so the old period is superseded instead.
+        catch_up_same_period_only=True,
     ),
     ActivityDefinition(
         activity_key="weekly-elder-standing",
@@ -291,7 +296,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=("Discord: #announcements",),
         activity_role="communicator",
-        catch_up_period="weekly",
+        # No generic catch-up until the Discord side has a period-keyed outbox.
     ),
     # site-content (POAP KINGS website publishing) was removed entirely 2026-06-21
     # — the website has its own standalone update script now.
@@ -310,7 +315,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=("Discord: #recruiting",),
         activity_role="communicator",
         status_name="promotion_content_cycle",
-        catch_up_period="weekly",
+        # No generic catch-up until the Discord side has a period-keyed outbox.
     ),
     ActivityDefinition(
         activity_key="card-catalog-sync",
@@ -387,7 +392,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=("Discord webhook: #elixir-log",),
         activity_role="observer+communicator",
-        catch_up_period="weekly",
+        # Maintenance is repeatable, but the report has no period-keyed outbox.
     ),
     ActivityDefinition(
         activity_key="clan-wars-intel",
@@ -535,6 +540,7 @@ def resolve_activity(activity_key: str, runtime_module: Any) -> dict[str, Any]:
         "job_callable": getattr(runtime_module, activity.job_function),
         "status_name": activity.status_name or activity.job_id.replace("-", "_"),
         "catch_up_period": activity.catch_up_period,
+        "catch_up_same_period_only": activity.catch_up_same_period_only,
         "schedule_kind": activity.schedule_kind,
         "schedule_config": _resolve_mapping(activity.schedule_config, runtime_module),
         "active_window": _resolve_mapping(activity.active_window, runtime_module)
@@ -604,6 +610,7 @@ def schedule_specs_from_registry(runtime_module: Any) -> list[dict[str, Any]]:
                 "job_function": activity.job_function,
                 "status_name": resolved["status_name"],
                 "catch_up_period": resolved["catch_up_period"],
+                "catch_up_same_period_only": resolved["catch_up_same_period_only"],
                 "schedule_kind": activity.schedule_kind,
                 "schedule_config": resolved["schedule_config"],
                 "active_window": resolved["active_window"],

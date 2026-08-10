@@ -10,9 +10,12 @@ from __future__ import annotations
 import asyncio
 import re
 
+import pytest
+
 import agent.mail.outbound as outbound
 import db
-from runtime import member_report
+from runtime import email_dedup, member_report
+from runtime import status as runtime_status
 from runtime.jobs import _core
 
 _DEFAULT_LOG = [
@@ -231,11 +234,97 @@ def test_weekly_member_report_isolates_one_failure(monkeypatch):
         return {"overview": "o", "closer": "c"}
 
     monkeypatch.setattr("agent.workflows.generate_member_report", _gen)
+    failures: list[str] = []
+    monkeypatch.setattr(
+        runtime_status, "mark_job_failure", lambda name, error: failures.append(error)
+    )
 
     result = asyncio.run(_core._weekly_member_report_cycle())
 
     assert result == {"sent": 1, "total": 2}  # one failed, one sent
     assert [s["to"] for s in sends] == ["ben@x.com"]
+    assert len(failures) == 1
+    assert "1/2 fulfilled; 1 failed" in failures[0]
+
+
+def test_catch_up_retries_only_missing_recipients_under_the_owed_key(monkeypatch):
+    sends: list[dict] = []
+    _job_stubs(monkeypatch, sends)
+    seen: set[tuple[str, str]] = set()
+    monkeypatch.setattr(email_dedup, "already_sent", lambda kind, key: (kind, key) in seen)
+    monkeypatch.setattr(
+        email_dedup,
+        "record_sent",
+        lambda kind, key, **kw: bool(seen.add((kind, key))) or True,
+    )
+
+    failed_once = False
+
+    def _gen(facts):
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise RuntimeError("one recipient failed")
+        return {"overview": "o", "closer": "c"}
+
+    monkeypatch.setattr("agent.workflows.generate_member_report", _gen)
+    outcomes: list[tuple[str, str]] = []
+    monkeypatch.setattr(runtime_status, "mark_job_start", lambda name: None)
+    monkeypatch.setattr(
+        runtime_status,
+        "mark_job_success",
+        lambda name, summary=None: outcomes.append(("success", summary)),
+    )
+    monkeypatch.setattr(
+        runtime_status, "mark_job_failure", lambda name, error: outcomes.append(("failure", error))
+    )
+
+    with runtime_status.job_period("2026-W32", catch_up=True):
+        first = asyncio.run(_core._weekly_member_report_cycle())
+    with runtime_status.job_period("2026-W32", catch_up=True):
+        second = asyncio.run(_core._weekly_member_report_cycle())
+
+    assert first == {"sent": 1, "total": 2}
+    assert second == {"sent": 1, "total": 2}
+    assert [outcome for outcome, _ in outcomes] == ["failure", "success"]
+    assert [item["to"] for item in sends] == ["ben@x.com", "ada@x.com"]
+    assert seen == {
+        ("member_report", "#AAA:2026-W32"),
+        ("member_report", "#BBB:2026-W32"),
+    }
+
+
+def test_sent_without_a_delivery_receipt_does_not_complete_the_period(monkeypatch):
+    sends: list[dict] = []
+    _job_stubs(monkeypatch, sends)
+    monkeypatch.setattr(
+        "agent.workflows.generate_member_report",
+        lambda facts: {"overview": "o", "closer": "c"},
+    )
+    monkeypatch.setattr(email_dedup, "already_sent", lambda kind, key: False)
+    calls = 0
+
+    def _record_sent(kind, key, **kwargs):
+        nonlocal calls
+        calls += 1
+        return calls == 2
+
+    monkeypatch.setattr(email_dedup, "record_sent", _record_sent)
+    failures: list[str] = []
+    monkeypatch.setattr(runtime_status, "mark_job_start", lambda name: None)
+    monkeypatch.setattr(
+        runtime_status, "mark_job_success", lambda name, summary=None: pytest.fail(summary)
+    )
+    monkeypatch.setattr(
+        runtime_status, "mark_job_failure", lambda name, error: failures.append(error)
+    )
+
+    with runtime_status.job_period("2026-W32", catch_up=True):
+        result = asyncio.run(_core._weekly_member_report_cycle())
+
+    assert result == {"sent": 1, "total": 2}
+    assert len(sends) == 2
+    assert failures == ["period 2026-W32: 1/2 fulfilled; 1 failed"]
 
 
 def test_weekly_member_report_skips_when_mail_disabled(monkeypatch):

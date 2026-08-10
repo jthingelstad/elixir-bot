@@ -822,9 +822,10 @@ async def _weekly_member_report_cycle():
     week's battles/badges/cards/profile), narrated in Elixir's voice, and sent
     individually (To:, never BCC — it's about them, and no address leaks).
 
-    Best-effort and isolated: one member's build/LLM/mail failure is logged and
-    skipped so it can't sink the batch. Skips cleanly when mail is unconfigured
-    or nobody has a verified email."""
+    Failure-isolated and retryable: one member's build/LLM/mail failure cannot
+    stop the remaining sends, but the period succeeds only after every current
+    recipient is either sent or already fulfilled for its delivery key. Skips
+    cleanly when mail is unconfigured or nobody has a verified email."""
     runtime_status.mark_job_start("weekly_member_report")
 
     from agent.mail import outbound
@@ -840,16 +841,19 @@ async def _weekly_member_report_cycle():
         runtime_status.mark_job_success("weekly_member_report", "no members with a verified email")
         return {"sent": 0, "total": 0}
 
-    # Per member, per ISO week. Without this a partial re-run re-sends to every
-    # member who already succeeded — the isolation that makes one failure
-    # survivable also makes a retry duplicate everyone else.
-    week_key = "{}-W{:02d}".format(*datetime.now(CHICAGO).isocalendar()[:2])
+    # The scheduler's owed period is the delivery idempotency key. Facts remain
+    # live/current; no historical report dataset is reconstructed. Manual runs
+    # outside the scheduler retain the current ISO-week key.
+    period = runtime_status.current_job_period()
+    week_key = (period or {}).get("key") or "{}-W{:02d}".format(
+        *datetime.now(CHICAGO).isocalendar()[:2]
+    )
 
-    def _build_and_send(rec: dict) -> bool:
+    def _build_and_send(rec: dict) -> str:
         tag = rec["player_tag"]
         dedup_key = f"{tag}:{week_key}"
         if email_dedup.already_sent("member_report", dedup_key):
-            return False
+            return "already"
         name = rec.get("member_name") or tag
         ctx = member_report.build_member_report_context(tag, name)
         narrative = generate_member_report(member_report.facts_for_model(ctx))
@@ -857,33 +861,44 @@ async def _weekly_member_report_cycle():
         outbound.send(to=rec["email"], subject=subject, body=body)
         if not email_dedup.record_sent("member_report", dedup_key):
             log.error("arena dispatch: sent to %s but NOT recorded; a re-run will duplicate", tag)
-        return True
+            return "unrecorded"
+        return "sent"
 
     sent = 0
     skipped = 0
+    failed = 0
     for rec in recipients:
         try:
-            if await asyncio.to_thread(_build_and_send, rec):
+            outcome = await asyncio.to_thread(_build_and_send, rec)
+            if outcome == "sent":
                 sent += 1
-            else:
+            elif outcome == "already":
                 skipped += 1
+            else:
+                failed += 1
         except Exception as exc:  # one member's failure never sinks the batch
+            failed += 1
             log.warning("arena dispatch failed for %s: %s", rec.get("player_tag"), exc)
 
     total = len(recipients)
-    if sent == 0 and skipped == total and total:
-        # Everyone was already mailed this week — a no-op re-run, not a failure.
+    if failed == 0 and sent + skipped == total:
         runtime_status.mark_job_success(
-            "weekly_member_report", f"already sent this week ({total} member(s))"
+            "weekly_member_report",
+            f"period {week_key}: {sent} sent, {skipped} already fulfilled, {total} total",
         )
-        return {"sent": 0, "total": total, "skipped": skipped}
-    if sent == 0:
-        runtime_status.mark_job_failure("weekly_member_report", f"0/{total} arena dispatches sent")
     else:
-        runtime_status.mark_job_success(
-            "weekly_member_report", f"{sent}/{total} arena dispatches sent"
+        runtime_status.mark_job_failure(
+            "weekly_member_report",
+            f"period {week_key}: {sent + skipped}/{total} fulfilled; {failed} failed",
         )
-    log.info("arena dispatch: %d/%d member report(s) emailed", sent, total)
+    log.info(
+        "arena dispatch: period=%s sent=%d already=%d failed=%d total=%d",
+        week_key,
+        sent,
+        skipped,
+        failed,
+        total,
+    )
     return {"sent": sent, "total": total}
 
 

@@ -118,10 +118,14 @@ def _legacy_success_period(status: dict[str, Any], period_kind: str) -> str | No
     return period_key(period_kind, parsed)
 
 
-def _period_succeeded(status: dict[str, Any], period_kind: str, key: str) -> bool:
-    return status.get("last_success_period") == key or (
+def _period_resolution(status: dict[str, Any], period_kind: str, key: str) -> str | None:
+    if status.get("last_success_period") == key or (
         not status.get("last_success_period") and _legacy_success_period(status, period_kind) == key
-    )
+    ):
+        return "current"
+    if status.get("last_skipped_period") == key:
+        return "skipped"
+    return None
 
 
 def wrap_scheduled_activity(resolved: dict[str, Any]):
@@ -165,9 +169,25 @@ async def run_catch_up_sweep(runtime_module: Any, *, now: datetime | None = None
 
         async with _activity_lock(resolved["activity_key"]):
             status = runtime_status.job_state(status_name)
-            if _period_succeeded(status, resolved["catch_up_period"], key):
+            resolution = _period_resolution(status, resolved["catch_up_period"], key)
+            if resolution:
                 results.append(
-                    {"activity": resolved["activity_key"], "period": key, "outcome": "current"}
+                    {"activity": resolved["activity_key"], "period": key, "outcome": resolution}
+                )
+                continue
+            current_key = period_key(resolved["catch_up_period"], current)
+            if resolved.get("catch_up_same_period_only") and current_key != key:
+                reason = f"superseded by {current_key} before catch-up"
+                runtime_status.mark_job_period_skipped(status_name, key, reason)
+                await asyncio.to_thread(runtime_status.flush_status_writes)
+                log.warning(
+                    "scheduled catch-up skipped activity=%s period=%s reason=%s",
+                    resolved["activity_key"],
+                    key,
+                    reason,
+                )
+                results.append(
+                    {"activity": resolved["activity_key"], "period": key, "outcome": "superseded"}
                 )
                 continue
             claim = runtime_status.claim_catch_up_period(

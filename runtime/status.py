@@ -74,6 +74,9 @@ def _default_job_state() -> dict:
         "last_summary": None,
         "last_started_period": None,
         "last_success_period": None,
+        "last_skipped_period": None,
+        "last_skipped_at": None,
+        "last_skipped_reason": None,
         "last_catch_up_period": None,
         "last_catch_up_at": None,
         "running": False,
@@ -88,6 +91,12 @@ def job_period(period_key: str, *, catch_up: bool = False):
         yield
     finally:
         _JOB_PERIOD.reset(token)
+
+
+def current_job_period() -> dict | None:
+    """Return the schedule-period context for the current job execution."""
+    period = _JOB_PERIOD.get()
+    return copy.deepcopy(period) if period else None
 
 
 def _persist_job_status(name: str, state: dict) -> None:
@@ -228,6 +237,10 @@ def mark_job_success(name: str, summary: str | None = None) -> None:
         period = _JOB_PERIOD.get()
         if period:
             state["last_success_period"] = period["key"]
+            if state.get("last_skipped_period") == period["key"]:
+                state["last_skipped_period"] = None
+                state["last_skipped_at"] = None
+                state["last_skipped_reason"] = None
         state["running"] = False
         snapshot_state = copy.deepcopy(state)
     _persist_job_status(name, snapshot_state)
@@ -270,6 +283,26 @@ def job_state(name: str) -> dict:
         return copy.deepcopy(_state_for(name))
 
 
+def mark_job_period_skipped(name: str, period_key: str, reason: str) -> None:
+    """Durably satisfy a period without pretending the job succeeded.
+
+    This is an operator decision for a deliverable that should no longer run,
+    or an automatic supersession when live-data semantics would otherwise run
+    a newer member-facing period early. It is deliberately distinct from a job
+    success so health counters and last-success timestamps stay truthful.
+    """
+    with _LOCK:
+        state = _state_for(name)
+        if state.get("last_success_period") == str(period_key):
+            raise ValueError(f"period already succeeded: {name}/{period_key}")
+        now = _utcnow()
+        state["last_skipped_period"] = str(period_key)
+        state["last_skipped_at"] = now
+        state["last_skipped_reason"] = str(reason)
+        snapshot_state = copy.deepcopy(state)
+    _persist_job_status(name, snapshot_state)
+
+
 def claim_catch_up_period(
     name: str,
     period_key: str,
@@ -286,6 +319,8 @@ def claim_catch_up_period(
             return "busy"
         if state.get("last_success_period") == key:
             return "current"
+        if state.get("last_skipped_period") == key:
+            return "skipped"
         if state.get("last_catch_up_period") == key and state.get("last_catch_up_at"):
             try:
                 previous = datetime.fromisoformat(str(state["last_catch_up_at"]))
