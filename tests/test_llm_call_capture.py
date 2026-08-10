@@ -128,6 +128,30 @@ def test_cost_is_priced_at_write_time(monkeypatch):
     assert row["cost_usd"] is not None and row["cost_usd"] > 0
 
 
+def test_cost_and_daily_counter_share_the_api_request_timestamp(monkeypatch):
+    """A midnight boundary must not price one call on one day and charge another."""
+    from agent import spend_budget
+
+    seen = {}
+
+    def _price(*args, effective_at):
+        seen["priced_at"] = effective_at
+        return 0.25
+
+    def _record_cost(usd, *, now):
+        seen["recorded_usd"] = usd
+        seen["recorded_at"] = now
+
+    monkeypatch.setattr(spend_budget, "call_cost_usd", _price)
+    monkeypatch.setattr(spend_budget, "record_spend_usd", _record_cost)
+    row = _record(monkeypatch, "ask_elixir_daily", _Resp([_Block(type="text", text="hi")]))
+
+    assert row["cost_usd"] == 0.25
+    assert seen["recorded_usd"] == 0.25
+    assert seen["priced_at"] == seen["recorded_at"]
+    assert seen["priced_at"].tzinfo is not None
+
+
 def test_calls_in_one_turn_share_a_turn_id(monkeypatch):
     """A tool-using workflow makes several calls per turn. Without this, cost
     per turn is not computable — only cost per workflow per day."""

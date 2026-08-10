@@ -8,6 +8,7 @@ import subprocess
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import NamedTuple
 
 from anthropic import Anthropic, APIConnectionError, APIError, BadRequestError
@@ -684,6 +685,7 @@ def _create_chat_completion(
     attempts = 1
 
     try:
+        call_started_at = datetime.now(timezone.utc)
         try:
             resp = _get_client().messages.create(**kwargs)
         except BadRequestError as e:
@@ -702,6 +704,7 @@ def _create_chat_completion(
                 )
                 kwargs.pop("temperature")
                 attempts += 1
+                call_started_at = datetime.now(timezone.utc)
                 resp = _get_client().messages.create(**kwargs)
             else:
                 raise
@@ -747,8 +750,9 @@ def _create_chat_completion(
                 completion_tokens,
                 cache_creation_tokens,
                 cache_read_tokens,
+                effective_at=call_started_at,
             )
-            record_spend_usd(cost_usd)
+            record_spend_usd(cost_usd, now=call_started_at)
         except Exception:
             log.debug("spend budget: could not record call cost", exc_info=True)
 

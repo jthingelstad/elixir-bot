@@ -5,315 +5,137 @@ description: Analyze the llm_calls table in elixir-telemetry.db to break down El
 
 # LLM Cost Report
 
-Read `/Users/otto/Projects/elixir-bot/elixir-telemetry.db` (table `llm_calls`), compute real spend using current Sonnet 5 introductory pricing, Sonnet 4.6 fallback pricing, and Haiku 4.5 pricing, and hand the user a short prioritized report: where the money goes, whether caching is paying off, daily trend, anomalies, and concrete next levers. Pairs with `log-triage` ("is the bot alive?") and `awareness-report` ("is the bot making good calls?") — this one answers "where is the money going?"
+Read the admin-only telemetry database and hand the user a short prioritized
+report: where the money goes, whether caching is paying off, daily trend,
+anomalies, and concrete next levers. Pairs with `log-triage` (health) and
+`awareness-report` (decision quality); this one answers "where is the money
+going?"
 
-Budget context: the user's target is **$20/month (~$0.67/day)**. Report current spend against that bar.
+Budget context: the user's target is **$20/month (~$0.67/day)**.
 
-## Scope
+## Canonical report path
 
-Default to the **last 7 days** of `llm_calls` rows. Overridable by the user ("last 24h", "last 30 days", "since 2026-04-10"). `recorded_at` is an ISO-8601 timestamp.
+Run the repository tool from `/Users/otto/Projects/elixir-bot`:
 
-### The database moved — do not read the clan DB
-
-`llm_calls` lived in `elixir-v51.db` until **2026-08-03**, when telemetry was split
-into its own file so the instrument would stop contending with the workload it
-measures. The clan DB still carries a copy of every row written before the
-cutover and **it is frozen** — nothing new lands there ever again.
-
-That stale table is dangerous rather than merely useless: querying it shows spend
-falling off a cliff on 2026-08-03 and holding at zero, which reads exactly like a
-cost win. If a report ever shows spend ending abruptly on that date, the path is
-wrong, not the spend. The clan copy is retained only until it is dropped in a
-future migration.
-
-### Timestamps are ISO-Z; do not compare against `datetime('now')`
-
-`recorded_at` is written as `2026-08-03T15:51:54Z`. SQLite's `datetime('now')`
-returns `2026-08-03 15:51:54` — space separator, no `Z`. These compare as
-strings, and `'T' > ' '`, so a naive `recorded_at >= datetime('now','-7 days')`
-**silently over-selects**, pulling in the whole boundary day.
-
-Build cutoffs in the same format instead:
-
-```sql
-strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
+```bash
+uv run --locked python scripts/llm_cost_report.py --days 7 --json
 ```
 
-Rows written before the 2026-08-03 cutover carry no `Z`. Both forms still sort
-correctly against a `Z`-suffixed cutoff, so one filter covers the whole history.
+Use `--days 1`, `--days 14`, or `--days 30` when the user requests another
+rolling window. The script opens SQLite read-only and consumes
+`agent/pricing.py`, the same date-aware authority that charges the runtime
+budget and stores each call's `cost_usd`. Do not recreate model rates in SQL,
+this skill, or prose.
+
+The JSON includes:
+
+- exact ISO-Z cutoff and lifetime first/last call;
+- calls, failures, total and projected monthly cost;
+- stored-receipt versus timestamp-priced fallback row counts;
+- daily cost and call volume;
+- workflow/model cost breakdown;
+- cache read/write ratios; and
+- any unknown model that had to use the explicitly marked conservative
+  fallback.
+
+### The database moved — never read the clan DB
+
+`llm_calls` moved to `elixir-telemetry.db` on 2026-08-03. The clan database's
+old copy is frozen. If spend appears to end abruptly on that date, the database
+path is wrong, not the spend.
+
+### Stored costs are historical receipts
+
+Prefer non-null `cost_usd`. It records what the runtime charged when the call
+ran and remains immutable across later price changes. Rows from before per-call
+capture have null cost; the report tool falls back to the canonical rate at
+each row's `recorded_at` timestamp. Never replace a stored receipt with a
+current-price recomputation.
 
 ### Bootstrap guard
 
-If fewer than ~24 hours of rows exist, say so in one line and stop. Short windows produce misleading averages.
+Check `first_call`, `last_call`, and `lifetime_calls` in the report. If fewer
+than roughly 24 hours of rows exist, say so and stop; the averages are not yet
+representative.
 
-```sql
-SELECT MIN(recorded_at) AS first_call,
-       MAX(recorded_at) AS last_call,
-       COUNT(*) AS n
-FROM llm_calls;
-```
+## Cost per turn and waste checks
 
-### Schema reference
-
-```
-llm_calls(call_id, recorded_at, workflow, model, ok, error, duration_ms,
-          prompt_tokens, completion_tokens, total_tokens,
-          cache_creation_tokens, cache_read_tokens,
-          -- added 2026-08-09; NULL on rows written before that date
-          effort, max_tokens, timeout_s,          -- what the call was asked to do
-          stop_reason, block_census, attempts,    -- what happened
-          cost_usd, turn_id)
-```
-
-### Prefer the stored `cost_usd`
-
-Every call now records its own cost, priced at the rates in force when it ran.
-**Use it instead of recomputing** — a stored figure stays correct across price
-changes, and the `CASE` ladder below is a second copy of the pricing table that
-has to be kept in sync by hand.
-
-Rows written before 2026-08-09 have `cost_usd` NULL, so a report spanning the
-boundary needs both. Prefer the column and fall back:
-
-```sql
-SELECT workflow,
-       ROUND(SUM(COALESCE(cost_usd, <CASE ladder>/1e6)), 4) AS cost
-FROM llm_calls
-WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-7 days')
-GROUP BY workflow ORDER BY cost DESC;
-```
-
-If the whole window is after 2026-08-09, drop the ladder entirely and just
-`SUM(cost_usd)`.
-
-### Cost per turn, not just per workflow
-
-`turn_id` groups the several calls one agent turn makes — a tool-using workflow
-loops until the model stops asking for tools, so per-workflow totals answer
-"what did awareness cost this week" but never "what did one tick cost". NULL
-means a standalone single call.
+`turn_id` groups the several API calls made by one tool-using turn. If per-turn
+cost matters, run this read-only query; every selected row already has its
+stored receipt:
 
 ```sql
 SELECT workflow,
        COUNT(DISTINCT COALESCE(turn_id, 'call:' || call_id)) AS turns,
        ROUND(SUM(cost_usd), 4) AS cost,
-       ROUND(SUM(cost_usd) / COUNT(DISTINCT COALESCE(turn_id, 'call:' || call_id)), 4)
-         AS cost_per_turn,
-       ROUND(1.0 * COUNT(*) / COUNT(DISTINCT COALESCE(turn_id, 'call:' || call_id)), 1)
-         AS calls_per_turn
+       ROUND(SUM(cost_usd) /
+         COUNT(DISTINCT COALESCE(turn_id, 'call:' || call_id)), 4) AS cost_per_turn,
+       ROUND(1.0 * COUNT(*) /
+         COUNT(DISTINCT COALESCE(turn_id, 'call:' || call_id)), 1) AS calls_per_turn
 FROM llm_calls
 WHERE cost_usd IS NOT NULL
   AND recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-7 days')
 GROUP BY workflow ORDER BY cost DESC;
 ```
 
-A high `calls_per_turn` is a cost driver in its own right: each extra tool round
-re-sends the whole conversation.
-
-### Waste that is now directly visible
-
-Three things used to require live instrumentation to find. Check them before
-recommending model-tier cuts — they are cheaper wins.
+Check these three directly visible waste signals before recommending a model
+swap:
 
 ```sql
--- Wasted API round trips. Anything above 1 is a rejected parameter or a
--- retry; it was 2 on every claude-5 call for months before 2026-08-08.
+-- API round trips above one are rejected parameters or retries.
 SELECT workflow, model, COUNT(*) n, SUM(attempts) trips
 FROM llm_calls WHERE attempts > 1 GROUP BY workflow, model;
 
--- Truncation: spend that bought a cut-off answer. `max_tokens` is the ceiling
--- it hit, so the fix is readable straight off the row.
+-- Spend that produced a truncated response.
 SELECT workflow, max_tokens, COUNT(*) n, ROUND(SUM(cost_usd), 4) wasted
 FROM llm_calls WHERE stop_reason = 'max_tokens' GROUP BY workflow, max_tokens;
 
--- Effort vs what it bought. This is the lever for cost, not max_tokens.
+-- Effort versus completion and cost.
 SELECT workflow, effort, COUNT(*) n,
        ROUND(AVG(completion_tokens)) avg_out, ROUND(AVG(cost_usd), 5) avg_cost
 FROM llm_calls WHERE effort IS NOT NULL GROUP BY workflow, effort;
 ```
 
-`block_census` carries per-type block COUNTS, not sizes. A response whose census
-shows a `thinking` block but no `text` or `tool_use` spent its budget thinking
-and returned nothing — that is a real failure wearing a successful stop_reason.
-Do not read a character count off it: `thinking.display` defaults to `omitted`,
-so thinking text is always empty and its char count is 0 either way.
+`block_census` carries block counts, not sizes. Thinking present with no text or
+tool use means the model spent budget without a deliverable; pair the census
+with completion tokens.
 
-## Pricing constants
+## Interpretation
 
-Use these exact numbers (per 1M tokens). Update this block if Anthropic changes prices.
+- Workflow above 25% of spend: name it as the primary lever.
+- Cache read/write below 0.28: caching is net-negative for that workflow;
+  verify the prefix/cadence before recommending a change.
+- Top day above twice the 14-day median: drill into workflow/model for that day.
+- High Haiku volume with tiny cost: leave it alone.
+- Separate member-driven spikes from scheduled baseline before changing a cron.
 
-| Model | Prompt | Completion | Cache read | Cache write |
-|---|---:|---:|---:|---:|
-| Opus 4.8 (`claude-opus-4-8`) | $5.00 | $25.00 | $0.50 | $6.25 |
-| Sonnet 5 (`claude-sonnet-5`) | $2.00 | $10.00 | $0.20 | $2.50 |
-| Sonnet 4.6 (`claude-sonnet-4-6`) | $3.00 | $15.00 | $0.30 | $3.75 |
-| Haiku 4.5 (`claude-haiku-4-5-20251001`) | $1.00 | $5.00 | $0.10 | $1.25 |
+Prefer recommendations in this order:
 
-Test models (`claude-test-*`) are priced at $0 — filter them out of cost totals, but count them if you're checking call volume.
+1. Fix retries, truncations, or empty responses that waste paid calls.
+2. Reduce low-value signals before they invoke a model.
+3. Move suitable analysis to a lighter model only after quality evidence.
+4. Remove stale prompt/tool payload that invalidates or bloats cached prefixes.
+5. Reduce cadence when measured editorial value does not justify it.
 
-**Caching break-even:** caching is net-cheaper than no-cache when
-`cache_read_tokens / cache_creation_tokens ≥ 0.28`
-(derived: cache_write = 1.25× base, cache_read = 0.10× base; 0.25·X = 0.90·Y → Y = 0.28·X).
+Do not change member-visible cadence, hard-post coverage, or the daily ceiling
+from this read-only report. Route those decisions to their owning issue.
 
-## Queries to run
+## Output
 
-Run all four queries against `elixir-telemetry.db` via read-only `sqlite3` and interpret them together.
+Keep the report under roughly 40 lines:
 
-### Q1 — Daily totals and trend
-
-```sql
-SELECT date(recorded_at) AS day,
-       COUNT(*) AS calls,
-       ROUND(SUM(CASE WHEN model LIKE 'claude-sonnet-5%'
-            THEN prompt_tokens*2 + cache_read_tokens*0.2 + cache_creation_tokens*2.5 + completion_tokens*10
-            WHEN model LIKE 'claude-opus-4-8%'
-            THEN prompt_tokens*5 + cache_read_tokens*0.5 + cache_creation_tokens*6.25 + completion_tokens*25
-            WHEN model LIKE 'claude-sonnet%'
-            THEN prompt_tokens*3 + cache_read_tokens*0.3 + cache_creation_tokens*3.75 + completion_tokens*15
-            WHEN model LIKE 'claude-haiku%'
-            THEN prompt_tokens*1 + cache_read_tokens*0.1 + cache_creation_tokens*1.25 + completion_tokens*5
-            ELSE 0 END) / 1e6, 2) AS cost_usd
-FROM llm_calls
-WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
-GROUP BY day
-ORDER BY day;
-```
-
-What it tells you: daily burn rate, spikes, and whether the trend is rising or flat. Median day × 30 is the projected monthly cost.
-
-### Q2 — Per-workflow, per-model breakdown
-
-```sql
-SELECT workflow,
-       model,
-       COUNT(*) AS calls,
-       ROUND(SUM(CASE WHEN model LIKE 'claude-sonnet-5%'
-            THEN prompt_tokens*2 + cache_read_tokens*0.2 + cache_creation_tokens*2.5 + completion_tokens*10
-            WHEN model LIKE 'claude-opus-4-8%'
-            THEN prompt_tokens*5 + cache_read_tokens*0.5 + cache_creation_tokens*6.25 + completion_tokens*25
-            WHEN model LIKE 'claude-sonnet%'
-            THEN prompt_tokens*3 + cache_read_tokens*0.3 + cache_creation_tokens*3.75 + completion_tokens*15
-            WHEN model LIKE 'claude-haiku%'
-            THEN prompt_tokens*1 + cache_read_tokens*0.1 + cache_creation_tokens*1.25 + completion_tokens*5
-            ELSE 0 END) / 1e6, 2) AS cost_usd,
-       ROUND(AVG(prompt_tokens))        AS avg_prompt,
-       ROUND(AVG(cache_read_tokens))    AS avg_cache_read,
-       ROUND(AVG(cache_creation_tokens))AS avg_cache_write,
-       ROUND(AVG(completion_tokens))    AS avg_completion
-FROM llm_calls
-WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
-  AND model LIKE 'claude-%'
-GROUP BY workflow, model
-ORDER BY cost_usd DESC;
-```
-
-What it tells you: which workflows are the real cost drivers. Anything over 25% of total is a primary lever. Per-call averages show whether a workflow is expensive due to volume or prompt size.
-
-### Q3 — Cache efficiency
-
-```sql
-SELECT workflow,
-       SUM(cache_creation_tokens) AS cc_total,
-       SUM(cache_read_tokens)     AS cr_total,
-       ROUND(SUM(cache_read_tokens) * 1.0 / NULLIF(SUM(cache_creation_tokens), 0), 2)
-         AS read_per_write
-FROM llm_calls
-WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
-  AND cache_creation_tokens > 0
-GROUP BY workflow
-ORDER BY cc_total DESC;
-```
-
-What it tells you: whether cache is paying off per workflow. Flag any workflow where `read_per_write < 0.28` — cache is costing more than it saves. Don't flag cache as the lever without checking this number.
-
-### Q4 — Anomaly / spike detection
-
-```sql
-WITH daily AS (
-  SELECT date(recorded_at) AS day,
-         SUM(CASE WHEN model LIKE 'claude-sonnet-5%'
-              THEN prompt_tokens*2 + cache_read_tokens*0.2 + cache_creation_tokens*2.5 + completion_tokens*10
-              WHEN model LIKE 'claude-opus-4-8%'
-              THEN prompt_tokens*5 + cache_read_tokens*0.5 + cache_creation_tokens*6.25 + completion_tokens*25
-              WHEN model LIKE 'claude-sonnet%'
-              THEN prompt_tokens*3 + cache_read_tokens*0.3 + cache_creation_tokens*3.75 + completion_tokens*15
-              WHEN model LIKE 'claude-haiku%'
-              THEN prompt_tokens*1 + cache_read_tokens*0.1 + cache_creation_tokens*1.25 + completion_tokens*5
-              ELSE 0 END) / 1e6 AS cost
-  FROM llm_calls
-  WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-14 days')
-  GROUP BY day
-)
-SELECT day, ROUND(cost, 2) AS cost_usd
-FROM daily
-ORDER BY cost DESC
-LIMIT 3;
-```
-
-If the top day is >2× the 14-day median, it's a spike. Drill in by re-running Q2 with a single-day `WHERE date(recorded_at) = '<spike-date>'` filter and name the driver workflow.
-
-## Interpretation rules
-
-- **Workflow >25% of total spend** = primary lever. Name it explicitly.
-- **Sonnet workflow with `read_per_write < 0.28`** = cache is net-negative on that workflow.
-- **Daily cost trending up week-over-week** = regression worth calling out.
-- **High Haiku call volume but tiny cost** = noise, leave alone. Don't recommend cron kills just because the call count is high.
-- **Apr 16 2026 spike** is a known one-time autonomous-sprint event — if it still falls inside the window, flag it once and don't over-weight the median.
-
-## Recommended-actions playbook
-
-When recommending next levers, prefer them in this order:
-
-1. **Signal-side cuts** — reduce how often a workflow is *triggered* in the first place. Tighter signal filters, longer dedup windows, per-channel cooldowns. This is the user's stated preference.
-2. **Model swap to Haiku** — fair game for any workflow that isn't long-form written content.
-   - **Keep Sonnet** on: `weekly_recap`, `recruiting_copy`, `tournament_recap`, `intel_report`, `memory_synthesis`.
-   - Everything else can default to Haiku.
-3. **Prompt trim** — remove stale or unused fields from Situation JSON. Don't add new rules or restrictions; *removing bloat* is fine.
-4. **Cadence** — lower cron frequency (e.g. `HEARTBEAT_INTERVAL_MINUTES` 30 → 60).
-
-**Do NOT recommend:**
-- Per-user quotas or daily caps.
-- Daily-budget circuit breakers.
-- Killing low-cost Haiku crons (site content, roster bios, events) — the user has said these aren't moving the needle.
-- Disabling caching — check the break-even math (Q3) first; it's almost never the right call.
-
-Always quote estimated weekly and monthly savings with the recommendation, derived from current volume × price delta.
-
-## Output format
-
-Compact report, top-down by priority. Keep the whole thing under ~40 lines.
-
-```
+```text
 ## LLM Cost Report — <window>
-
-**Summary:** $X.XX over N days ≈ $YY/month (target $20/mo). Top driver: `<workflow>` at $Z.ZZ (W%).
-
-### Cost by workflow (top 10 by cost)
-| Workflow | Model | Calls | Cost | % | r/w |
-| ...
-
-### Daily trend
-<day>: $X.XX  (N calls)
-...
-
-### Cache efficiency flags
-- `<workflow>`: read/write = 0.YY — caching is net-negative; move to non-cached prompt OR stabilize the prefix.
-(or: "All cached workflows above 0.28 break-even." if nothing to flag)
-
-### Anomalies
-- <e.g. "2026-04-16: $5.48 vs 14-day median $1.80 — driver `awareness` from autonomous signal sprint. Non-recurring.">
-(or: "No days >2× median in window." if clean)
-
-### Recommended next levers
-1. <concrete: workflow, change, saving>. E.g. "Swap `deck_review` → Haiku — ~$2.50/wk saved at current volume."
-2. ...
+Summary: $X over N days, projected $Y/month against $20 target.
+Top driver: workflow/model, calls, cost, share.
+Daily trend: ...
+Cache flags: ...
+Waste/anomalies: ...
+Recommended next levers: 1-3 measured actions with estimated savings.
 ```
 
-If spend is already under target, say so in one sentence and stop. No need to keep hunting for cuts that don't matter.
-
-## When to act vs. just report
-
-Read-only by default. This skill produces the report and stops. User picks which lever to pull; code changes happen in follow-up work.
+If spend is below target, say so in one sentence and stop. This skill reports;
+code changes happen only in explicitly authorized follow-up work.
 
 ## Arguments
 

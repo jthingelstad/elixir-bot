@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from db import (
@@ -473,22 +474,28 @@ def get_channel_state(
     return dict(row) if row else None
 
 
-_LLM_COST_7D_SQL = """
-        SELECT COUNT(*) AS calls,
-               SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures,
-               ROUND(COALESCE(SUM(CASE
-                    WHEN model LIKE 'claude-opus-4-8%' OR model LIKE 'Codex-opus-4-8%'
-                    THEN COALESCE(prompt_tokens, 0)*5 + COALESCE(cache_read_tokens, 0)*0.5 + COALESCE(cache_creation_tokens, 0)*6.25 + COALESCE(completion_tokens, 0)*25
-                    WHEN model LIKE 'claude-sonnet-5%' OR model LIKE 'Codex-sonnet-5%'
-                    THEN COALESCE(prompt_tokens, 0)*2 + COALESCE(cache_read_tokens, 0)*0.2 + COALESCE(cache_creation_tokens, 0)*2.5 + COALESCE(completion_tokens, 0)*10
-                    WHEN model LIKE 'claude-sonnet%' OR model LIKE 'Codex-sonnet%'
-                    THEN COALESCE(prompt_tokens, 0)*3 + COALESCE(cache_read_tokens, 0)*0.3 + COALESCE(cache_creation_tokens, 0)*3.75 + COALESCE(completion_tokens, 0)*15
-                    WHEN model LIKE 'claude-haiku%' OR model LIKE 'Codex-haiku%'
-                    THEN COALESCE(prompt_tokens, 0)*1 + COALESCE(cache_read_tokens, 0)*0.1 + COALESCE(cache_creation_tokens, 0)*1.25 + COALESCE(completion_tokens, 0)*5
-                    ELSE 0 END), 0) / 1000000.0, 4) AS cost_usd
-        FROM llm_calls
-        WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-7 days')
-        """
+def _llm_cost_7d(*, now: datetime | None = None) -> dict | None:
+    """Admin-only cost summary; never feeds runtime decisions."""
+    try:
+        from agent.pricing import summarize_call_rows
+        from storage import telemetry
+
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        cutoff = (current.astimezone(timezone.utc) - timedelta(days=7)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        rows = telemetry.connect().execute(
+            "SELECT recorded_at, model, ok, prompt_tokens, completion_tokens, "
+            "cache_creation_tokens, cache_read_tokens, cost_usd "
+            "FROM llm_calls WHERE recorded_at >= ?",
+            (cutoff,),
+        )
+        return summarize_call_rows(rows)
+    except Exception:  # noqa: BLE001 - a cost panel must not break /status
+        log.warning("system status: LLM cost unavailable", exc_info=True)
+        return None
 
 
 @managed_connection
@@ -574,15 +581,6 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
     # dropped the clan copy). Fail soft: a status page must render even when the
     # telemetry file is missing or unreadable — this panel is the least important
     # thing on it.
-    def _llm_cost_7d():
-        try:
-            from storage import telemetry
-
-            return telemetry.connect().execute(_LLM_COST_7D_SQL).fetchone()
-        except Exception:  # noqa: BLE001 - a cost panel must not break /status
-            log.warning("system status: LLM cost unavailable", exc_info=True)
-            return None
-
     llm_cost_7d = _llm_cost_7d()
     awareness_7d = conn.execute(
         """
@@ -630,7 +628,7 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         "raw_payloads_by_endpoint": endpoint_counts,
         "current_season_id": current_season_id,
         "stale_player_intel_targets": stale_targets,
-        "llm_cost_7d": dict(llm_cost_7d) if llm_cost_7d else None,
+        "llm_cost_7d": llm_cost_7d,
         "awareness_7d": dict(awareness_7d) if awareness_7d else None,
         "contextual_memory": {
             "latest_memory_at": freshness["contextual_memory_at"],

@@ -90,20 +90,22 @@ def test_the_counter_lives_in_the_clan_db_not_telemetry(engine_conn):
     "model,tokens,expected",
     [
         # 1M output tokens at the published rate, as a sanity anchor.
-        ("claude-sonnet-5", 1_000_000, 15.0),
+        ("claude-sonnet-5", 1_000_000, 10.0),
         ("claude-opus-5", 1_000_000, 25.0),
         ("claude-haiku-4-5-20251001", 1_000_000, 5.0),
     ],
 )
 def test_cost_maths_matches_published_rates(model, tokens, expected):
-    assert abs(spend_budget.call_cost_usd(model, 0, tokens, 0, 0) - expected) < 1e-6
+    assert (
+        abs(spend_budget.call_cost_usd(model, 0, tokens, 0, 0, effective_at=NOW) - expected) < 1e-6
+    )
 
 
 def test_cache_reads_are_a_tenth_of_input():
     """Almost all of Elixir's input is cache reads — if this were wrong the
     ceiling would be wrong by an order of magnitude."""
-    full = spend_budget.call_cost_usd("claude-sonnet-5", 1_000_000, 0, 0, 0)
-    cached = spend_budget.call_cost_usd("claude-sonnet-5", 0, 0, 0, 1_000_000)
+    full = spend_budget.call_cost_usd("claude-sonnet-5", 1_000_000, 0, 0, 0, effective_at=NOW)
+    cached = spend_budget.call_cost_usd("claude-sonnet-5", 0, 0, 0, 1_000_000, effective_at=NOW)
     assert abs(cached - full * 0.1) < 1e-6
 
 

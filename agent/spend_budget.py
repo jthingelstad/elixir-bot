@@ -32,19 +32,12 @@ import logging
 import os
 from datetime import datetime, timezone
 
+from agent.pricing import call_cost_usd
 from db import managed_connection
 
 log = logging.getLogger("elixir")
 
 SPEND_CURSOR_KEY = "budget:llm:spend_micros"
-
-# $/1M tokens. Cache writes bill at 1.25x input, cache reads at 0.1x.
-_RATES = {
-    "claude-sonnet-5": (3.0, 15.0),
-    "claude-opus-5": (5.0, 25.0),
-    "claude-haiku-4-5-20251001": (1.0, 5.0),
-}
-_DEFAULT_RATE = (3.0, 15.0)
 
 # Never shed. These carry the hard-post floor to members, or are the cheap
 # routing that decides whether anything happens at all.
@@ -88,18 +81,6 @@ def warn_fraction() -> float:
         return min(1.0, max(0.0, float(os.getenv("ELIXIR_SPEND_WARN_AT", "0.75"))))
     except ValueError:
         return 0.75
-
-
-def call_cost_usd(
-    model: str, prompt_tokens, completion_tokens, cache_creation, cache_read
-) -> float:
-    rate_in, rate_out = _RATES.get(model, _DEFAULT_RATE)
-    return (
-        (prompt_tokens or 0) * rate_in
-        + (cache_creation or 0) * rate_in * 1.25
-        + (cache_read or 0) * rate_in * 0.1
-        + (completion_tokens or 0) * rate_out
-    ) / 1_000_000
 
 
 def _today(now: datetime = None) -> str:
