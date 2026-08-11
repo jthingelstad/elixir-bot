@@ -76,6 +76,44 @@ def test_role_action_uses_multi_row_decision_copy_and_note_controls_no_defer():
     assert not any(isinstance(child, discord.ui.Select) for child in view.children)
 
 
+def test_departure_action_offers_typed_ignore_choice():
+    view = LeaderActionView(_action("departure_verification"))
+
+    assert _labels(view) == ["Kicked", "Left", "Ignore"]
+
+
+def test_departure_ignore_is_one_click_and_does_not_open_modal():
+    action = _action("departure_verification")
+    view = LeaderActionView(action)
+    button = next(child for child in view.children if getattr(child, "label", None) == "Ignore")
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=42),
+        response=SimpleNamespace(
+            is_done=lambda: False,
+            edit_message=AsyncMock(),
+            send_modal=AsyncMock(),
+            send_message=AsyncMock(),
+        ),
+        followup=SimpleNamespace(send=AsyncMock()),
+    )
+    updated = {**action, "status": db.ACTION_DONE, "outcome": {"classification": "ignore"}}
+
+    with (
+        patch.object(leader_action_ui, "_ensure_leader", AsyncMock(return_value=True)),
+        patch.object(leader_action_ui.db, "get_leader_action_by_id", return_value=action),
+        patch.object(leader_action_ui.db, "classify_departure", return_value=updated) as classify,
+        patch.object(leader_action_ui, "queue_leader_action_feedback_refresh") as refresh,
+    ):
+        asyncio.run(button.callback(interaction))
+
+    classify.assert_called_once_with(
+        action["action_id"], classification="ignore", discord_user_id=42
+    )
+    refresh.assert_called_once_with("departure_verification")
+    interaction.response.send_modal.assert_not_awaited()
+    interaction.response.edit_message.assert_awaited_once()
+
+
 def test_terminal_action_has_no_controls():
     view = LeaderActionView(_action("promotion_recommendation", status=db.ACTION_DONE))
 

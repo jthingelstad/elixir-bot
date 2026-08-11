@@ -29,9 +29,9 @@ class LeaderActionTypeSpec:
     decline_label: str = "Decline"
     allow_copy_edit: bool = False
     copy_field_label: str = "Clash Copy"
-    # When set, the card is a two-way CLASSIFICATION (not binary done/decline):
-    # each tuple is (button_kind, label, emoji). Both choices resolve the card as
-    # done-with-a-classification. Used by departure_verification (Left vs Kicked).
+    # When set, the card is a CLASSIFICATION (not binary done/decline): each
+    # tuple is (button_kind, label, emoji). Every choice resolves the card as
+    # done-with-a-classification. Used by departure_verification.
     classify_choices: tuple[tuple[str, str, str], ...] = ()
 
 
@@ -117,19 +117,24 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
     ),
     "departure_verification": LeaderActionTypeSpec(
         "departure_verification",
-        "Departure — Leave or Kick?",
+        "Departure — Kicked, Left, or Ignore?",
         "🔍",
         0x7F8C8D,
         "Verified",
         classify_choices=(
-            ("classify_leave", "Left", "🚶"),
             ("classify_kick", "Kicked", "🚪"),
+            ("classify_leave", "Left", "🚶"),
+            ("classify_ignore", "Ignore", "🔕"),
         ),
     ),
 }
 
 # Button kind → the classification value classify_departure records.
-_CLASSIFY_KIND_VALUE = {"classify_leave": "leave", "classify_kick": "kick"}
+_CLASSIFY_KIND_VALUE = {
+    "classify_leave": "leave",
+    "classify_kick": "kick",
+    "classify_ignore": "ignore",
+}
 
 
 def leader_action_spec(action_type: str | None) -> LeaderActionTypeSpec:
@@ -562,7 +567,6 @@ class DepartureClassifyModal(discord.ui.Modal):
             await _send_ephemeral(interaction, "Action not found.")
             return
         queue_leader_action_feedback_refresh(updated.get("action_type"))
-        queue_leader_note_interpretation(self.action_id, bot=interaction.client)
         await _apply_card_update(interaction, updated)
 
 
@@ -665,6 +669,19 @@ class LeaderActionButton(discord.ui.Button):
         if self.kind == "note":
             await interaction.response.send_modal(NoteModal(action))
             return
+        if self.kind == "classify_ignore":
+            updated = await asyncio.to_thread(
+                db.classify_departure,
+                self.action_id,
+                classification="ignore",
+                discord_user_id=interaction.user.id,
+            )
+            if updated is None:
+                await _report_already_decided(interaction, None, action_id=self.action_id)
+                return
+            queue_leader_action_feedback_refresh(action.get("action_type"))
+            await _apply_card_update(interaction, updated)
+            return
         if self.kind in _CLASSIFY_KIND_VALUE:
             await interaction.response.send_modal(
                 DepartureClassifyModal(action, _CLASSIFY_KIND_VALUE[self.kind])
@@ -696,8 +713,8 @@ class LeaderActionView(discord.ui.View):
     def _add_primary_buttons(self, action: dict, spec) -> None:
         copies = action_copy_messages(action)
         if spec.classify_choices:
-            # Two-way classification card (e.g. departure_verification): render the
-            # choice buttons instead of done/decline. Both resolve the card.
+            # Classification card (e.g. departure_verification): render the
+            # choice buttons instead of done/decline. Every choice resolves it.
             for kind, label, emoji in spec.classify_choices:
                 self.add_item(
                     LeaderActionButton(
@@ -709,16 +726,6 @@ class LeaderActionView(discord.ui.View):
                         row=0,
                     )
                 )
-            self.add_item(
-                LeaderActionButton(
-                    action,
-                    kind="note",
-                    label="Add Note",
-                    emoji="📝",
-                    style=discord.ButtonStyle.secondary,
-                    row=2,
-                )
-            )
             return
 
         self.add_item(

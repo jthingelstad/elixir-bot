@@ -229,7 +229,7 @@ def _leader_note_interpret_system():
     card into one structured, behaviour-changing effect."""
     return _build_system_prompt(
         "You classify a clan leader's free-text note on a POAP KINGS #actions "
-        "card (a kick / promotion / demotion / departure recommendation) into "
+        "card (a kick / promotion / demotion recommendation) into "
         "EXACTLY ONE structured effect for the engine. You do not write anything "
         "the leader or members will read — you only route intent.\n\n"
         "The four effect kinds:\n"

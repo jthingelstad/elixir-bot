@@ -33,7 +33,7 @@ POSTING_SENTINEL = "posting"
 # Recorded in outcome_json so this needs no schema change.
 DECIDED_VIA_REACTION = "reaction"
 DECIDED_VIA_BUTTON = "button"
-# Action types resolved by a two-way classification (not done/decline). Their
+# Action types resolved by an explicit classification (not done/decline). Their
 # cards ignore the ✅/❌ reaction path and resolve only via their own buttons.
 _CLASSIFICATION_ACTION_TYPES = {"departure_verification"}
 ACTION_OUTCOME_DELAY_HOURS = {
@@ -1003,8 +1003,8 @@ def decide_leader_action_by_message(
     if not action:
         return None
     if action.get("action_type") in _CLASSIFICATION_ACTION_TYPES:
-        # Two-way classification cards (LEAVE vs KICK) resolve only via their
-        # buttons; a bare ✅/❌ reaction can't express which choice. Ignore it.
+        # Classification cards resolve only via their buttons; a bare ✅/❌
+        # reaction can't express which choice. Ignore it.
         return None
     return decide_leader_action(
         action["action_id"],
@@ -1179,7 +1179,7 @@ def _departure_was_kick(conn, tag: str, left_at: str | None) -> bool:
     source = (verified["leave_source"] if verified else None) or ""
     if source == "leader_verified_kick":
         return True
-    if source == "leader_verified_leave":
+    if source in {"leader_verified_leave", "leader_ignored_departure"}:
         return False
     params: list = [tag]
     window = ""
@@ -1252,10 +1252,10 @@ def raise_departure_verification_cards(
             objective=f"Confirm departure: did {name} leave or get kicked?",
             prompt_text=(
                 f"{name} is no longer in the clan (tenure {tenure_text}). Elixir can't tell "
-                f"if they LEFT on their own or were KICKED — click one. On a LEAVE, add a "
-                f"note with any context for the farewell (e.g. “alt account of X”, or a "
-                f"detail worth a mention) and I'll compose the goodbye with it. No public "
-                f"goodbye is posted until this is verified; a KICK is never announced."
+                f"what happened — choose KICKED, LEFT, or IGNORE. LEFT opens an optional "
+                f"note for farewell context (e.g. “alt account of X”, or a detail worth a "
+                f"mention) and then posts the goodbye. KICKED and IGNORE close this card "
+                f"silently with no public post."
             ),
             rationale=f"Departure detected {row['left_at']}; leave_source unverified (roster_diff).",
             target_player_tag=tag,
@@ -1328,8 +1328,9 @@ def expire_departure_verification_cards(
 LEAVE_SOURCE_VERIFIED = {
     "leave": "leader_verified_leave",
     "kick": "leader_verified_kick",
+    "ignore": "leader_ignored_departure",
 }
-_CLASSIFY_EMOJI = {"leave": "🚶", "kick": "🚪"}
+_CLASSIFY_EMOJI = {"leave": "🚶", "kick": "🚪", "ignore": "🔕"}
 
 
 @managed_connection
@@ -1343,7 +1344,8 @@ def classify_departure(
     conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
     """Resolve a departure_verification card. The leader confirms the member
-    LEFT on their own (``classification='leave'``) or was KICKED (``'kick'``).
+    LEFT on their own (``classification='leave'``), was KICKED (``'kick'``), or
+    should be silently ignored (``'ignore'``).
 
     Writes the authoritative ``clan_memberships.leave_source`` (the member's row
     always exists, unlike a decision case), marks the card done-with-classification,
@@ -1429,7 +1431,11 @@ def classify_departure(
         except Exception:
             log.warning("departure memory write failed for %s", canon, exc_info=True)
 
-    _mark_note_pending(conn, action["action_id"], clean_comment)
+    # Departure comments are factual context for the farewell/memory, not
+    # management instructions. Do not route them through the recommendation
+    # note interpreter (the production "no need to comment" note was otherwise
+    # misread as an unrelated premise rejection).
+    _mark_note_pending(conn, action["action_id"], None)
     return get_leader_action_by_id(action["action_id"], conn=conn)
 
 

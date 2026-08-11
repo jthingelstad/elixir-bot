@@ -103,6 +103,7 @@ def test_classify_leave_writes_authoritative_source_and_memory(
     )
     assert updated["status"] == "done"
     assert _leave_source(engine_conn) == "leader_verified_leave"
+    assert updated["note_interpret_status"] is None
     mem = engine_conn.execute(
         "SELECT body, kind, scope FROM memories WHERE member_tag='#A'"
     ).fetchone()
@@ -120,6 +121,29 @@ def test_classify_kick_sets_verified_kick(engine_conn, _isolate_default_sqlite_d
     assert _leave_source(engine_conn) == "leader_verified_kick"
 
 
+def test_classify_ignore_settles_without_public_farewell(engine_conn, _isolate_default_sqlite_db):
+    _seed_departure(engine_conn)
+    raise_departure_verification_cards(now=NOW, conn=engine_conn)
+    card = _open_departure_card(engine_conn)
+
+    updated = classify_departure(
+        card["action_id"], classification="ignore", discord_user_id=42, conn=engine_conn
+    )
+
+    assert updated["status"] == "done"
+    assert updated["outcome"]["classification"] == "ignore"
+    assert updated["decision_emoji"] == "🔕"
+    assert updated["note_interpret_status"] is None
+    assert _leave_source(engine_conn) == "leader_ignored_departure"
+    assert emit_verified_leave_events(engine_conn, "#J2RGCRVG", NOW) == 0
+    assert (
+        engine_conn.execute(
+            "SELECT 1 FROM clan_events WHERE subject_tag='#A' AND event_type='member_left_verified'"
+        ).fetchone()
+        is None
+    )
+
+
 def test_departure_was_kick_prefers_verified_source(engine_conn, _isolate_default_sqlite_db):
     # A done kick card would infer "kick", but a leader-verified LEAVE overrides it.
     _seed_departure(engine_conn, leave_source="leader_verified_leave")
@@ -129,6 +153,10 @@ def test_departure_was_kick_prefers_verified_source(engine_conn, _isolate_defaul
         "UPDATE clan_memberships SET leave_source='leader_verified_kick' WHERE player_tag='#A'"
     )
     assert _departure_was_kick(engine_conn, "#A", "2026-07-12T11:00:00Z") is True
+    engine_conn.execute(
+        "UPDATE clan_memberships SET leave_source='leader_ignored_departure' WHERE player_tag='#A'"
+    )
+    assert _departure_was_kick(engine_conn, "#A", "2026-07-12T11:00:00Z") is False
 
 
 def test_verified_leave_emits_event_kick_does_not(engine_conn, _isolate_default_sqlite_db):
