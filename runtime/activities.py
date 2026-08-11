@@ -374,7 +374,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     # the incident ledger, which had recorded 0 rows in 25 days while
     # logs/elixir-error.log held 159 real errors, so it reported "all clear"
     # through every actual failure. The error log is the interface now
-    # (AGENT-TEAM/operations-manager.md owns reading it).
+    # (AGENT-TEAM/run-elixir.md owns reading it).
     # editorial-sweep + editorial-review retired 2026-07-10 with the Editor: the
     # brain composes with depth natively, so there's no template gate to tune and
     # no rubric to feed. Removing the ActivityDefinitions unschedules both jobs.

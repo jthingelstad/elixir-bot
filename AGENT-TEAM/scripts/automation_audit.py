@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check or apply the versioned Codex automation plan for AGENT-TEAM."""
+"""Check the live Codex automations against the objective-owner plan."""
 
 from __future__ import annotations
 
@@ -11,24 +11,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 PLAN_PATH = REPO / "AGENT-TEAM" / "automations.toml"
 CODEX_HOME = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+OBJECTIVES = {"run", "game", "agent"}
 
 
 def _prompt(entry: dict) -> str:
-    if entry["schedule_kind"] == "dispatcher":
-        paths = [
-            "AGENTS.md",
-            "AGENT-TEAM/WORKFLOW.md",
-            "AGENT-TEAM/README.md",
-            entry["role_file"],
-            "AGENT-TEAM/dispatch.toml",
-        ]
-        rendered = ", ".join(f"`{REPO / path}`" for path in paths)
-        return (
-            f"Read {rendered} completely, then execute exactly one dispatcher heartbeat as "
-            "written. Do not do role work yourself. Preserve preflight, global `wip` "
-            "serialization, deterministic priority, the one-child limit, approval gates, "
-            "claim cleanup, and normal app-visible task creation."
-        )
     paths = [
         "AGENTS.md",
         "AGENT-TEAM/WORKFLOW.md",
@@ -37,30 +23,19 @@ def _prompt(entry: dict) -> str:
     ]
     rendered = ", ".join(f"`{REPO / path}`" for path in paths)
     return (
-        f"Read {rendered} completely, then execute the role exactly as written. "
-        f"Your automation identity is `{entry['id']}` / `{entry['name']}`; use the attribution "
-        "contract and helper in AGENT-TEAM/README.md for every issue comment and commit. "
-        f"This is the `{entry['schedule_kind']}` calendar activity; issue handoffs use "
-        f"`{entry['dispatch_label']}` and run on demand. Run as a normal app-visible project "
-        "task and follow the title protocol in AGENT-TEAM/README.md. Start with the shared "
-        "preflight, stop if any other `wip` owns the shared checkout, respect issue claims and "
-        "lane boundaries, do one focused thing, write the required AGENT-TEAM run note, and end "
-        "with a clean repository. "
-        "If main is ahead of origin/main, remain read-only: never commit, push, deploy, or restart "
-        "into pre-existing commits. Never push a commit this run did not create."
+        f"Read {rendered} completely, then pursue the `{entry['objective']}` objective "
+        "exactly as written. Measure live evidence before changing anything. Own a clear "
+        "finding through source fix, regression coverage, gates, commit, push, and natural "
+        "acceptance instead of creating role handoff tickets. Use GitHub only for multi-run "
+        "work, external blockers, or Jamie decisions. Acquire the local objective lease before "
+        "repository mutation, preserve the member-visible and irreversible human boundary, "
+        "never force member traffic for validation, and end with a clean repository. If main "
+        "is unexpectedly ahead of origin/main, remain read-only and never publish a commit "
+        "this run did not create."
     )
 
 
 def _expected(entry: dict) -> dict:
-    if entry["schedule_kind"] == "dispatcher":
-        return {
-            "id": entry["id"],
-            "kind": "heartbeat",
-            "name": entry["name"],
-            "prompt": _prompt(entry),
-            "status": entry["status"],
-            "rrule": entry["rrule"],
-        }
     return {
         "id": entry["id"],
         "kind": "cron",
@@ -78,31 +53,26 @@ def _expected(entry: dict) -> dict:
 def audit(plan: dict, *, codex_home: Path = CODEX_HOME) -> tuple[list[str], list[str]]:
     successes: list[str] = []
     failures: list[str] = []
-    for entry in plan["automation"]:
-        status = entry.get("status")
-        schedule_kind = entry.get("schedule_kind")
-        if status == "ACTIVE" and schedule_kind not in {
-            "time_window",
-            "recovery",
-            "dispatcher",
-        }:
-            failures.append(
-                f"{entry['id']}: ACTIVE requires time_window, recovery, or dispatcher schedule_kind"
-            )
+    entries = plan.get("automation", [])
+    objectives = [entry.get("objective") for entry in entries]
+    if len(entries) != 3 or set(objectives) != OBJECTIVES or len(set(objectives)) != 3:
+        failures.append("plan must contain exactly one run, game, and agent objective")
+
+    for entry in entries:
+        if entry.get("status") != "ACTIVE":
+            failures.append(f"{entry.get('id', '(unknown)')}: every objective must be ACTIVE")
             continue
-        if status == "PAUSED" and schedule_kind != "event_driven":
-            failures.append(f"{entry['id']}: PAUSED requires event_driven schedule_kind")
+        if entry.get("schedule_kind") not in {"time_window", "recovery"}:
+            failures.append(
+                f"{entry['id']}: objective schedule_kind must be time_window or recovery"
+            )
             continue
         role_path = REPO / entry["role_file"]
         if not role_path.exists():
-            failures.append(f"{entry['id']}: missing role file {entry['role_file']}")
+            failures.append(f"{entry['id']}: missing objective file {entry['role_file']}")
             continue
         path = codex_home / "automations" / entry["id"] / "automation.toml"
-        expected = _expected(entry)
         if not path.exists():
-            if status == "PAUSED":
-                successes.append(f"OK  {entry['id']}  PAUSED  event_driven  absent (expected)")
-                continue
             failures.append(f"{entry['id']}: missing {path}")
             continue
         try:
@@ -110,12 +80,13 @@ def audit(plan: dict, *, codex_home: Path = CODEX_HOME) -> tuple[list[str], list
         except Exception as exc:
             failures.append(f"{entry['id']}: invalid TOML: {exc}")
             continue
+        expected = _expected(entry)
         drift = [key for key, value in expected.items() if actual.get(key) != value]
         if drift:
             failures.append(f"{entry['id']}: drift in {', '.join(drift)}")
         else:
             successes.append(
-                f"OK  {entry['id']}  {entry['status']}  {entry['schedule_kind']}  {entry['model']}"
+                f"OK  {entry['id']}  {entry['objective']}  {entry['rrule']}  {entry['model']}"
             )
     return successes, failures
 
@@ -125,12 +96,9 @@ def main() -> int:
     successes, failures = audit(plan)
     for success in successes:
         print(success)
-
-    if failures:
-        for failure in failures:
-            print(f"FAIL  {failure}", file=sys.stderr)
-        return 1
-    return 0
+    for failure in failures:
+        print(f"FAIL  {failure}", file=sys.stderr)
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

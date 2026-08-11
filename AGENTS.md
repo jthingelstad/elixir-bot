@@ -490,7 +490,7 @@ Ask what a block could ever CHANGE the brain's behaviour about. Match literal va
 The `system_signals` queue was retired in #212 — it had no drain, so nothing it held was ever delivered. The two things it used to carry now have real owners:
 
 - **Feature / release news** → `scripts/cut_release.py`: RELEASES.md, a #announcements post, and email to members with a verified address. One flow, already used for every release.
-- **CR API drift** → the `api-sentinel` activity records first-seen schema paths into `api_sentinel_observations`. Nothing in the runtime evaluates them: the Operations Manager runs the 48h *structural*-drift query (new schema path, progress key, or game mode — never routine new event tags, which are pure noise) from `AGENT-TEAM/error-watch.md` step 5. The hand-off is deliberately thin; the AGENT-TEAM **Data Analyst** owns characterizing it and filing the issue.
+- **CR API drift** → the `api-sentinel` activity records first-seen schema paths into `api_sentinel_observations`. Nothing in the runtime evaluates them: **Run Elixir** runs the 48h *structural*-drift query (new schema path, progress key, or game mode — never routine new event tags, which are pure noise) from `AGENT-TEAM/error-watch.md` step 5. **Understand Clash Royale** owns the meaning end-to-end: characterize it, quantify it, and correct the source model when the evidence is clear. No dispatch issue is required for same-run work.
 
 Elixir also posts a startup check-in to the #elixir-log webhook with the running build hash and a short Clash Royale-flavored line.
 

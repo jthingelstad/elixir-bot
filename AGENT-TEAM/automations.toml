@@ -1,27 +1,15 @@
-version = 3
+version = 4
 repo = "/Users/otto/Projects/elixir-bot"
 timezone = "America/Chicago"
 
-# ACTIVE is reserved for a genuinely time-windowed or recovery activity. PAUSED means the
-# historical schedule remains recorded but issue work is selected from GitHub and runs on demand
-# as a normal app-visible project task. It is not a dormant queue to reactivate. The dispatcher is
-# the one ACTIVE queue heartbeat and reuses one persistent app-visible task.
-
-[[automation]]
-id = "elixir-dispatcher"
-name = "Elixir Dispatcher"
-role_file = "AGENT-TEAM/dispatcher.md"
-schedule_kind = "dispatcher"
-rrule = "FREQ=MINUTELY;INTERVAL=15"
-model = "gpt-5.6-sol"
-reasoning_effort = "xhigh"
-status = "ACTIVE"
+# Three active objective owners replace the retired role/dispatcher pipeline.
+# Stable automation ids preserve the existing Codex task history and memory.
 
 [[automation]]
 id = "elixir-operations-manager"
-name = "Elixir Operations Manager"
-role_file = "AGENT-TEAM/operations-manager.md"
-dispatch_label = "dispatch:operations"
+name = "Run Elixir"
+objective = "run"
+role_file = "AGENT-TEAM/run-elixir.md"
 schedule_kind = "recovery"
 rrule = "RRULE:FREQ=HOURLY;INTERVAL=4;BYMINUTE=10"
 model = "gpt-5.6-terra"
@@ -30,9 +18,9 @@ status = "ACTIVE"
 
 [[automation]]
 id = "elixir-data-analyst"
-name = "Elixir Data Analyst"
-role_file = "AGENT-TEAM/data-analyst.md"
-dispatch_label = "dispatch:data"
+name = "Understand Clash Royale"
+objective = "game"
+role_file = "AGENT-TEAM/understand-clash-royale.md"
 schedule_kind = "time_window"
 rrule = "RRULE:FREQ=DAILY;BYHOUR=6;BYMINUTE=30"
 model = "gpt-5.6-terra"
@@ -41,55 +29,11 @@ status = "ACTIVE"
 
 [[automation]]
 id = "elixir-quality-manager"
-name = "Elixir Quality Manager"
-role_file = "AGENT-TEAM/quality-manager.md"
-dispatch_label = "dispatch:quality"
+name = "Improve Elixir"
+objective = "agent"
+role_file = "AGENT-TEAM/improve-elixir.md"
 schedule_kind = "time_window"
 rrule = "RRULE:FREQ=DAILY;BYHOUR=8;BYMINUTE=0"
-model = "gpt-5.6-terra"
-reasoning_effort = "high"
-status = "ACTIVE"
-
-[[automation]]
-id = "elixir-build-manager"
-name = "Elixir Build Manager"
-role_file = "AGENT-TEAM/build-manager.md"
-dispatch_label = "dispatch:build"
-schedule_kind = "event_driven"
-rrule = "RRULE:FREQ=HOURLY;INTERVAL=6;BYMINUTE=30"
 model = "gpt-5.6-sol"
 reasoning_effort = "xhigh"
-status = "PAUSED"
-
-[[automation]]
-id = "elixir-steward"
-name = "Elixir Product Manager"
-role_file = "AGENT-TEAM/product-manager.md"
-dispatch_label = "dispatch:product"
-schedule_kind = "time_window"
-rrule = "RRULE:FREQ=WEEKLY;BYHOUR=11;BYMINUTE=30;BYDAY=WE"
-model = "gpt-5.6-sol"
-reasoning_effort = "xhigh"
-status = "ACTIVE"
-
-[[automation]]
-id = "elixir-evaluator"
-name = "Elixir Evaluator"
-role_file = "AGENT-TEAM/evaluator.md"
-dispatch_label = "dispatch:evaluator"
-schedule_kind = "time_window"
-rrule = "RRULE:FREQ=WEEKLY;BYHOUR=13;BYMINUTE=30;BYDAY=FR"
-model = "gpt-5.6-sol"
-reasoning_effort = "xhigh"
-status = "ACTIVE"
-
-[[automation]]
-id = "elixir-team-manager"
-name = "Elixir Team Manager"
-role_file = "AGENT-TEAM/manager.md"
-dispatch_label = "dispatch:manager"
-schedule_kind = "time_window"
-rrule = "RRULE:FREQ=WEEKLY;BYHOUR=17;BYMINUTE=30;BYDAY=SA"
-model = "gpt-5.6-sol"
-reasoning_effort = "high"
 status = "ACTIVE"

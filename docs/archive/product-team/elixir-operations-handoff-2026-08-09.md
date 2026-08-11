@@ -1,4 +1,8 @@
-# Elixir operations handoff — 2026-08-09
+# Historical Elixir operations handoff — 2026-08-09
+
+Archived 2026-08-11 when AGENT-TEAM moved from job-oriented roles to three
+objective owners. The incidents and lessons below remain useful historical
+evidence; its current-state and open-work sections are no longer authoritative.
 
 Written at the end of a week of operating Elixir, for whoever picks it up next.
 This is state and judgement, not a task list; `AGENTS.md` remains the

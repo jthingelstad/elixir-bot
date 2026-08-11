@@ -848,8 +848,8 @@ def _apply_v13(conn: sqlite3.Connection) -> None:
     Drift moved to ``runtime.health.check_api_drift``, posting to #elixir-log.
     (That check lasted five days: the whole health job was retired in v20, and
     the drift query moved out of the product runtime to the AGENT-TEAM Error
-    Watch runbook in ``AGENT-TEAM/operations-manager.md``, which is where the
-    Data Analyst's hand-off starts now.) The sentinel observations themselves
+    Watch runbook in ``AGENT-TEAM/run-elixir.md``. Understand Clash Royale owns
+    the resulting interpretation and source correction.) The sentinel observations themselves
     (``api_sentinel_observations``) are untouched — only the undeliverable queue
     in front of them goes.
     """

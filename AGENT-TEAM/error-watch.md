@@ -1,11 +1,11 @@
 # Error Watch
 
-**Owner: the Operations Manager** (`operations-manager.md`). This is that role's
-error-log runbook, not a separate role — it runs inside the Operations Manager's
-normal cadence and uses its lane, boundaries, and commit rules.
+**Owner: Run Elixir** (`run-elixir.md`). This is that objective's error-log
+runbook, not a separate role. It runs every four-hour cadence under the shared
+objective workflow and human boundary.
 
 Read `AGENTS.md`, `AGENT-TEAM/WORKFLOW.md`, `AGENT-TEAM/README.md`, and
-`operations-manager.md` before acting.
+`run-elixir.md` before acting.
 
 **Lane:** be the thing that notices Elixir is broken. Read
 `logs/elixir-error.log` end to end, group what's there into distinct failure
@@ -48,7 +48,7 @@ following indented line belongs to the traceback above it. The logger name
 call sites carry a stable `<component> failed: k=v k=v` prefix, so the message is
 groupable as-is.
 
-**Cadence:** every Operations Manager run (hourly, or every few hours).
+**Cadence:** every Run Elixir pass (every four hours).
 
 ## Every run
 
@@ -118,13 +118,12 @@ groupable as-is.
    that role's runbook already owns the full-backlog query. Only work it yourself
    if ingest is actually failing right now, which is an `operations` outage.
 
-6. **Act, one finding at a time.** Per the Operations Manager's boundary:
-   - Small, obvious, test-backed operational fix → claim the issue with `wip`,
-     fix it, `uv run --locked pytest -q` must be green, commit, deploy, close.
-   - Anything larger, ambiguous, or outside the operations lane → file a labeled
-     issue with the **grouped** evidence: component, count, first/last seen, and
-     the traceback. Route product/quality/prompt findings by label; never reach
-     into another lane's code.
+6. **Act, one finding at a time.** Per the objective workflow:
+   - Clear, safe, test-backed defect → acquire the `run` checkout lease, fix the
+     source, add a regression, run the gates, commit, push, deploy, and verify.
+   - Larger, ambiguous, externally blocked, or human-owned work → retain one
+     `objective:run` issue, or ask Jamie one direct yes/no question when the
+     boundary is member-visible.
    - Nothing live → say "no live errors" in one line and stop. A healthy run is a
      clean one-liner and no churn.
 
