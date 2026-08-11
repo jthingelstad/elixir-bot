@@ -39,6 +39,10 @@ Cadence: every four hours, plus after a deploy or a reported incident.
    a backup or deployment.
 8. Inspect open `objective:run` issues. Work the highest-impact current gap if it is
    safe and authorized; the issue is context, not permission ceremony.
+9. Once per ISO week, make one bounded stewardship pass over dependency/security
+   advisories, supported runtime and dependency drift, dead feature flags or config,
+   monitoring coverage, and architecture/documentation drift. Act only on current
+   evidence; a clean weekly pass is a valid no-op.
 
 ## Action
 
@@ -49,6 +53,10 @@ evidence. Do not file a second issue just to ask another agent to build it.
 If the source change would alter member-visible behavior, ask Jamie first. Never force
 a member-facing job, Discord post, clan-chat relay, or mass email to prove a fix; use
 the next natural scheduled occurrence.
+
+After a deploy, verify revision and technical health, then record any remaining natural
+semantic acceptance under the objective that originated the change. Do not close a game
+or agent watch merely because the process restarted cleanly.
 
 ## Success
 

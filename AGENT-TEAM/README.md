@@ -19,7 +19,8 @@ part of the current operating model.
 There is no separate Build Manager. Building is a capability of every objective
 owner. There is no Product Manager intermediary: new member-visible direction goes
 straight to Jamie as one concrete decision. There is no Team Manager or dispatcher;
-the objectives and their schedules are the operating system.
+Improve Elixir performs a light Friday health pulse instead. The objectives and their
+schedules are the operating system.
 
 ## Project map
 
@@ -94,6 +95,10 @@ same human boundary when they affect members.
 
 Do not create a deployment ticket solely to move a commit between agents. The commit,
 the running revision, and production verification are the durable record.
+
+Run Elixir owns deployment and technical-health acceptance. The objective that made a
+change retains its semantic natural-acceptance watch; a successful restart does not
+prove that game meaning or agent behavior improved.
 
 ## Human boundary
 

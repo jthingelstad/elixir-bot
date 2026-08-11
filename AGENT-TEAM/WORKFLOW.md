@@ -55,6 +55,15 @@ Every objective run uses the same loop:
 9. Verify the outcome from natural production evidence. Do not manufacture member
    activity, send an early report, or post synthetic Discord traffic for acceptance.
 
+## Acceptance ownership
+
+Run Elixir owns deployment acceptance: the intended revision is running, the process
+is healthy, migrations and scheduled work are sound, and no fresh operational failure
+appeared. The objective that originated a change owns semantic acceptance: Understand
+Clash Royale proves the data now means the right thing, and Improve Elixir proves the
+member or leadership outcome is better from natural evidence. Run reports the deployed
+revision to the originating objective; it does not inherit that objective's judgment.
+
 ## Issues are the exception ledger
 
 Do not open an issue merely to authorize, claim, route, deploy, or close work that
@@ -119,3 +128,16 @@ Each run ends in one of three states:
   consequence of each answer.
 
 Report outcomes and remaining risk, not workflow ceremony.
+
+## Automation memory
+
+Each objective keeps only a compact working set in its automation memory:
+
+1. `Current state` — the latest durable operating facts needed by the next run.
+2. `Active watches` — unresolved natural acceptance, decisions, or blockers only.
+3. `Latest run` — one replace-in-place summary with timestamp, evidence, action, and
+   outcome.
+
+Replace `Latest run` on every pass and remove resolved watches. Commits, issues,
+telemetry, and production ledgers hold history; automation memory must not accumulate
+a narrative of every prior run.

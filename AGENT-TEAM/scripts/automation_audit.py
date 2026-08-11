@@ -31,7 +31,8 @@ def _prompt(entry: dict) -> str:
         "repository mutation, preserve the member-visible and irreversible human boundary, "
         "never force member traffic for validation, and end with a clean repository. If main "
         "is unexpectedly ahead of origin/main, remain read-only and never publish a commit "
-        "this run did not create."
+        "this run did not create. Keep automation memory compact with exactly Current state, "
+        "Active watches, and one replace-in-place Latest run section."
     )
 
 

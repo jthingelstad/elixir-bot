@@ -47,6 +47,23 @@ def test_automation_prompt_encodes_end_to_end_ownership_and_human_boundary():
         assert "instead of creating role handoff tickets" in prompt
         assert "local objective lease" in prompt
         assert "member-visible and irreversible human boundary" in prompt
+        assert "Current state" in prompt
+        assert "Active watches" in prompt
+        assert "one replace-in-place Latest run" in prompt
+
+
+def test_workflow_pins_acceptance_and_memory_ownership():
+    workflow = (ROOT / "AGENT-TEAM/WORKFLOW.md").read_text()
+    run = (ROOT / "AGENT-TEAM/run-elixir.md").read_text()
+    improve = (ROOT / "AGENT-TEAM/improve-elixir.md").read_text()
+
+    assert "Run Elixir owns deployment acceptance" in workflow
+    assert "objective that originated a change owns semantic acceptance" in workflow
+    assert "Current state" in workflow
+    assert "Active watches" in workflow
+    assert "Replace `Latest run` on every pass" in workflow
+    assert "Once per ISO week" in run
+    assert "On Friday, also take a small team-health pulse" in improve
 
 
 def test_audit_rejects_any_plan_other_than_one_owner_per_objective(tmp_path):

@@ -51,6 +51,12 @@ version. Do not hide the decision in a proposal pipeline.
 Friday's deeper pass should improve measurement only where the current evidence cannot
 answer an important quality question. Do not add harnesses for their own sake.
 
+On Friday, also take a small team-health pulse from the week's outcomes: look for
+duplicate work, manufactured findings, lease collisions, stalled decisions, or an
+objective that repeatedly stops short of natural acceptance. Change an objective
+contract only when that evidence supports one specific correction. Do not create a
+digest, meta ticket, or standing manager ceremony.
+
 ## Success
 
 - exact defects become source fixes and regressions, not vague quality tickets;
