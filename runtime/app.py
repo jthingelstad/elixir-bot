@@ -1112,7 +1112,13 @@ async def _awareness_loop_body(trigger: str):
         runtime_status.mark_job_failure("awareness_loop", str(exc))
         log.exception("awareness loop failed")
         return
-    runtime_status.mark_job_success("awareness_loop", json.dumps(counters, default=str))
+    if counters.get("tick_failed"):
+        runtime_status.mark_job_failure(
+            "awareness_loop",
+            str(counters.get("error") or "awareness loop tick failed"),
+        )
+    else:
+        runtime_status.mark_job_success("awareness_loop", json.dumps(counters, default=str))
     log.info("awareness loop (live, %s): %s", trigger, counters)
     return counters
 

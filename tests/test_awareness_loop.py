@@ -374,6 +374,27 @@ def test_run_awareness_loop_records_tick_failure_not_silence(monkeypatch):
     assert (thoughts[0]["skipped_reason"] or "").startswith("⚠️ tick failed")
 
 
+def test_awareness_runtime_marks_tick_failure_as_job_failure():
+    """A caught model failure must not make the scheduler ledger claim success."""
+    import asyncio
+
+    import runtime.app as app
+
+    counters = {"tick_failed": True, "error": "tick_failed: provider overloaded"}
+    with (
+        patch("runtime.awareness.loop.run_awareness_loop", return_value=counters),
+        patch.object(app.runtime_status, "mark_job_start") as start,
+        patch.object(app.runtime_status, "mark_job_success") as success,
+        patch.object(app.runtime_status, "mark_job_failure") as failure,
+    ):
+        result = asyncio.run(app._awareness_loop_body("schedule"))
+
+    assert result == counters
+    start.assert_called_once_with("awareness_loop")
+    failure.assert_called_once_with("awareness_loop", counters["error"])
+    success.assert_not_called()
+
+
 def test_run_awareness_loop_numbers_loops_and_captures_tool_trace(monkeypatch):
     """Each loop gets a stable, incrementing number, and the tools the brain
     reached for are captured into the render (header + threaded detail)."""
