@@ -7,10 +7,11 @@ objective workflow and human boundary.
 Read `AGENTS.md`, `AGENT-TEAM/WORKFLOW.md`, `AGENT-TEAM/README.md`, and
 `run-elixir.md` before acting.
 
-**Lane:** be the thing that notices Elixir is broken. Read
+**Objective:** be the thing that notices Elixir is broken. Read
 `logs/elixir-error.log` end to end, group what's there into distinct failure
 kinds, separate what is *still firing* from what already stopped, trace each
-live one to a root cause from its traceback, and either fix it or file it.
+live one to a root cause from its traceback, and resolve it under the objective
+workflow's same-run-fix or durable-exception policy.
 
 ## Why this exists
 
@@ -114,9 +115,10 @@ groupable as-is.
      novelty only; `last_seen_at` was dropped with the touch that maintained it.
 
    This alert is deliberately thin — it says *something changed*, nothing more.
-   Hand it to the **Data Analyst** (`data` issue) to characterize and quantify;
-   that role's runbook already owns the full-backlog query. Only work it yourself
-   if ingest is actually failing right now, which is an `operations` outage.
+   Record it for **Understand Clash Royale** to characterize on its next daily pass.
+   Retain an `objective:game` issue only when the finding needs multiple runs, is
+   blocked, or otherwise needs a durable record. Run Elixir works it directly only
+   when ingest is actively failing, which is an operational outage.
 
 6. **Act, one finding at a time.** Per the objective workflow:
    - Clear, safe, test-backed defect → acquire the `run` checkout lease, fix the
@@ -139,7 +141,8 @@ even when the error log is empty.** Quiet is not calm.
 
 ## Success
 
-Every live error in the log is either fixed or a filed issue within one cadence,
-and every finding you report says whether it is still firing. Measured by how
-little sits unread in `logs/elixir-error.log` — not by how many findings you
-file, and never again by a green report from a source nobody validated.
+Every live error in the log is either fixed or retained as one justified durable
+exception within one cadence, and every finding you report says whether it is still
+firing. Measured by how little sits unread in `logs/elixir-error.log` — not by how
+many issues you create, and never again by a green report from a source nobody
+validated.

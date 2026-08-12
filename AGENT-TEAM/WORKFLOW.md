@@ -43,8 +43,11 @@ Every objective run uses the same loop:
    uv run --locked python AGENT-TEAM/scripts/objective_lease.py claim <run|game|agent>
    ```
 
-   Read-only work needs no lease. A held lease means another objective owns the
-   checkout; stop before mutation. Release the lease after the repository is clean.
+   Read-only work needs no lease. The lease records the Codex task identity, host,
+   and starting commit. A held lease means another objective owns the checkout; stop
+   before mutation. Release it after the repository is clean. Never infer inactivity
+   from age plus a clean worktree; use the proof-based stale clear or the explicit
+   inspected manual clear documented in `README.md`.
 6. Add regression coverage, run the proportionate focused checks, then run
    `scripts/gates.sh` before committing.
 7. Commit and push only the work created by the current run. Never publish an

@@ -76,12 +76,25 @@ backlogs, stale items, and unowned issues.
 
 All three objectives share this checkout. Before a mutation, acquire the local lease
 defined in `WORKFLOW.md`. It lives under `.git`, not GitHub, so coordination does not
-create issues or comments. A stale lease may be cleared only after eight hours and
-only when the worktree is clean:
+create issues or comments. Each lease records its objective, holder identity, host,
+and starting commit. Automatic stale recovery additionally requires a durable holder
+PID, proof that the process is gone, a clean worktree, and an unchanged commit:
 
 ```bash
 uv run --locked python AGENT-TEAM/scripts/objective_lease.py clear-stale --hours 8
 ```
+
+When holder inactivity cannot be proved automatically, inspect the lease and active
+work first, then clear it explicitly by repeating its exact `holder_id`:
+
+```bash
+uv run --locked python AGENT-TEAM/scripts/objective_lease.py status
+uv run --locked python AGENT-TEAM/scripts/objective_lease.py clear-manual \
+  --holder-id <exact-holder-id> --confirm-inactive
+```
+
+For a pre-upgrade lease with no recorded holder, the exact compatibility identifier
+is `legacy-unidentified`; the same inspection and confirmation are still required.
 
 The normal clean/synchronized preflight rules still apply. The lease does not make a
 dirty or ahead checkout safe.
