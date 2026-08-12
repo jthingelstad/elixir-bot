@@ -534,21 +534,20 @@ pages). The comment above `ELDER_BAND_FLOOR` names them all.
 
 ## Work Tracking
 
-- **GitHub issues** are the canonical queue for discrete, trackable work. Use
-  `gh issue list` / `gh issue create` / `gh issue view`. Claude in any session
-  can read and write issues on `jthingelstad/elixir-bot`.
-- Use labels to cluster arcs: `persona` for work that closes the gap between
-  Elixir's articulated persona (`prompts/SOUL.md`, `prompts/PURPOSE.md`) and
-  the implementation; `v5.1` for the engine re-architecture arc. Add a
-  tracking issue when an arc has 3+ child issues.
+- **GitHub issues are the exception ledger**, not the default authorization or handoff
+  path. Use them for multi-run work, external blockers, durable audits, and Jamie
+  decisions. A clear safe gap that can be fixed and accepted in the current run needs no
+  issue.
+- Every open issue has exactly one `objective:*` ownership label. Descriptive labels such
+  as `persona`, `v5.1`, `bug`, `data`, and `quality` cluster work but never select another
+  worker or transfer ownership.
 - **`docs/tasks/*.md`** is for *active* long-form design docs — the *why*
   behind an in-flight arc, not the unit-of-work ledger. When a design doc
   exists, link it from the tracking issue. When an arc ships, move its doc to
   `docs/archive/`; docs describing a stable, ongoing system live in
   `docs/reference/`. See `docs/README.md` for the layout.
-- Default: create an issue before starting non-trivial work. Commit directly
-  to `main` — PRs are not required. Reference the issue number in commit
-  messages (e.g. `Closes #12`) so GitHub auto-closes on push.
+- Commit verified current-run work directly to `main`; PRs are not required. Reference an
+  issue only when one legitimately exists.
 
 ## Key Conventions
 

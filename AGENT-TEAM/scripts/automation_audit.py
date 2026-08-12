@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Check the live Codex automations against the objective-owner plan."""
+"""Validate the objective registry and compare it with live Codex automations."""
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import tomllib
@@ -11,90 +12,124 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 PLAN_PATH = REPO / "AGENT-TEAM" / "automations.toml"
 CODEX_HOME = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
-OBJECTIVES = {"run", "game", "agent"}
+REQUIRED_KEYS = {
+    "id",
+    "name",
+    "objective",
+    "objective_file",
+    "status",
+    "rrule",
+    "model",
+    "reasoning_effort",
+}
+VALID_STATUSES = {"ACTIVE", "PAUSED"}
 
 
-def _prompt(entry: dict) -> str:
+def prompt(entry: dict, repo: Path = REPO) -> str:
     paths = [
-        "AGENTS.md",
-        "AGENT-TEAM/WORKFLOW.md",
-        "AGENT-TEAM/README.md",
-        entry["role_file"],
+        repo / "AGENT-TEAM/WORKFLOW.md",
+        repo / "AGENT-TEAM/README.md",
+        repo / entry["objective_file"],
     ]
-    rendered = ", ".join(f"`{REPO / path}`" for path in paths)
+    rendered = ", ".join(f"`{path}`" for path in paths)
     return (
-        f"Read {rendered} completely, then pursue the `{entry['objective']}` objective "
-        "exactly as written. Measure live evidence before changing anything. Own a clear "
-        "finding through source fix, regression coverage, gates, commit, push, and natural "
-        "acceptance instead of creating role handoff tickets. Use GitHub only for multi-run "
-        "work, external blockers, or Jamie decisions. Acquire the local objective lease before "
-        "repository mutation, preserve the member-visible and irreversible human boundary, "
-        "never force member traffic for validation, and end with a clean repository. If main "
-        "is unexpectedly ahead of origin/main, remain read-only and never publish a commit "
-        "this run did not create. Keep automation memory compact with exactly Current state, "
-        "Active watches, and one replace-in-place Latest run section."
+        f"Follow the project instructions already loaded by Codex. Read {rendered} "
+        f"completely, then pursue the `{entry['objective']}` objective exactly as written. "
+        "Measure current evidence before changing anything. Own a clear gap through source "
+        "fix, regression coverage, verification, deployment or restart when required, and "
+        "natural acceptance. Use issues only for multi-run work, external blockers, durable "
+        "audits, or Jamie decisions. Run preflight first; acquire the objective lease only "
+        "before mutation; never publish pre-existing work; preserve human and privacy "
+        "boundaries; and end with a clean repository. Keep automation memory to Current "
+        "state, Active watches, and one replace-in-place Latest run."
     )
 
 
-def _expected(entry: dict) -> dict:
+def validate(plan: dict, repo: Path = REPO) -> list[str]:
+    failures: list[str] = []
+    if plan.get("version") != 2:
+        failures.append("registry version must be 2")
+    if plan.get("repo") != str(repo):
+        failures.append(f"registry repo must be {repo}")
+    entries = plan.get("automation", [])
+    if not entries:
+        failures.append("registry must contain at least one automation")
+        return failures
+    ids = [entry.get("id") for entry in entries]
+    objectives = [entry.get("objective") for entry in entries]
+    if len(ids) != len(set(ids)):
+        failures.append("automation ids must be unique")
+    if len(objectives) != len(set(objectives)):
+        failures.append("objectives must have exactly one owner")
+    for entry in entries:
+        missing = sorted(REQUIRED_KEYS - entry.keys())
+        if missing:
+            failures.append(f"{entry.get('id', '(unknown)')}: missing {', '.join(missing)}")
+            continue
+        if entry["status"] not in VALID_STATUSES:
+            failures.append(f"{entry['id']}: status must be ACTIVE or PAUSED")
+        if not (repo / entry["objective_file"]).is_file():
+            failures.append(f"{entry['id']}: missing {entry['objective_file']}")
+    return failures
+
+
+def expected(entry: dict, repo: Path = REPO) -> dict:
     return {
         "id": entry["id"],
         "kind": "cron",
         "name": entry["name"],
-        "prompt": _prompt(entry),
+        "prompt": prompt(entry, repo),
         "status": entry["status"],
         "rrule": entry["rrule"],
         "model": entry["model"],
         "reasoning_effort": entry["reasoning_effort"],
         "execution_environment": "local",
-        "cwds": [str(REPO)],
+        "cwds": [str(repo)],
     }
 
 
-def audit(plan: dict, *, codex_home: Path = CODEX_HOME) -> tuple[list[str], list[str]]:
+def audit(
+    plan: dict, *, codex_home: Path = CODEX_HOME, repo: Path = REPO
+) -> tuple[list[str], list[str]]:
     successes: list[str] = []
-    failures: list[str] = []
-    entries = plan.get("automation", [])
-    objectives = [entry.get("objective") for entry in entries]
-    if len(entries) != 3 or set(objectives) != OBJECTIVES or len(set(objectives)) != 3:
-        failures.append("plan must contain exactly one run, game, and agent objective")
-
-    for entry in entries:
-        if entry.get("status") != "ACTIVE":
-            failures.append(f"{entry.get('id', '(unknown)')}: every objective must be ACTIVE")
-            continue
-        if entry.get("schedule_kind") not in {"time_window", "recovery"}:
-            failures.append(
-                f"{entry['id']}: objective schedule_kind must be time_window or recovery"
-            )
-            continue
-        role_path = REPO / entry["role_file"]
-        if not role_path.exists():
-            failures.append(f"{entry['id']}: missing objective file {entry['role_file']}")
-            continue
+    failures = validate(plan, repo)
+    if failures:
+        return successes, failures
+    for entry in plan["automation"]:
         path = codex_home / "automations" / entry["id"] / "automation.toml"
         if not path.exists():
-            failures.append(f"{entry['id']}: missing {path}")
+            failures.append(f"{entry['id']}: live automation is not installed")
             continue
         try:
             actual = tomllib.loads(path.read_text())
         except Exception as exc:
-            failures.append(f"{entry['id']}: invalid TOML: {exc}")
+            failures.append(f"{entry['id']}: invalid live TOML: {exc}")
             continue
-        expected = _expected(entry)
-        drift = [key for key, value in expected.items() if actual.get(key) != value]
+        wanted = expected(entry, repo)
+        drift = [key for key, value in wanted.items() if actual.get(key) != value]
         if drift:
-            failures.append(f"{entry['id']}: drift in {', '.join(drift)}")
+            failures.append(f"{entry['id']}: live drift in {', '.join(drift)}")
         else:
             successes.append(
-                f"OK  {entry['id']}  {entry['objective']}  {entry['rrule']}  {entry['model']}"
+                f"OK  {entry['id']}  {entry['objective']}  {entry['status']}  {entry['rrule']}"
             )
     return successes, failures
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--registry-only", action="store_true", help="skip live Codex automation comparison"
+    )
+    args = parser.parse_args()
     plan = tomllib.loads(PLAN_PATH.read_text())
-    successes, failures = audit(plan)
+    if args.registry_only:
+        successes: list[str] = []
+        failures = validate(plan)
+        if not failures:
+            successes.append(f"OK  registry  {len(plan['automation'])} objective owners")
+    else:
+        successes, failures = audit(plan)
     for success in successes:
         print(success)
     for failure in failures:

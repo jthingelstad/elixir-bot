@@ -1,38 +1,51 @@
 #!/usr/bin/env bash
-# Read-only audit of the small exception ledger used by objective owners.
+# Read-only audit of the objective-owned exception ledger.
 
 set -euo pipefail
 
 command -v gh >/dev/null 2>&1 || { echo "gh CLI not found"; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "jq not found"; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "gh is not authenticated"; exit 1; }
 
-section() { printf '\n==> %s\n' "$1"; }
-list() { gh issue list --state open --limit 100 "$@" \
-  --json number,title,labels,updatedAt \
-  --jq '.[] | "  #\(.number)  [\([.labels[].name] | join(","))]  \(.title)  (updated \(.updatedAt[0:10]))"'; }
+objectives=("objective:run" "objective:game" "objective:agent")
+allowed='["objective:run","objective:game","objective:agent"]'
+retired='["proposal","approved","ready","needs-design","wip","needs-deploy","meta","needs-data","needs-quality","needs-eval"]'
+issues="$(gh issue list --state open --limit 1000 --json number,title,labels,updatedAt)"
+verdict=0
 
-echo "Objective issue audit — $(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+echo "Objective queue — $(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+for objective in "${objectives[@]}"; do
+  printf '\n==> %s\n' "$objective"
+  printf '%s' "$issues" | jq -r --arg objective "$objective" '
+    .[] | select([.labels[].name] | index($objective))
+    | "  #\(.number)  [\([.labels[].name] | join(","))]  \(.title)  (\(.updatedAt[0:10]))"'
+done
 
-section "Needs Jamie decision"
-list --label decision
+printf '\n==> Decisions waiting on Jamie\n'
+printf '%s' "$issues" | jq -r '
+  .[] | select([.labels[].name] | index("decision")) | "  #\(.number)  \(.title)"'
 
-section "Run Elixir"
-list --label objective:run
+printf '\n==> Missing, conflicting, or unknown objective ownership\n'
+bad="$(printf '%s' "$issues" | jq -r --argjson allowed "$allowed" '
+  .[] | [.labels[].name | select(startswith("objective:"))] as $owners
+  | select(($owners | length) != 1 or ($allowed | index($owners[0]) | not))
+  | "  #\(.number)  owners=\($owners | if length == 0 then "none" else join(",") end)  \(.title)"')"
+if [ -n "$bad" ]; then printf '%s\n' "$bad"; verdict=1; fi
 
-section "Understand Clash Royale"
-list --label objective:game
+printf '\n==> Retired workflow controls on open issues\n'
+old="$(printf '%s' "$issues" | jq -r --argjson retired "$retired" '
+  .[] | [.labels[].name | select((. as $name | $retired | index($name)) != null or startswith("dispatch:") or startswith("legacy:"))] as $controls
+  | select($controls | length > 0)
+  | "  #\(.number)  [\($controls | join(","))]  \(.title)"')"
+if [ -n "$old" ]; then printf '%s\n' "$old"; verdict=1; fi
 
-section "Improve Elixir"
-list --label objective:agent
-
-section "Open issues with no objective owner"
-gh issue list --state open --limit 100 --json number,title,labels,updatedAt \
-  --jq '.[] | select((.labels|map(.name)) as $l | (["objective:run","objective:game","objective:agent"] | map(. as $x | $l | index($x)) | any) | not) | "  #\(.number)  [\([.labels[].name]|join(","))]  \(.title)"'
-
-section "Stale objective issues (no update in 14 days)"
+printf '\n==> Stale objective issues (no update in 14 days)\n'
 cutoff="$(date -u -v-14d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-14 days' +%Y-%m-%dT%H:%M:%SZ)"
-gh issue list --state open --limit 100 --json number,title,labels,updatedAt \
-  --jq '.[] | select(.updatedAt < "'"$cutoff"'") | select((.labels|map(.name)|map(startswith("objective:"))|any)) | "  #\(.number)  \(.title)  (updated \(.updatedAt[0:10]))"'
+printf '%s' "$issues" | jq -r --arg cutoff "$cutoff" '
+  .[] | select(.updatedAt < $cutoff) | select([.labels[].name | startswith("objective:")] | any)
+  | "  #\(.number)  \(.title)  (updated \(.updatedAt[0:10]))"'
 
-echo
-echo "==> Done."
+if [ "$verdict" -eq 0 ]; then
+  echo "  ✓ every open issue has one known objective owner and no retired controls"
+fi
+exit "$verdict"

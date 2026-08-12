@@ -56,24 +56,25 @@ def test_registry_has_exactly_three_active_objective_owners():
     plan = tomllib.loads((ROOT / "AGENT-TEAM/automations.toml").read_text())
     entries = plan["automation"]
 
-    assert plan["version"] == 4
+    assert plan["version"] == 2
+    assert plan["repo"] == str(ROOT)
     assert len(entries) == 3
     assert {entry["objective"] for entry in entries} == {"run", "game", "agent"}
     assert all(entry["status"] == "ACTIVE" for entry in entries)
-    assert all((ROOT / entry["role_file"]).is_file() for entry in entries)
+    assert all((ROOT / entry["objective_file"]).is_file() for entry in entries)
     assert all("dispatch_label" not in entry for entry in entries)
 
 
 def test_automation_prompt_encodes_end_to_end_ownership_and_human_boundary():
     plan = tomllib.loads((ROOT / "AGENT-TEAM/automations.toml").read_text())
     for entry in plan["automation"]:
-        prompt = automation_audit._prompt(entry)
+        prompt = automation_audit.prompt(entry)
         assert entry["objective"] in prompt
-        assert "Measure live evidence" in prompt
+        assert "Measure current evidence" in prompt
         assert "source fix" in prompt
-        assert "instead of creating role handoff tickets" in prompt
-        assert "local objective lease" in prompt
-        assert "member-visible and irreversible human boundary" in prompt
+        assert "Use issues only for multi-run work" in prompt
+        assert "objective lease only before mutation" in prompt
+        assert "human and privacy boundaries" in prompt
         assert "Current state" in prompt
         assert "Active watches" in prompt
         assert "one replace-in-place Latest run" in prompt
@@ -81,6 +82,7 @@ def test_automation_prompt_encodes_end_to_end_ownership_and_human_boundary():
 
 def test_workflow_pins_acceptance_and_memory_ownership():
     workflow = (ROOT / "AGENT-TEAM/WORKFLOW.md").read_text()
+    readme = (ROOT / "AGENT-TEAM/README.md").read_text()
     run = (ROOT / "AGENT-TEAM/run-elixir.md").read_text()
     improve = (ROOT / "AGENT-TEAM/improve-elixir.md").read_text()
 
@@ -89,6 +91,8 @@ def test_workflow_pins_acceptance_and_memory_ownership():
     assert "Current state" in workflow
     assert "Active watches" in workflow
     assert "Replace `Latest run` on every pass" in workflow
+    assert "Outcome: HEALTHY | CHANGED | WATCHING | BLOCKED | NEEDS JAMIE" in workflow
+    assert "Run <objective> now and own the highest-impact measured gap." in readme
     assert "Once per ISO week" in run
     assert "On Friday, also take a small team-health pulse" in improve
 
@@ -99,7 +103,7 @@ def test_audit_rejects_any_plan_other_than_one_owner_per_objective(tmp_path):
 
     _, failures = automation_audit.audit(duplicate, codex_home=tmp_path)
 
-    assert "plan must contain exactly one run, game, and agent objective" in failures
+    assert "objectives must have exactly one owner" in failures
 
 
 def test_checkout_lease_is_atomic_and_owner_scoped(tmp_path, monkeypatch):
@@ -114,9 +118,11 @@ def test_checkout_lease_is_atomic_and_owner_scoped(tmp_path, monkeypatch):
         holder_pid=4321,
         hostname="test-host",
         starting_head="abc123",
+        lease_id="lease-1",
     )
     assert claimed == {
         "objective": "run",
+        "lease_id": "lease-1",
         "claimed_at": "2026-08-11T12:00:00Z",
         "holder_id": "thread-1",
         "holder_pid": 4321,
@@ -128,10 +134,23 @@ def test_checkout_lease_is_atomic_and_owner_scoped(tmp_path, monkeypatch):
     with pytest.raises(SystemExit, match="already held"):
         objective_lease.claim("game", now=now)
     with pytest.raises(SystemExit, match="belongs to 'run'"):
-        objective_lease.release("agent")
+        objective_lease.release("agent", lease_id="lease-1")
+    with pytest.raises(SystemExit, match="another run"):
+        objective_lease.release("run", lease_id="wrong")
 
-    objective_lease.release("run")
+    monkeypatch.setattr(objective_lease, "_checkout_is_clean", lambda: True)
+    objective_lease.release("run", lease_id="lease-1")
     assert not lease_path.exists()
+
+
+def test_codex_override_is_lean_and_points_to_objective_contract():
+    override = ROOT / "AGENTS.override.md"
+    text = override.read_text()
+
+    assert override.stat().st_size < 32 * 1024
+    assert "AGENT-TEAM/WORKFLOW.md" in text
+    assert "exception ledger" in text
+    assert "NEEDS JAMIE" in text
 
 
 def test_stale_lease_requires_proof_holder_is_gone_and_checkout_is_unchanged(tmp_path, monkeypatch):

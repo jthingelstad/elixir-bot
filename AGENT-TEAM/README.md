@@ -22,6 +22,22 @@ straight to Jamie as one concrete decision. There is no Team Manager or dispatch
 Improve Elixir performs a light Friday health pulse instead. The objectives and their
 schedules are the operating system.
 
+## How Jamie engages the team
+
+Jamie can start with the outcome instead of choosing a role or preparing a ticket:
+
+- `Run <objective> now and own the highest-impact measured gap.`
+- `Investigate <symptom>; choose the owner by the failed outcome, not the file.`
+- `Show me team status only; make no changes.`
+- `What across this team needs Jamie?`
+- `Resume the active watch for <objective or issue>.`
+
+Choose **Run Elixir** for execution, delivery, persistence, health, recovery, or cost;
+**Understand Clash Royale** for game facts, payload meaning, projections, or source
+semantics; and **Improve Elixir** when the sources are sound but behavior, judgment,
+timing, grounding, or usefulness is wrong. Cross-cutting work keeps one originating
+owner through acceptance.
+
 ## Project map
 
 - `AGENTS.md` is the architecture and repository source of truth.
@@ -72,12 +88,16 @@ but they never trigger a handoff.
 Run `AGENT-TEAM/scripts/queue-audit.sh` for a read-only view of decisions, objective
 backlogs, stale items, and unowned issues.
 
+Run `python3 AGENT-TEAM/scripts/automation_audit.py` to validate the registry against
+installed Codex tasks; add `--registry-only` when only repository state is in scope.
+
 ## Checkout ownership
 
 All three objectives share this checkout. Before a mutation, acquire the local lease
-defined in `WORKFLOW.md`. It lives under `.git`, not GitHub, so coordination does not
-create issues or comments. Each lease records its objective, holder identity, host,
-and starting commit. Automatic stale recovery additionally requires a durable holder
+defined in `WORKFLOW.md` and retain its returned `lease_id`; only that token may check
+or release the lease normally. It lives under `.git`, not GitHub, so coordination does
+not create issues or comments. Each lease records its objective, run token, holder
+identity, host, and starting commit. Automatic stale recovery additionally requires a durable holder
 PID, proof that the process is gone, a clean worktree, and an unchanged commit:
 
 ```bash

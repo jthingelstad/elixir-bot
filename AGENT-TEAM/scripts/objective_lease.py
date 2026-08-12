@@ -9,6 +9,7 @@ import os
 import socket
 import subprocess
 import sys
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -59,11 +60,13 @@ def claim(
     holder_pid: int | None = None,
     hostname: str | None = None,
     starting_head: str | None = None,
+    lease_id: str | None = None,
 ) -> dict:
     if objective not in OBJECTIVES:
         raise SystemExit(f"unknown objective {objective!r}; choose run, game, or agent")
     payload = {
         "objective": objective,
+        "lease_id": lease_id or str(uuid.uuid4()),
         "claimed_at": (now or _now()).isoformat().replace("+00:00", "Z"),
         "holder_id": holder_id or os.getenv("CODEX_THREAD_ID") or "untracked-manual-holder",
         "hostname": hostname or socket.gethostname(),
@@ -85,15 +88,27 @@ def claim(
     return payload
 
 
-def release(objective: str) -> None:
+def check(objective: str, *, lease_id: str) -> dict:
     current = _read()
     if current is None:
-        return
+        raise SystemExit("checkout lease is not held")
     if current.get("objective") != objective:
         raise SystemExit(
             f"checkout lease belongs to {current.get('objective')!r}, not {objective!r}"
         )
+    if current.get("lease_id") != lease_id:
+        raise SystemExit("checkout lease belongs to another run")
+    return current
+
+
+def release(objective: str, *, lease_id: str) -> dict | None:
+    current = _read()
+    if current is None:
+        return None
+    check(objective, lease_id=lease_id)
+    _require_clean_checkout()
     LEASE_PATH.unlink()
+    return current
 
 
 def _require_clean_checkout() -> None:
@@ -154,6 +169,10 @@ def main(argv: list[str] | None = None) -> int:
     claim_parser.add_argument("--holder-pid", type=int)
     release_parser = sub.add_parser("release")
     release_parser.add_argument("objective", choices=sorted(OBJECTIVES))
+    release_parser.add_argument("--lease-id", required=True)
+    check_parser = sub.add_parser("check")
+    check_parser.add_argument("objective", choices=sorted(OBJECTIVES))
+    check_parser.add_argument("--lease-id", required=True)
     stale_parser = sub.add_parser("clear-stale")
     stale_parser.add_argument("--hours", type=float, default=8.0)
     manual_parser = sub.add_parser("clear-manual")
@@ -170,8 +189,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     elif args.command == "release":
-        release(args.objective)
+        release(args.objective, lease_id=args.lease_id)
         print("released")
+    elif args.command == "check":
+        print(json.dumps(check(args.objective, lease_id=args.lease_id), sort_keys=True))
     elif args.command == "clear-stale":
         print(json.dumps(clear_stale(hours=args.hours), sort_keys=True))
     elif args.command == "clear-manual":

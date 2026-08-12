@@ -43,9 +43,11 @@ Every objective run uses the same loop:
    uv run --locked python AGENT-TEAM/scripts/objective_lease.py claim <run|game|agent>
    ```
 
-   Read-only work needs no lease. The lease records the Codex task identity, host,
-   and starting commit. A held lease means another objective owns the checkout; stop
-   before mutation. Release it after the repository is clean. Never infer inactivity
+   Retain the returned `lease_id` for this run and use it with `check` before the first
+   edit and before push, then `release --lease-id <id>` after the repository is clean.
+   Read-only work needs no lease. The lease records the run token, Codex task identity,
+   host, and starting commit. A held lease means another objective owns the checkout;
+   stop before mutation. Never infer inactivity
    from age plus a clean worktree; use the proof-based stale clear or the explicit
    inspected manual clear documented in `README.md`.
 6. Add regression coverage, run the proportionate focused checks, then run
@@ -123,12 +125,24 @@ approved natural schedule; it must not force the missed member-facing run as a t
 
 ## Reporting
 
-Each run ends in one of three states:
+Every run uses the same closeout contract:
 
-- **Healthy** — evidence checked; no action required.
-- **Changed** — source fix completed, verified, and pushed; include production state.
-- **Needs decision** — one concrete yes/no question for Jamie, with evidence and the
-  consequence of each answer.
+- **HEALTHY** — evidence checked; no action required.
+- **CHANGED** — source fix completed and verified; include deployment and acceptance state.
+- **WATCHING** — technical work is complete but named natural evidence is still pending.
+- **BLOCKED** — an external dependency or safety/concurrency gate prevents progress.
+- **NEEDS JAMIE** — one concrete yes/no decision is required, with consequences.
+
+Use this compact shape so Jamie can scan every team the same way:
+
+```text
+Outcome: HEALTHY | CHANGED | WATCHING | BLOCKED | NEEDS JAMIE
+Objective: <objective name>
+Evidence: <most decision-relevant facts>
+Action: <what changed, or None>
+Next check: <natural event/date, or None>
+Jamie: <one yes/no question, or None>
+```
 
 Report outcomes and remaining risk, not workflow ceremony.
 
