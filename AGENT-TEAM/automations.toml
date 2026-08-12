@@ -1,5 +1,5 @@
 version = 2
-repo = "/Users/otto/Projects/elixir-bot"
+repo = "."
 timezone = "America/Chicago"
 
 # Stable ids preserve Codex task history while names express durable objectives.

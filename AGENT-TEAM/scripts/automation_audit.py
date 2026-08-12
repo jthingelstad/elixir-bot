@@ -49,8 +49,8 @@ def validate(plan: dict, repo: Path = REPO) -> list[str]:
     failures: list[str] = []
     if plan.get("version") != 2:
         failures.append("registry version must be 2")
-    if plan.get("repo") != str(repo):
-        failures.append(f"registry repo must be {repo}")
+    if plan.get("repo") != ".":
+        failures.append("registry repo must be . so it is portable between checkouts")
     entries = plan.get("automation", [])
     if not entries:
         failures.append("registry must contain at least one automation")

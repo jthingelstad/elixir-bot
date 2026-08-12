@@ -57,7 +57,7 @@ def test_registry_has_exactly_three_active_objective_owners():
     entries = plan["automation"]
 
     assert plan["version"] == 2
-    assert plan["repo"] == str(ROOT)
+    assert plan["repo"] == "."
     assert len(entries) == 3
     assert {entry["objective"] for entry in entries} == {"run", "game", "agent"}
     assert all(entry["status"] == "ACTIVE" for entry in entries)
