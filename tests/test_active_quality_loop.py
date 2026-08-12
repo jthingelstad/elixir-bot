@@ -46,6 +46,12 @@ def test_active_sampler_reads_awareness_and_assistant_messages(engine_conn):
     ).fetchone()[0]
     engine_conn.execute(
         "INSERT INTO messages "
+        "(discord_message_id, thread_id, author_type, workflow, content, created_at) "
+        "VALUES ('201', ?, 'user', 'interactive', 'That answer was much better.', ?)",
+        (thread_id, _now(-1)),
+    )
+    engine_conn.execute(
+        "INSERT INTO messages "
         "(discord_message_id, thread_id, author_type, workflow, event_type, content, created_at) "
         "VALUES ('202', ?, 'assistant', 'interactive', 'channel_response', 'A grounded answer.', ?)",
         (thread_id, _now(-1)),
@@ -57,6 +63,23 @@ def test_active_sampler_reads_awareness_and_assistant_messages(engine_conn):
     awareness = next(post for post in posts if post["source"] == "awareness")
     assert awareness["facts"]["is_colosseum_week"] is True
     assert awareness["message_id"] == "101"
+    response = next(post for post in posts if post["source"] == "messages")
+    assert response["request_context"] == "That answer was much better."
+
+
+def test_active_sampler_keeps_event_type_for_wake_responder_post(engine_conn):
+    engine_conn.execute(
+        "INSERT INTO awareness_posts "
+        "(lane, content_preview, covers_json, posted_at, discord_message_id) "
+        "VALUES ('announcements', 'Welcome Alpha.', "
+        "'[\"member_joined:#ALPHA:2026-08-12T12:00:00Z\"]', ?, 'wake-101')",
+        (_now(-1),),
+    )
+
+    sampled = _sample(engine_conn, days=1, lane=None)
+    welcome = next(item for item in sampled if item["message_id"] == "wake-101")
+
+    assert welcome["intent_type"] == "awareness:member_joined"
 
 
 def test_active_sampler_recovers_pre_link_awareness_evidence(engine_conn):

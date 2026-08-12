@@ -47,7 +47,7 @@ SELECT COUNT(*) AS loops,
        SUM(CASE WHEN skipped_reason LIKE '⚠️ tick failed:%' THEN 1 ELSE 0 END) AS failed_loops,
        SUM(CASE WHEN model LIKE 'gate:%' THEN 1 ELSE 0 END) AS gated_loops
 FROM awareness_thoughts
-WHERE at >= datetime('now', '-7 days');
+WHERE datetime(at) >= datetime('now', '-7 days');
 ```
 
 ### 2. Delivered lanes and signal coverage
@@ -58,7 +58,7 @@ SELECT lane, COUNT(*) AS posts,
        SUM(json_array_length(covers_json)) AS covered_signals,
        MAX(posted_at) AS last_post
 FROM awareness_posts
-WHERE posted_at >= datetime('now', '-7 days')
+WHERE datetime(posted_at) >= datetime('now', '-7 days')
 GROUP BY lane
 ORDER BY posts DESC;
 ```
@@ -68,7 +68,7 @@ ORDER BY posts DESC;
 ```sql
 SELECT COALESCE(skipped_reason, '(none)') AS reason, COUNT(*) AS loops
 FROM awareness_thoughts
-WHERE at >= datetime('now', '-7 days') AND chose_silence = 1
+WHERE datetime(at) >= datetime('now', '-7 days') AND chose_silence = 1
 GROUP BY reason
 ORDER BY loops DESC
 LIMIT 12;
@@ -83,7 +83,7 @@ SELECT json_extract(tool.value, '$.tool') AS tool,
        SUM(json_extract(tool.value, '$.result') NOT LIKE 'ok%') AS non_ok
 FROM awareness_thoughts AS thought,
      json_each(COALESCE(thought.tool_trace_json, '[]')) AS tool
-WHERE thought.at >= datetime('now', '-7 days')
+WHERE datetime(thought.at) >= datetime('now', '-7 days')
 GROUP BY tool
 ORDER BY calls DESC;
 ```
