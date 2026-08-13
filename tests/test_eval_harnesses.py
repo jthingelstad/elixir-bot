@@ -4,6 +4,34 @@ import json
 import sqlite3
 
 
+def test_live_eval_readers_include_committed_wal_state(tmp_path):
+    from scripts import eval_ask_elixir_alignment, eval_leader_actions
+
+    db_path = tmp_path / "live-eval.db"
+    writer = sqlite3.connect(db_path)
+    try:
+        assert writer.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        writer.execute("CREATE TABLE decisions (status TEXT NOT NULL)")
+        writer.execute("INSERT INTO decisions VALUES ('proposed')")
+        writer.commit()
+        writer.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+        # Leave the terminal state committed only in the WAL. An immutable
+        # reader silently returns the checkpointed `proposed` value instead.
+        writer.execute("UPDATE decisions SET status = 'rejected'")
+        writer.commit()
+        assert (tmp_path / "live-eval.db-wal").stat().st_size > 0
+
+        for module in (eval_leader_actions, eval_ask_elixir_alignment):
+            reader = module._open_db(db_path)
+            try:
+                assert reader.execute("SELECT status FROM decisions").fetchone()[0] == "rejected"
+            finally:
+                reader.close()
+    finally:
+        writer.close()
+
+
 def test_active_eval_harnesses_open_the_current_v51_schema(tmp_path, monkeypatch):
     from scripts import eval_all_requests, eval_card_conversations
 

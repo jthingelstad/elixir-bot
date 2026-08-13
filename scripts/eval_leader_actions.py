@@ -78,7 +78,11 @@ def _open_db(path: str | os.PathLike[str]) -> sqlite3.Connection:
         conn = sqlite3.connect(raw, uri=True)
     else:
         absolute = Path(raw).expanduser().resolve()
-        conn = sqlite3.connect(f"file:{absolute}?mode=ro&immutable=1", uri=True)
+        # The production database is live and WAL-backed. ``immutable=1``
+        # ignores its WAL, so a freshly settled leader action can still look
+        # open to this evaluator. Read-only mode preserves the safety boundary
+        # while including committed WAL state.
+        conn = sqlite3.connect(f"file:{absolute}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 
