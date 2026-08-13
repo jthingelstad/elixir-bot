@@ -15,6 +15,11 @@ from agent import spend_budget
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
 
 
+def test_default_ceiling_matches_the_approved_fifty_dollar_month(monkeypatch):
+    monkeypatch.delenv("ELIXIR_DAILY_SPEND_USD", raising=False)
+    assert spend_budget.daily_ceiling_usd() == pytest.approx(50.0 / 30.0)
+
+
 def test_a_hard_post_workflow_is_never_budget_gated(monkeypatch, engine_conn):
     """The floor guarantee outranks the ceiling, at every spend level.
 

@@ -39,6 +39,10 @@ from db import managed_connection
 log = logging.getLogger("elixir")
 
 SPEND_CURSOR_KEY = "budget:llm:awareness_ask_elixir_micros"
+# $50/month expressed as a 30-day daily ceiling. Keep the exact fraction so the
+# default cannot silently exceed the approved monthly target through rounding.
+DEFAULT_DAILY_CEILING_USD = 50.0 / 30.0
+DEFAULT_DAILY_CEILING_ENV = str(DEFAULT_DAILY_CEILING_USD)
 
 # This is the policy boundary. Everything absent from this set always runs and
 # is not charged to the ceiling. Keep support calls that are part of these two
@@ -100,10 +104,10 @@ def required_work():
 def daily_ceiling_usd() -> float:
     """Hard stop. 0 disables the ceiling entirely."""
     try:
-        return max(0.0, float(os.getenv("ELIXIR_DAILY_SPEND_USD", "3.20")))
+        return max(0.0, float(os.getenv("ELIXIR_DAILY_SPEND_USD", DEFAULT_DAILY_CEILING_ENV)))
     except ValueError:
-        log.warning("bad ELIXIR_DAILY_SPEND_USD, using 3.20")
-        return 3.20
+        log.warning("bad ELIXIR_DAILY_SPEND_USD, using %.2f", DEFAULT_DAILY_CEILING_USD)
+        return DEFAULT_DAILY_CEILING_USD
 
 
 def warn_fraction() -> float:
