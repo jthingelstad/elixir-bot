@@ -70,6 +70,7 @@ Observed deck selections:
 - `draftCompetitive`
 - `predefined`
 - `quadDeckPick`
+- `unknown`
 
 ## Winner Inference
 

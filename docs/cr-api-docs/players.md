@@ -240,6 +240,7 @@ Observed: returns ~30-40 battles (most commonly 30).
 | `draftCompetitive` | competitive draft friendlies, Triple Draft tournaments                         |
 | `predefined`       | preset-deck friendlies (e.g. Mirror Deck)                                      |
 | `quadDeckPick`     | 1v1 Duel friendlies (`72000314 Duel_1v1_Friendly`) — 4 decks brought per match |
+| `unknown`          | Observed once on event-tagged `All_Random_Princess`; do not infer deck rules   |
 
 **Known game mode IDs:**
 
