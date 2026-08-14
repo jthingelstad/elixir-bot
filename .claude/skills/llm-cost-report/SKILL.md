@@ -11,7 +11,9 @@ anomalies, and concrete next levers. Pairs with `log-triage` (health) and
 `awareness-report` (decision quality); this one answers "where is the money
 going?"
 
-Budget context: the user's target is **$20/month (~$0.67/day)**.
+Budget context: the active discretionary awareness/Ask Elixir target is
+**$50/month (~$1.67/day)**. Scheduled reports and operational jobs are outside
+this budget and must be reported separately.
 
 ## Canonical report path
 
@@ -126,7 +128,7 @@ Keep the report under roughly 40 lines:
 
 ```text
 ## LLM Cost Report — <window>
-Summary: $X over N days, projected $Y/month against $20 target.
+Summary: $X over N days, projected $Y/month against $50 target.
 Top driver: workflow/model, calls, cost, share.
 Daily trend: ...
 Cache flags: ...
