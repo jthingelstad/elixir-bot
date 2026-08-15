@@ -235,7 +235,11 @@ def _score(actions: list[sqlite3.Row], *, now: datetime, thresholds: Thresholds)
         if proposed_at and proposed_at <= stale_cutoff and (expires_at is None or expires_at > now):
             stale_open.append(row)
 
-    decision_rate = _rate(len(terminal), total)
+    # Fresh proposed cards are still inside the response allowance and are not
+    # evidence of a missed leader decision. Count actions as decision-eligible
+    # once they settle or their open response window becomes stale.
+    decision_eligible = [*terminal, *stale_open]
+    decision_rate = _rate(len(terminal), len(decision_eligible))
     trace_rate = _rate(len(traceable), total)
     relay_copy_text_rate = _rate(len(relays_with_copy), len(relays))
     recommendation_unaccepted_rate = _rate(
@@ -247,7 +251,7 @@ def _score(actions: list[sqlite3.Row], *, now: datetime, thresholds: Thresholds)
             decision_rate,
             {">=": thresholds.min_decision_rate},
             decision_rate is None or decision_rate >= thresholds.min_decision_rate,
-            "Terminal leader actions (done/deferred/rejected) divided by all non-test actions in the window.",
+            "Terminal leader actions (done/deferred/rejected) divided by decision-eligible actions: terminal actions plus open cards older than stale_hours and not expired.",
         ),
         "trace_rate": _metric(
             trace_rate,
@@ -284,6 +288,7 @@ def _score(actions: list[sqlite3.Row], *, now: datetime, thresholds: Thresholds)
         "passed": all(item["passed"] for item in metrics.values()),
         "counts": {
             "total_actions": total,
+            "decision_eligible_actions": len(decision_eligible),
             "terminal_actions": len(terminal),
             "traceable_actions": len(traceable),
             "relay_actions": len(relays),

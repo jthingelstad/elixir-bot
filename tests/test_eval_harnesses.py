@@ -631,6 +631,50 @@ def test_eval_leader_actions_flags_stale_open_cards(tmp_path):
     assert result["stale_open_action_ids"] == [2]
 
 
+def test_eval_leader_actions_does_not_penalize_fresh_open_cards(tmp_path):
+    from scripts import eval_leader_actions
+
+    db_path = tmp_path / "leader-actions-fresh.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_leader_action_eval_schema(conn)
+        _insert_leader_action(conn)
+        for action_id, proposed_at in (
+            (2, "2026-06-24T10:00:00Z"),
+            (3, "2026-06-24T22:00:00Z"),
+        ):
+            _insert_leader_action(
+                conn,
+                action_id=action_id,
+                action_key=f"leader-action:{action_id}",
+                action_type="in_game_relay",
+                status="proposed",
+                proposed_at=proposed_at,
+                decided_at=None,
+                decided_by_discord_user_id=None,
+                decision_emoji=None,
+                updated_at=proposed_at,
+                source_message_id=f"300{action_id}",
+                copy_message_id=f"400{action_id}",
+                copy_message_ids_json=f'["400{action_id}"]',
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = eval_leader_actions.evaluate(
+        db_path,
+        since=eval_leader_actions._parse_time("2026-06-24T00:00:00Z"),
+        end=eval_leader_actions._parse_time("2026-06-25T00:00:00Z"),
+    )
+
+    assert result["passed"] is True
+    assert result["metrics"]["decision_rate"]["value"] == 1.0
+    assert result["counts"]["decision_eligible_actions"] == 1
+    assert result["counts"]["total_actions"] == 3
+    assert result["counts"]["stale_open_actions"] == 0
+
+
 def test_eval_ask_elixir_alignment_flags_blank_user_reply(tmp_path):
     from scripts import eval_ask_elixir_alignment
 
