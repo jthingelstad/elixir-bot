@@ -1360,7 +1360,7 @@ def get_clan_game_mode_summary(
 
     profile_rows = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, "
-        "NULL AS current_path_of_legend_season_result_json, NULL AS progress_json, "
+        "NULL AS current_path_of_legend_season_result_json, "
         "cs.trophies, cs.best_trophies, cs.ranked_league, cs.ranked_trophies "
         "FROM players m "
         "JOIN player_current_state cs ON cs.player_tag = m.player_tag "
@@ -1368,7 +1368,6 @@ def get_clan_game_mode_summary(
         "  WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
     ).fetchall()
     ranked_profiles = []
-    progress_keys: dict[str, dict] = {}
     for row in profile_rows:
         pol = {
             "leagueNumber": row["ranked_league"],
@@ -1391,31 +1390,6 @@ def get_clan_game_mode_summary(
                     },
                 )
             )
-        progress = _json_object(row["progress_json"])
-        for key, value in progress.items():
-            entry = progress_keys.setdefault(
-                key,
-                {
-                    "progress_key": key,
-                    "members": 0,
-                    "max_trophies": None,
-                    "max_best_trophies": None,
-                    "top_member": None,
-                },
-            )
-            entry["members"] += 1
-            if isinstance(value, dict):
-                trophies = value.get("trophies")
-                best = value.get("bestTrophies")
-                if isinstance(trophies, int) and (
-                    entry["max_trophies"] is None or trophies > entry["max_trophies"]
-                ):
-                    entry["max_trophies"] = trophies
-                    entry["top_member"] = row["name"]
-                if isinstance(best, int) and (
-                    entry["max_best_trophies"] is None or best > entry["max_best_trophies"]
-                ):
-                    entry["max_best_trophies"] = best
     ranked_profiles.sort(
         key=lambda item: (
             -(item.get("league_number") or 0),
@@ -1427,6 +1401,27 @@ def get_clan_game_mode_summary(
     )
 
     from storage.game_mode_contexts import list_game_mode_contexts
+
+    progress_keys = [
+        dict(row)
+        for row in conn.execute(
+            """SELECT progress_key,
+                      COUNT(*) AS members,
+                      MAX(trophies) AS max_trophies,
+                      MAX(best_trophies) AS max_best_trophies,
+                      MAX(observed_at) AS freshest_observed_at
+               FROM player_side_mode_progress
+               WHERE EXISTS (
+                   SELECT 1 FROM clan_memberships cm
+                   WHERE cm.player_tag = player_side_mode_progress.player_tag
+                     AND cm.left_at IS NULL
+               )
+               GROUP BY progress_key
+               ORDER BY members DESC, progress_key
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    ]
 
     event_badge_completions = _special_event_badge_completions(days, conn)
     event_activity = _special_event_activity(days, limit, conn)
@@ -1446,10 +1441,7 @@ def get_clan_game_mode_summary(
         "event_activity": event_activity,
         "ranked_activity": ranked_activity,
         "ranked_profiles": ranked_profiles[:limit],
-        "side_mode_progress": sorted(
-            progress_keys.values(),
-            key=lambda item: (-item["members"], item["progress_key"]),
-        )[:limit],
+        "side_mode_progress": progress_keys,
         "event_participation": event_participation,
         "event_top_members": _special_event_top_members(days, limit, conn),
         "event_badge_completions": [

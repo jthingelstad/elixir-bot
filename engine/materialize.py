@@ -205,6 +205,7 @@ def _apply_player(conn, observation: Observation, *, track_poll_freshness: bool)
             observation.observed_at,
         )
     projections.refresh_player_state(conn, tag, payload, None, observation.observed_at)
+    projections.refresh_side_mode_progress(conn, tag, payload, observation.observed_at)
     # Badge-derived facts (Collection Level, years played, career wins) — the ingest
     # that never existed post-v5.1, so these columns sat frozen for weeks.
     projections.refresh_profile_metadata(conn, tag, payload, observation.observed_at)

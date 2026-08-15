@@ -999,9 +999,9 @@ def _execute_get_clan_game_modes(arguments):
             "duos": snapshot["duos"],
         }
     if aspect == "side_modes":
-        # QA M13: side_mode_progress + leaderboards are not populated yet (no
-        # progress_json / leaderboard-context source). Empty means NOT TRACKED,
-        # not "nothing happening" — say so rather than imply a quiet clan.
+        # Progress is a bounded current-state projection. Keys remain opaque
+        # labels, so an empty list means no active profile reported a key, not
+        # that an unlisted game surface was necessarily inactive.
         side_progress = snapshot["side_modes"]["progress"]
         leaderboards = snapshot["side_modes"]["leaderboards"]
         return {
@@ -1012,7 +1012,7 @@ def _execute_get_clan_game_modes(arguments):
             "mode_mix": modes,
             "side_mode_progress_tracked": snapshot["side_modes"]["progress_tracked"],
             "leaderboards_tracked": snapshot["side_modes"]["leaderboards_tracked"],
-            "note": "side_mode_progress / leaderboards are not tracked yet; empty here means no data source, not clan inactivity — use mode_mix for side-mode activity.",
+            "note": "Progress keys are tracked as opaque labels; an empty list means no active profile reported a key. Leaderboards remain untracked, so use mode_mix for battle activity.",
         }
     if aspect == "events":
         return {

@@ -214,10 +214,17 @@ def test_ranked_and_clan_game_mode_query_helpers():
     assert ranked["current"]["leagueNumber"] == 6
     assert ranked["recent_ranked"]["battles"] == 1
     assert summary["ranked_activity"][0]["tag"] == "#2P0LYQ"
-    # v5.1 deliberately does not persist the unbounded profile ``progress``
-    # blob in the current-state projection; event context is tracked through
-    # game_mode_contexts instead.
-    assert summary["side_mode_progress"] == []
+    # v37 stores the bounded per-key facts rather than the open-ended profile
+    # blob, preserving opaque API keys without inventing game relationships.
+    assert len(summary["side_mode_progress"]) == 1
+    progress = summary["side_mode_progress"][0]
+    assert {key: value for key, value in progress.items() if key != "freshest_observed_at"} == {
+        "progress_key": "AutoChess_2026_Season_9",
+        "members": 1,
+        "max_trophies": 2100,
+        "max_best_trophies": 2200,
+    }
+    assert progress["freshest_observed_at"].endswith("Z")
     # QA H12: mode_mix (by_group) and ranked_activity now share the authoritative
     # battle_events source, so their ranked counts reconcile (were 1152 vs 451).
     ranked_group = next((g for g in summary["by_group"] if g["mode_group"] == "ranked"), None)

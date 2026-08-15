@@ -86,6 +86,57 @@ def test_v24_removes_live_only_awareness_prompt_column(tmp_path):
         conn.close()
 
 
+def test_v37_backfills_bounded_side_mode_progress_from_current_profile_receipts(tmp_path):
+    path = tmp_path / "v36.db"
+    build_database(str(path), None)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("DROP TABLE player_side_mode_progress")
+        conn.execute("PRAGMA user_version = 36")
+        conn.execute(
+            "INSERT INTO players (player_tag, first_seen_at, last_seen_at) VALUES ('#A', 'x', 'x')"
+        )
+        conn.execute(
+            """INSERT INTO raw_api_payloads
+                   (endpoint, entity_key, fetched_at, last_fetched_at, payload_hash, payload_json)
+               VALUES ('player', 'A', '2026-08-15T00:00:00Z', '2026-08-15T00:00:00Z', 'hash', ?)""",
+            (
+                json.dumps(
+                    {
+                        "progress": {
+                            "OpaqueMode": {
+                                "trophies": 12,
+                                "bestTrophies": 19,
+                                "arena": {"id": 7, "name": "Test Arena", "rawName": "test"},
+                            }
+                        }
+                    }
+                ),
+            ),
+        )
+        conn.commit()
+
+        apply_schema_migrations(conn)
+
+        assert conn.execute(
+            """SELECT player_tag, progress_key, trophies, best_trophies, arena_id,
+                      arena_name, arena_raw_name, observed_at
+               FROM player_side_mode_progress"""
+        ).fetchone() == (
+            "#A",
+            "OpaqueMode",
+            12,
+            19,
+            7,
+            "Test Arena",
+            "test",
+            "2026-08-15T00:00:00Z",
+        )
+        assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
+    finally:
+        conn.close()
+
+
 def test_v23_migration_adds_admin_command_telemetry_additively(tmp_path):
     path = tmp_path / "v22.db"
     build_database(str(path), None)

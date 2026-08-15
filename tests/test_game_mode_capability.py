@@ -78,6 +78,7 @@ def test_capability_combines_activity_leaders_ranked_state_and_duos(engine_conn)
     assert result["sources"] == [
         "battle_events",
         "player_current_state",
+        "player_side_mode_progress",
         "game_mode_contexts",
     ]
     assert result["modes"]["ranked"]["battles"] == 3
@@ -85,6 +86,34 @@ def test_capability_combines_activity_leaders_ranked_state_and_duos(engine_conn)
     assert result["ranked"]["standings"][0]["member_ref"] == "Alpha"
     assert result["ranked"]["standings"][0]["rating"] == 1800
     assert result["duos"] == [{"player": "Alpha", "teammate": "Bravo", "battles": 2, "wins": 1}]
+
+
+def test_capability_aggregates_bounded_opaque_progress_keys(engine_conn):
+    _seed_player(engine_conn, "#A", "Alpha", 6, 1800)
+    _seed_player(engine_conn, "#B", "Bravo", 4, 1200)
+    engine_conn.executemany(
+        """INSERT INTO player_side_mode_progress
+               (player_tag, progress_key, trophies, best_trophies, observed_at)
+           VALUES (?, ?, ?, ?, '2026-08-15T00:00:00Z')""",
+        [
+            ("#A", "AutoChess_2026_Season_10", 2100, 2200),
+            ("#B", "AutoChess_2026_Season_10", 1950, 2300),
+            ("#A", "OpaqueFutureMode", 80, 100),
+        ],
+    )
+
+    result = get_clan_game_modes(days=7, limit=10, conn=engine_conn)
+
+    progress = {item["progress_key"]: item for item in result["side_modes"]["progress"]}
+    assert result["side_modes"]["progress_tracked"] is True
+    assert progress["AutoChess_2026_Season_10"] == {
+        "progress_key": "AutoChess_2026_Season_10",
+        "members": 2,
+        "max_trophies": 2100,
+        "max_best_trophies": 2300,
+        "freshest_observed_at": "2026-08-15T00:00:00Z",
+    }
+    assert progress["OpaqueFutureMode"]["members"] == 1
 
 
 def test_multi_window_capability_uses_the_same_contract(engine_conn):

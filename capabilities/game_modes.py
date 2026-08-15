@@ -129,7 +129,12 @@ def _get_clan_game_modes(
         "data_generation": generation_snapshot(conn),
         "window_days": days,
         "mode_group": mode_group,
-        "sources": ["battle_events", "player_current_state", "game_mode_contexts"],
+        "sources": [
+            "battle_events",
+            "player_current_state",
+            "player_side_mode_progress",
+            "game_mode_contexts",
+        ],
         "modes": modes,
         "game_modes": list(summary.get("by_game_mode") or []),
         "ranked": {
@@ -140,7 +145,7 @@ def _get_clan_game_modes(
         "side_modes": {
             "progress": side_progress,
             "leaderboards": leaderboards,
-            "progress_tracked": bool(side_progress),
+            "progress_tracked": True,
             "leaderboards_tracked": bool(leaderboards),
         },
         "events": {

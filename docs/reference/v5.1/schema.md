@@ -71,7 +71,7 @@ tables unchanged and is not redesigned here.
 | L3 Event streams | `battle_events`, `player_events`, `clan_events`, `war_events` | 4 |
 | L4 Rollups (durable) | `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics` | 3 |
 | L5 Identity & tenure (durable) | `players`, `player_metadata`, `player_aliases`, `clans`, `discord_users`, `discord_links`, `clan_memberships` | 7 |
-| L6 Projections / read models | `player_current_state`, `player_card_collection`, `player_recent_form`, `member_management` | 4 |
+| L6 Projections / read models | `player_current_state`, `player_side_mode_progress`, `player_card_collection`, `player_recent_form`, `member_management` | 5 |
 | Awareness runtime | `awareness_thoughts`, `awareness_delivery_intents`, `awareness_posts` | 3 |
 | Clan management | `leader_action_recommendations`, `revisits` | 3 |
 | Bounded stream: war | `war_seasons`, `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days` | 5 |
@@ -79,7 +79,7 @@ tables unchanged and is not redesigned here.
 | Awards (durable) | `awards` | 1 |
 | Engine control | `stream_cursors` (durable), `runtime_job_status`, `poll_state` (runtime.md §4), `materialization_runs`, `materialization_inputs` | 5 |
 | Ops singletons (carried) | `llm_calls`, `prompt_failures`, `prompt_feedback`, `api_sentinel_observations`, `arena_relay_screenshot_observations`, `discord_channels`, `channel_state`, `game_mode_contexts`, `card_catalog` | 9 |
-| **Engine total** | | **51** |
+| **Engine total** | | **52** |
 | Deferred pass (carried unchanged) | `clan_memories` + 9 satellites + FTS/vec, `conversation_threads`, `messages`, `memory_facts`, `memory_episodes` | ~19 designed |
 
 51 engine tables from today's 75, with the memory-pass reduction still to come —

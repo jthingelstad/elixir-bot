@@ -13,8 +13,8 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 36
-EXPECTED_TABLE_COUNT = 63  # 64 -> 63 (v34): llm_calls moved to the telemetry DB
+CURRENT_SCHEMA_VERSION = 37
+EXPECTED_TABLE_COUNT = 64  # v37 adds the bounded player_side_mode_progress projection
 
 
 def initialize_empty_database(
@@ -237,6 +237,13 @@ REQUIRED_SCHEMA = {
         "battle_enrichment_enabled",
     },
     "player_current_state": {"player_tag", "last_seen_api"},
+    "player_side_mode_progress": {
+        "player_tag",
+        "progress_key",
+        "trophies",
+        "best_trophies",
+        "observed_at",
+    },
     "war_weeks": {"season_id", "section_index", "defense_fame"},
     "card_catalog": {"card_id", "first_seen_at"},
     "api_sentinel_observations": {"observation_id", "first_entity_key"},
@@ -1954,6 +1961,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 36
+    if version < 37:
+        try:
+            _apply_v37(conn)
+            conn.execute("PRAGMA user_version = 37")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -2179,6 +2195,69 @@ def _apply_v36(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v37(conn: sqlite3.Connection) -> None:
+    """Materialize bounded current Player.progress values for game-mode reads.
+
+    ``Player.progress`` is an open-ended map, so keeping its complete JSON blob
+    in ``player_current_state`` would create an unbounded projection.  The
+    capability needs only one row per player/key with current and best values.
+    Backfill from retained current profile receipts makes the new read immediately
+    useful after migration rather than waiting for the next adaptive poll. The
+    normalized profile baseline intentionally excludes this open-ended map.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS player_side_mode_progress (
+            player_tag TEXT NOT NULL REFERENCES players(player_tag) ON DELETE CASCADE,
+            progress_key TEXT NOT NULL,
+            trophies INTEGER,
+            best_trophies INTEGER,
+            arena_id INTEGER,
+            arena_name TEXT,
+            arena_raw_name TEXT,
+            observed_at TEXT NOT NULL,
+            PRIMARY KEY (player_tag, progress_key)
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_side_mode_progress_observed "
+        "ON player_side_mode_progress(observed_at DESC)"
+    )
+    conn.execute(
+        """INSERT INTO player_side_mode_progress
+               (player_tag, progress_key, trophies, best_trophies, arena_id,
+                arena_name, arena_raw_name, observed_at)
+           WITH latest_profile_receipt AS (
+               SELECT entity_key, MAX(COALESCE(last_fetched_at, fetched_at)) AS fetched_at
+               FROM raw_api_payloads
+               WHERE endpoint = 'player'
+               GROUP BY entity_key
+           )
+           SELECT '#' || receipt.entity_key,
+                  entry.key,
+                  json_extract(entry.value, '$.trophies'),
+                  json_extract(entry.value, '$.bestTrophies'),
+                  json_extract(entry.value, '$.arena.id'),
+                  json_extract(entry.value, '$.arena.name'),
+                  json_extract(entry.value, '$.arena.rawName'),
+                  COALESCE(receipt.last_fetched_at, receipt.fetched_at)
+           FROM raw_api_payloads AS receipt
+           JOIN latest_profile_receipt AS latest
+             ON latest.entity_key = receipt.entity_key
+            AND latest.fetched_at = COALESCE(receipt.last_fetched_at, receipt.fetched_at)
+           JOIN players ON players.player_tag = '#' || receipt.entity_key
+           JOIN json_each(receipt.payload_json, '$.progress') AS entry
+           WHERE receipt.endpoint = 'player'
+             AND json_type(entry.value) = 'object'
+           ON CONFLICT(player_tag, progress_key) DO UPDATE SET
+               trophies = excluded.trophies,
+               best_trophies = excluded.best_trophies,
+               arena_id = excluded.arena_id,
+               arena_name = excluded.arena_name,
+               arena_raw_name = excluded.arena_raw_name,
+               observed_at = excluded.observed_at"""
+    )
+
+
 def assert_current_schema(conn: sqlite3.Connection) -> None:
     """Raise with a precise diagnosis when a caller bypasses DB initialization."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -2365,7 +2444,7 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "0030a7b395cd77bc42aa5d9b79cf3c455267e537f47a7e893a8793c458a49d07"
+CURRENT_SCHEMA_FINGERPRINT = "bc84d8a92755d79193a80b8915f333eac294565802ac166dc662874537f7aef5"
 
 
 __all__ = [

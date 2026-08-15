@@ -64,7 +64,7 @@ tick(now):
                  emitter also runs here (birthdays/anniversaries — events.md §4;
                  clock-driven, no API call, date-embedded dedup keys).
        PROJECT   refresh what the polls touched: player_current_state,
-                 player_card_collection, player_recent_form (subjects with new
+                 player_side_mode_progress, player_card_collection, player_recent_form (subjects with new
                  battles), rollups (upsert today's rows), war_weeks /
                  war_week_clans / war_participation / war_attendance_days,
                  member_management inputs, and successful-poll freshness.

@@ -134,6 +134,49 @@ def refresh_player_state(conn, player_tag, profile_payload, roster_entry, observ
     )
 
 
+def refresh_side_mode_progress(conn, player_tag, profile_payload, observed_at):
+    """Replace one player's bounded current ``Player.progress`` projection.
+
+    Progress keys are supplied by Clash Royale and remain opaque identifiers.
+    Keeping scalar values per key gives game-mode reads current facts without
+    copying the API's open-ended progress map into a general-purpose JSON blob.
+    """
+    tag = canon_tag(player_tag)
+    progress = (profile_payload or {}).get("progress")
+    conn.execute("DELETE FROM player_side_mode_progress WHERE player_tag = ?", (tag,))
+    if not isinstance(progress, dict):
+        return
+    for raw_key, raw_value in progress.items():
+        if not isinstance(raw_value, dict):
+            continue
+        arena = raw_value.get("arena")
+        arena = arena if isinstance(arena, dict) else {}
+        conn.execute(
+            """INSERT INTO player_side_mode_progress
+                   (player_tag, progress_key, trophies, best_trophies, arena_id,
+                    arena_name, arena_raw_name, observed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                tag,
+                str(raw_key),
+                raw_value.get("trophies")
+                if isinstance(raw_value.get("trophies"), int)
+                and not isinstance(raw_value.get("trophies"), bool)
+                else None,
+                raw_value.get("bestTrophies")
+                if isinstance(raw_value.get("bestTrophies"), int)
+                and not isinstance(raw_value.get("bestTrophies"), bool)
+                else None,
+                arena.get("id")
+                if isinstance(arena.get("id"), int) and not isinstance(arena.get("id"), bool)
+                else None,
+                arena.get("name") if isinstance(arena.get("name"), str) else None,
+                arena.get("rawName") if isinstance(arena.get("rawName"), str) else None,
+                observed_at,
+            ),
+        )
+
+
 def refresh_card_collection(conn, player_tag, cards_payload, observed_at):
     """Upsert player_card_collection from a profile's cards[] array."""
     tag = canon_tag(player_tag)
