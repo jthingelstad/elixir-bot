@@ -1020,7 +1020,14 @@ def run_tick_evaluators(
             "SELECT MAX(battle_time) FROM battle_events WHERE player_tag = ?", (tag,)
         ).fetchone()
         if last_row and last_row[0]:
-            reference = _parse_ts(last_row[0])
+            # A roster join starts this clan's inactivity clock. Imported
+            # battle history can predate the current membership, so measuring
+            # from the battle alone can recommend a member for removal on the
+            # same tick they join. There is still no newcomer shield: once the
+            # normal idle threshold has elapsed from the later personal anchor,
+            # the ordinary state machine applies.
+            candidates = [_parse_ts(v) for v in (last_row[0], m["membership_joined_at"]) if v]
+            reference = max(c for c in candidates if c is not None)
         else:
             # Never battled in the stream: idle from THEIR OWN anchor — the
             # later of membership joined_at and players.last_seen_at — never

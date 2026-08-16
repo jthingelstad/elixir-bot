@@ -356,6 +356,18 @@ def test_newcomer_gets_no_shield(engine_conn):
     assert _kick_state(engine_conn) == "recommended"
 
 
+def test_new_membership_resets_prejoin_battle_idle_clock(engine_conn):
+    # Regression (2026-08-16): imported battle history can predate a player's
+    # current clan tenure. A player who joins today with a 10-day-old battle is
+    # not 10 days idle in this clan and must not receive an immediate kick card.
+    _seed_member(engine_conn, joined_days_ago=0, last_battle_days_ago=10)
+
+    transitions = management.run_tick_evaluators(engine_conn, now=NOW)
+
+    assert _kick_state(engine_conn) == "none"
+    assert not any(t["player_tag"] == "#A" for t in transitions)
+
+
 def _add_memory(conn, tag, *, title, expires_at=None, retired_at=None):
     conn.execute(
         "INSERT INTO memories (kind, title, body, member_tag, scope, created_by, "
