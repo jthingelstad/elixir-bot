@@ -18,7 +18,9 @@ _BATTLES_REFERENCE = (
         (72000286, "TeamVsTeam_TripleElixir_Friendly"),
         (72000376, "Event_RestlessDead"),
         (72000501, "All_Random_Princess"),
+        (72000504, "Crazy_Arena_EpicOnly"),
         (72000505, "Chaos_1v1_Draft"),
+        (72000506, "Chaos_1v1_TripleDraft"),
     ],
 )
 def test_observed_game_modes_remain_in_agent_reference(mode_id: int, mode_name: str) -> None:
