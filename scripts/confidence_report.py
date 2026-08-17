@@ -171,7 +171,8 @@ def _liveness() -> list[str]:
         # (b) the can_post_leader_action signature: proposed but never posted.
         stuck = conn.execute(
             "SELECT COUNT(*) FROM leader_action_recommendations "
-            "WHERE status = 'proposed' AND copy_message_id IS NULL "
+            "WHERE status = 'proposed' "
+            "AND (source_message_id IS NULL OR source_message_id = 'posting') "
             "AND COALESCE(is_test, 0) = 0 AND proposed_at < "
             "strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)",
             (f"-{LEADER_ACTION_STALE_HOURS} hours",),

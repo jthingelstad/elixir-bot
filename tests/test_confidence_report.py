@@ -20,7 +20,8 @@ def _liveness_conn(
     )
     conn.execute(
         "CREATE TABLE leader_action_recommendations ("
-        "status TEXT NOT NULL, copy_message_id TEXT, is_test INTEGER, proposed_at TEXT NOT NULL)"
+        "status TEXT NOT NULL, copy_message_id TEXT, is_test INTEGER, proposed_at TEXT NOT NULL, "
+        "source_message_id TEXT)"
     )
     conn.execute(
         "INSERT INTO awareness_thoughts VALUES (?, ?, ?, ?)",
@@ -62,14 +63,25 @@ def test_liveness_does_not_treat_failed_plan_as_a_success(monkeypatch):
 def test_liveness_retains_stuck_leader_action_alarm(monkeypatch):
     conn = _liveness_conn(thought_at=_utc(1))
     conn.execute(
-        "INSERT INTO leader_action_recommendations VALUES (?, ?, ?, ?)",
-        ("proposed", None, 0, _utc(3)),
+        "INSERT INTO leader_action_recommendations VALUES (?, ?, ?, ?, ?)",
+        ("proposed", None, 0, _utc(3), None),
     )
     monkeypatch.setattr("scripts.read_only_db.connect_read_only", lambda: conn)
 
     assert confidence_report._liveness() == [
         "1 leader-action(s) proposed >2h ago but never posted — card posting may be broken"
     ]
+
+
+def test_liveness_accepts_posted_card_without_copy_message(monkeypatch):
+    conn = _liveness_conn(thought_at=_utc(1))
+    conn.execute(
+        "INSERT INTO leader_action_recommendations VALUES (?, ?, ?, ?, ?)",
+        ("proposed", None, 0, _utc(3), "123456789"),
+    )
+    monkeypatch.setattr("scripts.read_only_db.connect_read_only", lambda: conn)
+
+    assert confidence_report._liveness() == []
 
 
 def test_quality_eval_is_read_only(monkeypatch):
