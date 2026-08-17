@@ -525,7 +525,7 @@ def test_repair_awareness_plan_has_headroom_for_multi_post_plans():
         )
 
     assert captured.get("called"), "repair should have issued a model call"
-    assert core.policy_for("awareness_repair").max_tokens >= 8192
+    assert core.policy_for("awareness_repair").max_tokens >= 16384
 
 
 def test_run_awareness_tick_serializes_the_full_read_compactly():

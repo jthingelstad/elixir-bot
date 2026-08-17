@@ -203,7 +203,10 @@ MODEL_CALL_POLICY: dict[str, CallPolicy] = {
     # These are background jobs on a weekly or twice-daily cadence, so latency
     # costs nothing and a timeout costs the whole deliverable.
     "awareness": CallPolicy(8192, timeout=300),
-    "awareness_repair": CallPolicy(8192, timeout=300),
+    # A repair must return the complete original plan as JSON as well as its
+    # corrected copy.  A live multi-post repair exhausted 8192 tokens and then
+    # failed closed because the truncated response omitted posts (2026-08-17).
+    "awareness_repair": CallPolicy(16384, timeout=300),
     "memory_synthesis": CallPolicy(16384, timeout=300),
     "weekly_recap": CallPolicy(16384, timeout=300),
     "weekly_recap_email": CallPolicy(16384, timeout=300),
