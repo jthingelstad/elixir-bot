@@ -29,6 +29,12 @@ _LITERAL_ESCAPE_RE = re.compile(r"\\[nrt]")
 # quotation it opened in its own head. It reads as a typo at the end of a post.
 _TRAILING_QUOTE_RE = re.compile(r'["\']\s*$')
 
+# A 2026-08-15 scoped-responder post embedded the model's tool-call parameter
+# syntax in the member-visible content while leaving ``covers_signal_keys``
+# empty. The trailing junk ended in ``]``, so the stray-quote check above did
+# not catch it and the durable delivery path faithfully sent it to Discord.
+_TOOL_PARAMETER_MARKUP_RE = re.compile(r"</?parameter\b[^>]*>", re.IGNORECASE)
+
 # `:name:` shortcodes. An unknown one renders as literal text, so a hallucinated
 # emoji is a visible defect rather than a missing decoration.
 _EMOJI_RE = re.compile(r":([a-z0-9_]+):", re.IGNORECASE)
@@ -74,6 +80,12 @@ def validate_discord_post(
         _reject(
             "The content ends with a stray quotation mark.",
             "Send only the post itself, with no wrapping quotes.",
+        )
+
+    if _TOOL_PARAMETER_MARKUP_RE.search(text):
+        _reject(
+            "The content contains leaked tool-call parameter markup.",
+            "Put tool arguments in their structured fields and send only the post text as content.",
         )
 
     if len(text) > max_chars:

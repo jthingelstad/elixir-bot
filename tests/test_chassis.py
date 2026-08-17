@@ -102,6 +102,18 @@ def test_a_trailing_quote_is_rejected():
         )
 
 
+def test_leaked_tool_parameter_markup_is_rejected():
+    """A real scoped-responder post shipped its intended coverage argument as
+    visible text. The post ended in ``]`` rather than a quote, so the older
+    mechanical checks accepted and delivered it."""
+    malformed = (
+        '**Champion League.** The push is real.",\n'
+        '<parameter name="covers_signal_keys">["champion_league_reached:#AAA:4"]'
+    )
+    with pytest.raises(PostRejected, match="tool-call parameter markup"):
+        validate_discord_post(malformed, lane="elixir")
+
+
 def test_invented_custom_emoji_are_rejected_but_unicode_is_allowed():
     """The `elixir_` namespace is checkable; Unicode shortcodes are not, and the
     brain's real posts use :crossed_swords: and :wave: correctly."""
