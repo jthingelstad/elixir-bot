@@ -51,6 +51,46 @@ def test_cli_without_arguments_runs_the_full_backup_set(monkeypatch):
     assert calls == ["backup"]
 
 
+def test_cli_loads_only_backup_paths_from_project_env(tmp_path, monkeypatch):
+    """The admin restart CLI must use the service's configured backup set."""
+    configured_backup_dir = tmp_path / "configured backups"
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            [
+                "ELIXIR_DB_PATH=/runtime/elixir-v51.db",
+                "ELIXIR_TELEMETRY_DB_PATH=/runtime/elixir-telemetry.db",
+                f'ELIXIR_BACKUP_DIR="{configured_backup_dir}"',
+                "CLAUDE_API_KEY=must-not-be-loaded-by-backup-cli",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    for key in backup_db._BACKUP_RUNTIME_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("CLAUDE_API_KEY", raising=False)
+    monkeypatch.setattr(backup_db, "_PROJECT_ROOT", tmp_path)
+
+    observed = {}
+    monkeypatch.setattr(
+        backup_db,
+        "backup_all",
+        lambda: (
+            observed.update(
+                {key: os.environ.get(key) for key in backup_db._BACKUP_RUNTIME_ENV_KEYS}
+            )
+            or {"ok": True, "results": []}
+        ),
+    )
+
+    assert backup_db.main([]) == 0
+    assert observed == {
+        "ELIXIR_DB_PATH": "/runtime/elixir-v51.db",
+        "ELIXIR_TELEMETRY_DB_PATH": "/runtime/elixir-telemetry.db",
+        "ELIXIR_BACKUP_DIR": str(configured_backup_dir),
+    }
+    assert "CLAUDE_API_KEY" not in os.environ
+
+
 def test_backup_leaves_no_temp_files_in_dest(tmp_path):
     src = tmp_path / "src.db"
     conn = sqlite3.connect(src)

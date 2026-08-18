@@ -49,6 +49,11 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 _DEFAULT_DB = _PROJECT_ROOT / "elixir-v51.db"
 _DEFAULT_BACKUP_DIR = Path.home() / "elixir-backups"
+_BACKUP_RUNTIME_ENV_KEYS = (
+    "ELIXIR_DB_PATH",
+    "ELIXIR_TELEMETRY_DB_PATH",
+    "ELIXIR_BACKUP_DIR",
+)
 
 _TIMESTAMP_FMT = "%Y-%m-%d-%H%M%S"
 _DEFAULT_PREFIX = "elixir"
@@ -66,6 +71,29 @@ def _telemetry_path() -> Path:
     from storage import telemetry
 
     return Path(telemetry.telemetry_path())
+
+
+def _load_backup_runtime_config() -> None:
+    """Load only the non-secret backup settings for standalone admin commands.
+
+    The launchd service already receives ``.env`` before its scheduled backup
+    runs.  ``scripts/admin.sh restart`` invokes this module directly instead,
+    which used to send its pre-restart snapshot to the fallback local directory
+    while the scheduled set went to the configured recovery location.  Keeping
+    the three path settings aligned makes every caller produce one backup set
+    without needlessly importing credentials into this operational command.
+    Explicit shell values still take precedence for recovery rehearsals.
+    """
+    env_path = _PROJECT_ROOT / ".env"
+    if not env_path.is_file():
+        return
+
+    from dotenv import dotenv_values
+
+    configured = dotenv_values(env_path)
+    for key in _BACKUP_RUNTIME_ENV_KEYS:
+        if key not in os.environ and configured.get(key):
+            os.environ[key] = configured[key]
 
 
 def _databases() -> list[tuple[str, Path, bool]]:
@@ -345,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    _load_backup_runtime_config()
     if not backup_all()["ok"]:
         log.error("One or more backups failed.")
         return 1

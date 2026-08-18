@@ -45,6 +45,11 @@ Override via env:
 - `ELIXIR_DB_PATH` — source database (default: `<repo>/elixir-v51.db`)
 - `ELIXIR_BACKUP_DIR` — destination dir (default: `~/elixir-backups`)
 
+When invoked directly by `admin.sh`, the backup CLI also reads these non-secret
+backup path settings (plus `ELIXIR_TELEMETRY_DB_PATH`) from the project `.env`.
+This keeps pre-deploy and scheduled snapshots in the same configured set without
+loading credentials.
+
 ### `elixir_state.py`
 Read-only inspection of Elixir's event streams, awareness activity, war state,
 and leader actions.

@@ -144,9 +144,11 @@ Do not turn it into a chain of internal proposals.
 Use the objective identity for commits and durable issue comments:
 
 ```bash
-uv run --locked python AGENT-TEAM/scripts/agent_attribution.py commit <automation-id> -- <git commit args>
+uv run --locked python AGENT-TEAM/scripts/agent_attribution.py commit <automation-id> -- -m "Commit message"
 uv run --locked python AGENT-TEAM/scripts/agent_attribution.py issue-comment <automation-id> <issue> --body-file <path>
 ```
+
+The commit helper invokes `git commit` itself; pass only its arguments after `--`.
 
 The automation IDs remain stable so existing scheduled-task history and memory are
 preserved; their display names and role files now express the objectives.
