@@ -111,6 +111,43 @@ def test_build_read_returns_expected_keys_on_empty_db():
     assert read["time"] is None
 
 
+def test_open_relay_copy_reaches_the_brain_for_duplicate_judgment(engine_conn):
+    """Regression for R304: an open weekly-story relay was reduced to the
+    opaque objective ``clan_story``, so the next awareness loop could not see
+    that its Week 2 clan-chat voicing duplicated the pending card."""
+    from runtime.awareness.read import _leader_action_board
+
+    action = db.create_leader_action_recommendation(
+        action_type="in_game_relay",
+        objective="clan_story",
+        prompt_text="Relay this week's story into clan chat.",
+        source_signal_key="weekly_story_relay:2026-W34",
+        source_signal_type="weekly_story_relay",
+        copy_original_text="Week 2 finished first again.",
+        copy_current_text="Week 2 finished first again; set boat defenses early. - E",
+        conn=engine_conn,
+    )
+
+    board = _leader_action_board(engine_conn)
+
+    assert board["open"] == [
+        {
+            "action_id": action["action_id"],
+            "action_type": "in_game_relay",
+            "objective": "clan_story",
+            "source_signal_type": "weekly_story_relay",
+            "relay_copy": "Week 2 finished first again; set boat defenses early. - E",
+            "status": "proposed",
+            "target_player_tag": None,
+            "target_player_name": None,
+            "decision_emoji": None,
+            "decision_note": None,
+            "proposed_at": board["open"][0]["proposed_at"],
+            "decided_at": None,
+        }
+    ]
+
+
 # ---------------------------------------------------------------------------
 # run_awareness_loop
 # ---------------------------------------------------------------------------

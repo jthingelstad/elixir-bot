@@ -805,10 +805,23 @@ def _leader_action_board(conn) -> dict:
     decided = [a for a in recent if (a.get("status") or "proposed") != "proposed"]
 
     def _compact(action: dict) -> dict:
+        relay_copy = None
+        if action.get("action_type") == "in_game_relay":
+            # Semantic duplication is an editorial judgment, but the brain used
+            # to receive only the opaque objective (for example ``clan_story``).
+            # Keep the exact pending in-game copy so it can recognize that a
+            # mandatory Discord post still belongs while its clan-chat sibling
+            # would repeat a card already in the leader's hands. Clan-chat copy
+            # is bounded to two 200-character messages by the producer.
+            relay_copy = (
+                action.get("copy_current_text") or action.get("copy_original_text") or ""
+            ).strip()[:420] or None
         return {
             "action_id": action.get("action_id"),
             "action_type": action.get("action_type"),
             "objective": action.get("objective"),
+            "source_signal_type": action.get("source_signal_type"),
+            "relay_copy": relay_copy,
             "status": action.get("status"),
             "target_player_tag": action.get("target_player_tag"),
             "target_player_name": action.get("target_player_name"),
