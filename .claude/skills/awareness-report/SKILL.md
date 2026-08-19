@@ -89,7 +89,7 @@ ORDER BY calls DESC;
 ```
 
 Also inspect failed thoughts, posts without a linked loop number, awareness
-errors in `logs/elixir-error.log`, and the `awareness-loop` row in
+errors in `logs/elixir-error.log`, and the `awareness_loop` row in
 `runtime_job_status`. Use exact thought loop
 numbers, post ids, Discord message ids, and timestamps as evidence.
 
