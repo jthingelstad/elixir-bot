@@ -86,6 +86,29 @@ JOBS = (
         ),
         frozenset({_ELIXIR, _CLAN_CHAT}),
     ),
+    # Phase 3. ONE job for the whole war boundary, and the plan asked for two
+    # (`war_week.md` + `war_season.md`). Two would have been a bug: at a season
+    # close, `week_finished`, `season_closed` and `clan_league_changed` all emit
+    # at the SAME instant (measured 2026-08-03T11:17:22Z), and wakes group by
+    # (class, model, job) — so two jobs means two groups, two wakes, and two
+    # posts narrating one moment. That is the divergence this architecture
+    # exists to prevent, and the plan's own text demands the season close "land
+    # as ONE post". One job makes the batching structural instead of hoped-for.
+    # A plain week close carries only `week_finished` and reads the same way.
+    JobSpec(
+        "war_close",
+        frozenset({"week_finished", "season_closed", "clan_league_changed"}),
+        frozenset({_ELIXIR, _CLAN_CHAT}),
+    ),
+    # Its own job, deliberately: a tournament result shares (immediate, chat)
+    # with the war boundary but is a different story, and the grouping key is
+    # what keeps them from colliding into one confused post.
+    JobSpec("tournament", frozenset({"tournament_finished"}), frozenset({_ELIXIR})),
+    # Annual, and the last hard post that had no job. Without one it would fall
+    # to the brain — which this phase cuts to once a day, so the clan's own
+    # birthday could arrive up to 24h late. Registering it is what makes the
+    # cadence cut safe.
+    JobSpec("clan_birthday", frozenset({"clan_birthday"}), frozenset({_ANNOUNCE, _CLAN_CHAT})),
 )
 
 JOBS_BY_NAME = {spec.name: spec for spec in JOBS}
@@ -190,6 +213,12 @@ def build_seed(events: list[dict], conn) -> dict:
         tag = event.get("subject_tag")
         if tag:
             entry["member"] = _member_facts(conn, tag)
+        # War-boundary events have no subject_tag — the subject is the clan. The
+        # facts they need are resolved the same way and for the same reason.
+        if event.get("event_type") in _WAR_FACT_EVENT_TYPES:
+            war = _war_facts(conn, event)
+            if war:
+                entry["war"] = war
         seed_events.append(entry)
 
     return {
@@ -229,6 +258,89 @@ def _member_facts(conn, tag: str) -> dict:
     # The distinction a welcome turns on. Left to infer from a stint list, a
     # model can and does read a returning member as brand new.
     facts["is_returning"] = len([s for s in stints if s["left_at"]]) > 0
+    return facts
+
+
+# Read off the job registry rather than restated, so a war type added to
+# `war_close` cannot silently miss its resolved facts.
+_WAR_FACT_EVENT_TYPES = JOBS_BY_NAME["war_close"].event_types
+
+_LEAGUE_ORDER = ("Bronze", "Silver", "Gold", "Legendary")
+_ROMAN = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5}
+
+
+def _league_rank(name: str | None) -> tuple[int, int] | None:
+    """Order a war league name so direction can be stated, not guessed.
+
+    Clash Royale numbers war-league tiers ASCENDING inside a band — Silver II is
+    above Silver I — which is the opposite of the ranked ladder's convention and
+    is exactly the "league-direction semantics" the plan flags as a trap. A model
+    asked to infer it from two names gets it right about half the time, and
+    "POAP KINGS drops to Silver II" after a promotion is the worst sentence this
+    job could write.
+    """
+    if not name:
+        return None
+    parts = str(name).split()
+    band = next((i for i, b in enumerate(_LEAGUE_ORDER) if parts and parts[0] == b), None)
+    if band is None:
+        return None
+    tier = next((_ROMAN[p] for p in parts if p in _ROMAN), 0)
+    return (band, tier)
+
+
+def _war_facts(conn, event: dict) -> dict:
+    """Resolve what a war-boundary post must state and must not derive.
+
+    Three things, all measured as traps rather than imagined:
+
+    - **Clan names.** ``week_finished`` standings carry clan TAGS only. A model
+      that cannot resolve ``#RJQQLLV9`` either prints the tag or invents a name.
+      Resolved here for the same reason ``_member_facts`` resolves a player: a
+      join is cheap and an invention is not.
+    - **The human week label.** ``section_index`` is 0-based and the clan says
+      "Week 1". Off-by-one in a headline is the kind of error nobody forgives.
+    - **League direction.** See ``_league_rank``.
+    """
+    facts: dict = {}
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    key = str(event.get("signal_key") or "")
+
+    # dedup_key shape is `<type>:<season>:<section>` — the season and week live
+    # on the row, not in the payload, so this is where they re-enter.
+    bits = key.split(":")
+    if len(bits) >= 3 and bits[1].isdigit() and bits[2].isdigit():
+        facts["season_id"] = int(bits[1])
+        facts["week_label"] = f"Week {int(bits[2]) + 1}"
+    elif len(bits) >= 2 and bits[1].isdigit():
+        facts["season_id"] = int(bits[1])
+
+    standings = payload.get("standings")
+    if isinstance(standings, list) and standings:
+        names = {}
+        tags = [s.get("clan_tag") for s in standings if isinstance(s, dict) and s.get("clan_tag")]
+        if tags:
+            rows = conn.execute(
+                f"SELECT clan_tag, name FROM clans WHERE clan_tag IN "
+                f"({','.join('?' for _ in tags)})",
+                tuple(tags),
+            ).fetchall()
+            names = {r["clan_tag"]: r["name"] for r in rows}
+        facts["standings"] = [
+            {**s, "clan_name": names.get(s.get("clan_tag"))}
+            for s in standings
+            if isinstance(s, dict)
+        ]
+
+    if event.get("event_type") == "clan_league_changed":
+        before, after = (
+            _league_rank(payload.get("prev_league")),
+            _league_rank(payload.get("league")),
+        )
+        if before and after and before != after:
+            facts["direction"] = "promoted" if after > before else "demoted"
+        elif before and after:
+            facts["direction"] = "unchanged"
     return facts
 
 

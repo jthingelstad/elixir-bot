@@ -37,8 +37,8 @@ matches brain quality at 4–20× lower cost; the brain spends ~300K tokens/tick
 |---|---|---|
 | 0 — shadow wakes + baseline | **shipped, live** (`4eaab798`) | `ELIXIR_WAKE_POLICY=1`, `ELIXIR_WAKE_SHADOW=1` |
 | 1 — chassis + join responder | **shipped, LIVE, gate MET 2026-08-05** (`276011fb`, enabled `f1d6c2fa`) | `ELIXIR_WAKE_RESPONDER=1` |
-| 2 — roster wakes, brain 4×→2× | **shipped, LIVE 2026-08-05**, watching | `ELIXIR_WAKE_RESPONDER=1` |
-| 3 — war wakes, brain →1× | not started | — |
+| 2 — roster wakes, brain 4×→2× | **shipped, LIVE 2026-08-05, gate MET 2026-08-19** | `ELIXIR_WAKE_RESPONDER=1` |
+| 3 — war wakes, brain →1× | **shipped, LIVE 2026-08-19** | `ELIXIR_WAKE_RESPONDER=1` |
 | 4 — leader-feedback reflection | not started | — |
 | 5 — dossiers + follow-ups | not started | needs `_apply_v36` |
 | 6 — adoption + tuning | not started | — |
@@ -52,10 +52,66 @@ Five jobs now, the brain runs twice a day, and `trigger.py` is gone. What the
 pre-build analysis changed about the plan is recorded in the Phase 2 section
 below — three of its six steps were wrong about where the work was.
 
-**Phase 2's exit gate is running: two weeks from 2026-08-05, to 2026-08-19.**
-Watch `#leaders` for the daily divergence report (overlaps + floor misses) and
-review post quality. Note Jamie is away from the evening of 2026-08-06, so the
-first stretch of the gate is unattended by design.
+**Phase 2's exit gate is MET, closed by Jamie 2026-08-19.** Two weeks measured
+2026-08-05 to 2026-08-19, almost all of it unattended:
+
+| Gate criterion | Result |
+|---|---|
+| Zero divergence flags | **0 overlaps** across 58 fulfilled intents / 14 days |
+| Zero floor misses | **0** |
+| Post quality | reviewed and accepted; two defects found and fixed (below) |
+| Cost | responder **$0.112/episode**; awareness stack **$0.79/day** against a ~$1.40 target |
+
+41 wake episodes, **40 delivered (97.6%)**. Jobs exercised on live events:
+`milestone_batch` 27, `welcome` 9, `farewell` 3, `role_change` 2. The farewell
+carried the leader's note through to the post — the `leader_context` path the
+phase was built for — and the role changes cited real war evidence.
+
+**`podium` never fired, and could not have.** `pol_season_podium` is monthly; it
+last fired 2026-08-03, two days BEFORE Phase 2 shipped, and the next is ~2026-09-03.
+Jamie's call on 2026-08-19 was to close the gate rather than hold a shipped phase
+open for a calendar: the job is registered, its prompt is written, and it was
+rehearsed — waiting three more weeks buys one observation and blocks everything
+behind it. **It is the one job still unproven in production; treat its first live
+firing as a thing to watch, not as a thing that is known to work.** This is the
+same lesson the phase already recorded once about "≥5 real joins": when a gate is
+waiting on the world rather than on work, stop waiting.
+
+**What the gate found that the criteria did not ask for** — all four fixed and
+deployed 2026-08-19 (`bad0255a`, `8a57ee33`):
+
+- **The escalation ladder fired 10 times and left no evidence.** Haiku carried
+  31/41 (76%); every one of the 10 escalations had the identical signature — no
+  post, no validator rejection, `stop_reason=end_turn`, output nowhere near the
+  2,000-token ceiling. The turn ended early rather than the tier being too weak.
+  Only the winning tier's episode was stored, so none of it was diagnosable from
+  the episodes; it came out of log lines. A won episode now carries the rungs
+  that failed, and a tier that ends without posting gets one nudge at the same
+  price before the stronger model is paid for.
+- **The canary could be skipped by an unrelated job.** It ran 13 of 14 days. It
+  rides inside `action-outcome-refresh`, whose early `return` on failure took it
+  down on 2026-08-03 (`database is locked`). A check that did not run is
+  indistinguishable from a clean one — the single thing this gate cannot afford.
+- **The literal `\n` was renting a round.** 22 bounces across 41 wakes, 56% of
+  episodes paying an extra model round, the model rewriting it correctly every
+  time. Now repaired and counted onto the episode.
+- **The welcome converged on a form.** Nine welcomes, nine different decks, one
+  three-sentence skeleton — the trophies-and-arena opener `welcome.md` already
+  bans, relocated to sentence two. `recent_posts` was reaching the model the
+  whole time; the job file now asks for a different structure, not just
+  different facts.
+
+**Also measured, and it is what re-costs Phase 3:** the awareness stack runs at
+**$0.79/day** (brain $0.48 + responder $0.31). The plan's post-Phase-2 target was
+~$1.40/day and its **post-Phase-3** target was $1.00-1.20/day. Phase 2 alone beat
+the Phase 3 number by 25-35%. See the Phase 3 section.
+
+**The brain's own floors are still unwatched.** `divergence.floor_misses` reads
+wake episodes only, so it covers the responder and nothing else. Two brain runs
+failed in 29 during the window (llm_api_error 2026-08-12; a copy-policy repair
+failure 2026-08-17). Fail-closed worked both times and the next run covered the
+signal — but the 2026-08-17 failure delayed a `week_finished` hard post by
+**16h 24m** with nothing raising a flag. The normal figure is ~4.5h.
 
 **A gate lesson worth carrying forward:** "≥5 real joins" was an exit criterion
 the team could not influence — it depended on strangers deciding to join a clan.
@@ -445,9 +501,17 @@ say out loud. Two hard posts were missed outright: gtr0925's departure
 (2026-07-15) and a promotion to Elder (2026-07-05). Added load is ~1.9 scoped
 turns/day.
 
-Exit gate: two weeks, zero floor misses (`runtime/awareness/divergence.py`,
-reported daily to #leaders), zero divergence flags, Jamie satisfied with post
-quality. Cost report: expected ~$1.40/day total awareness spend at this stage.
+Exit gate: **MET 2026-08-19** — two weeks, zero floor misses
+(`runtime/awareness/divergence.py`), zero divergence flags, post quality accepted,
+awareness spend $0.79/day against the expected ~$1.40. Full result and the four
+defects the window surfaced are in the status section at the top of this file.
+
+> One correction worth carrying: **the daily report only POSTS to #leaders when
+> it finds something.** A clean day is a log line. "Watch #leaders for the daily
+> divergence report" was written as if silence meant nothing had run, when in
+> fact silence was the pass condition — and for two weeks Jamie was watching an
+> empty channel with no way to tell the two apart. If a check is someone's
+> evidence, it has to report that it ran, not only that it failed.
 Kill switch: per-class — a wake class flips back to digest with one registry
 edit; cadence revert is one line.
 Size: 2–3 evenings.
@@ -499,9 +563,44 @@ Build:
   it. Boundary-day escalation: a war wake may request the full brain when it
   judges the moment bigger than its scope (a tool, not a heuristic).
 
+**SHIPPED 2026-08-19.** What the pre-build analysis changed, continuing this
+plan's habit of being wrong about where the work is:
+
+- **The two job files were the bug.** `war_week.md` + `war_season.md` would have
+  split the season boundary into two jobs — and wakes group by (class, model,
+  job), so that is two wakes and two posts narrating one moment, the exact
+  divergence this architecture exists to prevent. Measured at
+  2026-08-03T11:17:22Z, `week_finished`, `season_closed` and
+  `clan_league_changed` fire in the SAME instant. One job (`war_close`) makes the
+  plan's own "must land as ONE post" structural rather than hoped-for.
+- **The contracts were already right.** All four war types were already
+  `immediate`/`chat`; they simply had no job, so `job_for` returned None and they
+  fell to the brain. Phase 3's core was a registry entry, not a wake-policy
+  change — the same discovery Phase 2 made about step 2.
+- **`tournament_finished` and `clan_birthday` were hard posts with no job**, and
+  nothing in the plan mentioned them. Both had to be registered before the
+  cadence could be cut, because a floor with no job waits for the brain.
+  `tests/test_wake_jobs_phase3.py::test_every_hard_post_has_a_job` is now the
+  join between the jobs and the cron: it fails if anyone adds a hard post without
+  a job, which is the precondition for `AWARENESS_LOOP_HOURS_DEFAULT = "9"`.
+- **Which brain slot to cut was measurable.** Over the Phase 2 window the 21:05
+  CT run was silent 11 of 15 times for 5 posts; the 09:05 CT run posted on all
+  14. The quiet slot went.
+- **The seed's traps were real and none were in the payload.** Standings carry
+  clan TAGS with no names; the week label needs `section_index + 1` off the
+  dedup key, not the payload; and war-league tiers run ASCENDING inside a band
+  (Silver II is above Silver I), the opposite of the ranked ladder. All three are
+  resolved in `_war_facts` before the model sees them.
+
+Not built: the boundary-day escalation tool (a war wake asking for the full
+brain). The failure path it would improve already exists — an uncovered floor
+runs the brain out of band — and adding a surface tool touches three tool-name
+sets for a case that has not yet occurred. It stays on the plan.
+
 Exit gate: one full war week + one season boundary handled by wakes, quality
 reviewed side-by-side against the brain era. Awareness spend at target
-(~$1.00–1.20/day).
+(~$1.00–1.20/day). **Next natural checkpoints: a week close ~2026-08-24 and the
+season boundary ~2026-09-03**, which is also `podium`'s first live firing.
 Kill switch: war classes → digest (registry edit) restores brain-composed war
 posts at the daily cadence.
 Size: 2 evenings.

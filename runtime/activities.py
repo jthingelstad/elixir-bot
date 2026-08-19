@@ -16,7 +16,7 @@ from typing import Any
 # signals, trends, and the backstop sweep — which does not need four passes.
 # 9/21 keeps the two highest-value slots: the morning check-in and peak evening
 # play, the last chance to voice anything before the day rolls.
-AWARENESS_LOOP_HOURS_DEFAULT = "9,21"
+AWARENESS_LOOP_HOURS_DEFAULT = "9"
 
 
 @dataclass(frozen=True)
@@ -434,7 +434,16 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         # tunables: hourly -> */3 (2026-07-23) -> */6 (2026-07-31), both for cost,
         # then */6 -> 3,9,15,21 (2026-07-31) to phase the same 6h interval onto CT
         # waking hours, then -> 9,21 (2026-08-05, Phase 2) once the scoped
-        # responder took over the hard posts (see AWARENESS_LOOP_HOURS_DEFAULT).
+        # responder took over the hard posts (see AWARENESS_LOOP_HOURS_DEFAULT),
+        # then 9,21 -> 9 (2026-08-19, Phase 3) once EVERY hard post had a job.
+        # That last precondition is the whole safety argument and it is testable:
+        # tests/test_wake_jobs_phase3.py asserts no hard-post event type is left
+        # without one. Before Phase 3 a war week close reached members only
+        # through this cron, so halving it would have doubled the worst-case wait
+        # on a floor. Now no floor depends on this run at all.
+        # Which slot survived was measured, not chosen: over the Phase 2 window
+        # the 21:05 CT run was silent 11 of 15 times and produced 5 posts, while
+        # the 09:05 CT run posted on all 14. The quiet slot is the one that went.
         # Awareness is 51% of Elixir's LLM spend, so the interval is the biggest
         # single lever (~$37/month here). Moving it to Haiku was measured and
         # REJECTED instead: replaying real captured rounds, Haiku wrote near-parity
