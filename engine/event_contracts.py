@@ -176,6 +176,17 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
     "cr_account_anniversary": _event("clan", "clan_event", "name", "years"),
     "war_champ_lead_change": _event("war", "clan_event", "season_id", "new_leader"),
     "rookie_mvp_lead_change": _event("war", "clan_event", "season_id", "new_leader"),
+    # Phase 5: a carried intention came due. Not a hard post — a check-in is a
+    # kindness, not an obligation, and a floor would mean a failed turn blocks
+    # the cursor until someone is asked how their phone is. Immediate because a
+    # follow-up scheduled for Tuesday is worthless on Thursday.
+    "followup_due": _event(
+        "clan",
+        "clan_event",
+        "why",
+        time_semantics="exact",
+        wake="immediate",
+    ),
     "pol_season_podium": _event(
         "clan",
         "battle_mode",

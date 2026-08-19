@@ -131,6 +131,33 @@ def _persist_lessons(conn, lessons: list[dict], notes: str) -> list[int]:
     return written
 
 
+def _persist_dossiers(conn, dossiers: list[dict]) -> int:
+    """Write member dossiers. Returns how many were written.
+
+    Only for members who actually exist: a dossier keyed on a tag the roster has
+    never seen is either a hallucinated player or a typo, and the FK would raise
+    into the job either way.
+    """
+    from storage.dossiers import upsert_dossier
+
+    written = 0
+    for entry in dossiers:
+        if not isinstance(entry, dict):
+            continue
+        tag = str(entry.get("member_tag") or "").strip()
+        body = str(entry.get("body") or "").strip()
+        if not tag or not body:
+            continue
+        known = conn.execute("SELECT 1 FROM players WHERE player_tag = ?", (tag,)).fetchone()
+        if not known:
+            log.info("reflection: dropped a dossier for unknown member %s", tag)
+            continue
+        if upsert_dossier(tag, body, updated_by="reflection", conn=conn):
+            written += 1
+    conn.commit()
+    return written
+
+
 def _evidence_key(evidence: str) -> str:
     import hashlib
 
@@ -189,25 +216,32 @@ async def _reflection_cycle():
         )
         lessons = lessons[:MAX_LESSONS_PER_NIGHT]
 
+    dossiers = plan.get("dossiers")
+    dossiers = dossiers if isinstance(dossiers, list) else []
+
     def _write():
         conn = db.get_connection()
         try:
-            return _persist_lessons(conn, lessons, str(plan.get("notes") or ""))
+            written = _persist_lessons(conn, lessons, str(plan.get("notes") or ""))
+            return written, _persist_dossiers(conn, dossiers)
         finally:
             conn.close()
 
     try:
-        written = await asyncio.to_thread(_write)
+        written, dossiers_written = await asyncio.to_thread(_write)
     except Exception as exc:
         log.error("reflection: persisting lessons failed: %s", exc, exc_info=True)
         runtime_status.mark_job_failure("reflection", f"persist failed: {exc}")
         return
 
     log.info(
-        "reflection: %d intent(s), %d reaction(s), %d silence(s) -> %d lesson(s) written",
+        "reflection: %d intent(s), %d reaction(s), %d silence(s) -> %d lesson(s), %d dossier(s)",
         len(context["intents"]),
         len(context["reactions"]),
         len(context["silences"]),
         len(written),
+        dossiers_written,
     )
-    runtime_status.mark_job_success("reflection", f"{len(written)} lesson(s)")
+    runtime_status.mark_job_success(
+        "reflection", f"{len(written)} lesson(s), {dossiers_written} dossier(s)"
+    )

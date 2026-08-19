@@ -13,8 +13,8 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 37
-EXPECTED_TABLE_COUNT = 64  # v37 adds the bounded player_side_mode_progress projection
+CURRENT_SCHEMA_VERSION = 38
+EXPECTED_TABLE_COUNT = 66  # v38 adds member_dossiers + scheduled_followups
 
 
 def initialize_empty_database(
@@ -1970,6 +1970,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 37
+    if version < 38:
+        try:
+            _apply_v38(conn)
+            conn.execute("PRAGMA user_version = 38")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -2192,6 +2201,57 @@ def _apply_v36(conn: sqlite3.Connection) -> None:
            WHERE game_mode_id = 72000071
              AND game_mode_name = 'Rage_Friendly'
              AND mode_group = 'other'"""
+    )
+
+
+def _apply_v38(conn: sqlite3.Connection) -> None:
+    """Agentic Loop v2 Phase 5: member dossiers and carried intentions.
+
+    Both tables hold **member data and model-authored text**, which is why they
+    live here and never in git — the repo is public (plan design rule 6).
+
+    ``member_dossiers`` is one row per member: what Elixir knows about someone as
+    a person rather than as a row of statistics. Written only by the nightly
+    reflection and injected by the chassis for members in a turn's scope.
+
+    **There is deliberately no backfill.** A dossier is earned by observation, and
+    generating fifty of them from statistics on migration day would manufacture
+    exactly the confident-sounding fiction this is meant to replace. Empty on
+    migration is the correct state.
+
+    ``scheduled_followups`` is an intention with a due date — "ask canavar how
+    the phone is". It lives in the CLAN database, not telemetry, because a due
+    follow-up becomes a wake and a wake changes what Elixir does; the telemetry
+    file is safe to delete and may never decide anything.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS member_dossiers (
+            player_tag TEXT PRIMARY KEY REFERENCES players(player_tag) ON DELETE CASCADE,
+            body TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            updated_by TEXT NOT NULL,
+            source_intent_key TEXT
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_member_dossiers_updated ON member_dossiers(updated_at DESC)"
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS scheduled_followups (
+            followup_id INTEGER PRIMARY KEY,
+            due_at TEXT NOT NULL,
+            why TEXT NOT NULL,
+            player_tag TEXT REFERENCES players(player_tag) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'fired', 'cancelled')),
+            fired_at TEXT
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scheduled_followups_due "
+        "ON scheduled_followups(status, due_at)"
     )
 
 
@@ -2444,7 +2504,8 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-CURRENT_SCHEMA_FINGERPRINT = "bc84d8a92755d79193a80b8915f333eac294565802ac166dc662874537f7aef5"
+# v38 (2026-08-19): member_dossiers + scheduled_followups.
+CURRENT_SCHEMA_FINGERPRINT = "b2977bc9431e1d9a674970c58276dce21c1b32515f85cd6619f30a3b9837381b"
 
 
 __all__ = [

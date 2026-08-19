@@ -31,7 +31,9 @@ BROAD_EXCEPTION_BASELINE = {
     # caller can escalate instead of crashing), and two guard context assembly —
     # a turn without lessons or recent posts is worse than one with, and far
     # better than a hard-post floor left uncovered because a lookup failed.
-    "agent/chassis.py": 3,
+    # 3 -> 4 (2026-08-19, Phase 5): dossier injection. A turn must still happen
+    # when the dossier read fails; a post with less colour beats no post.
+    "agent/chassis.py": 4,
     # 3 -> 4 (2026-08-05): recording a call's cost against the daily spend
     # ceiling. A counter that can fail an already-successful model call would
     # be a cost control causing the outage it exists to prevent.
@@ -47,7 +49,9 @@ BROAD_EXCEPTION_BASELINE = {
     "agent/factual_admission.py": 1,
     "agent/intent_router.py": 1,
     "agent/release_notes.py": 2,
-    "agent/tool_exec.py": 8,  # -1: #225 removed the obsolete watch-to-case fallback
+    # 8 -> 9 (2026-08-19, Phase 5): schedule_followup. A failed intention returns
+    # an error to the model, which can say so; it never fails the turn.
+    "agent/tool_exec.py": 9,  # -1: #225 removed the obsolete watch-to-case fallback
     "agent/workflows.py": 10,
     "capabilities/battle_intel.py": 1,  # newcomer view: deck naming must never fail a welcome
     "capabilities/decks.py": 2,
@@ -59,13 +63,18 @@ BROAD_EXCEPTION_BASELINE = {
     # even with no database; an unavailable floor renders as "read it live"
     # rather than a guessed number.
     "prompts.py": 1,
-    "db/schema.py": 37,  # +1: v37 migration rollback/re-raise (same pattern as v2-v36)
+    # 37 -> 38 (2026-08-19): the v38 ladder rung, which rolls back and re-raises
+    # exactly like every rung before it.
+    "db/schema.py": 38,  # +1: v37 migration rollback/re-raise (same pattern as v2-v36)
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
     "engine/leader_note_effects.py": 2,  # apply/revert leader-note effects fail-open (never break the interpreter)
     "engine/management.py": 6,  # +3: v7 leader-note gates (premise fingerprint, member shield) fail-open to False
     "engine/materialize.py": 2,
+    # Phase 5 (2026-08-19): due-followup emission. A check-in that cannot be
+    # emitted must never fail a tick carrying war data and management verdicts.
+    "engine/tick.py": 1,
     "engine/nicknames.py": 1,
     "engine/pol_seasons.py": 2,
     "memory_store/__init__.py": 1,

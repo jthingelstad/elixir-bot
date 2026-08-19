@@ -109,6 +109,11 @@ JOBS = (
     # birthday could arrive up to 24h late. Registering it is what makes the
     # cadence cut safe.
     JobSpec("clan_birthday", frozenset({"clan_birthday"}), frozenset({_ANNOUNCE, _CLAN_CHAT})),
+    # Phase 5. Both surfaces available, but `followup.md` sends almost every one
+    # to clan chat: a check-in is about one person and belongs where they will
+    # see it. It is also the one job whose correct answer is often no post at
+    # all, which is why it carries no floor.
+    JobSpec("followup", frozenset({"followup_due"}), frozenset({_ELIXIR, _CLAN_CHAT})),
 )
 
 JOBS_BY_NAME = {spec.name: spec for spec in JOBS}

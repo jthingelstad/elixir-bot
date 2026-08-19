@@ -430,6 +430,17 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
                     conn=conn,
                 )
 
+    # Phase 5: a carried intention that has come due becomes an ordinary event,
+    # so it travels the wake path everything else uses instead of growing a
+    # second scheduler. Guarded because a follow-up is a kindness — failing to
+    # ask someone how their phone is must never fail a tick that also has war
+    # data and management verdicts in it.
+    try:
+        counters["followups_emitted"] = _emit_due_followups(conn, now_iso)
+    except Exception as exc:
+        counters["followup_error"] = str(exc)
+        log.warning("followup emission failed: %s", exc, exc_info=True)
+
     counters["proactive_posting"] = "awareness_only"
     counters["tick_completed_at"] = utcnow()
     manage_succeeded = "manage_error" not in counters
@@ -469,3 +480,36 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
     )
     conn.commit()
     return counters
+
+
+def _emit_due_followups(conn, now_iso: str) -> int:
+    """Turn due follow-ups into `followup_due` events. Returns the count.
+
+    `fired` is set at EMISSION, not delivery. The event carries the ordinary
+    guarantees from here: it sits past the awareness cursor until something
+    covers it, and a failed responder turn leaves it for the daily brain.
+    Keeping the row pending too would give one intention two retry mechanisms,
+    which is how a gentle check-in becomes the same question asked four times.
+    """
+    from engine.emitters import insert_stream_event
+    from storage import dossiers
+
+    due = dossiers.due_followups(now=now_iso, conn=conn)
+    emitted = 0
+    for item in due:
+        payload = {"why": item["why"], "followup_id": item["followup_id"]}
+        if item.get("player_tag"):
+            payload["player_tag"] = item["player_tag"]
+        emitted += insert_stream_event(
+            conn,
+            "clan_events",
+            dedup_key=f"followup_due:{item['followup_id']}",
+            event_type="followup_due",
+            subject_cols={"clan_tag": HOME_CLAN, "subject_tag": item.get("player_tag")},
+            observed_at=now_iso,
+            window_start=None,
+            payload=payload,
+            timing="exact",
+        )
+        dossiers.mark_followup_fired(item["followup_id"], conn=conn)
+    return emitted

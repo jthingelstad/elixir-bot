@@ -197,7 +197,36 @@ def assemble_context(attention: Attention, seed: dict) -> dict:
     context["lessons"] = _editorial_lessons()
     if attention.scope.lanes:
         context["recent_posts"] = _recent_posts(attention.scope.lanes)
+    dossiers = _dossiers(attention.scope.member_tags)
+    if dossiers:
+        context["dossiers"] = dossiers
     return context
+
+
+def _dossiers(member_tags) -> dict:
+    """What Elixir knows about the people this turn is about (Phase 5).
+
+    Flagged separately from the reflection that writes them: capturing a
+    dossier and letting it shape a member-facing post are different risks, and
+    the second one is the one a member would notice.
+
+    The bodies are model-authored text re-entering a model, so they are
+    length-capped at the store. They are facts about a person, never
+    instructions — the job prompt is what tells a turn how to write.
+    """
+    import os
+
+    if not member_tags:
+        return {}
+    if os.getenv("ELIXIR_DOSSIERS", "0").strip().lower() in ("0", "false", "no", "off"):
+        return {}
+    try:
+        from storage.dossiers import dossiers_for
+
+        return dossiers_for(member_tags)
+    except Exception:
+        log.debug("chassis: dossiers unavailable", exc_info=True)
+        return {}
 
 
 def _editorial_lessons(limit: int = 12) -> list[dict]:

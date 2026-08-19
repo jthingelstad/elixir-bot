@@ -61,7 +61,11 @@ def memdb(tmp_path, monkeypatch):
 
 
 def test_every_awareness_intended_write_tool_is_reachable():
-    intended = {"save_clan_memory", "record_leadership_followup"}
+    # schedule_followup joined 2026-08-19 (Phase 5). It is in BOTH write sets on
+    # purpose: a tool in _WRITE_TOOL_NAMES alone was once offered to a model zero
+    # times, and an intention Elixir can only form during a leadership
+    # conversation is useless — members mention the broken phone in #ask-elixir.
+    intended = {"save_clan_memory", "record_leadership_followup", "schedule_followup"}
     tool_names = {t["name"] for t in TOOLSETS_BY_WORKFLOW["awareness"]}
     assert AWARENESS_WRITE_TOOL_NAMES == intended
     assert intended <= _WRITE_TOOL_NAMES
@@ -88,8 +92,11 @@ def test_retired_write_tools_are_not_exposed_to_awareness():
     }.isdisjoint(tool_names)
 
 
-def test_write_tool_names_match_two_tool_surface():
-    expected = {"save_clan_memory", "record_leadership_followup"}
+def test_write_tool_names_match_the_write_surface():
+    """The two sets must stay identical. They are separate for a real reason —
+    clanops and awareness are different audiences — but a tool in one and not
+    the other is invisible to half the system, which has happened."""
+    expected = {"save_clan_memory", "record_leadership_followup", "schedule_followup"}
     assert _WRITE_TOOL_NAMES == expected
     assert AWARENESS_WRITE_TOOL_NAMES == expected
 

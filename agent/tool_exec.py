@@ -1519,6 +1519,42 @@ def _execute_schedule_revisit(arguments):
     }
 
 
+def _execute_schedule_followup(arguments):
+    """Carry an intention forward (Agentic Loop v2, Phase 5).
+
+    Writes a row and nothing else. When it comes due the engine tick emits a
+    `followup_due` event and the ordinary wake path takes over — this tool
+    schedules Elixir, it does not schedule a message.
+    """
+    from storage.dossiers import schedule_followup
+
+    due_at = str(arguments.get("due_at") or "").strip()
+    why = str(arguments.get("why") or "").strip()
+    if not due_at or not why:
+        return {"error": "schedule_followup requires due_at and why"}
+    member_tag = (arguments.get("member_tag") or "").strip() or None
+    if member_tag:
+        resolved = _resolve_member_tag(member_tag)
+        if resolved:
+            member_tag = resolved
+    try:
+        followup_id = schedule_followup(
+            due_at=due_at, why=why, player_tag=member_tag, created_by="agent"
+        )
+    except Exception as exc:
+        log.warning("schedule_followup failed: %s", exc)
+        return {"error": "could not schedule the follow-up"}
+    if not followup_id:
+        return {"error": "schedule_followup requires due_at and why"}
+    return {
+        "scheduled": True,
+        "followup_id": followup_id,
+        "due_at": due_at,
+        "member_tag": member_tag,
+        "note": "You will be woken with this note at that time and can decide then.",
+    }
+
+
 def _execute_record_leadership_followup(arguments):
     """Awareness-loop observation: record an operational note.
 
@@ -1814,6 +1850,7 @@ ADVERTISED_TOOL_EXECUTOR_NAMES = frozenset(
         "cr_api",
         "save_clan_memory",
         "record_leadership_followup",
+        "schedule_followup",
         "get_awards",
         "get_game_mode_performance",
         "lookup_reference",
@@ -2123,6 +2160,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_raise_clan_chat_relay(arguments)
         elif name == "record_leadership_followup":
             result = _execute_record_leadership_followup(arguments)
+        elif name == "schedule_followup":
+            result = _execute_schedule_followup(arguments)
         elif name == "schedule_revisit":
             result = _execute_schedule_revisit(arguments)
         else:

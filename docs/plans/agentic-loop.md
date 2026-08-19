@@ -40,7 +40,7 @@ matches brain quality at 4–20× lower cost; the brain spends ~300K tokens/tick
 | 2 — roster wakes, brain 4×→2× | **shipped, LIVE 2026-08-05, gate MET 2026-08-19** | `ELIXIR_WAKE_RESPONDER=1` |
 | 3 — war wakes, brain →1× | **shipped, LIVE 2026-08-19** | `ELIXIR_WAKE_RESPONDER=1` |
 | 4 — leader-feedback reflection | **shipped, LIVE 2026-08-19** | `ELIXIR_REFLECTION=1` |
-| 5 — dossiers + follow-ups | not started | needs `_apply_v36` |
+| 5 — dossiers + follow-ups | **shipped, LIVE 2026-08-19** (`_apply_v38`) | `ELIXIR_DOSSIERS`, `ELIXIR_REFLECTION` |
 | 6 — adoption + tuning | not started | — |
 
 **Phase 2 shipped 2026-08-05** and is **verified on a real member**: Escanor
@@ -679,8 +679,35 @@ Build:
   First uses: post-advice check-ins in #ask-elixir, quiet-joiner check, "ask
   canavar how the phone is" class of intentions.
 
+**SHIPPED 2026-08-19** as `_apply_v38` (`member_dossiers`, `scheduled_followups`),
+rehearsed on a copy of the 1.7GB production database before deploy: 0.00s, no row
+counts changed, `integrity_check` ok, `foreign_key_check` clean.
+
+- **No backfill, deliberately.** Generating fifty dossiers from statistics on
+  migration day would manufacture exactly the confident-sounding fiction this is
+  meant to replace. A dossier is earned by observation; empty is correct.
+- **Follow-ups reuse the wake path rather than becoming a second scheduler.**
+  A due intention is emitted as an ordinary `followup_due` clan event by the
+  engine tick, so it inherits cursors, grouping, escalation and the brain
+  backstop for free. `fired` is set at EMISSION — leaving the row pending too
+  would give one intention two retry mechanisms, which is how a gentle check-in
+  becomes the same question asked four times.
+- **`followup_due` is NOT a hard post.** A check-in is a kindness, not an
+  obligation, and a floor would block the cursor until someone is asked how their
+  phone is. `followup.md` treats "post nothing" as a successful outcome.
+- **The two capabilities are flagged apart.** `ELIXIR_REFLECTION` gates writing
+  dossiers; `ELIXIR_DOSSIERS` gates injecting them into member-facing turns.
+  Capturing a note and letting it shape a post are different risks and only the
+  second is one a member would notice — injection ships OFF.
+- **`schedule_followup` went into BOTH write-tool sets.** The documented trap:
+  a tool in `_WRITE_TOOL_NAMES` alone was once offered to a model zero times, and
+  an intention Elixir can only form in a leadership conversation is useless —
+  members mention the broken phone in #ask-elixir.
+
 Exit gate: dossier spot-check (accuracy + tone — would Jamie be comfortable if
 a member saw their own dossier?); first follow-ups fire and read naturally.
+**Nothing can be spot-checked until the nightly reflection has written some**, so
+the gate starts at the first 02:40 CT run that sees a real conversation.
 Kill switch: dossier injection and followup wakes are independent flags.
 Size: a weekend + the migration care.
 

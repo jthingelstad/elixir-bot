@@ -39,6 +39,7 @@ class WorkflowSpec:
 _WRITE_TOOL_NAMES = {
     "save_clan_memory",
     "record_leadership_followup",
+    "schedule_followup",
 }
 
 # Posting is a write. These reach members, so they are the most consequential
@@ -48,6 +49,11 @@ _SURFACE_TOOL_NAMES = frozenset({"post_to_discord", "post_to_clan_chat"})
 AWARENESS_WRITE_TOOL_NAMES = {
     "save_clan_memory",
     "record_leadership_followup",
+    # Phase 5. In BOTH write sets deliberately: a shipped tool was once offered
+    # to a model zero times because it landed in _WRITE_TOOL_NAMES alone, and an
+    # intention Elixir can only form in a leadership conversation is useless —
+    # the member says "my phone broke" in #ask-elixir, not in #leaders.
+    "schedule_followup",
 }
 
 AWARENESS_WRITE_BUDGET_PER_TICK = 3
@@ -275,7 +281,7 @@ _WORKFLOW_SPECS = (
     # one day, not a quarter — the weekly Opus synthesis is still the deep pass.
     WorkflowSpec(
         "reflection",
-        response_schema={"required": ["lessons", "notes"]},
+        response_schema={"required": ["lessons", "notes"]},  # `dossiers` optional
         tools=[],
         max_tool_rounds=2,
         model_family="chat",

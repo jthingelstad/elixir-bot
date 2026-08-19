@@ -1320,6 +1320,41 @@ TOOLS = [
         },
     },
     {
+        "name": "schedule_followup",
+        "description": (
+            "Carry an intention forward to a date: something you want to come back to later. "
+            "Use it when a member tells you something with a future in it — a broken phone, "
+            "an exam week, a promise to return — or when you want to check whether advice you "
+            "gave actually helped. "
+            "This is NOT a leadership escalation and raises no card; use "
+            "record_leadership_followup for anything a leader must decide. It schedules YOU. "
+            "When the time comes you will be woken with the 'why' you wrote here, and you will "
+            "decide then whether it still makes sense to say anything — often it will not, and "
+            "posting nothing is a correct outcome. "
+            "Write 'why' as a note to your future self, in your own words: it is never shown "
+            "to the member. Keep the horizon honest — days or weeks, not months."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "due_at": {
+                    "type": "string",
+                    "description": "When to come back to this, as an ISO-8601 UTC timestamp (e.g. '2026-09-01T12:00:00Z').",
+                },
+                "why": {
+                    "type": "string",
+                    "description": "A note to your future self: what you wanted to check, and enough context to judge whether it still matters.",
+                },
+                "member_tag": {
+                    "type": "string",
+                    "description": "Player tag if this follow-up is about a specific member. Optional.",
+                },
+            },
+            "required": ["due_at", "why"],
+        },
+        "side_effect": "write",
+    },
+    {
         "name": "record_leadership_followup",
         "description": (
             "Record an operational observation as a durable leadership-scoped memory tagged "
@@ -1601,6 +1636,7 @@ _SHARED_TOOL_NAMES = (
     "cr_api",
     "save_clan_memory",
     "record_leadership_followup",
+    "schedule_followup",
     "get_game_mode_performance",
     "get_awards",
     "lookup_reference",
