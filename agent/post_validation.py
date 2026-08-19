@@ -11,6 +11,15 @@ the model, which fixes it and calls again — the author stays the author. Silen
 repair would hide a systematic problem behind a clean-looking post, which is how
 "the model handles it" becomes untrue without anyone noticing.
 
+**One measured exception: the literal `\\n`.** It bounced 22 times in 41 wakes
+over the Phase 2 gate window — 56% of episodes paid an extra model round — and
+the model rewrote it correctly every single time. A bounce that is always
+followed by the same successful fix is not surfacing a defect, it is renting
+one. So this one is repaired rather than rejected, and every repair is COUNTED
+into the turn's episode. That keeps the rule the docstring above is really
+about: the problem stays visible. Repair without the counting would be the
+silent rewrite this module refuses to do.
+
 What this does NOT do is judge quality. Whether a welcome sounds like Elixir
 looked at the newcomer is the job file's problem and the reflection loop's; this
 layer only catches the mechanical failures that a member would see as a bug.
@@ -53,28 +62,45 @@ def _reject(problem: str, fix: str) -> None:
     raise PostRejected(f"{problem} {fix} Rewrite the content and call the tool again.")
 
 
+def _repair_literal_escapes(text: str, *, newline: str, repairs: list | None) -> str:
+    """Turn the characters ``\\`` + ``n`` into what the model meant, and say so.
+
+    ``newline`` differs by surface: Discord wants a real line break, clan chat is
+    a single plain line and wants a space. Both beat shipping ``\\n`` mid-sentence.
+    """
+    if not _LITERAL_ESCAPE_RE.search(text):
+        return text
+    repaired = _LITERAL_ESCAPE_RE.sub(
+        lambda m: {"n": newline, "r": newline, "t": " "}[m.group(0)[1]], text
+    )
+    # Collapse a run of them (a `\n\n` paragraph break on a surface that has no
+    # line breaks would otherwise leave a double space).
+    if newline == " ":
+        repaired = re.sub(r" {2,}", " ", repaired)
+    if repairs is not None:
+        repairs.append("literal_escape_sequences")
+    return repaired
+
+
 def validate_discord_post(
     content: str,
     *,
     lane: str,
     known_emoji: set[str] | None = None,
     max_chars: int = DISCORD_HARD_LIMIT,
+    repairs: list | None = None,
 ) -> str:
-    """Return the content unchanged, or raise :class:`PostRejected`.
+    """Return the post to send, or raise :class:`PostRejected`.
 
-    Returning the input rather than a cleaned copy is deliberate: a caller that
-    forgets to use the return value still gets the check.
+    The return value is now load-bearing — literal escape sequences come back
+    repaired — so a caller MUST use it. ``repairs`` is the sink that keeps those
+    fixes visible; pass the turn's list so the episode records them.
     """
     text = content or ""
     if not text.strip():
         _reject("The post content was empty.", "A delivered post must have text.")
 
-    if _LITERAL_ESCAPE_RE.search(text):
-        _reject(
-            "The content contains literal escape sequences (backslash-n or similar) "
-            "instead of real line breaks.",
-            "Use actual newlines in the string, not the two characters backslash and n.",
-        )
+    text = _repair_literal_escapes(text, newline="\n", repairs=repairs)
 
     if _TRAILING_QUOTE_RE.search(text.strip()):
         _reject(
@@ -116,7 +142,7 @@ def validate_discord_post(
     return text
 
 
-def validate_clan_chat_post(content: str, *, limit: int = 200) -> str:
+def validate_clan_chat_post(content: str, *, limit: int = 200, repairs: list | None = None) -> str:
     """Clan chat is stricter than Discord and fails differently: the game's own
     filter silently blanks handle-like tokens, and there is no formatting.
 
@@ -127,11 +153,9 @@ def validate_clan_chat_post(content: str, *, limit: int = 200) -> str:
     if not text:
         _reject("The clan-chat line was empty.", "A join must carry an in-game welcome.")
 
-    if _LITERAL_ESCAPE_RE.search(text):
-        _reject(
-            "The clan-chat line contains literal escape sequences.",
-            "Clan chat is a single plain line — no line breaks at all.",
-        )
+    # A space, not a newline: clan chat has no line breaks, so the repair has to
+    # produce the single plain line the surface actually renders.
+    text = _repair_literal_escapes(text, newline=" ", repairs=repairs).strip()
 
     if _EMOJI_RE.search(text):
         _reject(

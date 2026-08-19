@@ -101,6 +101,10 @@ class _Staging:
         self.attention = attention
         self.posts: list[dict] = []
         self.rejections: list[str] = []
+        # Deterministic fixes applied on the model's behalf. Kept beside the
+        # rejections so a repair is as visible in the episode as a bounce was —
+        # that visibility is the whole condition on which repairing is allowed.
+        self.repairs: list[str] = []
 
     def stage_discord(self, *, lane: str, content: str, covers: list[str]) -> dict:
         post = {
@@ -257,7 +261,9 @@ def surface_tools(attention: Attention) -> list[dict]:
     return [TOOLS_BY_NAME[name] for name in names if name in TOOLS_BY_NAME]
 
 
-def run_turn(attention: Attention, seed: dict, *, read_tools=None, on_event=None) -> dict:
+def run_turn(
+    attention: Attention, seed: dict, *, read_tools=None, on_event=None, nudge: str | None = None
+) -> dict:
     """Execute one chassis turn. Returns an episode dict.
 
     The episode is the record the reflection loop reads: what woke this, what it
@@ -271,6 +277,11 @@ def run_turn(attention: Attention, seed: dict, *, read_tools=None, on_event=None
     from agent.workflows import _chat_with_tools
 
     context = assemble_context(attention, seed)
+    if nudge:
+        # A second run of the same tier after it ended its turn without posting.
+        # The key name is deliberately loud: it sits in a JSON context the model
+        # reads top to bottom, and the thing it must not do again is stop early.
+        context["you_have_not_posted_yet"] = nudge
     system = assemble_system(attention)
     tools = list(read_tools if read_tools is not None else INTERACTIVE_READ_TOOLS)
     tools.extend(surface_tools(attention))
@@ -309,6 +320,7 @@ def run_turn(attention: Attention, seed: dict, *, read_tools=None, on_event=None
         },
         "posts": staging.posts,
         "rejections": staging.rejections,
+        "repairs": staging.repairs,
         "tool_trace": tool_stats.get("tool_trace") or [],
         "error": error,
         "lessons_injected": len(context.get("lessons") or []),

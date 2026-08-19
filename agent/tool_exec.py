@@ -1897,6 +1897,7 @@ def _execute_post_to_discord(arguments):
             str(arguments.get("content") or ""),
             lane=lane,
             known_emoji=known,
+            repairs=staging.repairs,
         )
     except PostRejected as exc:
         staging.rejections.append(str(exc))
@@ -1927,7 +1928,9 @@ def _execute_post_to_clan_chat(arguments):
     if staging is None:
         return json.dumps({"error": "post_to_clan_chat is only available inside a chassis turn"})
     try:
-        content = validate_clan_chat_post(str(arguments.get("content") or ""))
+        content = validate_clan_chat_post(
+            str(arguments.get("content") or ""), repairs=staging.repairs
+        )
     except PostRejected as exc:
         staging.rejections.append(str(exc))
         return json.dumps({"error": "post_rejected", "reason": str(exc)})

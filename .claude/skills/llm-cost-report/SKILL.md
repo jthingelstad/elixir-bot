@@ -11,9 +11,11 @@ anomalies, and concrete next levers. Pairs with `log-triage` (health) and
 `awareness-report` (decision quality); this one answers "where is the money
 going?"
 
-Budget context: the active discretionary awareness/Ask Elixir target is
-**$50/month (~$1.67/day)**. Scheduled reports and operational jobs are outside
-this budget and must be reported separately.
+Budget context: the ratified hard ceiling on discretionary awareness/Ask Elixir
+spend is **$3.20/day** (`agent/spend_budget.py`). It is a stop, not a target —
+budgeted spend actually runs around **$0.90/day**. Scheduled reports and
+operational jobs are outside this ledger entirely (about half of all spend) and
+must be reported separately.
 
 ## Canonical report path
 
@@ -128,7 +130,7 @@ Keep the report under roughly 40 lines:
 
 ```text
 ## LLM Cost Report — <window>
-Summary: $X over N days, projected $Y/month against $50 target.
+Summary: $X over N days; budgeted $Y/day against the $3.20 ceiling.
 Top driver: workflow/model, calls, cost, share.
 Daily trend: ...
 Cache flags: ...

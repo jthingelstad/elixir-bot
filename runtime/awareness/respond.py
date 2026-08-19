@@ -305,6 +305,33 @@ def respond(
         episode = chassis.run_turn(attention, seed, on_event=on_event)
         attempts.append(episode)
 
+        # Measured over the Phase 2 gate: 10 of 41 wakes escalated to Sonnet, and
+        # EVERY one of them looked like this — no post, no validator rejection,
+        # `stop_reason=end_turn`, output nowhere near the token ceiling. The model
+        # read its tools and then talked about the post instead of calling the
+        # tool that makes one. That is not a tier being too weak, it is a turn
+        # ending early, and the bounce-and-fix contract already fixes exactly this
+        # class of mistake everywhere else in the chassis. So say so once, at the
+        # same price, before paying for the stronger model.
+        #
+        # Only on the clean signature: a turn that produced rejections was trying
+        # and failing, and a nudge would just spend another round on it.
+        if not (episode.get("posts") or episode.get("rejections") or episode.get("error")):
+            log.info("wake responder: %s tier ended without posting; nudging once", tier)
+            episode = chassis.run_turn(
+                attention,
+                seed,
+                on_event=on_event,
+                nudge=(
+                    "Your previous turn ended without posting. You have already read "
+                    "what you need. Call post_to_discord now with the finished post — "
+                    "prose in your reply is not a post and reaches nobody. If this "
+                    "moment genuinely does not deserve one, post nothing and say why "
+                    "in one line."
+                ),
+            )
+            attempts.append(episode)
+
         posts = episode.get("posts") or []
         covered = {k for post in posts for k in post.get("covers_signal_keys") or []}
         uncovered = sorted(floor - covered)

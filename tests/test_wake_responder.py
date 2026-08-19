@@ -151,7 +151,10 @@ def test_a_wake_can_only_fail_upward(seeded, monkeypatch):
     outcome = respond.respond(
         _wake(), deliver_fn=lambda read, plan: {"delivered": 1, "failed": False}, conn=seeded
     )
-    assert tiers == ["lightweight", "chat"]
+    # The cheap tier gets a second, nudged attempt before the escalation — see
+    # test_a_tier_that_ends_without_posting_is_nudged_before_escalating. The
+    # direction is what this test pins: never downward, never silence.
+    assert tiers == ["lightweight", "lightweight", "chat"]
     assert outcome["handled"] is True and outcome["tier"] == "chat"
 
 
@@ -238,3 +241,71 @@ def test_a_wake_won_on_the_first_tier_carries_no_preceding_attempts(seeded, monk
         _wake(), deliver_fn=lambda read, plan: {"delivered": 1, "failed": False}, conn=seeded
     )
     assert "preceding_attempts" not in outcome["episode"]
+
+
+def test_a_tier_that_ends_without_posting_is_nudged_before_escalating(seeded, monkeypatch):
+    """The measured escalation signature: no post, no rejection, no error.
+
+    Ten of 41 wakes over the Phase 2 gate ended exactly this way and went
+    straight to Sonnet. The model had read its tools and then written prose
+    instead of calling the posting tool — the same mistake the validator bounce
+    already fixes in-loop, so it gets the same treatment at the same price
+    before the stronger model is paid for.
+    """
+    seen = []
+
+    def _run(attention, seed, **kw):
+        seen.append((attention.budget.model_family, kw.get("nudge")))
+        if kw.get("nudge"):
+            return _episode([_good_post()])
+        return _episode([])
+
+    monkeypatch.setattr(chassis, "run_turn", _run)
+    outcome = respond.respond(
+        _wake(), deliver_fn=lambda read, plan: {"delivered": 1, "failed": False}, conn=seeded
+    )
+
+    assert outcome["handled"] is True
+    assert outcome["tier"] == "lightweight", "the nudge must win on the cheap tier"
+    assert [tier for tier, _ in seen] == ["lightweight", "lightweight"]
+    assert seen[0][1] is None and seen[1][1], "exactly one nudge, on the retry"
+
+
+def test_a_tier_that_bounced_is_escalated_rather_than_nudged(seeded, monkeypatch):
+    """A turn with rejections was trying. Another round at the same tier spends
+    money to repeat a failure the model already could not fix."""
+    seen = []
+
+    def _run(attention, seed, **kw):
+        seen.append((attention.budget.model_family, kw.get("nudge")))
+        if attention.budget.model_family == "lightweight":
+            return _episode([], rejections=["stray quotation mark"])
+        return _episode([_good_post()], workflow="wake_response_chat")
+
+    monkeypatch.setattr(chassis, "run_turn", _run)
+    outcome = respond.respond(
+        _wake(), deliver_fn=lambda read, plan: {"delivered": 1, "failed": False}, conn=seeded
+    )
+
+    assert outcome["tier"] == "chat"
+    assert [tier for tier, _ in seen] == ["lightweight", "chat"]
+    assert all(nudge is None for _, nudge in seen)
+
+
+def test_the_nudge_does_not_stop_a_wake_from_escalating(seeded, monkeypatch):
+    """It buys one cheap attempt; it must not become a way to fail quietly."""
+    seen = []
+
+    def _run(attention, seed, **kw):
+        seen.append(attention.budget.model_family)
+        if attention.budget.model_family == "lightweight":
+            return _episode([])
+        return _episode([_good_post()], workflow="wake_response_chat")
+
+    monkeypatch.setattr(chassis, "run_turn", _run)
+    outcome = respond.respond(
+        _wake(), deliver_fn=lambda read, plan: {"delivered": 1, "failed": False}, conn=seeded
+    )
+
+    assert outcome["handled"] is True and outcome["tier"] == "chat"
+    assert seen == ["lightweight", "lightweight", "chat"]

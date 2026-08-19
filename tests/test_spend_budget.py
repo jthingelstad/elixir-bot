@@ -15,9 +15,14 @@ from agent import spend_budget
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
 
 
-def test_default_ceiling_matches_the_approved_fifty_dollar_month(monkeypatch):
+def test_default_ceiling_is_the_ratified_number(monkeypatch):
+    """$3.20/day is Jamie's, set after watching it bite and reaffirmed 2026-08-19.
+
+    It was replaced with $50/30 (~$1.67) on 2026-08-13 without him. Pinning it
+    here means the next quiet change fails a gate instead of shipping.
+    """
     monkeypatch.delenv("ELIXIR_DAILY_SPEND_USD", raising=False)
-    assert spend_budget.daily_ceiling_usd() == pytest.approx(50.0 / 30.0)
+    assert spend_budget.daily_ceiling_usd() == pytest.approx(3.20)
 
 
 def test_a_hard_post_workflow_is_never_budget_gated(monkeypatch, engine_conn):

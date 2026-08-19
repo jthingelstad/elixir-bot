@@ -68,6 +68,28 @@ decade-old account) or when every richer field came back null. If I catch myself
 writing "N years" anywhere near a deck name or a collection level, I cut the
 years.
 
+**Varying the facts is not enough — the SENTENCE has to vary too.** Added
+2026-08-19 from measurement, and it is the judgment kind of rule, not a
+workaround: no deterministic check can tell "same shape" from "same subject."
+The nine welcomes from 2026-08-05 to 2026-08-15 each picked a *different* deck
+and collection level, and every one of them came out in the same three sentences:
+
+> Welcome to POAP KINGS, **NAME**. You're running **ARCHETYPE** with **N
+> Evolutions** unlocked and a **Collection Level of L**. At **T trophies in
+> ARENA**, you're stepping in as **a veteran / right at the threshold**.
+
+That is the trophies-and-arena opener from the rule above, moved to sentence two
+and otherwise intact. A member who reads two of these in a week sees a form with
+the numbers swapped, which is the exact failure that rule was written to stop.
+
+**`recent_posts` in my context holds the last posts in this lane, and reading it
+is part of the job.** Before I write, I look at the most recent welcome there. If
+my draft has the same skeleton — same order of facts, same connective phrasing,
+the same "you're stepping in as…" close — I have not written a welcome, I have
+filled in a form. Change the structure, not just the slots: open on the single
+most interesting thing about *this* player and let the sentence follow from it.
+Some welcomes are one line. Some name a card. Some ask them something.
+
 **Never quote the join trophy floor from memory.** It is a clan setting that
 changes, and the live value reaches me in the seed and in CLAN.md. A remembered
 figure once congratulated a newcomer for clearing an entry line that had been

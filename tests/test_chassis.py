@@ -88,11 +88,36 @@ def test_a_broken_lesson_store_does_not_stop_the_turn(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_literal_escape_sequences_are_rejected():
-    """Haiku emitted literal backslash-n inside the tool argument in 4 of 7
-    experiment cases. Discord would have rendered them mid-sentence."""
-    with pytest.raises(PostRejected, match="escape sequences"):
-        validate_discord_post("**Welcome.**\\n\\nGlad to have you.", lane="announcements")
+def test_literal_escape_sequences_are_repaired_and_counted():
+    """The one measured exception to bounce-not-rewrite.
+
+    It bounced 22 times in 41 wakes over the Phase 2 gate and the model rewrote
+    it correctly every time — a bounce always followed by the same successful fix
+    is renting a defect, not surfacing one. So it is repaired; the counting is
+    the condition that keeps it from being a silent rewrite.
+    """
+    repairs = []
+    out = validate_discord_post(
+        "**Welcome.**\\n\\nGlad to have you.", lane="announcements", repairs=repairs
+    )
+    assert out == "**Welcome.**\n\nGlad to have you."
+    assert repairs == ["literal_escape_sequences"]
+
+
+def test_a_clean_post_records_no_repair():
+    """The counter must mean something: it stays empty when nothing was fixed."""
+    repairs = []
+    validate_discord_post("**Welcome.** Glad to have you.", lane="announcements", repairs=repairs)
+    assert repairs == []
+
+
+def test_clan_chat_repairs_a_line_break_to_a_space():
+    """Clan chat has no line breaks at all, so the repair has to produce the
+    single plain line the surface actually renders."""
+    repairs = []
+    out = validate_clan_chat_post("Welcome to POAP KINGS.\\n\\nGlad to have you.", repairs=repairs)
+    assert out == "Welcome to POAP KINGS. Glad to have you."
+    assert repairs == ["literal_escape_sequences"]
 
 
 def test_a_trailing_quote_is_rejected():
@@ -179,14 +204,36 @@ def test_a_rejected_post_is_not_staged_and_says_why():
     staging, raw = _run_staged(
         lambda: _execute_tool(
             "post_to_discord",
-            {"lane": "announcements", "content": "Welcome.\\n\\nGlad.", "covers_signal_keys": []},
+            {"lane": "announcements", "content": 'Welcome. Glad."', "covers_signal_keys": []},
         )
     )
     result = json.loads(raw)
     assert result["error"] == "post_rejected"
-    assert "escape sequences" in result["reason"]
+    assert "quotation mark" in result["reason"]
     assert staging.posts == [], "a rejected post must never reach the outbox"
     assert staging.rejections, "the rejection is recorded on the episode"
+
+
+def test_a_repaired_post_is_staged_and_the_repair_reaches_the_episode():
+    """The repair path must not become invisible: it stages the fixed post AND
+    leaves the fix on the staging the episode is built from."""
+    from agent.tool_exec import _execute_tool
+
+    staging, raw = _run_staged(
+        lambda: _execute_tool(
+            "post_to_discord",
+            {
+                "lane": "announcements",
+                "content": "Welcome.\\n\\nGlad.",
+                "covers_signal_keys": [],
+            },
+        )
+    )
+    result = json.loads(raw)
+    assert result["accepted"] is True
+    assert staging.posts[0]["content"] == "Welcome.\n\nGlad."
+    assert staging.repairs == ["literal_escape_sequences"]
+    assert staging.rejections == [], "a repair is not a bounce"
 
 
 def test_the_clan_chat_line_rides_on_its_discord_sibling():

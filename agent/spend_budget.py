@@ -39,9 +39,13 @@ from db import managed_connection
 log = logging.getLogger("elixir")
 
 SPEND_CURSOR_KEY = "budget:llm:awareness_ask_elixir_micros"
-# $50/month expressed as a 30-day daily ceiling. Keep the exact fraction so the
-# default cannot silently exceed the approved monthly target through rounding.
-DEFAULT_DAILY_CEILING_USD = 50.0 / 30.0
+# $3.20/day is the RATIFIED ceiling — Jamie set it after watching it bite, and
+# it is his number to move. It was quietly replaced with $50/30 (~$1.67) on
+# 2026-08-13 and restored on 2026-08-19: budgeted spend had peaked at $1.20,
+# which put the deferrable shed line ($1.25) within 4% of an ordinary day. If
+# you are about to change this constant, that is a decision to take to Jamie,
+# not a tuning knob.
+DEFAULT_DAILY_CEILING_USD = 3.20
 DEFAULT_DAILY_CEILING_ENV = str(DEFAULT_DAILY_CEILING_USD)
 
 # This is the policy boundary. Everything absent from this set always runs and

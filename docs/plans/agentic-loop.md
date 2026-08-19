@@ -22,7 +22,7 @@ matches brain quality at 4–20× lower cost; the brain spends ~300K tokens/tick
 > to "save money" should read the cost table in the Phase 3 section first.
 >
 > **A hard daily spend ceiling now exists** (`agent/spend_budget.py`,
-> `ELIXIR_DAILY_SPEND_USD=$50/30` (about $1.67/day) for awareness and Ask Elixir only. Scheduled
+> `ELIXIR_DAILY_SPEND_USD=3.20`) for awareness and Ask Elixir only. Scheduled
 > jobs do not charge or read it. `wake_response`, `wake_response_chat`,
 > `clan_chat_copy`, `reception` and `intent_router` are `ESSENTIAL` and never
 > gated. Scheduled awareness is budgeted; the third-rung run after every scoped
