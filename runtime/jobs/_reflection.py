@@ -1,0 +1,213 @@
+"""Nightly reflection: a day of Elixir's own output becomes lessons.
+
+Agentic Loop v2, Phase 4 (docs/plans/agentic-loop.md). Every other feeder in
+``engine/editor.py`` fires on an unambiguous human act — an admin deleted a post,
+a leader rewrote copy. This one reads a whole day at once, because the signals it
+is after are only visible in aggregate: three welcomes that opened the same way,
+a reaction removed after a correction, a wake that chose silence four times for
+the same reason.
+
+**Three properties this job must keep.**
+
+1. **Lessons are capped, hard, in code.** The chassis injects at most 12 and a
+   model asked for lessons will always find some. Three a night is the ceiling
+   here, and it is enforced after the model returns rather than requested in the
+   prompt, because a request is a suggestion.
+2. **Every lesson carries its evidence.** A lesson reaches every chassis turn
+   from the moment it is written. One that cannot name the post it came from is
+   an unfalsifiable instruction with a permanent audience.
+3. **It proposes; Jamie disposes.** Lessons are visible, evidence-linked, and
+   removable with one delete. Nothing here changes wake policy, cadence, or what
+   Elixir posts about — only how it writes.
+"""
+
+from __future__ import annotations
+
+__all__ = ["MAX_LESSONS_PER_NIGHT", "_reflection_cycle", "build_reflection_context"]
+
+import asyncio
+import json
+import logging
+
+import db
+import elixir_agent
+from runtime import status as runtime_status
+
+log = logging.getLogger("elixir")
+
+# Enforced in code, after the model answers. See property 1 above.
+MAX_LESSONS_PER_NIGHT = 3
+
+# A lesson the model is unsure of still reaches every turn, so the bar to be
+# written down at all is higher than "possible".
+MIN_LESSON_CONFIDENCE = 0.5
+
+
+def build_reflection_context(conn, hours: int = 24) -> dict:
+    """The day, as evidence. Reads only; decides nothing."""
+    from agent import chassis
+    from engine import editor
+
+    intents = conn.execute(
+        "SELECT intent_key, lane, content, covers_json, fulfilled_at "
+        "FROM awareness_delivery_intents "
+        "WHERE status = 'fulfilled' AND fulfilled_at >= datetime('now', ?) "
+        "ORDER BY fulfilled_at",
+        (f"-{int(hours)} hours",),
+    ).fetchall()
+
+    # A wake that produced nothing is a decision, and the reason it recorded is
+    # often the more interesting half of the day.
+    silences = conn.execute(
+        "SELECT at, skipped_reason, post_count FROM awareness_thoughts "
+        "WHERE chose_silence = 1 AND at >= datetime('now', ?) "
+        "ORDER BY at",
+        (f"-{int(hours)} hours",),
+    ).fetchall()
+
+    return {
+        "window_hours": int(hours),
+        "intents": [
+            {
+                "intent_key": r["intent_key"],
+                "lane": r["lane"],
+                "posted_at": r["fulfilled_at"],
+                "covers": json.loads(r["covers_json"] or "[]"),
+                "content": (r["content"] or "")[:900],
+            }
+            for r in intents
+        ],
+        "silences": [
+            {"at": r["at"], "reason": (r["skipped_reason"] or "")[:300]} for r in silences
+        ],
+        "reactions": editor.recent_reaction_feeders(conn, hours=hours),
+        "current_lessons": chassis._editorial_lessons(),
+    }
+
+
+def _persist_lessons(conn, lessons: list[dict], notes: str) -> list[int]:
+    """Write the accepted lessons as editorial memories. Returns memory ids."""
+    from engine import editor
+
+    written: list[int] = []
+    for lesson in lessons:
+        if not isinstance(lesson, dict):
+            continue
+        title = str(lesson.get("title") or "").strip()
+        body = str(lesson.get("body") or "").strip()
+        evidence = str(lesson.get("evidence") or "").strip()
+        # Property 2, enforced rather than requested. A lesson with no evidence
+        # is dropped, not downgraded — there is nothing to review it against
+        # later, and it would be injected into every turn regardless.
+        if not title or not body or not evidence:
+            log.info("reflection: dropped a lesson with no title/body/evidence")
+            continue
+        try:
+            confidence = float(lesson.get("confidence") or 0)
+        except TypeError, ValueError:
+            confidence = 0.0
+        if confidence < MIN_LESSON_CONFIDENCE:
+            log.info("reflection: dropped low-confidence lesson %r (%.2f)", title, confidence)
+            continue
+        memory_id = editor._add_editorial_memory(
+            conn,
+            title=title[:200],
+            body=f"{body}\n\nEVIDENCE: {evidence[:400]}",
+            kind_tag="lesson",
+            # Deduped on the evidence, not the wording: the same reaction
+            # re-read tomorrow must not become a second copy of the same rule.
+            event_key=f"reflection_lesson:{_evidence_key(evidence)}",
+            confidence=min(1.0, max(0.0, confidence)),
+            created_by="reflection",
+            extra_tags=("nightly",),
+        )
+        if memory_id:
+            written.append(memory_id)
+        if len(written) >= MAX_LESSONS_PER_NIGHT:
+            break
+    if notes:
+        log.info("reflection notes: %s", notes[:800])
+    conn.commit()
+    return written
+
+
+def _evidence_key(evidence: str) -> str:
+    import hashlib
+
+    return hashlib.sha1(evidence.strip().lower().encode("utf-8")).hexdigest()[:16]
+
+
+async def _reflection_cycle():
+    """Nightly. Reads the day, writes at most three lessons, never posts."""
+    from runtime.prompt_feedback import reflection_enabled
+
+    if not reflection_enabled():
+        log.info("reflection: disabled (ELIXIR_REFLECTION), skipping")
+        return
+    runtime_status.mark_job_start("reflection")
+
+    def _read():
+        conn = db.get_connection()
+        try:
+            return build_reflection_context(conn)
+        finally:
+            conn.close()
+
+    try:
+        context = await asyncio.to_thread(_read)
+    except Exception as exc:
+        log.error("reflection: context build failed: %s", exc, exc_info=True)
+        runtime_status.mark_job_failure("reflection", f"context build failed: {exc}")
+        return
+
+    # Nothing happened is a normal night, and paying for a model call to be told
+    # so is not.
+    if not context["intents"] and not context["reactions"]:
+        log.info("reflection: no posts or reactions in the window; nothing to reflect on")
+        runtime_status.mark_job_success("reflection", "quiet day, no call made")
+        return
+
+    try:
+        plan = await asyncio.to_thread(elixir_agent.run_reflection, context)
+    except Exception as exc:
+        log.error("reflection: agent call failed: %s", exc, exc_info=True)
+        runtime_status.mark_job_failure("reflection", f"agent call failed: {exc}")
+        return
+    if not isinstance(plan, dict) or plan.get("_error"):
+        detail = (plan or {}).get("_error") if isinstance(plan, dict) else "no plan"
+        log.warning("reflection: agent returned no usable plan: %s", detail)
+        runtime_status.mark_job_failure("reflection", f"no usable plan: {detail}")
+        return
+
+    lessons = plan.get("lessons")
+    lessons = lessons if isinstance(lessons, list) else []
+    if len(lessons) > MAX_LESSONS_PER_NIGHT:
+        log.info(
+            "reflection: model returned %d lessons; keeping %d",
+            len(lessons),
+            MAX_LESSONS_PER_NIGHT,
+        )
+        lessons = lessons[:MAX_LESSONS_PER_NIGHT]
+
+    def _write():
+        conn = db.get_connection()
+        try:
+            return _persist_lessons(conn, lessons, str(plan.get("notes") or ""))
+        finally:
+            conn.close()
+
+    try:
+        written = await asyncio.to_thread(_write)
+    except Exception as exc:
+        log.error("reflection: persisting lessons failed: %s", exc, exc_info=True)
+        runtime_status.mark_job_failure("reflection", f"persist failed: {exc}")
+        return
+
+    log.info(
+        "reflection: %d intent(s), %d reaction(s), %d silence(s) -> %d lesson(s) written",
+        len(context["intents"]),
+        len(context["reactions"]),
+        len(context["silences"]),
+        len(written),
+    )
+    runtime_status.mark_job_success("reflection", f"{len(written)} lesson(s)")

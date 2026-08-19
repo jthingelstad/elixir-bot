@@ -91,6 +91,11 @@ BROAD_EXCEPTION_BASELINE = {
     # and may be absent or locked. Missing telemetry must degrade the report to
     # "unavailable", never raise into the daily job.
     "runtime/awareness/divergence.py": 1,
+    # Phase 4 nightly reflection: three guards, one per stage (read, model
+    # call, persist). Each marks the job failed and returns. A learning loop
+    # that can take down the scheduler is not worth having, and every stage
+    # is optional to the clan — no post depends on any of it.
+    "runtime/jobs/_reflection.py": 3,
     "runtime/awareness/gate.py": 2,
     "runtime/awareness/loop.py": 8,
     # 1 -> 2 (2026-08-04): the covered-signal lookup fails OPEN. A failure that
@@ -150,7 +155,11 @@ BROAD_EXCEPTION_BASELINE = {
     "runtime/leader_note_interpreter.py": 5,  # interpret/apply/undo/fix all fail-open off the delivery path
     "runtime/onboarding.py": 3,
     "runtime/outreach.py": 3,  # raise_card + send_dm + compose fail-soft in the flow loop
-    "runtime/prompt_feedback.py": 5,  # +1: member_outreach decision handling
+    # 5 -> 6 (2026-08-19, Phase 4): editorial reaction capture. A leader's
+    # reaction must still acknowledge and still resolve a leader-action card
+    # even if recording the editorial evidence fails — feedback capture is the
+    # least important thing happening in that handler.
+    "runtime/prompt_feedback.py": 6,  # +1: member_outreach decision handling
     # 3 -> 4 (2026-08-05): the startup budget line. The boot message is what
     # tells us the bot came up at all; an unreadable spend counter must degrade
     # that line, never suppress the message.

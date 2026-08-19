@@ -39,7 +39,7 @@ matches brain quality at 4–20× lower cost; the brain spends ~300K tokens/tick
 | 1 — chassis + join responder | **shipped, LIVE, gate MET 2026-08-05** (`276011fb`, enabled `f1d6c2fa`) | `ELIXIR_WAKE_RESPONDER=1` |
 | 2 — roster wakes, brain 4×→2× | **shipped, LIVE 2026-08-05, gate MET 2026-08-19** | `ELIXIR_WAKE_RESPONDER=1` |
 | 3 — war wakes, brain →1× | **shipped, LIVE 2026-08-19** | `ELIXIR_WAKE_RESPONDER=1` |
-| 4 — leader-feedback reflection | not started | — |
+| 4 — leader-feedback reflection | **shipped, LIVE 2026-08-19** | `ELIXIR_REFLECTION=1` |
 | 5 — dossiers + follow-ups | not started | needs `_apply_v36` |
 | 6 — adoption + tuning | not started | — |
 
@@ -624,8 +624,35 @@ Build:
 - Lessons already flow chassis-wide via `assemble_context` — no extra wiring;
   the brain keeps its existing `_editorial_guidance` injection.
 
+**SHIPPED 2026-08-19.** What the build changed about the plan:
+
+- **Reactions are feeders, not lessons, and the tag is what enforces it.** The
+  chassis selects injected guidance by the `editorial` tag and takes 12. A raw
+  reaction written into that set would evict a real lesson in order to tell every
+  future turn that somebody once pressed a thumbs-up. Reactions carry
+  `editorial-feeder` instead; only the nightly pass promotes a conclusion.
+- **The caps are in code, after the model answers.** Three lessons a night, a
+  0.5 confidence floor, and a hard requirement that each names its evidence — a
+  lesson that cannot point at a post is dropped, not downgraded. Asking for these
+  in the prompt would make them suggestions.
+- **Lessons dedupe on their evidence, not their wording.** The 24h window
+  overlaps at the boundary, so the same reaction re-read tomorrow would otherwise
+  become a second copy of the same rule in different words.
+- **A quiet day makes no model call at all.** No intents and no reactions means
+  there is nothing to reflect on, and paying to be told so is not a learning loop.
+- **The workflow is toolless on purpose.** Everything it may reason about is
+  handed to it; a tool would let it go and find a fact to justify a lesson it had
+  already decided to write.
+
+Not built: leadership free-text replies routed through the leader-note
+interpreter. Reactions are the higher-signal, lower-ambiguity half and they
+carry the exit gate; threading replies through note interpretation is a second
+attribution problem worth doing on its own evidence.
+
 Exit gate: two weeks of lessons reviewed — are they true, specific, and
-traceable? At least one demonstrable behavior change from a reaction.
+traceable? At least one demonstrable behavior change from a reaction. **First
+lessons possible 2026-08-19 02:40 CT** (the job is a no-op until a leader reacts
+to something, so the gate starts when the first reaction lands).
 Kill switch: `ELIXIR_REFLECTION=0`; individual lessons removable by leader
 note; a poisoned lane empties with one delete.
 Size: a weekend.

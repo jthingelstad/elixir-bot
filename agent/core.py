@@ -208,6 +208,12 @@ MODEL_CALL_POLICY: dict[str, CallPolicy] = {
     # failed closed because the truncated response omitted posts (2026-08-17).
     "awareness_repair": CallPolicy(16384, timeout=300),
     "memory_synthesis": CallPolicy(16384, timeout=300),
+    # Nightly reflection reads a day and writes at most three short lessons, so
+    # the VISIBLE output is tiny — but the judgment ("is one thumbs-up a pattern
+    # or an anecdote?") is the whole job, and extended thinking is drawn from
+    # max_tokens. Sizing this to the answer is exactly how memory_synthesis
+    # returned completion_chars=0 against a 3000 ceiling. 8192 with room to think.
+    "reflection": CallPolicy(8192, timeout=180),
     "weekly_recap": CallPolicy(16384, timeout=300),
     "weekly_recap_email": CallPolicy(16384, timeout=300),
     "release_notes": CallPolicy(8192, timeout=300),

@@ -187,6 +187,20 @@ def _memory_synthesis_system():
     )
 
 
+def _reflection_system():
+    """System prompt for the nightly reflection (Agentic Loop v2, Phase 4).
+
+    Identity and policy, but deliberately NOT the Discord formatting or emoji
+    guidance: this turn writes lessons for other turns to read, not a message for
+    a channel. Handing it composition guidance invites it to produce a post.
+    """
+    return _build_system_prompt(
+        prompts.identity_block(),
+        prompts.policy(),
+        prompts.agent_prompt("reflection"),
+    )
+
+
 def _leader_action_feedback_system():
     """System prompt for synthesizing leader-action feedback."""
     return _build_system_prompt(
@@ -1063,5 +1077,6 @@ __all__ = [
     "_war_intel_system",
     "_ask_elixir_daily_system",
     "_memory_synthesis_system",
+    "_reflection_system",
     "_clan_chat_copy_system",
 ]

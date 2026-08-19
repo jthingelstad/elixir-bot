@@ -47,8 +47,17 @@ def _add_editorial_memory(
     created_by: str,
     extra_tags: tuple[str, ...] = (),
     source_type: str = "inference",
+    lesson: bool = True,
 ) -> int | None:
-    """One rubric entry, deduped on its event key. Returns memory_id or None."""
+    """One rubric entry, deduped on its event key. Returns memory_id or None.
+
+    ``lesson=False`` writes a **feeder**: evidence for the nightly reflection to
+    read, tagged so it is NOT injected as guidance. The chassis selects lessons
+    by the ``editorial`` tag and injects at most 12, so a raw reaction landing in
+    that set would evict a real lesson to tell the model that somebody once
+    pressed a thumbs-up. Evidence and conclusions are different things and only
+    the conclusions belong in the prompt.
+    """
     import memory_store
 
     if _editorial_memory_exists(conn, event_key):
@@ -68,7 +77,7 @@ def _add_editorial_memory(
     )
     memory_store.attach_tags(
         mem["memory_id"],
-        ["editorial", kind_tag, *extra_tags],
+        ["editorial" if lesson else "editorial-feeder", kind_tag, *extra_tags],
         actor=created_by,
         conn=conn,
     )
@@ -291,3 +300,66 @@ def record_post_quality_feedback(
         created_by="editor-post-quality",
         extra_tags=("quality-eval", f"lane:{lane}", f"source:{source}"),
     )
+
+
+# ------------------------------------------------- Phase 4: leader reactions
+
+
+def record_post_reaction(
+    conn, *, discord_message_id: str, emoji: str, reactor_id: str, removed: bool = False
+) -> int | None:
+    """Feeder: a leader reacted to something Elixir posted.
+
+    Agentic Loop v2, Phase 4. This is **evidence, not a lesson** — it is written
+    with ``lesson=False`` so it never enters the 12-slot injection budget. The
+    nightly reflection reads these alongside the intents they point at and
+    decides what, if anything, they mean. A thumbs-up on its own says almost
+    nothing; a thumbs-up on four consecutive posts that all opened with a member's
+    name says something, and only a pass over the whole day can see it.
+
+    The join is `awareness_delivery_intents.discord_message_id`, which is what
+    makes this specific: a reaction on any other message in the channel is not
+    feedback about Elixir's writing and is ignored.
+    """
+    intent = conn.execute(
+        "SELECT intent_key, lane, content, covers_json, fulfilled_at "
+        "FROM awareness_delivery_intents WHERE discord_message_id = ?",
+        (str(discord_message_id),),
+    ).fetchone()
+    if not intent:
+        return None
+    verb = "removed" if removed else "added"
+    mid = _add_editorial_memory(
+        conn,
+        title=f"Leader reaction {verb}: {emoji}",
+        body=(
+            f"A leader {verb} the reaction {emoji} on an Elixir post in "
+            f"#{intent['lane']}.\n\n"
+            f"Intent: {intent['intent_key']}\n"
+            f"Posted: {intent['fulfilled_at']}\n"
+            f"Evidence covered: {(intent['covers_json'] or '[]')[:300]}\n\n"
+            f"POST: {(intent['content'] or '')[:700]}"
+        ),
+        kind_tag="reaction",
+        # Keyed on message+emoji+verb so a toggle-and-back records both halves
+        # once each rather than colliding into one row.
+        event_key=f"editorial_reaction:{discord_message_id}:{emoji}:{verb}",
+        confidence=0.6,
+        created_by=f"editor-reaction:{reactor_id}",
+        extra_tags=(f"lane:{intent['lane']}",),
+        lesson=False,
+    )
+    conn.commit()
+    return mid
+
+
+def recent_reaction_feeders(conn, hours: int = 24) -> list[dict]:
+    """The reaction evidence the nightly reflection reads."""
+    rows = conn.execute(
+        "SELECT m.title, m.body, m.created_at FROM memories m "
+        "JOIN memory_tags t ON t.memory_id = m.memory_id "
+        "WHERE t.tag = 'reaction' AND m.created_at >= datetime('now', ?) "
+        "ORDER BY m.created_at DESC LIMIT 50",
+        (f"-{int(hours)} hours",),
+    ).fetchall()
+    return [dict(r) for r in rows]

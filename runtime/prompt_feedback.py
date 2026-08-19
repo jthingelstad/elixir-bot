@@ -118,6 +118,62 @@ async def _post_retry_invitation(payload, *, prompt_feedback_id: int | None, mes
         )
 
 
+def reflection_enabled() -> bool:
+    """Phase 4 ships ON for capture and OFF for the nightly pass by default.
+
+    Recording evidence is safe and reversible — the rows are inert until a
+    reflection reads them, and a lane that turns out to be poisoned empties with
+    one delete. Writing lessons that reach every chassis turn is the part that
+    earns a flag.
+    """
+    import os
+
+    return os.getenv("ELIXIR_REFLECTION", "0").strip().lower() not in ("0", "false", "no", "off")
+
+
+async def _record_editorial_reaction(payload, *, removed: bool) -> None:
+    """Attribute a leader's reaction to the Elixir post it landed on.
+
+    Never raises into the reaction handler: feedback capture failing must not
+    stop a thumbs-up from being acknowledged or a leader action from resolving.
+    """
+    import runtime.app as app
+
+    if not app._has_leader_role(getattr(payload, "member", None)):
+        return
+
+    def _write():
+        import db
+        from engine import editor
+
+        conn = db.get_connection()
+        try:
+            return editor.record_post_reaction(
+                conn,
+                discord_message_id=str(payload.message_id),
+                emoji=str(getattr(payload, "emoji", "")),
+                reactor_id=str(payload.user_id),
+                removed=removed,
+            )
+        finally:
+            conn.close()
+
+    try:
+        memory_id = await asyncio.to_thread(_write)
+    except Exception:
+        log.warning("editorial reaction capture failed", exc_info=True)
+        return
+    if memory_id:
+        log.info(
+            "editorial_reaction %s emoji=%s message_id=%s reactor=%s memory=%s",
+            "removed" if removed else "added",
+            getattr(payload, "emoji", ""),
+            payload.message_id,
+            payload.user_id,
+            memory_id,
+        )
+
+
 async def handle_raw_reaction_add(payload) -> None:
     import runtime.app as app
 
@@ -183,6 +239,12 @@ async def handle_raw_reaction_add(payload) -> None:
                         payload.user_id,
                     )
             return
+    # Phase 4: any leadership reaction on something Elixir POSTED is editorial
+    # evidence, whatever the emoji. This is deliberately not an emoji vocabulary
+    # — the join is the delivery intent, so a reaction on any other message in
+    # the channel is not feedback about Elixir's writing and never lands here.
+    await _record_editorial_reaction(payload, removed=False)
+
     feedback_value = feedback_value_for_emoji(getattr(payload, "emoji", None))
     if not feedback_value:
         return
@@ -260,6 +322,10 @@ async def handle_raw_reaction_remove(payload) -> None:
                 )
                 await refresh_leader_action_card(app.bot, action)
             return
+    # Taking a reaction back is itself a signal — a leader who removes a
+    # thumbs-up has changed their mind, and the reflection should see both.
+    await _record_editorial_reaction(payload, removed=True)
+
     feedback_value = feedback_value_for_emoji(getattr(payload, "emoji", None))
     if not feedback_value:
         return

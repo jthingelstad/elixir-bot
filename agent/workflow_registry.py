@@ -269,6 +269,18 @@ _WORKFLOW_SPECS = (
         model_family="intensive",
         tools_allowed=False,
     ),
+    # Phase 4. Toolless on purpose: everything it may reason about is handed to
+    # it as evidence, so it cannot go and find a fact to justify a lesson it
+    # already wanted to write. `chat` rather than `intensive` because it reads
+    # one day, not a quarter — the weekly Opus synthesis is still the deep pass.
+    WorkflowSpec(
+        "reflection",
+        response_schema={"required": ["lessons", "notes"]},
+        tools=[],
+        max_tool_rounds=2,
+        model_family="chat",
+        tools_allowed=False,
+    ),
     WorkflowSpec(
         "leader_action_feedback",
         response_schema={

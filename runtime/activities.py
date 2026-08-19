@@ -241,6 +241,28 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         activity_role="observer+communicator",
     ),
     ActivityDefinition(
+        activity_key="nightly-reflection",
+        owner_lane="leader-lounge",
+        purpose=(
+            "Read the last 24h of Elixir's own posts, the wakes that chose silence, "
+            "and leadership reactions; write at most three evidence-linked editorial "
+            "lessons. Proposes only — it never posts and never changes wake policy."
+        ),
+        job_id="nightly-reflection",
+        job_function="_reflection_cycle",
+        schedule_kind="cron",
+        schedule_config={
+            "hour": _attr("REFLECTION_HOUR", 2),
+            "minute": 40,
+        },
+        # 02:40 CT: after the day's last posts have settled and well clear of the
+        # 03:37 backup and the 04:00/04:15 jobs. It writes memories, not messages.
+        delivery_targets=("Storage: editorial lesson memories (tag `editorial`)",),
+        activity_role="observer",
+        manual_trigger_allowed=True,
+        status_name="reflection",
+    ),
+    ActivityDefinition(
         activity_key="weekly-recap",
         owner_lane="announcements",
         purpose="Publish the public weekly clan recap and members-page payload.",

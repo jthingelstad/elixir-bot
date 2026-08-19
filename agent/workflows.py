@@ -38,6 +38,7 @@ from agent.prompt_builders import (
     _memory_synthesis_system,
     _promote_system,
     _reception_system,
+    _reflection_system,
     _screenshot_readout_system,
     _tournament_recap_system,
     _tournament_update_system,
@@ -463,6 +464,37 @@ def synthesize_leader_action_feedback(context: dict):
         workflow="leader_action_feedback",
         allowed_tools=TOOLSETS_BY_WORKFLOW["leader_action_feedback"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["leader_action_feedback"],
+        strict_json=True,
+        return_errors=True,
+    )
+
+
+def run_reflection(context: dict):
+    """One nightly reflection turn (Agentic Loop v2, Phase 4).
+
+    ``context`` carries the last 24h of delivery intents, the wakes that chose
+    silence and why, leadership reactions attributed to specific posts, and the
+    lessons already in force. Returns
+    ``{"lessons": [...], "notes": "..."}``.
+
+    Persisting is the job function's business, not this call's — and it is where
+    the caps live, because a model asked to be useful will always find three
+    things to say.
+    """
+    public_context = {k: v for k, v in (context or {}).items() if not k.startswith("_")}
+    user_msg = (
+        "Here is the last 24 hours of your own output and the leadership "
+        "reactions to it. Decide what you should do differently, with evidence "
+        "for each lesson. An empty lessons list is a correct answer on a quiet "
+        "day. Follow the output schema in your system prompt exactly.\n\n"
+        f"```json\n{json.dumps(public_context, indent=2, default=str)}\n```\n"
+    )
+    return _chat_with_tools(
+        _reflection_system(),
+        user_msg,
+        workflow="reflection",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["reflection"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["reflection"],
         strict_json=True,
         return_errors=True,
     )
@@ -1727,6 +1759,7 @@ __all__ = [
     "generate_intel_report",
     "generate_war_intel_narrative",
     "run_memory_synthesis",
+    "run_reflection",
     "run_awareness_tick",
     "repair_awareness_plan",
     "generate_ask_elixir_daily",

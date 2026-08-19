@@ -340,6 +340,11 @@ from runtime.jobs._promotion import (  # noqa: E402,F401
     _unwrap_outer_bold,
     _validate_promote_content_or_raise,
 )
+from runtime.jobs._reflection import (  # noqa: E402,F401
+    MAX_LESSONS_PER_NIGHT,
+    _reflection_cycle,
+    build_reflection_context,
+)
 from runtime.jobs._tournament import (  # noqa: E402,F401
     _TOURNAMENT_JOB_ID,
     TOURNAMENT_BATTLE_LOG_SPACING_SECONDS,
