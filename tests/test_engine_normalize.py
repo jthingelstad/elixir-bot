@@ -89,6 +89,19 @@ def test_pol_rank_lower_is_better():
     assert pol_rank_improved(50, None) is False
 
 
+def test_live_chaos_event_mode_keys_keep_their_authoritative_labels():
+    """The 2026-08 live event feed supplies these exact in-game titles.
+
+    Generic splitting would render ``Crazy Arena Epic Only`` and
+    ``Chaos 1v 1 Triple Draft``, losing the official C.H.A.O.S branding used
+    by the linked event records and in the client.
+    """
+    from engine.normalize import humanize_game_mode
+
+    assert humanize_game_mode("Crazy_Arena_EpicOnly") == "C.H.A.O.S Epic Only"
+    assert humanize_game_mode("Chaos_1v1_TripleDraft") == "C.H.A.O.S Triple Draft"
+
+
 def test_tag_forms_named():
     assert canon_tag("abc123") == "#ABC123"
     assert canon_tag("#abc123") == "#ABC123"

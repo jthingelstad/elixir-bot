@@ -406,6 +406,8 @@ def badge_facts(badge_name, catalog=None) -> dict:
 _GAME_MODE_LABELS = {
     "Chaos_1v1_Draft": "C.H.A.O.S Draft",
     "Crazy_Arena": "Crazy Arena",
+    "Crazy_Arena_EpicOnly": "C.H.A.O.S Epic Only",
+    "Chaos_1v1_TripleDraft": "C.H.A.O.S Triple Draft",
     "Challenge_AllCards_EventDeck_NoSet": "All-Cards Challenge",
     "TeamVsTeam": "2v2",
     "CW_Battle_1v1": "Clan War",
