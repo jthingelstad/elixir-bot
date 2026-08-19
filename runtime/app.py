@@ -1569,6 +1569,13 @@ async def _action_outcome_refresh():
     except Exception as exc:
         runtime_status.mark_job_failure("action_outcome_refresh", str(exc))
         log.warning("action outcome refresh failed: %s", exc, exc_info=True)
+        # The canary rides this job but does not depend on it. Returning here
+        # used to skip it silently: on 2026-08-03 a "database is locked" in the
+        # outcome refresh took the divergence check down with it, and the only
+        # evidence Phase 2's exit gate has is a check that ran. Leader-action
+        # hygiene failing tells us nothing about whether two authors narrated
+        # the same moment.
+        await _report_wake_divergence()
         return
     await _report_wake_divergence()
     runtime_status.mark_job_success(

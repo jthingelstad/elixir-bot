@@ -199,3 +199,42 @@ def test_the_responder_ships_disabled(monkeypatch):
     assert respond.responder_enabled() is False
     monkeypatch.setenv("ELIXIR_WAKE_RESPONDER", "1")
     assert respond.responder_enabled() is True
+
+
+def test_an_escalation_keeps_the_failed_rung_in_the_recorded_episode(seeded, monkeypatch):
+    """A won wake must still explain what the cheap tier did.
+
+    Over the Phase 2 exit-gate window 10 of 41 wakes escalated, and because only
+    the winning tier's episode was stored, not one of them left a durable trace
+    of WHY Haiku lost — the diagnosis had to come from a log line that says
+    nothing but "produced no post". Same blindness the fully-failed path was
+    fixed for, one rung down.
+    """
+
+    def _run(attention, seed, **kw):
+        if attention.budget.model_family == "lightweight":
+            return _episode([], rejections=["bounced once, then gave up"])
+        return _episode([_good_post()], workflow="wake_response_chat")
+
+    monkeypatch.setattr(chassis, "run_turn", _run)
+    outcome = respond.respond(
+        _wake(), deliver_fn=lambda read, plan: {"delivered": 1, "failed": False}, conn=seeded
+    )
+
+    assert outcome["handled"] is True and outcome["tier"] == "chat"
+    preceding = outcome["episode"]["preceding_attempts"]
+    assert len(preceding) == 1
+    assert preceding[0]["workflow"] == "wake_response"
+    assert preceding[0]["rejections"] == ["bounced once, then gave up"]
+    # The winner still identifies itself as the winner: job/workflow/tier are
+    # what record_episode() writes into its own columns.
+    assert outcome["episode"]["workflow"] == "wake_response_chat"
+
+
+def test_a_wake_won_on_the_first_tier_carries_no_preceding_attempts(seeded, monkeypatch):
+    """The common case stays exactly as small as it was."""
+    monkeypatch.setattr(chassis, "run_turn", lambda a, s, **kw: _episode([_good_post()]))
+    outcome = respond.respond(
+        _wake(), deliver_fn=lambda read, plan: {"delivered": 1, "failed": False}, conn=seeded
+    )
+    assert "preceding_attempts" not in outcome["episode"]

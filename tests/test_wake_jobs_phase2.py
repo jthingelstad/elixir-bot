@@ -9,6 +9,7 @@ job means adding a row, and that the rows say what a month of real posts said.
 from __future__ import annotations
 
 import json
+import types
 
 import pytest
 
@@ -352,3 +353,44 @@ def test_the_divergence_report_never_calls_itself_clean_when_it_could_not_look()
         divergence.floor_misses = original
     assert result["clean"] is False
     assert result["floor_data_available"] is False
+
+
+def test_the_canary_still_runs_when_the_job_it_rides_on_fails():
+    """The divergence check must not be collateral damage.
+
+    It is scheduled inside `_action_outcome_refresh` for convenience, but the two
+    have nothing to do with each other. On 2026-08-03 a "database is locked" in
+    the leader-action refresh returned early and took the canary down with it —
+    and a check that did not run is precisely the state Phase 2's exit gate
+    cannot distinguish from a clean one.
+    """
+    import asyncio
+
+    from runtime import app
+
+    calls = {"divergence": 0}
+
+    async def _fake_report():
+        calls["divergence"] += 1
+
+    def _boom():
+        raise RuntimeError("database is locked")
+
+    original_report = app._report_wake_divergence
+    original_refresh = app.db.refresh_due_leader_action_outcomes
+    original_status = app.runtime_status
+    app._report_wake_divergence = _fake_report
+    app.db.refresh_due_leader_action_outcomes = _boom
+    app.runtime_status = types.SimpleNamespace(
+        mark_job_start=lambda *a, **k: None,
+        mark_job_failure=lambda *a, **k: None,
+        mark_job_success=lambda *a, **k: None,
+    )
+    try:
+        asyncio.run(app._action_outcome_refresh())
+    finally:
+        app._report_wake_divergence = original_report
+        app.db.refresh_due_leader_action_outcomes = original_refresh
+        app.runtime_status = original_status
+
+    assert calls["divergence"] == 1, "the canary was skipped by an unrelated failure"

@@ -321,6 +321,14 @@ def respond(
             continue
 
         result = _deliver(episode, seed, floor, deliver_fn)
+        # Carry the rungs that failed on the way here. Only the winning tier's
+        # episode was stored before, so an escalation left NO durable trace of
+        # why the cheap tier lost — over the Phase 2 gate, 10 of 41 wakes
+        # escalated and every one of them could only be diagnosed from a log
+        # line. Same class of blindness as the floor miss that a fully-failed
+        # wake used to leave, one level down.
+        if len(attempts) > 1:
+            episode = {**episode, "preceding_attempts": attempts[:-1]}
         result["episode"] = episode
         result["attempts"] = len(attempts)
         result["tier"] = tier
