@@ -127,7 +127,10 @@ def _errors(hours: int = 24) -> list[dict]:
     return sorted(grouped.values(), key=lambda e: e["last"], reverse=True)
 
 
-AWARENESS_DECISION_STALE_HOURS = 14
+# The once-daily 09:05 CT awareness cron needs the same two-hour grace that
+# the former twice-daily cadence had (12h + 2h = 14h).  Otherwise the report
+# raises a false liveness alarm every night between the morning decisions.
+AWARENESS_DECISION_STALE_HOURS = 26
 LEADER_ACTION_STALE_HOURS = 2  # a proposed card unposted this long → posting broken
 
 

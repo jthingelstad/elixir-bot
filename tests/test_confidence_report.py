@@ -37,13 +37,20 @@ def test_liveness_accepts_recent_deliberate_silence(monkeypatch):
     assert confidence_report._liveness() == []
 
 
+def test_liveness_allows_daily_awareness_cadence_before_flagging_stale(monkeypatch):
+    conn = _liveness_conn(thought_at=_utc(25))
+    monkeypatch.setattr("scripts.read_only_db.connect_read_only", lambda: conn)
+
+    assert confidence_report._liveness() == []
+
+
 def test_liveness_flags_stale_successful_awareness_decision(monkeypatch):
-    conn = _liveness_conn(thought_at=_utc(15))
+    conn = _liveness_conn(thought_at=_utc(27))
     monkeypatch.setattr("scripts.read_only_db.connect_read_only", lambda: conn)
 
     finding = confidence_report._liveness()[0]
 
-    assert finding.startswith("no successful awareness decision in 15.0h")
+    assert finding.startswith("no successful awareness decision in 27.0h")
 
 
 def test_liveness_does_not_treat_failed_plan_as_a_success(monkeypatch):
