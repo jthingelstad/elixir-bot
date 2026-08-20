@@ -113,12 +113,34 @@ EVENT_CONTRACTS: dict[str, EventContract] = {
     # same news: 20% of promotions into leagues 1-3 reached a post, against 60%
     # into 4-6 and 100% into 7. League 4 is where the game renames the tier to
     # "Champion", so the boundary is the game's own.
-    "pol_promotion": _event("player", "battle_mode", "league", "prev_league", "league_tier"),
+    "pol_promotion": _event(
+        "player",
+        "battle_mode",
+        "league",
+        "prev_league",
+        "league_name",
+        "prev_league_name",
+        "league_tier",
+    ),
     "champion_league_reached": _event(
-        "player", "battle_mode", "league", "prev_league", "league_tier", wake="immediate"
+        "player",
+        "battle_mode",
+        "league",
+        "prev_league",
+        "league_name",
+        "prev_league_name",
+        "league_tier",
+        wake="immediate",
     ),
     "ultimate_champion_reached": _event(
-        "player", "battle_mode", "league", "league_tier", wake="immediate"
+        "player",
+        "battle_mode",
+        "league",
+        "prev_league",
+        "league_name",
+        "prev_league_name",
+        "league_tier",
+        wake="immediate",
     ),
     "pol_global_rank_attained": _event("player", "battle_mode", "from_rank", "to_rank", "league"),
     "pol_season_closed": _event("player", "battle_mode", "pol_season_id", time_semantics="exact"),

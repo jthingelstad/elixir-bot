@@ -101,7 +101,25 @@ def test_a_champion_tier_arrival_is_its_own_event(engine_conn):
     ensure_player(engine_conn, "#CH", "Climber", "2026-08-04T00:00:00Z")
     events = _promote(engine_conn, "#CH", 3, 4)
     assert [e[0] for e in events] == ["champion_league_reached"]
-    assert events[0][1] == {"league": 4, "prev_league": 3, "league_tier": "champion"}
+    assert events[0][1] == {
+        "league": 4,
+        "prev_league": 3,
+        "league_name": "Champion",
+        "prev_league_name": "Master 3",
+        "league_tier": "champion",
+    }
+
+
+def test_a_second_champion_tier_arrival_names_the_new_rung(engine_conn):
+    """Regression: Champion -> Grand Champion must not become a second post
+    claiming the member merely reached generic "Champion League"."""
+    from engine.db import ensure_player
+
+    ensure_player(engine_conn, "#GC", "Climber", "2026-08-04T00:00:00Z")
+    events = _promote(engine_conn, "#GC", 4, 5)
+    assert [e[0] for e in events] == ["champion_league_reached"]
+    assert events[0][1]["prev_league_name"] == "Champion"
+    assert events[0][1]["league_name"] == "Grand Champion"
 
 
 def test_a_master_tier_bump_stays_routine(engine_conn):

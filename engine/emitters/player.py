@@ -282,6 +282,17 @@ def emit_ranked(conn, tag, old, new, observed_at, window_start) -> int:
     # timestamp — a true duplicate that inflated every count involving it.
     if isinstance(ol, int) and isinstance(nl, int) and nl > ol:
         tier = normalize.ranked_league_tier(nl)
+        payload = {
+            "league": nl,
+            "prev_league": ol,
+            # Numbers identify and order the event; names are the canonical
+            # member-facing facts. Without them a scoped responder described
+            # both Champion (4) and Grand Champion (5) as "Champion League"
+            # three days apart, producing 93% duplicate copy.
+            "league_name": normalize.ranked_league_name(nl),
+            "prev_league_name": normalize.ranked_league_name(ol),
+            "league_tier": tier,
+        }
         if tier == "ultimate" and ol < ULTIMATE_CHAMPION_LEAGUE:
             n += _emit(
                 conn,
@@ -290,7 +301,7 @@ def emit_ranked(conn, tag, old, new, observed_at, window_start) -> int:
                 window_start,
                 "ultimate_champion_reached",
                 None,
-                {"league": nl, "prev_league": ol, "league_tier": tier},
+                payload,
             )
         else:
             n += _emit(
@@ -300,7 +311,7 @@ def emit_ranked(conn, tag, old, new, observed_at, window_start) -> int:
                 window_start,
                 "champion_league_reached" if tier == "champion" else "pol_promotion",
                 nl,
-                {"league": nl, "prev_league": ol, "league_tier": tier},
+                payload,
             )
     # pol_global_rank_attained — rank attained or improved (lower = better);
     # key = to_rank (events.md §3: key prefix = event_type, rank attained)
