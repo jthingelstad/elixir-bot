@@ -31,7 +31,10 @@ Cadence: daily, plus after a material Supercell release or a structural drift al
 4. Characterize each candidate with counts, first/last observation, affected entities,
    raw examples, and downstream consumers. Distinguish new from merely rare.
 5. Ask what useful data Elixir captures but does not yet interpret, especially special
-   events and shifts in where the clan is actually playing.
+   events and shifts in where the clan is actually playing. At least monthly, perform a
+   small captured-but-unused data inventory: trace each credible candidate from receipt
+   through events, projections, and capability consumers, then either prove it is not
+   useful or correct the missing source representation. Do not create an idea backlog.
 6. Inspect open `objective:game` issues for multi-run context.
 
 ## Action

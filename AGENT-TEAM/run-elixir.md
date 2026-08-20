@@ -34,7 +34,10 @@ Cadence: every four hours, plus after a deploy or a reported incident.
 6. Run the canonical seven-day LLM cost report. Report total spend and separately
    identify the budget-governed awareness/Ask Elixir work. Scheduled jobs remain
    outside that budget and must not be starved by it. Distinguish useful workload
-   from retry, truncation, bad-parameter, or cache waste before changing anything.
+   from retry, truncation, bad-parameter, or cache waste before changing anything. If
+   a proposed saving would alter model behavior, cadence, context, or routing, retain
+   the cost evidence but require Improve Elixir's quality acceptance; a lower bill
+   alone is not proof of efficiency.
 7. Check backup completion and the current backup-set owner when the window includes
    a backup or deployment.
 8. Inspect open `objective:run` issues. Work the highest-impact current gap if it is

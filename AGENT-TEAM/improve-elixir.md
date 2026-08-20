@@ -51,6 +51,19 @@ version. Do not hide the decision in a proposal pipeline.
 Friday's deeper pass should improve measurement only where the current evidence cannot
 answer an important quality question. Do not add harnesses for their own sake.
 
+Friday's deeper pass is also the **intelligence and efficiency baseline**. It is not a
+separate report or agent:
+
+- for any materially expensive member-facing workflow, compare canonical cost evidence
+  with its natural outcome and quality signal; a cheaper model, shorter context, or
+  lower cadence is not an improvement unless the relevant quality bar still holds;
+- when sufficient natural examples exist, trace one feedback or learned-context path
+  (leader feedback, reflection, dossier, or memory) to a later comparable decision;
+  record `insufficient_sample` rather than inferring learning from the mechanism's
+  existence; and
+- turn a proven quality/cost regression into one source fix and regression, not a
+  standing optimizer backlog.
+
 On Friday, also take a small team-health pulse from the week's outcomes: look for
 duplicate work, manufactured findings, lease collisions, stalled decisions, or an
 objective that repeatedly stops short of natural acceptance. Change an objective

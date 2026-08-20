@@ -22,6 +22,24 @@ straight to Jamie as one concrete decision. There is no Team Manager or dispatch
 Improve Elixir performs a light Friday health pulse instead. The objectives and their
 schedules are the operating system.
 
+## Intelligence and efficiency remain objective-owned
+
+Do not add a fourth Intelligence, Data Analyst, Evaluator, or Cost Optimizer agent.
+Those names split outcomes the current objectives already own and would recreate the
+retired handoff pipeline.
+
+| Need | Owner | Decision standard |
+|---|---|---|
+| Better reasoning, learned context, tool choice, and editorial judgment | **Improve Elixir** | Exact natural behavior must improve, not merely an offline score. |
+| Newly useful Clash Royale or clan data | **Understand Clash Royale** | Trace receipts through events and capabilities before calling a signal meaningful. |
+| Spend, retries, cache efficiency, and model-call reliability | **Run Elixir** | A lower bill is a win only when it preserves the relevant quality outcome. |
+
+Run supplies the canonical cost and reliability evidence. Improve owns quality
+acceptance whenever a savings change could alter model behavior, cadence, context, or
+routing. Understand owns any missing source representation discovered along the way.
+The originating objective keeps the work through acceptance; this is a shared evidence
+contract, not an analyst-to-builder handoff.
+
 ## How Jamie engages the team
 
 Jamie can start with the outcome instead of choosing a role or preparing a ticket:

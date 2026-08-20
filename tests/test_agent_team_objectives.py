@@ -84,6 +84,7 @@ def test_workflow_pins_acceptance_and_memory_ownership():
     workflow = (ROOT / "AGENT-TEAM/WORKFLOW.md").read_text()
     readme = (ROOT / "AGENT-TEAM/README.md").read_text()
     run = (ROOT / "AGENT-TEAM/run-elixir.md").read_text()
+    game = (ROOT / "AGENT-TEAM/understand-clash-royale.md").read_text()
     improve = (ROOT / "AGENT-TEAM/improve-elixir.md").read_text()
 
     assert "Run Elixir owns deployment acceptance" in workflow
@@ -93,7 +94,14 @@ def test_workflow_pins_acceptance_and_memory_ownership():
     assert "Replace `Latest run` on every pass" in workflow
     assert "Outcome: HEALTHY | CHANGED | WATCHING | BLOCKED | NEEDS JAMIE" in workflow
     assert "Run <objective> now and own the highest-impact measured gap." in readme
+    assert "Intelligence and efficiency remain objective-owned" in readme
+    assert "Do not add a fourth Intelligence" in readme
     assert "Once per ISO week" in run
+    assert "a lower bill" in run
+    assert "alone is not proof of efficiency" in run
+    assert "captured-but-unused data inventory" in game
+    assert "intelligence and efficiency baseline" in improve
+    assert "insufficient_sample" in improve
     assert "On Friday, also take a small team-health pulse" in improve
 
 
