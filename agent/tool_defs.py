@@ -1352,7 +1352,6 @@ TOOLS = [
             },
             "required": ["due_at", "why"],
         },
-        "side_effect": "write",
     },
     {
         "name": "record_leadership_followup",

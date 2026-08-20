@@ -1612,6 +1612,28 @@ def test_create_chat_completion_cache_control(
         assert last_msg["content"] == message
 
 
+def test_create_chat_completion_never_sends_internal_tool_metadata():
+    """Write authority is registry metadata, not part of Anthropic's tool schema."""
+    response = _mock_anthropic_response()
+    create = Mock(return_value=response)
+    mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
+
+    with (
+        patch("agent.core._get_client", return_value=mock_client),
+        patch("elixir_agent.runtime_status.record_llm_call"),
+    ):
+        elixir_agent._create_chat_completion(
+            workflow="deck_review",
+            messages=[{"role": "user", "content": "review this deck"}],
+            tools=elixir_agent.TOOLSETS_BY_WORKFLOW["deck_review"],
+        )
+
+    followup = next(
+        tool for tool in create.call_args.kwargs["tools"] if tool["name"] == "schedule_followup"
+    )
+    assert "side_effect" not in followup
+
+
 def test_message_cache_breakpoint_marks_last_block_of_last_message():
     """A growing tool loop: the breakpoint rides the end of the history so each
     round's prefix is cache-readable. String content becomes a text block; an
