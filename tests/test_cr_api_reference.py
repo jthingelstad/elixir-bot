@@ -36,3 +36,10 @@ def test_observed_unknown_deck_selection_remains_in_agent_references() -> None:
         _PLAYERS_REFERENCE.read_text()
     )
     assert "- `unknown`" in _BATTLES_REFERENCE.read_text()
+
+
+def test_touchdown_draft_reference_records_current_observation() -> None:
+    """Do not leave an observed battle-log mode marked as unobserved."""
+    assert "| 72000051 | TeamVsTeam_Touchdown_Draft (observed August 2026)" in (
+        _PLAYERS_REFERENCE.read_text()
+    )

@@ -258,7 +258,7 @@ Observed: returns ~30-40 battles (most commonly 30).
 | 72000033 | RampUpElixir_Friendly                                                              |
 | 72000042 | PickMode                                                                           |
 | 72000050 | Touchdown_Draft                                                                    |
-| 72000051 | TeamVsTeam_Touchdown_Draft (listed, not observed March–April 2026)                 |
+| 72000051 | TeamVsTeam_Touchdown_Draft (observed August 2026)                                  |
 | 72000060 | Overtime_Ladder                                                                    |
 | 72000062 | TripleElixir_Ladder                                                                |
 | 72000065 | Showdown_Friendly                                                                  |
