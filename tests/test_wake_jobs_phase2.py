@@ -275,10 +275,10 @@ def test_the_escalation_rung_has_real_output_headroom():
     runs when a hard post has already lost the cheap tier, so it is the one rung
     that must not fail for want of room.
     """
-    assert respond._MAX_TOKENS_BY_TIER["chat"] >= 8192
-    assert set(respond._MAX_TOKENS_BY_TIER) == set(respond._LADDER), (
-        "every ladder rung needs a declared ceiling"
-    )
+    from agent.workflow_registry import policy_for
+
+    assert policy_for(respond._LADDER["lightweight"]).max_tokens == 2000
+    assert policy_for(respond._LADDER["chat"]).max_tokens >= 8192
 
 
 # ------------------------------------- telemetry must stay operational-only

@@ -13,12 +13,15 @@ precisely enough that a future turn can act on it.
   chose not to post is as much a decision as one that did.
 - **`reactions`** — leadership reactions attributed to specific posts, including
   reactions that were *removed*.
+- **`member_conversations`** — linked member-authored Ask Elixir and deck-review
+  messages. These are the only evidence that may create a member dossier.
+- **`evidence_index`** — the exact source references accepted by persistence.
 - **`current_lessons`** — the lessons already in force. I see them so I do not
   write the same one again in different words.
 
 ## The one rule that matters
 
-**Every lesson must point at evidence in tonight's input.** If I cannot name the
+**Every lesson must point at one or more exact `evidence_index.ref` values.** If I cannot name the
 post, the reaction, or the silence that taught me something, I do not have a
 lesson — I have an opinion about writing, and the prompt files already carry
 plenty of those.
@@ -80,12 +83,16 @@ still true rather than writing only today's fragment.
     {
       "title": "short, specific, reads as a rule",
       "body": "what to do differently, and the evidence for it",
-      "evidence": "the intent key, reaction, or silence this came from",
+      "evidence_refs": ["intent:awareness:...", "reaction:123"],
       "confidence": 0.0
     }
   ],
   "dossiers": [
-    {"member_tag": "#ABC123", "body": "the whole note, carrying forward what is still true"}
+    {
+      "member_tag": "#ABC123",
+      "body": "the whole note, carrying forward what is still true",
+      "evidence_refs": ["message:456"]
+    }
   ],
   "notes": "anything a human should look at — bugs, oddities, things that are not lessons"
 }

@@ -6,35 +6,46 @@ rationale and may describe components later retired from production.
 
 ## Data flow
 
-1. `cr_api.py` is the only Clash Royale ingress. Every response is appended to
-   `raw_api_payloads` under its real endpoint before downstream use.
+1. `cr_api.py` is the only Clash Royale ingress. Every successful request gets
+   an append-only `api_observation_receipts` row under its true endpoint;
+   identical bodies share one hash-deduplicated `raw_api_payloads` content row.
 2. `engine/observations.py` admits payloads, and the normalizers/projectors in
    `engine/` convert API-shaped data into canonical tags, timestamps, and
    domain values.
 3. Emitters compare canonical state to `state_baselines`. A first sight creates
    a baseline but no event; a real delta is applied through an invariant-checked
    change set and advances the baseline only after its writes succeed.
-4. The durable streams are `battle_events`, `player_events`, `clan_events`,
-   `war_events`, and `game_events`. Projections and rollups are derived from
+4. The durable streams are `battle_events`, `player_events`, `clan_events`, and
+   `war_events`. Projections and rollups are derived from
    those streams; identity, tenure, awards, and recognition claims are durable
    records rather than disposable projections.
 5. `capabilities/` packages canonical domain answers for tools, awareness,
    reports, memory synthesis, and admin. Consumers choose wording
    and presentation; they do not independently recalculate the facts.
-6. The unified awareness loop reads new stream positions plus projections and
-   capability answers, makes one proactive plan, validates it, sends it, then
-   records confirmed receipts in `awareness_posts`. Interactive Discord turns
-   use the same capability/tool facts but keep their conversation history in
-   `messages`.
+6. The awareness stack has two authors and one delivery owner. The daily brain
+   deliberates over the whole read; nine scoped responder jobs handle qualifying
+   events between brain runs. Both validate complete plans and persist them to
+   `awareness_delivery_intents` before delivery. Discord receipts also enter
+   `awareness_posts`; clan-chat-only follow-ups are durable intents whose relay
+   card must succeed before fulfillment. An allowed no-post result is an explicit
+   `choose_silence` tool call, never inferred from an empty model response.
+7. Interactive Discord turns use the same capability facts and keep linked
+   history in `messages`. `interactive` and `deck_review` may schedule one
+   bounded follow-up per turn. Nightly reflection can use those linked messages
+   as dossier evidence, but persistence accepts only exact source references.
+8. `agent/workflow_registry.py` is the single workflow policy source: model
+   family, tool surface, write permission/budget, rounds, output ceiling,
+   reasoning effort, and timeout are projections of one `WorkflowSpec` row.
 
 ## Ownership boundaries
 
 | Concern | Owner | Durable evidence |
 |---|---|---|
-| API capture | `cr_api.py` | `raw_api_payloads` |
+| API capture | `cr_api.py` | `api_observation_receipts`, `raw_api_payloads` |
 | Canonical state transitions | `engine/` change sets and emitters | baselines, streams, identity tables |
 | Shared domain meaning | `capabilities/` | versioned dictionary contracts |
-| Proactive judgment and voice | awareness workflow | `awareness_thoughts`, `awareness_posts`, stream cursors |
+| Proactive judgment and voice | awareness brain + scoped responder | `awareness_thoughts`, `awareness_delivery_intents`, `awareness_posts`, stream cursors |
+| Nightly learning and member context | reflection + dossiers | evidence refs, editorial memories, `member_dossiers`, `scheduled_followups` |
 | Interactive answers | agent workflows and tool policy | `messages`, scoped memories, LLM telemetry |
 | Human clan decisions | management state machines and leadership UI | leader actions and revisits |
 | Operational truth | activity registry, runtime status, process logging | `runtime_job_status`, tick history, `logs/elixir-error.log` |

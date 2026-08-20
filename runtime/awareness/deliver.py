@@ -35,6 +35,7 @@ log = logging.getLogger("elixir")
 # The only two channels the brain posts to. Anything else in a plan is a bug in
 # the prompt/output and fails the tick rather than leaking to a wrong channel.
 POSTABLE_CHANNELS = ("announcements", "elixir")
+CLAN_CHAT_CHANNEL = "clan_chat"
 
 
 def _post_content(post: dict) -> str:
@@ -100,8 +101,9 @@ def deliver_posts(
     # or more posts had already escaped, guaranteeing a partial retry problem.
     for post in posts:
         channel = post.get("channel")
+        is_clan_chat_only = channel == CLAN_CHAT_CHANNEL
         cfg = lanes.get(channel) if channel in POSTABLE_CHANNELS else None
-        if cfg is None:
+        if cfg is None and not is_clan_chat_only:
             reason = f"unroutable channel {channel!r}"
             log.error("awareness deliver: %s — failing tick before send", reason)
             return {
@@ -124,6 +126,15 @@ def deliver_posts(
         prepared_post["_delivery_content"] = copy
         delivery_posts.append(prepared_post)
         covered.update(post.get("covers_signal_keys") or [])
+
+    if any(post.get("channel") == CLAN_CHAT_CHANNEL for post in delivery_posts):
+        if relay_fn is None:
+            return {
+                "delivered": 0,
+                "failed": True,
+                "reason": "clan-chat-only delivery has no relay binding",
+                "uncovered_hard": [],
+            }
 
     mandatory = {
         signal.get("signal_key")
@@ -248,7 +259,6 @@ def deliver_posts(
             replayed += 1
         intent_key = item["intent_key"]
         channel = post.get("channel")
-        cfg = lanes[channel]
         copy = post["_delivery_content"]
 
         if intent_store is not None:
@@ -266,6 +276,50 @@ def deliver_posts(
                     "intent_keys": intent_keys,
                 }
 
+        if channel == CLAN_CHAT_CHANNEL:
+            try:
+                relayed = bool(relay_fn(post, "clan chat"))
+            except Exception as exc:
+                log.exception("awareness deliver: standalone clan-chat relay failed")
+                relayed = False
+                relay_error = str(exc)
+            else:
+                relay_error = "relay returned no receipt"
+            if not relayed:
+                if intent_store is not None:
+                    try:
+                        intent_store.mark_delivery_pending(intent_key, relay_error)
+                    except Exception:
+                        log.exception(
+                            "awareness deliver: could not return clan-chat intent to pending"
+                        )
+                return {
+                    "delivered": delivered,
+                    "failed": True,
+                    "reason": f"clan-chat relay failed: {relay_error}",
+                    "uncovered_hard": [],
+                    "intent_keys": intent_keys,
+                }
+            if intent_store is not None:
+                try:
+                    intent_store.mark_delivery_fulfilled(
+                        intent_key,
+                        f"clan-chat:{intent_key}",
+                        loop_number=loop_number,
+                    )
+                except Exception as exc:
+                    log.exception("awareness deliver: could not fulfill clan-chat intent")
+                    return {
+                        "delivered": delivered + 1,
+                        "failed": True,
+                        "reason": f"delivery intent finalize failed: {exc}",
+                        "uncovered_hard": [],
+                        "intent_keys": intent_keys,
+                    }
+            delivered += 1
+            continue
+
+        cfg = lanes[channel]
         try:
             message_id = post_fn(cfg["channel_id"], copy)
         except Exception as exc:
@@ -362,4 +416,4 @@ def deliver_posts(
     return result
 
 
-__all__ = ["deliver_posts", "POSTABLE_CHANNELS"]
+__all__ = ["CLAN_CHAT_CHANNEL", "deliver_posts", "POSTABLE_CHANNELS"]

@@ -40,7 +40,7 @@ matches brain quality at 4–20× lower cost; the brain spends ~300K tokens/tick
 | 2 — roster wakes, brain 4×→2× | **shipped, LIVE 2026-08-05, gate MET 2026-08-19** | `ELIXIR_WAKE_RESPONDER=1` |
 | 3 — war wakes, brain →1× | **shipped, LIVE 2026-08-19** | `ELIXIR_WAKE_RESPONDER=1` |
 | 4 — leader-feedback reflection | **shipped, LIVE 2026-08-19** | `ELIXIR_REFLECTION=1` |
-| 5 — dossiers + follow-ups | **shipped, LIVE 2026-08-19** (`_apply_v38`) | `ELIXIR_DOSSIERS`, `ELIXIR_REFLECTION` |
+| 5 — dossiers + follow-ups | **complete in code 2026-08-20; natural acceptance watching** (`_apply_v38`) | `ELIXIR_DOSSIERS` kill switch, `ELIXIR_REFLECTION` |
 | 6 — adoption + tuning | not started | — |
 
 **Phase 2 shipped 2026-08-05** and is **verified on a real member**: Escanor
@@ -48,7 +48,7 @@ joined at 14:57:53Z and the welcome was delivered at 14:58:07Z — **14 seconds*
 against a historical median of 2.0 hours. Exactly one intent covered it (two
 would be the v4 failure), and the divergence canary reports clean.
 
-Five jobs now, the brain runs twice a day, and `trigger.py` is gone. What the
+Nine jobs now, the brain runs once a day, and `trigger.py` is gone. What the
 pre-build analysis changed about the plan is recorded in the Phase 2 section
 below — three of its six steps were wrong about where the work was.
 
@@ -136,13 +136,15 @@ re-invents.
 | Wake policy (data) | `engine/event_contracts.py` — `wake`, `wake_model` per contract |
 | Wake evaluator | `runtime/awareness/wake.py` |
 | Shadow report | `scripts/wake_shadow_report.py` (`--simulate` replays history) |
-| Chassis | `agent/chassis.py` — `Attention` / `Scope` / `Budget` / `run_turn` |
+| Chassis | `agent/chassis.py` — `Attention` / `Scope` / `run_turn`; spend policy stays in the workflow registry |
 | Delivery validator | `agent/post_validation.py` |
 | Posting tools | `agent/tool_defs.SURFACE_TOOLS` + executors in `agent/tool_exec.py` |
+| Explicit silence | `choose_silence`, offered only by a silence-allowed `Attention` |
 | Scoped responder | `runtime/awareness/respond.py` |
 | **Job registry (surfaces + event types)** | `runtime/awareness/respond.JOBS` — the per-event-type behaviour, as DATA |
 | **Divergence canary** | `runtime/awareness/divergence.py` → daily #leaders report |
 | **Spend ceiling** | `agent/spend_budget.py` — `BUDGETED` names awareness / Ask Elixir; jobs are absent |
+| **Workflow policy** | `agent/workflow_registry.py` — model, tools, writes, rounds, tokens, effort, timeout |
 | Job prompts | `prompts/jobs/*.md` via `prompts.job_prompt()` |
 | Episodes / observations | `wake_episodes`, `wake_observations` (telemetry DB) |
 | Tier predicates | `engine/normalize.badge_tier`, `.ranked_league_tier` |
@@ -313,7 +315,7 @@ Size: an evening. No LLM calls, no schema change, no behavior change.
 **Status: BUILT 2026-08-04, shipped OFF (`ELIXIR_WAKE_RESPONDER=0`).** Two real
 joins replayed end to end against production data, delivery stubbed.
 
-Shipped: `agent/chassis.py` (Attention/Scope/Budget, one system-assembly
+Shipped: `agent/chassis.py` (Attention/Scope, one system-assembly
 recipe, auto-injected lessons, staging), `agent/post_validation.py`,
 `post_to_discord` + `post_to_clan_chat` in `agent/tool_defs.SURFACE_TOOLS`
 (never in `_SHARED_TOOL_NAMES` or `ALL_TOOLS`), executors in
@@ -379,7 +381,8 @@ proven case (trigger.py exists because of them) and the cheapest quality
 review (Jamie sees every welcome).
 
 Build:
-- `agent/chassis.py`: `Attention` / `Scope` / `Budget` dataclasses;
+- `agent/chassis.py`: `Attention` / `Scope` dataclasses; workflow spend lives in
+  the canonical registry row;
   `assemble_system` (identity + knowledge **incl. GAME.md** + policy + job file
   + surface guidance — one recipe); `assemble_context` (seed + editorial
   lessons + recent posts for in-scope surfaces); the tool loop against one
@@ -618,8 +621,9 @@ Build:
 - Leadership free-text replies to an Elixir post route through the existing
   leader-note interpretation machinery, attributed to the same intent.
 - `runtime/jobs/_reflection.py` (nightly, Sonnet): reads 24h of intents (posts
-  AND gated silences with reasons), reactions/notes, current lessons; emits
-  evidence-linked editorial lessons (upsert, capped at 12 injected). Weekly
+  AND gated silences with reasons), reactions/notes, linked member-authored
+  conversations, and current lessons; emits referential editorial lessons
+  (upsert, capped at 12 injected). Weekly
   Opus synthesis now consumes the nightly notes.
 - Lessons already flow chassis-wide via `assemble_context` — no extra wiring;
   the brain keeps its existing `_editorial_guidance` injection.
@@ -631,14 +635,14 @@ Build:
   reaction written into that set would evict a real lesson in order to tell every
   future turn that somebody once pressed a thumbs-up. Reactions carry
   `editorial-feeder` instead; only the nightly pass promotes a conclusion.
-- **The caps are in code, after the model answers.** Three lessons a night, a
-  0.5 confidence floor, and a hard requirement that each names its evidence — a
-  lesson that cannot point at a post is dropped, not downgraded. Asking for these
-  in the prompt would make them suggestions.
+- **The caps and references are in code, after the model answers.** Three lessons
+  a night, a 0.5 confidence floor, and a hard requirement that every
+  `evidence_refs` value exist in that night's evidence index. Plausible free text
+  and invented IDs are dropped, not downgraded.
 - **Lessons dedupe on their evidence, not their wording.** The 24h window
   overlaps at the boundary, so the same reaction re-read tomorrow would otherwise
   become a second copy of the same rule in different words.
-- **A quiet day makes no model call at all.** No intents and no reactions means
+- **A quiet day makes no model call at all.** No intents, reactions, or linked conversations means
   there is nothing to reflect on, and paying to be told so is not a learning loop.
 - **The workflow is toolless on purpose.** Everything it may reason about is
   handed to it; a tool would let it go and find a fact to justify a lesson it had
@@ -683,6 +687,14 @@ Build:
 rehearsed on a copy of the 1.7GB production database before deploy: 0.00s, no row
 counts changed, `integrity_check` ok, `foreign_key_check` clean.
 
+**Completed structurally 2026-08-20:** linked Ask Elixir/deck-review messages now
+enter reflection with stable `message:<id>` references; dossier persistence
+requires a matching member-authored reference. Interactive and deck-review turns
+may call one bounded `schedule_followup`. Due follow-ups can produce a Discord
+post, a durable clan-chat-only relay, or explicit successful silence, and the
+wake cursor advances only for a consumed outcome. A cross-layer test covers that
+conversation → dossier/follow-up → due event → silence → cursor slice.
+
 - **No backfill, deliberately.** Generating fifty dossiers from statistics on
   migration day would manufacture exactly the confident-sounding fiction this is
   meant to replace. A dossier is earned by observation; empty is correct.
@@ -694,20 +706,21 @@ counts changed, `integrity_check` ok, `foreign_key_check` clean.
   becomes the same question asked four times.
 - **`followup_due` is NOT a hard post.** A check-in is a kindness, not an
   obligation, and a floor would block the cursor until someone is asked how their
-  phone is. `followup.md` treats "post nothing" as a successful outcome.
-- **The two capabilities are flagged apart.** `ELIXIR_REFLECTION` gates writing
-  dossiers; `ELIXIR_DOSSIERS` gates injecting them into member-facing turns.
-  Capturing a note and letting it shape a post are different risks and only the
-  second is one a member would notice — injection ships OFF.
-- **`schedule_followup` went into BOTH write-tool sets.** The documented trap:
-  a tool in `_WRITE_TOOL_NAMES` alone was once offered to a model zero times, and
-  an intention Elixir can only form in a leadership conversation is useless —
-  members mention the broken phone in #ask-elixir.
+  phone is. Silence succeeds only through `choose_silence`; an empty model turn
+  remains a failed attempt and escalates.
+- **Clan chat can stand alone.** The staged row uses lane `clan_chat` in the same
+  delivery outbox. Unlike the best-effort sibling relay after Discord already
+  landed, a clan-chat-only intent stays pending unless its relay card succeeds.
+- **Dossier injection is on by default with a kill switch.** `ELIXIR_REFLECTION`
+  gates writing; `ELIXIR_DOSSIERS=0` disables member-facing injection. Exact
+  conversation references now protect the capture side of that boundary.
+- **`schedule_followup` reaches every relevant conversation with a tight cap.**
+  Awareness/clanops retain their existing write surface; `interactive` and
+  `deck_review` receive only this write tool, at one successful call per turn.
 
-Exit gate: dossier spot-check (accuracy + tone — would Jamie be comfortable if
-a member saw their own dossier?); first follow-ups fire and read naturally.
-**Nothing can be spot-checked until the nightly reflection has written some**, so
-the gate starts at the first 02:40 CT run that sees a real conversation.
+Exit gate: the structural path is covered and focused tests pass. Natural
+acceptance remains: spot-check the first referential dossiers for accuracy/tone
+and the first organic follow-up for timing and voice; do not manufacture either.
 Kill switch: dossier injection and followup wakes are independent flags.
 Size: a weekend + the migration care.
 

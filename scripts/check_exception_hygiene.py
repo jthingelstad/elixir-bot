@@ -95,7 +95,11 @@ BROAD_EXCEPTION_BASELINE = {
     # composing paths for overlap; a check that could fail the daily leader-action
     # job would be a monitor taking down the thing it monitors.
     "runtime/app.py": 43,
-    "runtime/awareness/deliver.py": 10,
+    # Three additional fail-closed boundaries belong to standalone clan-chat
+    # delivery: relay, return-to-pending, and intent fulfillment. The injected
+    # relay/store callables are external side-effect seams and may raise any
+    # exception; letting one escape would lose the retry contract.
+    "runtime/awareness/deliver.py": 13,
     # The floor-miss half reads the telemetry database, which is a separate file
     # and may be absent or locked. Missing telemetry must degrade the report to
     # "unavailable", never raise into the daily job.

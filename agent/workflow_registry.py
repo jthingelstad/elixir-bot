@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from agent.tool_defs import SURFACE_TOOLS, TOOLS
 
@@ -22,6 +22,15 @@ def _awareness_max_rounds() -> int:
 
 
 ModelFamily = Literal["chat", "creative", "lightweight", "intensive"]
+DEFAULT_EFFORT = "high"
+DEFAULT_MAX_TOKENS = 4096
+DEFAULT_TIMEOUT = 60
+
+
+class CallPolicy(NamedTuple):
+    max_tokens: int
+    effort: str = DEFAULT_EFFORT
+    timeout: int = DEFAULT_TIMEOUT
 
 
 @dataclass(frozen=True)
@@ -34,6 +43,9 @@ class WorkflowSpec:
     aliases: tuple[str, ...] = ()
     tools_allowed: bool = True
     write_tools_allowed: bool = False
+    max_tokens: int = DEFAULT_MAX_TOKENS
+    effort: str = DEFAULT_EFFORT
+    timeout: int = DEFAULT_TIMEOUT
 
 
 _WRITE_TOOL_NAMES = {
@@ -44,7 +56,7 @@ _WRITE_TOOL_NAMES = {
 
 # Posting is a write. These reach members, so they are the most consequential
 # writes Elixir has.
-_SURFACE_TOOL_NAMES = frozenset({"post_to_discord", "post_to_clan_chat"})
+_SURFACE_TOOL_NAMES = frozenset({"post_to_discord", "post_to_clan_chat", "choose_silence"})
 
 AWARENESS_WRITE_TOOL_NAMES = {
     "save_clan_memory",
@@ -65,11 +77,15 @@ AWARENESS_WRITE_BUDGET_PER_TICK = 3
 # (Discord + clan chat) and a validator bounce can legitimately cost a third, so
 # a shared 3-call cap would fail the very turn it was meant to protect.
 WRITE_BUDGET_BY_WORKFLOW = {
+    "interactive": 1,
+    "deck_review": 1,
     "awareness": AWARENESS_WRITE_BUDGET_PER_TICK,
     "wake_response": AWARENESS_WRITE_BUDGET_PER_TICK,
     "wake_response_chat": AWARENESS_WRITE_BUDGET_PER_TICK,
 }
 BUDGETED_WRITE_TOOLS_BY_WORKFLOW = {
+    "interactive": frozenset({"schedule_followup"}),
+    "deck_review": frozenset({"schedule_followup"}),
     "awareness": frozenset(AWARENESS_WRITE_TOOL_NAMES),
     "wake_response": frozenset(AWARENESS_WRITE_TOOL_NAMES),
     "wake_response_chat": frozenset(AWARENESS_WRITE_TOOL_NAMES),
@@ -120,6 +136,9 @@ _TOURNAMENT_UPDATE_TOOL_NAMES = {"cr_api"}
 TOURNAMENT_UPDATE_TOOLS = [t for t in READ_TOOLS if t["name"] in _TOURNAMENT_UPDATE_TOOL_NAMES]
 
 INTERACTIVE_READ_TOOLS = READ_TOOLS
+INTERACTIVE_TOOLS = READ_TOOLS + [
+    d["tool"] for d in TOOL_DEFINITIONS if d["name"] == "schedule_followup"
+]
 AWARENESS_TOOLS = READ_TOOLS + [
     d["tool"] for d in TOOL_DEFINITIONS if d["name"] in AWARENESS_WRITE_TOOL_NAMES
 ]
@@ -144,9 +163,13 @@ _WORKFLOW_SPECS = (
     WorkflowSpec(
         "interactive",
         response_schema=_CHANNEL_SCHEMA,
-        tools=INTERACTIVE_READ_TOOLS,
+        tools=INTERACTIVE_TOOLS,
         max_tool_rounds=4,
         model_family="chat",
+        write_tools_allowed=True,
+        max_tokens=4096,
+        effort="medium",
+        timeout=90,
     ),
     WorkflowSpec(
         "clanops",
@@ -155,6 +178,9 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=5,
         write_tools_allowed=True,
         model_family="chat",
+        max_tokens=8192,
+        effort="medium",
+        timeout=90,
     ),
     WorkflowSpec(
         "reception",
@@ -163,6 +189,8 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=0,
         tools_allowed=False,
         model_family="chat",
+        max_tokens=400,
+        effort="low",
     ),
     WorkflowSpec(
         "roster_bios",
@@ -173,7 +201,7 @@ _WORKFLOW_SPECS = (
     WorkflowSpec(
         "deck_review",
         response_schema=_CHANNEL_SCHEMA,
-        tools=INTERACTIVE_READ_TOOLS,
+        tools=INTERACTIVE_TOOLS,
         # 10 -> 6 (2026-08-05). Measured over 18 real reviews: the median takes
         # 5 calls and the 75th percentile 5, but the tail ran to 11 and 16 — and
         # a round is not cheap here, because each one writes ~14K tokens of
@@ -187,12 +215,17 @@ _WORKFLOW_SPECS = (
         # rather than for less waste.
         max_tool_rounds=6,
         model_family="chat",
+        write_tools_allowed=True,
+        effort="medium",
+        timeout=180,
     ),
     WorkflowSpec(
         "screenshot_readout",
         response_schema=_CHANNEL_SCHEMA,
         tools=READ_TOOLS,
         max_tool_rounds=4,
+        max_tokens=9000,
+        timeout=120,
     ),
     WorkflowSpec(
         "intel_report",
@@ -200,6 +233,7 @@ _WORKFLOW_SPECS = (
         tools=INTEL_REPORT_TOOLS,
         max_tool_rounds=15,
         model_family="intensive",
+        effort="medium",
     ),
     WorkflowSpec(
         "tournament_recap",
@@ -207,12 +241,15 @@ _WORKFLOW_SPECS = (
         tools=TOURNAMENT_RECAP_TOOLS,
         max_tool_rounds=8,
         model_family="intensive",
+        max_tokens=2500,
+        effort="medium",
     ),
     WorkflowSpec(
         "tournament_update",
         response_schema=_CHANNEL_SCHEMA,
         tools=TOURNAMENT_UPDATE_TOOLS,
         max_tool_rounds=4,
+        effort="medium",
     ),
     WorkflowSpec(
         "awareness",
@@ -221,6 +258,8 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=_awareness_max_rounds(),
         write_tools_allowed=True,
         model_family="chat",
+        max_tokens=8192,
+        timeout=300,
     ),
     # Agentic Loop v2 chassis turns. Two specs rather than a model argument
     # because model choice is registry data everywhere else in this file, and
@@ -234,6 +273,9 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=6,
         write_tools_allowed=True,
         model_family="lightweight",
+        max_tokens=2000,
+        effort="low",
+        timeout=90,
     ),
     WorkflowSpec(
         "wake_response_chat",
@@ -241,6 +283,9 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=6,
         write_tools_allowed=True,
         model_family="chat",
+        max_tokens=8192,
+        effort="low",
+        timeout=90,
     ),
     WorkflowSpec(
         "awareness_repair",
@@ -249,6 +294,8 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=0,
         tools_allowed=False,
         model_family="chat",
+        max_tokens=16384,
+        timeout=300,
     ),
     WorkflowSpec(
         "game_factual_repair",
@@ -257,6 +304,8 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=0,
         tools_allowed=False,
         model_family="chat",
+        max_tokens=1600,
+        effort="medium",
     ),
     WorkflowSpec(
         "ask_elixir_daily",
@@ -264,6 +313,9 @@ _WORKFLOW_SPECS = (
         tools=INTERACTIVE_READ_TOOLS,
         max_tool_rounds=6,
         model_family="chat",
+        max_tokens=16384,
+        effort="medium",
+        timeout=120,
     ),
     WorkflowSpec(
         "memory_synthesis",
@@ -274,6 +326,8 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=2,
         model_family="intensive",
         tools_allowed=False,
+        max_tokens=16384,
+        timeout=300,
     ),
     # Phase 4. Toolless on purpose: everything it may reason about is handed to
     # it as evidence, so it cannot go and find a fact to justify a lesson it
@@ -286,6 +340,8 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=2,
         model_family="chat",
         tools_allowed=False,
+        max_tokens=8192,
+        timeout=180,
     ),
     WorkflowSpec(
         "leader_action_feedback",
@@ -312,6 +368,9 @@ _WORKFLOW_SPECS = (
         # price across every token class.
         model_family="lightweight",
         tools_allowed=False,
+        max_tokens=1200,
+        effort="medium",
+        timeout=120,
     ),
     WorkflowSpec(
         "clan_chat_copy",
@@ -320,6 +379,8 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=1,
         model_family="chat",
         tools_allowed=False,
+        max_tokens=900,
+        effort="medium",
     ),
     WorkflowSpec(
         "weekly_recap",
@@ -327,6 +388,8 @@ _WORKFLOW_SPECS = (
         tools=INTERACTIVE_READ_TOOLS,
         max_tool_rounds=6,
         model_family="intensive",
+        max_tokens=16384,
+        timeout=300,
     ),
     # The emailed Weekly Clan Report — a separate composition from `weekly_recap`,
     # not a reformat of it. Discord gets the short punchy post; email gets the
@@ -337,15 +400,31 @@ _WORKFLOW_SPECS = (
         tools=INTERACTIVE_READ_TOOLS,
         max_tool_rounds=6,
         model_family="intensive",
+        max_tokens=16384,
+        timeout=300,
     ),
-    WorkflowSpec("member_report", model_family="intensive"),
+    WorkflowSpec("member_report", model_family="intensive", max_tokens=2048, effort="medium"),
     # Weekly public Elder Standing report — standalone, no tools, composed from a
     # pre-materialized facts brief (runtime.elder_standing), grounding-guarded.
-    WorkflowSpec("elder_standing", tools=[], tools_allowed=False, model_family="intensive"),
+    WorkflowSpec(
+        "elder_standing",
+        tools=[],
+        tools_allowed=False,
+        model_family="intensive",
+        max_tokens=1200,
+        effort="medium",
+    ),
     # DM outreach ask (runtime.outreach via app): a short warm profile-outreach DM
     # composed in Elixir's voice from a member facts brief. No tools; a leader
     # approves the draft before it sends.
-    WorkflowSpec("member_outreach_ask", tools=[], tools_allowed=False, model_family="chat"),
+    WorkflowSpec(
+        "member_outreach_ask",
+        tools=[],
+        tools_allowed=False,
+        model_family="chat",
+        max_tokens=300,
+        effort="low",
+    ),
     # Awareness cost gate (runtime.awareness.gate): a lightweight (Haiku) binary
     # post-vs-silence triage that runs before the expensive Sonnet brain on
     # soft-signal ticks. No tools, tiny prompt — it only gates, never posts.
@@ -355,6 +434,8 @@ _WORKFLOW_SPECS = (
         tools_allowed=False,
         max_tool_rounds=1,
         model_family="lightweight",
+        max_tokens=120,
+        effort="low",
     ),
     # Leader-note interpreter (runtime.leader_note_interpreter): a lightweight
     # (Haiku) classifier that reads a leader's free-text on an #actions card and
@@ -368,8 +449,16 @@ _WORKFLOW_SPECS = (
         tools_allowed=False,
         max_tool_rounds=1,
         model_family="lightweight",
+        max_tokens=400,
+        effort="low",
     ),
-    WorkflowSpec("recruiting_copy", model_family="creative"),
+    WorkflowSpec(
+        "recruiting_copy",
+        model_family="creative",
+        max_tokens=8192,
+        effort="medium",
+        timeout=90,
+    ),
     # Release-notes announcement (agent/release_notes.py, ported from Oliver):
     # Elixir's first-person "what I can do now" post — chat-tier, no tools.
     WorkflowSpec(
@@ -378,6 +467,83 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=1,
         tools_allowed=False,
         model_family="intensive",
+        max_tokens=8192,
+        timeout=300,
+    ),
+    # Direct/single-shot workflows still belong in the registry. Registering
+    # them prevents a typo or new call site from silently inheriting unrelated
+    # defaults while keeping the tool-less boundary explicit.
+    WorkflowSpec(
+        "intent_router",
+        tools=[],
+        tools_allowed=False,
+        max_tool_rounds=0,
+        model_family="lightweight",
+        max_tokens=512,
+        effort="low",
+        timeout=30,
+    ),
+    WorkflowSpec(
+        "memory_inference",
+        tools=[],
+        tools_allowed=False,
+        max_tool_rounds=0,
+        model_family="lightweight",
+        max_tokens=1500,
+        timeout=20,
+    ),
+    WorkflowSpec(
+        "memory_distill",
+        tools=[],
+        tools_allowed=False,
+        max_tool_rounds=0,
+        model_family="lightweight",
+        max_tokens=256,
+        timeout=15,
+    ),
+    WorkflowSpec(
+        "post_quality_eval",
+        tools=[],
+        tools_allowed=False,
+        max_tool_rounds=0,
+        model_family="lightweight",
+        max_tokens=120,
+        effort="low",
+        timeout=30,
+    ),
+    WorkflowSpec(
+        "event_blurb",
+        tools=[],
+        tools_allowed=False,
+        max_tool_rounds=0,
+        model_family="lightweight",
+        max_tokens=300,
+    ),
+    WorkflowSpec(
+        "help",
+        tools=[],
+        tools_allowed=False,
+        max_tool_rounds=0,
+        model_family="lightweight",
+        max_tokens=600,
+        effort="low",
+    ),
+    WorkflowSpec(
+        "war_intel",
+        tools=[],
+        tools_allowed=False,
+        max_tool_rounds=0,
+        model_family="lightweight",
+        max_tokens=2000,
+        effort="medium",
+    ),
+    WorkflowSpec(
+        "lightweight",
+        tools=[],
+        tools_allowed=False,
+        max_tool_rounds=0,
+        model_family="lightweight",
+        max_tokens=200,
     ),
 )
 
@@ -433,3 +599,18 @@ RESPONSE_SCHEMAS_BY_WORKFLOW = {
 for _alias, _canonical in _ALIASES.items():
     if _canonical in RESPONSE_SCHEMAS_BY_WORKFLOW:
         RESPONSE_SCHEMAS_BY_WORKFLOW[_alias] = RESPONSE_SCHEMAS_BY_WORKFLOW[_canonical]
+
+# Model selection, tools, rounds, output ceiling, effort, and timeout are now
+# projections of the same registry row.
+MODEL_CALL_POLICY = {
+    spec.name: CallPolicy(spec.max_tokens, spec.effort, spec.timeout) for spec in _WORKFLOW_SPECS
+}
+for _alias, _canonical in _ALIASES.items():
+    MODEL_CALL_POLICY[_alias] = MODEL_CALL_POLICY[_canonical]
+
+
+def policy_for(workflow: str | None) -> CallPolicy:
+    return MODEL_CALL_POLICY.get(
+        canonical_workflow_name(workflow),
+        CallPolicy(DEFAULT_MAX_TOKENS, DEFAULT_EFFORT, DEFAULT_TIMEOUT),
+    )

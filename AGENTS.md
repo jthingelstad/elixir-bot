@@ -66,7 +66,7 @@ One data flow, spec'd in `docs/reference/v5.1/`:
 - **Four event streams:** `battle_events` (native — battles mirror in with exact timestamps; war keys resolved from the battle's own time), `player_events`, `clan_events`, `war_events` (emitted — each poll diffs against its `state_baselines` row; first sight emits nothing; dedup keys make re-processing safe). `engine/event_contracts.py` is the single vocabulary for event ownership, payload floors, time semantics, awareness lanes, and hard-post policy.
 - **One proactive owner (the awareness stack):** the brain reads the event streams and current projections, decides worthiness and framing in one turn, and posts with hard-floor coverage; the scoped responder handles single qualifying events between brain runs. Both post through the same validator and outbox. The ported deterministic recognizers/delivery consumer remain an explicit offline comparison seam only; production `run_tick` does not import or run them.
 - **Composition policy:** the awareness workflow owns voice and routing. Deterministic code validates the complete plan before any send (including member pronouns and unranked-war claims), permits one wording-only repair, then fails closed so the event resurfaces next loop. There is no member-facing template fallback.
-- **Delivery:** awareness validates hard-post coverage before any send, persists every planned post to `awareness_delivery_intents`, then advances each intent `pending → sending → fulfilled`. Explicit send failures return only that intent to pending; the next turn skips already-fulfilled posts. `awareness_posts` remains the delivered channel-memory ledger. A failed turn does not advance event cursors. A crash while an intent is `sending` fails closed during its 15-minute lease, then returns to pending for an at-least-once retry instead of wedging the outbox forever. The retired consumer creates `communication_intents` only as a connection-local TEMP table in explicit offline legacy rehearsals.
+- **Delivery:** awareness validates hard-post coverage before any send, persists every planned post to `awareness_delivery_intents`, then advances each intent `pending → sending → fulfilled`. Explicit send failures return only that intent to pending; the next turn skips already-fulfilled posts. Discord receipts enter `awareness_posts`; clan-chat-only follow-ups remain in the same outbox and require a successful relay card before fulfillment. A permitted silence is an explicit `choose_silence` tool call. Failed or merely empty turns do not advance event cursors. A crash while an intent is `sending` fails closed during its 15-minute lease, then returns to pending for an at-least-once retry instead of wedging the outbox forever. The retired consumer creates `communication_intents` only as a connection-local TEMP table in explicit offline legacy rehearsals.
 - **Clan management:** `engine/management.py` is the source of truth for every promote/demote/kick rule and constant. Human-readable policy is `prompts/POLICY.md`; original rationale (with the drifted parts marked) is `docs/reference/v5.1/management.md`. Elder promotion and demotion come from the **elder band** — a score ranks the non-leadership roster, the band sizes the corps, and hysteresis paces the moves. The three Layer-1 signals (`sustained_donor` / `war_reliable` / `battle_active`, 3-of-4-week hysteresis) are still computed and stored but **feed nothing**; they survive as rendered evidence only, which is why `WAR_QUALIFY_RATE` is commented "legacy … evidence rendering only". The kick path is separate: pure idle-days-from-battles arithmetic, reactive mid-tick through the policy gate. Promote/demote surface in the Monday 07:00 CT weekly review, the only place weekly counters roll. Engagement is measured from battles — `lastSeen`/logins are deliberately ignored. Every verdict carries `judgment_status` (`ready` / `held` / `unknown`), its evidence timestamp/reason, and the `materialization_id` that produced it; stale evidence fails closed and is excluded from actionable capability reads.
 - **Adaptive polling:** `poll_state` temperatures (battles → hot; clan-poll deltas → warm; decay to cold) drive a budget of 40 per-player calls/tick, hottest first, with fairness floors (battlelog ≤6 h, profile ≤24 h for everyone). The clan and riverrace calls are cheap fixed overhead outside the budget.
 
@@ -264,18 +264,24 @@ Current executable workflows (specs in `agent/workflow_registry.py`):
   focused post on the shared chassis (`agent/chassis.py`), escalating Haiku →
   Sonnet → an out-of-band brain run. Gated by `ELIXIR_WAKE_RESPONDER`.
   **Which events it claims, and which surfaces each job may speak on, is the
-  `JOBS` table in `respond.py` — data, never a code path.** Five jobs today:
-  welcome, farewell, role_change, podium, milestone_batch. Adding one means a
+  `JOBS` table in `respond.py` — data, never a code path.** Nine jobs today:
+  welcome, farewell, role_change, podium, milestone_batch, war_close,
+  tournament, clan_birthday, and followup. Adding one means a
   row plus a `prompts/jobs/*.md` file (hyphenated: `role_change` reads
   `role-change.md`). If anything else needs to change per event type, stop —
   that is v4's `delivery.py` growing back.
-- `interactive` — public read-only conversation in member-facing lanes.
+- `interactive` — public conversation in member-facing lanes; read tools plus
+  one bounded `schedule_followup` write when a member asks Elixir to remember.
 - `clanops` — private leadership conversation with gated write tools.
 - `reception` — constrained onboarding and identity-verification replies.
 - `memory_synthesis` — weekly memory hygiene and canonical arc synthesis.
 - `content` workflows — recruiting, weekly recap, other publishable content.
 - specialists such as `deck_review`, `tournament_update`, `clan_chat_copy`,
   `intent_router`.
+
+Every workflow's model family, tools, write permission/budget, round cap, token
+ceiling, effort, and timeout live on its `WorkflowSpec` in
+`agent/workflow_registry.py`. Do not recreate a model-policy map in a caller.
 
 **One delivery owner, no longer one author.** Since Phase 1 there are two
 composing paths (the brain and the responder), but every post still leaves
@@ -307,8 +313,8 @@ cadence. Only the load-bearing *shape* belongs in this file:
   `player-progression`, and `award-detection` activities — awards now grant on
   the war stream's `season_closed` event, and polling is the adaptive
   scheduler's job.
-- **The brain runs on a cron, not continuously** — `awareness-loop`, **twice**
-  a day since 2026-08-05 (Phase 2), down from four. The scoped responder covers
+- **The brain runs on a cron, not continuously** — `awareness-loop`, **once**
+  a day since 2026-08-19 (Phase 3), down from four. The scoped responder covers
   the hard posts within a tick, so the cron is for deliberation: digest signals,
   trends, and the backstop sweep.
 - **Weeks roll in exactly one place** — `weekly-leadership-review`, Mon 07:00

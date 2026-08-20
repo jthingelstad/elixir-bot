@@ -55,6 +55,25 @@ def _good_post(covers=(JOIN_KEY,)):
     }
 
 
+def _tier(attention):
+    return "chat" if attention.workflow == "wake_response_chat" else "lightweight"
+
+
+def _followup_wake():
+    return _wake(
+        reason="1 immediate event(s): followup_due",
+        events=[
+            {
+                "signal_key": "followup_due:17",
+                "event_type": "followup_due",
+                "subject_tag": "#AAA",
+                "observed_at": "2026-08-20T12:00:00Z",
+                "payload": {"followup_id": 17, "why": "ask how the new phone worked out"},
+            }
+        ],
+    )
+
+
 @pytest.fixture
 def seeded(engine_conn):
     # clan_memberships carries an FK to clans as well as players.
@@ -136,14 +155,63 @@ def test_a_turn_that_produces_nothing_leaves_it_for_the_daily_brain(seeded, monk
     assert "daily deliberation" in outcome["reason"]
 
 
+def test_an_explicit_followup_silence_is_consumed_without_delivery(seeded, monkeypatch):
+    monkeypatch.setattr(
+        chassis,
+        "run_turn",
+        lambda a, s, **kw: _episode(
+            [],
+            job="followup",
+            intentionally_silent=True,
+            silence_reason="The member is already back and playing.",
+        ),
+    )
+    delivered = []
+    outcome = respond.respond(
+        _followup_wake(),
+        deliver_fn=lambda read, plan: delivered.append(plan),
+        conn=seeded,
+    )
+
+    assert outcome["consumed"] is True
+    assert outcome["intentionally_silent"] is True
+    assert outcome["delivered"] == 0
+    assert delivered == []
+
+
+def test_a_followup_may_stage_clan_chat_without_discord(seeded, monkeypatch):
+    post = {
+        "channel": "clan_chat",
+        "content": "How did the new phone work out?",
+        "clan_chat": ["How did the new phone work out?"],
+        "covers_signal_keys": ["followup_due:17"],
+    }
+    monkeypatch.setattr(
+        chassis,
+        "run_turn",
+        lambda a, s, **kw: _episode([post], job="followup"),
+    )
+    captured = {}
+
+    def _deliver(read, plan):
+        captured["plan"] = plan
+        return {"delivered": 1, "failed": False}
+
+    outcome = respond.respond(_followup_wake(), deliver_fn=_deliver, conn=seeded)
+
+    assert outcome["consumed"] is True
+    assert outcome["intentionally_silent"] is False
+    assert captured["plan"]["posts"][0]["channel"] == "clan_chat"
+
+
 def test_a_wake_can_only_fail_upward(seeded, monkeypatch):
     """Haiku first; if it produces nothing usable, Sonnet composes. A wake never
     degrades into silence."""
     tiers = []
 
     def _run(attention, seed, **kw):
-        tiers.append(attention.budget.model_family)
-        if attention.budget.model_family == "lightweight":
+        tiers.append(_tier(attention))
+        if _tier(attention) == "lightweight":
             return _episode([])  # nothing usable
         return _episode([_good_post()], workflow="wake_response_chat")
 
@@ -163,7 +231,7 @@ def test_a_sonnet_wake_does_not_start_on_haiku(seeded, monkeypatch):
     tiers = []
 
     def _run(attention, seed, **kw):
-        tiers.append(attention.budget.model_family)
+        tiers.append(_tier(attention))
         return _episode([_good_post()])
 
     monkeypatch.setattr(chassis, "run_turn", _run)
@@ -215,7 +283,7 @@ def test_an_escalation_keeps_the_failed_rung_in_the_recorded_episode(seeded, mon
     """
 
     def _run(attention, seed, **kw):
-        if attention.budget.model_family == "lightweight":
+        if _tier(attention) == "lightweight":
             return _episode([], rejections=["bounced once, then gave up"])
         return _episode([_good_post()], workflow="wake_response_chat")
 
@@ -255,7 +323,7 @@ def test_a_tier_that_ends_without_posting_is_nudged_before_escalating(seeded, mo
     seen = []
 
     def _run(attention, seed, **kw):
-        seen.append((attention.budget.model_family, kw.get("nudge")))
+        seen.append((_tier(attention), kw.get("nudge")))
         if kw.get("nudge"):
             return _episode([_good_post()])
         return _episode([])
@@ -277,8 +345,8 @@ def test_a_tier_that_bounced_is_escalated_rather_than_nudged(seeded, monkeypatch
     seen = []
 
     def _run(attention, seed, **kw):
-        seen.append((attention.budget.model_family, kw.get("nudge")))
-        if attention.budget.model_family == "lightweight":
+        seen.append((_tier(attention), kw.get("nudge")))
+        if _tier(attention) == "lightweight":
             return _episode([], rejections=["stray quotation mark"])
         return _episode([_good_post()], workflow="wake_response_chat")
 
@@ -297,8 +365,8 @@ def test_the_nudge_does_not_stop_a_wake_from_escalating(seeded, monkeypatch):
     seen = []
 
     def _run(attention, seed, **kw):
-        seen.append(attention.budget.model_family)
-        if attention.budget.model_family == "lightweight":
+        seen.append(_tier(attention))
+        if _tier(attention) == "lightweight":
             return _episode([])
         return _episode([_good_post()], workflow="wake_response_chat")
 

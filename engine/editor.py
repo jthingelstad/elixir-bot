@@ -177,7 +177,7 @@ def _recent_solo_spotlight(conn, post: dict) -> dict | None:
     target = tags[0]
     rows = conn.execute(
         "SELECT at, plan_json FROM awareness_thoughts "
-        "WHERE chose_silence = 0 AND at >= datetime('now', '-48 hour') "
+        "WHERE chose_silence = 0 AND datetime(at) >= datetime('now', '-48 hour') "
         "ORDER BY at DESC LIMIT 50"
     ).fetchall()
     for row in rows:
@@ -356,10 +356,10 @@ def record_post_reaction(
 def recent_reaction_feeders(conn, hours: int = 24) -> list[dict]:
     """The reaction evidence the nightly reflection reads."""
     rows = conn.execute(
-        "SELECT m.title, m.body, m.created_at FROM memories m "
+        "SELECT m.memory_id, m.title, m.body, m.created_at FROM memories m "
         "JOIN memory_tags t ON t.memory_id = m.memory_id "
-        "WHERE t.tag = 'reaction' AND m.created_at >= datetime('now', ?) "
+        "WHERE t.tag = 'reaction' AND datetime(m.created_at) >= datetime('now', ?) "
         "ORDER BY m.created_at DESC LIMIT 50",
         (f"-{int(hours)} hours",),
     ).fetchall()
-    return [dict(r) for r in rows]
+    return [{**dict(r), "evidence_ref": f"reaction:{r['memory_id']}"} for r in rows]

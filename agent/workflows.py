@@ -484,8 +484,9 @@ def run_reflection(context: dict):
     public_context = {k: v for k, v in (context or {}).items() if not k.startswith("_")}
     user_msg = (
         "Here is the last 24 hours of your own output and the leadership "
-        "reactions to it. Decide what you should do differently, with evidence "
-        "for each lesson. An empty lessons list is a correct answer on a quiet "
+        "reactions to it, plus member-authored conversations that may support "
+        "dossiers. Use only exact refs from evidence_index in evidence_refs. "
+        "An empty lessons list is a correct answer on a quiet "
         "day. Follow the output schema in your system prompt exactly.\n\n"
         f"```json\n{json.dumps(public_context, indent=2, default=str)}\n```\n"
     )
@@ -1332,11 +1333,9 @@ def generate_message(event, context, recent_posts=None):
     return _generate_simple_message(
         _event_system(),
         user_msg,
-        # `event:<name>` is an open-ended family, so it can never have a policy
-        # row of its own and would otherwise fall through to the 4096 default.
-        # These are one-line event blurbs; 300 is the deliberate ceiling.
-        workflow=f"event:{event}",
-        max_tokens=300,
+        # Event type belongs in the evidence, not in workflow identity. Every
+        # one-line event blurb shares one registered policy.
+        workflow="event_blurb",
         temperature=0.7,
         error_label=f"generate_message({event})",
     )
@@ -1367,7 +1366,6 @@ def _generate_simple_message(
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=60,
         )
         text = (response_text(resp) or "").strip()
         if not text or text.lower() == "null":

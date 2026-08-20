@@ -20,7 +20,8 @@ enforced at a new call site.
 
 The escalation ladder means a wake can only ever fail *upward*: the cheap model
 first, the strong model if the cheap one produced nothing usable, and the daily
-brain if both fell short. A wake never degrades into silence.
+brain if both fell short. Silence is successful only when the job permits it and
+the model calls the explicit silence tool.
 """
 
 from __future__ import annotations
@@ -57,6 +58,7 @@ class JobSpec:
     name: str
     event_types: frozenset
     surfaces: frozenset
+    silence_allowed: bool = False
 
 
 _ANNOUNCE = "discord:announcements"
@@ -113,7 +115,12 @@ JOBS = (
     # to clan chat: a check-in is about one person and belongs where they will
     # see it. It is also the one job whose correct answer is often no post at
     # all, which is why it carries no floor.
-    JobSpec("followup", frozenset({"followup_due"}), frozenset({_ELIXIR, _CLAN_CHAT})),
+    JobSpec(
+        "followup",
+        frozenset({"followup_due"}),
+        frozenset({_ELIXIR, _CLAN_CHAT}),
+        silence_allowed=True,
+    ),
 )
 
 JOBS_BY_NAME = {spec.name: spec for spec in JOBS}
@@ -130,21 +137,6 @@ _LANE_BY_SURFACE = {_ANNOUNCE: "announcements", _ELIXIR: "elixir"}
 
 # The escalation ladder. Same attention, stronger composer.
 _LADDER = {"lightweight": "wake_response", "chat": "wake_response_chat"}
-
-# Output ceiling per tier. NOT the same number, and the difference is the point:
-# **extended thinking is drawn from max_tokens**, so on a reasoning model a
-# ceiling sized for the visible answer can be spent before a character is
-# written. This repo has been bitten three times now — the weekly recap at 1,600
-# (2026-08-03), memory synthesis at 3,000 (which never once succeeded on Opus),
-# and the 2026-08-05 Phase 2 rehearsal, where the Sonnet rung truncated on a
-# milestone batch at 2,000 and produced nothing.
-#
-# 8,192 matches what the awareness brain uses for a multi-post plan, and the
-# chat rung is the ESCALATION — the one that must not fail when a hard post has
-# already lost the cheap tier. Haiku stays at 2,000: it has composed every post
-# it was asked for without truncating, and raising a proven ceiling to buy
-# imagined headroom is how a working tier gets destabilised.
-_MAX_TOKENS_BY_TIER = {"lightweight": 2000, "chat": 8192}
 
 
 def job_spec(job: str) -> JobSpec | None:
@@ -373,7 +365,13 @@ def respond(
     events = wake.get("events") or []
     job = job_for(events)
     if job is None:
-        return {"handled": False, "reason": "no job claims this wake"}
+        return {
+            "consumed": False,
+            "delivered": 0,
+            "intentionally_silent": False,
+            "handled": False,
+            "reason": "no job claims this wake",
+        }
 
     owns_conn = conn is None
     conn = conn or db.get_connection()
@@ -390,7 +388,13 @@ def respond(
         # unless the two fall out of step. Fail to the brain rather than guess a
         # surface — a wrong lane is a member-facing error.
         log.error("wake responder: job %r has no spec; leaving for the daily brain", job)
-        return {"handled": False, "reason": f"job {job!r} has no surface declaration"}
+        return {
+            "consumed": False,
+            "delivered": 0,
+            "intentionally_silent": False,
+            "handled": False,
+            "reason": f"job {job!r} has no surface declaration",
+        }
     lanes = lanes_for(spec)
     surfaces = spec.surfaces
 
@@ -415,8 +419,8 @@ def respond(
                 signal_keys=tuple(str(e.get("signal_key")) for e in events if e.get("signal_key")),
             ),
             surfaces=frozenset(surfaces),
-            budget=chassis.Budget(model_family=tier, max_tokens=_MAX_TOKENS_BY_TIER[tier]),
             floor=floor,
+            silence_allowed=spec.silence_allowed,
             workflow=_LADDER[tier],
         )
         episode = chassis.run_turn(attention, seed, on_event=on_event)
@@ -433,7 +437,12 @@ def respond(
         #
         # Only on the clean signature: a turn that produced rejections was trying
         # and failing, and a nudge would just spend another round on it.
-        if not (episode.get("posts") or episode.get("rejections") or episode.get("error")):
+        if not (
+            episode.get("posts")
+            or episode.get("intentionally_silent")
+            or episode.get("rejections")
+            or episode.get("error")
+        ):
             log.info("wake responder: %s tier ended without posting; nudging once", tier)
             episode = chassis.run_turn(
                 attention,
@@ -441,10 +450,9 @@ def respond(
                 on_event=on_event,
                 nudge=(
                     "Your previous turn ended without posting. You have already read "
-                    "what you need. Call post_to_discord now with the finished post — "
-                    "prose in your reply is not a post and reaches nobody. If this "
-                    "moment genuinely does not deserve one, post nothing and say why "
-                    "in one line."
+                    "what you need. Call a posting tool now with the finished post — "
+                    "prose in your reply reaches nobody. If this job permits silence "
+                    "and no post is appropriate, call choose_silence with the reason."
                 ),
             )
             attempts.append(episode)
@@ -452,6 +460,22 @@ def respond(
         posts = episode.get("posts") or []
         covered = {k for post in posts for k in post.get("covers_signal_keys") or []}
         uncovered = sorted(floor - covered)
+        if episode.get("intentionally_silent"):
+            if posts or floor or not spec.silence_allowed:
+                log.warning("wake responder: invalid silence outcome for job=%s", job)
+                continue
+            if len(attempts) > 1:
+                episode = {**episode, "preceding_attempts": attempts[:-1]}
+            return {
+                "consumed": True,
+                "delivered": 0,
+                "intentionally_silent": True,
+                "handled": True,
+                "reason": episode.get("silence_reason") or "explicit successful silence",
+                "attempts": len(attempts),
+                "tier": tier,
+                "episode": episode,
+            }
         if not posts:
             log.warning(
                 "wake responder: %s tier produced no post (job=%s, rejections=%s)",
@@ -477,7 +501,12 @@ def respond(
         result["attempts"] = len(attempts)
         result["tier"] = tier
         if not result.get("failed"):
-            return {"handled": True, **result}
+            return {
+                "consumed": True,
+                "intentionally_silent": False,
+                "handled": True,
+                **result,
+            }
         log.warning("wake responder: delivery failed on %s tier: %s", tier, result.get("reason"))
 
     # A wake that failed every tier is the evidence the exit gate asks for, so it
@@ -486,6 +515,9 @@ def respond(
     # records nothing when it is absent. A floor miss was therefore invisible to
     # exactly the query meant to find it.
     return {
+        "consumed": False,
+        "delivered": 0,
+        "intentionally_silent": False,
         "handled": False,
         "reason": "no tier produced a deliverable post; leaving for the daily deliberation",
         "attempts": len(attempts),
@@ -566,7 +598,7 @@ def record_episode(episode: dict, outcome: dict) -> None:
                 episode.get("job"),
                 episode.get("workflow"),
                 outcome.get("tier"),
-                1 if outcome.get("handled") else 0,
+                1 if outcome.get("consumed") else 0,
                 int(outcome.get("delivered") or 0),
                 str(outcome.get("reason") or "")[:400],
                 json.dumps(episode, default=str)[:200000],

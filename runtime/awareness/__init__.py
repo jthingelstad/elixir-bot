@@ -3,7 +3,8 @@
 Builds "the read" (the situation snapshot), hands it to the brain with its full
 read + write tool surface, persists the train of thought, delivers the plan's
 posts to the member-facing channels, and writes a bot-native diagnostic to the
-leader-only #thinking channel. The brain is the clan's sole proactive poster.
+leader-only #thinking channel. The scoped responder shares its delivery owner
+for qualifying events between brain runs.
 """
 
 from __future__ import annotations

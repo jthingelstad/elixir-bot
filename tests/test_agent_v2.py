@@ -331,11 +331,12 @@ def test_build_tool_result_envelope_under_limit_unchanged():
     assert envelope["data"]["cards"] == [{"name": "Knight"}]
 
 
-def test_interactive_workflow_exposes_all_read_tools():
+def test_interactive_workflow_exposes_reads_plus_bounded_followup():
     interactive_names = {tool["name"] for tool in elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]}
 
-    # 15 -> 16 (2026-08-04): get_game_mode_performance
-    assert len(interactive_names) == 16
+    # The 16 canonical reads plus the one Phase-5 write members need in this lane.
+    assert len(interactive_names) == 17
+    assert "schedule_followup" in interactive_names
     assert "get_member" in interactive_names
     assert "read_deck_link" in interactive_names
     assert "get_member_cards" in interactive_names

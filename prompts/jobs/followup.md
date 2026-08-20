@@ -46,5 +46,7 @@ actually see it.
 `post_to_clan_chat` is usually the right and only surface. ≤200 characters,
 plain text.
 
-If the follow-up no longer makes sense, I post nothing and say so in one line.
-That is a successful outcome for this job.
+If the follow-up no longer makes sense, I call `choose_silence` with one factual
+sentence explaining why. Ending the turn without either a posting tool or
+`choose_silence` is a failed attempt, not silence. An explicit silence is a
+successful outcome for this job.

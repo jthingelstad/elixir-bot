@@ -2,8 +2,8 @@
 
 Agentic Loop v2, Phase 1 (docs/plans/agentic-loop.md).
 
-Today Elixir is 16 entry points, 25 system-prompt builders and 27 workflow
-specs, each hand-assembling its own prompt, its own context, its own tool
+Elixir still has specialist entry points and prompt builders, historically
+each hand-assembling its own prompt, its own context, its own tool
 surface and its own delivery. That duplication is why a lesson learned from a
 bad post reaches the awareness brain and nothing else, and why "the composer
 succeeded but the caller mishandled delivery" is a bug category at all.
@@ -65,15 +65,6 @@ class Scope:
 
 
 @dataclass(frozen=True)
-class Budget:
-    """What this turn may spend."""
-
-    model_family: str = "lightweight"
-    max_tool_rounds: int = 6
-    max_tokens: int = 2000
-
-
-@dataclass(frozen=True)
 class Attention:
     """One unit of cognition: what woke it, what it may see, what it may say."""
 
@@ -81,11 +72,14 @@ class Attention:
     trigger: dict = field(default_factory=dict)
     scope: Scope = field(default_factory=Scope)
     surfaces: frozenset = frozenset()
-    budget: Budget = field(default_factory=Budget)
     # Signal keys this turn MUST cover. Checked after the turn by the caller,
     # against what actually reached the outbox — never against what the model
     # said it did.
     floor: frozenset = frozenset()
+    # Silence is an explicit outcome, never inferred from the model ending a
+    # turn without using a posting tool. Only jobs whose contract says silence
+    # is successful opt in.
+    silence_allowed: bool = False
     workflow: str = "wake_response"
 
 
@@ -105,6 +99,7 @@ class _Staging:
         # rejections so a repair is as visible in the episode as a bounce was —
         # that visibility is the whole condition on which repairing is allowed.
         self.repairs: list[str] = []
+        self.silence_reason: str | None = None
 
     def stage_discord(self, *, lane: str, content: str, covers: list[str]) -> dict:
         post = {
@@ -120,15 +115,40 @@ class _Staging:
         return post
 
     def attach_clan_chat(self, content: str) -> dict | None:
-        """The in-game line rides on its Discord sibling — that is the shape
-        ``deliver_posts`` and the join copy-policy both expect. Composing it in
-        the same turn is what keeps the two surfaces telling one story."""
-        if not self.posts:
-            return None
-        post = self.posts[-1]
-        post["clan_chat"] = [content]
-        post.setdefault("relay_reason", "")
+        """Attach to a Discord sibling, or stage a clan-chat-only intent.
+
+        A join still uses one post with two sibling copies. A personal follow-up
+        may legitimately belong only in clan chat; representing that as its own
+        post keeps it in the same durable outbox instead of creating a second
+        delivery path.
+        """
+        if self.posts and self.posts[-1].get("channel") != SURFACE_CLAN_CHAT:
+            post = self.posts[-1]
+            post["clan_chat"] = [content]
+            post.setdefault("relay_reason", "")
+            return post
+        post = {
+            "channel": SURFACE_CLAN_CHAT,
+            # The delivery outbox requires content for stable identity. The
+            # actual in-game copy remains in clan_chat, the field consumed by
+            # the relay-card path.
+            "content": content,
+            "clan_chat": [content],
+            "covers_signal_keys": sorted(self.attention.scope.signal_keys),
+            "leads_with": "followup",
+            "summary": "",
+            "relay_reason": "",
+            "member_tags": list(self.attention.scope.member_tags),
+            "member_names": [],
+        }
+        self.posts.append(post)
         return post
+
+    def choose_silence(self, reason: str) -> bool:
+        if not self.attention.silence_allowed or self.posts:
+            return False
+        self.silence_reason = reason
+        return True
 
 
 _LEADS_WITH_BY_LANE = {"announcements": "clan_event", "elixir": "milestone"}
@@ -218,7 +238,7 @@ def _dossiers(member_tags) -> dict:
 
     if not member_tags:
         return {}
-    if os.getenv("ELIXIR_DOSSIERS", "0").strip().lower() in ("0", "false", "no", "off"):
+    if os.getenv("ELIXIR_DOSSIERS", "1").strip().lower() in ("0", "false", "no", "off"):
         return {}
     try:
         from storage.dossiers import dossiers_for
@@ -287,6 +307,8 @@ def surface_tools(attention: Attention) -> list[dict]:
         names.append("post_to_discord")
     if SURFACE_CLAN_CHAT in attention.surfaces:
         names.append("post_to_clan_chat")
+    if attention.silence_allowed:
+        names.append("choose_silence")
     return [TOOLS_BY_NAME[name] for name in names if name in TOOLS_BY_NAME]
 
 
@@ -295,14 +317,15 @@ def run_turn(
 ) -> dict:
     """Execute one chassis turn. Returns an episode dict.
 
-    The episode is the record the reflection loop reads: what woke this, what it
-    posted, what it cost, what it refused. It is returned rather than persisted
+    The episode is operational evidence: what woke this, what it posted, what it
+    cost, what it refused. It is returned rather than persisted
     here so the caller owns the transaction — the same discipline the awareness
     loop uses for its thought.
     """
     import json
 
     from agent.tool_policy import INTERACTIVE_READ_TOOLS
+    from agent.workflow_registry import workflow_model_family
     from agent.workflows import _chat_with_tools
 
     context = assemble_context(attention, seed)
@@ -324,7 +347,6 @@ def run_turn(
             json.dumps(context, indent=1, default=str),
             workflow=attention.workflow,
             allowed_tools=tools,
-            max_tokens=attention.budget.max_tokens,
             strict_json=False,
             return_errors=True,
             tool_stats=tool_stats,
@@ -340,7 +362,7 @@ def run_turn(
     return {
         "job": attention.job,
         "workflow": attention.workflow,
-        "model_family": attention.budget.model_family,
+        "model_family": workflow_model_family(attention.workflow),
         "trigger": attention.trigger,
         "scope": {
             "member_tags": list(attention.scope.member_tags),
@@ -350,6 +372,8 @@ def run_turn(
         "posts": staging.posts,
         "rejections": staging.rejections,
         "repairs": staging.repairs,
+        "intentionally_silent": bool(staging.silence_reason),
+        "silence_reason": staging.silence_reason,
         "tool_trace": tool_stats.get("tool_trace") or [],
         "error": error,
         "lessons_injected": len(context.get("lessons") or []),
@@ -361,7 +385,6 @@ __all__ = [
     "SURFACE_DISCORD_ANNOUNCEMENTS",
     "SURFACE_DISCORD_ELIXIR",
     "Attention",
-    "Budget",
     "Scope",
     "active_staging",
     "assemble_context",

@@ -331,7 +331,6 @@ def _default_generate(system_prompt: str, user_msg: str) -> str | None:
         user_msg,
         workflow="awareness_triage",
         temperature=0.0,
-        max_tokens=120,
         error_label="awareness_triage",
     )
 

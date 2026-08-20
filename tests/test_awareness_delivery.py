@@ -398,6 +398,100 @@ def test_clan_chat_voicing_failure_does_not_fail_the_post():
     assert result["delivered"] == 1
 
 
+def test_standalone_clan_chat_is_durable_and_requires_a_relay_receipt(engine_conn):
+    class IntentStore:
+        @staticmethod
+        def prepare_delivery_intents(posts, required_signal_keys=None):
+            return store.prepare_delivery_intents(
+                posts, required_signal_keys=required_signal_keys, conn=engine_conn
+            )
+
+        @staticmethod
+        def mark_delivery_sending(intent_key):
+            return store.mark_delivery_sending(intent_key, conn=engine_conn)
+
+        @staticmethod
+        def mark_delivery_pending(intent_key, error):
+            return store.mark_delivery_pending(intent_key, error, conn=engine_conn)
+
+        @staticmethod
+        def mark_delivery_fulfilled(intent_key, message_id, loop_number=None):
+            return store.mark_delivery_fulfilled(
+                intent_key, message_id, loop_number=loop_number, conn=engine_conn
+            )
+
+    plan = {
+        "posts": [
+            {
+                "channel": "clan_chat",
+                "content": "How did the new phone work out?",
+                "clan_chat": ["How did the new phone work out?"],
+                "covers_signal_keys": ["followup_due:17"],
+            }
+        ]
+    }
+    relayed = []
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {},
+            plan,
+            post_fn=lambda *_: (_ for _ in ()).throw(AssertionError("Discord must not send")),
+            record_fn=lambda **_: (_ for _ in ()).throw(AssertionError("no Discord receipt")),
+            relay_fn=lambda post, channel: relayed.append((post, channel)) or True,
+            intent_store=IntentStore,
+        )
+
+    assert result["failed"] is False and result["delivered"] == 1
+    assert relayed[0][1] == "clan chat"
+    row = engine_conn.execute(
+        "SELECT lane, status, discord_message_id FROM awareness_delivery_intents"
+    ).fetchone()
+    assert row["lane"] == "clan_chat" and row["status"] == "fulfilled"
+    assert row["discord_message_id"].startswith("clan-chat:awareness:")
+
+
+def test_failed_standalone_clan_chat_relay_stays_pending(engine_conn):
+    class IntentStore:
+        @staticmethod
+        def prepare_delivery_intents(posts, required_signal_keys=None):
+            return store.prepare_delivery_intents(
+                posts, required_signal_keys=required_signal_keys, conn=engine_conn
+            )
+
+        @staticmethod
+        def mark_delivery_sending(intent_key):
+            return store.mark_delivery_sending(intent_key, conn=engine_conn)
+
+        @staticmethod
+        def mark_delivery_pending(intent_key, error):
+            return store.mark_delivery_pending(intent_key, error, conn=engine_conn)
+
+    plan = {
+        "posts": [
+            {
+                "channel": "clan_chat",
+                "content": "Checking in.",
+                "clan_chat": ["Checking in."],
+            }
+        ]
+    }
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {},
+            plan,
+            post_fn=lambda *_: 1,
+            record_fn=lambda **_: None,
+            relay_fn=lambda *_: False,
+            intent_store=IntentStore,
+        )
+
+    assert result["failed"] is True
+    row = engine_conn.execute(
+        "SELECT status, attempts, last_error FROM awareness_delivery_intents"
+    ).fetchone()
+    assert tuple(row) == ("pending", 1, "relay returned no receipt")
+
+
 def test_presence_of_clan_chat_is_the_routing_decision():
     """The in-game voicing fires because `clan_chat` is present — no separate flag.
     A sibling post with no `clan_chat` is not voiced in-game."""

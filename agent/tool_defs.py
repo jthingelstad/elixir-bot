@@ -1689,7 +1689,8 @@ SURFACE_TOOLS = [
             "reaches EVERY member, including those who never open Discord. One plain "
             "sentence, no markdown, no emoji shortcodes, no links, under 200 "
             "characters. It is a sibling of the Discord post, not a summary of it: "
-            "same distinguishing fact, said its own way. Call post_to_discord first."
+            "same distinguishing fact, said its own way. It may stand alone when "
+            "the job says clan chat is the right and only surface."
         ),
         "input_schema": {
             "type": "object",
@@ -1700,6 +1701,24 @@ SURFACE_TOOLS = [
                 }
             },
             "required": ["content"],
+        },
+    },
+    {
+        "name": "choose_silence",
+        "description": (
+            "Explicitly finish this job without a member-facing post because the "
+            "follow-up is already answered, no longer appropriate, or would create "
+            "pressure. This is available only when silence is a successful outcome."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "One factual sentence explaining why no post is appropriate.",
+                }
+            },
+            "required": ["reason"],
         },
     },
 ]

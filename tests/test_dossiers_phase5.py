@@ -7,6 +7,8 @@ about restraint: what is refused, what is capped, and what never gets invented.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from runtime.jobs import _reflection
@@ -59,17 +61,17 @@ def test_a_dossier_for_an_unknown_member_is_dropped_not_raised(engine_conn):
     """A tag the roster has never seen is a hallucinated player or a typo, and
     the FK would take the whole nightly job down with it."""
     written = _reflection._persist_dossiers(
-        engine_conn, [{"member_tag": "#NOPE", "body": "invented person"}]
+        engine_conn,
+        [{"member_tag": "#NOPE", "body": "invented person", "evidence_refs": ["message:1"]}],
+        evidence_members={"message:1": "#NOPE"},
     )
     assert written == 0
 
 
-def test_dossier_injection_is_flagged_off_by_default(monkeypatch):
-    """Capturing a dossier and letting it shape a member-facing post are
-    different risks; the second is the one a member would notice."""
+def test_dossier_injection_can_be_disabled(monkeypatch):
     from agent import chassis
 
-    monkeypatch.delenv("ELIXIR_DOSSIERS", raising=False)
+    monkeypatch.setenv("ELIXIR_DOSSIERS", "0")
     assert chassis._dossiers(("#AAA",)) == {}
 
 
@@ -173,3 +175,108 @@ def test_schedule_followup_reaches_both_write_audiences():
     assert "schedule_followup" in _WRITE_TOOL_NAMES
     assert "schedule_followup" in AWARENESS_WRITE_TOOL_NAMES
     assert "schedule_followup" in TOOL_EXECUTOR_NAMES
+
+
+def test_phase5_conversation_to_dossier_followup_silence_and_cursor(
+    engine_conn, member, monkeypatch
+):
+    """The complete successful-silence slice across the real stores.
+
+    A linked Ask Elixir message becomes referential dossier evidence; a carried
+    intention becomes a due event; the responder explicitly consumes it in
+    silence; only then does the wake cursor advance.
+    """
+    from agent import chassis
+    from engine.tick import _emit_due_followups
+    from runtime.awareness import respond, wake
+    from storage.messages import save_message
+
+    message_id = save_message(
+        "discord:ask-elixir:phase5",
+        "user",
+        "My phone broke, but I plan to be back next week.",
+        member_tag=member,
+        workflow="interactive",
+        conn=engine_conn,
+    )
+    context = _reflection.build_reflection_context(engine_conn, hours=24)
+    evidence_ref = f"message:{message_id}"
+    conversation = next(
+        item for item in context["member_conversations"] if item["evidence_ref"] == evidence_ref
+    )
+    assert conversation["member_tag"] == member
+    assert {item["ref"] for item in context["evidence_index"]} >= {evidence_ref}
+
+    assert (
+        _reflection._persist_dossiers(
+            engine_conn,
+            [
+                {
+                    "member_tag": member,
+                    "body": "Phone broke; plans to be back next week.",
+                    "evidence_refs": [evidence_ref],
+                }
+            ],
+            evidence_members={evidence_ref: member},
+        )
+        == 1
+    )
+    source = engine_conn.execute(
+        "SELECT source_intent_key FROM member_dossiers WHERE player_tag = ?", (member,)
+    ).fetchone()
+    assert source["source_intent_key"] == evidence_ref
+
+    followup_id = dossiers.schedule_followup(
+        due_at="2026-08-20T12:00:00Z",
+        why="ask how the new phone worked out",
+        player_tag=member,
+        created_by="interactive",
+        conn=engine_conn,
+    )
+    assert _emit_due_followups(engine_conn, "2026-08-21T00:00:00Z") == 1
+    event = engine_conn.execute(
+        "SELECT event_id, event_type, subject_tag, observed_at, dedup_key, payload_json "
+        "FROM clan_events WHERE dedup_key = ?",
+        (f"followup_due:{followup_id}",),
+    ).fetchone()
+    fired = {
+        "wake_class": "immediate",
+        "wake_model": "lightweight",
+        "reason": "followup due",
+        "events": [
+            {
+                "event_id": event["event_id"],
+                "signal_key": event["dedup_key"],
+                "event_type": event["event_type"],
+                "subject_tag": event["subject_tag"],
+                "observed_at": event["observed_at"],
+                "payload": json.loads(event["payload_json"]),
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        chassis,
+        "run_turn",
+        lambda attention, seed, **kwargs: {
+            "job": "followup",
+            "workflow": attention.workflow,
+            "posts": [],
+            "rejections": [],
+            "intentionally_silent": True,
+            "silence_reason": "The member is already back and the question answered itself.",
+        },
+    )
+    outcome = respond.respond(
+        fired,
+        deliver_fn=lambda *_: (_ for _ in ()).throw(AssertionError("silence must not deliver")),
+        conn=engine_conn,
+    )
+    assert outcome["consumed"] is True and outcome["intentionally_silent"] is True
+
+    consumer_key = "awareness:wake:live:immediate:lightweight:followup"
+    wake.mark_fired(consumer_key, event["event_id"], conn=engine_conn)
+    cursor = engine_conn.execute(
+        "SELECT cursor_int FROM stream_cursors WHERE consumer_key = ? AND scope_key = ''",
+        (consumer_key,),
+    ).fetchone()
+    assert cursor["cursor_int"] == event["event_id"]

@@ -658,7 +658,7 @@ def _recent_member_spotlights(conn) -> list[dict]:
     history in ``awareness_thoughts``."""
     rows = conn.execute(
         "SELECT at, plan_json FROM awareness_thoughts "
-        "WHERE chose_silence = 0 AND at >= datetime('now', ?) "
+        "WHERE chose_silence = 0 AND datetime(at) >= datetime('now', ?) "
         "ORDER BY at DESC LIMIT 40",
         (f"-{_SPOTLIGHT_LOOKBACK_HOURS} hour",),
     ).fetchall()

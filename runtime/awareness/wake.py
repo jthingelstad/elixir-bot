@@ -428,9 +428,9 @@ def evaluate(
 def mark_fired(consumer_key: str, high_water: int, *, conn: sqlite3.Connection = None) -> None:
     """Record that ``consumer_key`` fired through ``high_water``.
 
-    Called after the wake has been *attempted*, success or not — the point of
-    the mark is to bound cost to one attempt per event, with the daily
-    deliberation as the backstop for a wake whose turn failed.
+    Called after the wake has been consumed by delivery or explicit successful
+    silence. A failed or merely empty responder turn leaves the cursor in place
+    for the daily deliberation backstop.
     """
     conn.execute(
         "INSERT INTO stream_cursors "

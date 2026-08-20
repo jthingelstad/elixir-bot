@@ -743,7 +743,7 @@ async def _evaluate_wakes():
         # clan-DB state (stream_cursors), because a number that can suppress a
         # wake is a decision and must not depend on the telemetry file.
         await asyncio.to_thread(wake.record_spend, "live")
-        if outcome.get("handled"):
+        if outcome.get("consumed"):
             handled.append(fired["wake_class"])
             await asyncio.to_thread(wake.mark_fired, fired["consumer_key"], fired["high_water"])
         else:
@@ -807,13 +807,19 @@ async def _run_wake_responder(fired: dict) -> dict:
         outcome = await asyncio.to_thread(respond_mod.respond, fired, deliver_fn=_deliver_fn)
     except Exception as exc:
         log.exception("wake responder: turn failed")
-        return {"handled": False, "reason": str(exc)}
+        return {
+            "consumed": False,
+            "delivered": 0,
+            "intentionally_silent": False,
+            "handled": False,
+            "reason": str(exc),
+        }
     episode = outcome.get("episode") or {}
     if episode:
         await asyncio.to_thread(respond_mod.record_episode, episode, outcome)
     log.info(
         "wake responder: %s (%s) — %s",
-        "handled" if outcome.get("handled") else "not handled",
+        "consumed" if outcome.get("consumed") else "not consumed",
         outcome.get("tier") or "-",
         outcome.get("reason") or f"delivered {outcome.get('delivered', 0)}",
     )

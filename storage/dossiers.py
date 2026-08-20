@@ -6,7 +6,8 @@ not just the numbers the API returns.
 
 - **Dossiers** — one short body per member: "phone broke, said he'd be back",
   "asks for deck help most weeks", "third stint with us". Written only by the
-  nightly reflection, injected by the chassis for members in a turn's scope.
+  nightly reflection from a validated member-authored source reference, injected
+  by the chassis for members in a turn's scope.
 - **Follow-ups** — an intention with a due date. "Ask canavar how the phone is."
   When one comes due the engine tick emits a `followup_due` event and it travels
   the ordinary wake path, so a carried intention is not a second scheduler.
@@ -94,7 +95,8 @@ def due_followups(*, now: str | None = None, limit: int = 10, conn=None) -> list
     """Pending follow-ups whose time has come."""
     rows = conn.execute(
         "SELECT followup_id, due_at, why, player_tag FROM scheduled_followups "
-        "WHERE status = 'pending' AND due_at <= ? ORDER BY due_at LIMIT ?",
+        "WHERE status = 'pending' AND datetime(due_at) <= datetime(?) "
+        "ORDER BY datetime(due_at), followup_id LIMIT ?",
         (now or _utcnow(), int(limit)),
     ).fetchall()
     return [dict(r) for r in rows]

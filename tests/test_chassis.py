@@ -258,13 +258,45 @@ def test_the_clan_chat_line_rides_on_its_discord_sibling():
     assert staging.posts[0]["clan_chat"] == ["Welcome to POAP KINGS, blackberry."]
 
 
-def test_clan_chat_without_a_discord_post_tells_the_model_what_to_do():
+def test_clan_chat_without_a_discord_post_stages_a_standalone_intent():
     from agent.tool_exec import _execute_tool
 
-    _, raw = _run_staged(lambda: _execute_tool("post_to_clan_chat", {"content": "Hello there."}))
+    staging, raw = _run_staged(
+        lambda: _execute_tool("post_to_clan_chat", {"content": "Hello there."})
+    )
     result = json.loads(raw)
-    assert result["error"] == "no_discord_post_yet"
-    assert "post_to_discord first" in result["reason"]
+    assert result["accepted"] is True and result["standalone"] is True
+    assert staging.posts == [
+        {
+            "channel": "clan_chat",
+            "content": "Hello there.",
+            "clan_chat": ["Hello there."],
+            "covers_signal_keys": [],
+            "leads_with": "followup",
+            "summary": "",
+            "relay_reason": "",
+            "member_tags": [],
+            "member_names": [],
+        }
+    ]
+
+
+def test_silence_must_be_explicit_and_is_available_only_when_declared():
+    from agent.tool_exec import _execute_tool
+
+    attention = _attention(silence_allowed=True)
+    staging = chassis._Staging(attention)
+    token = chassis._ACTIVE_STAGING.set(staging)
+    try:
+        result = json.loads(
+            _execute_tool("choose_silence", {"reason": "The member already returned."})
+        )
+    finally:
+        chassis._ACTIVE_STAGING.reset(token)
+
+    assert result["intentionally_silent"] is True
+    assert staging.silence_reason == "The member already returned."
+    assert staging.posts == []
 
 
 def test_posting_tools_are_inert_outside_a_chassis_turn():
@@ -292,8 +324,9 @@ def test_posting_is_a_write_and_needs_an_opted_in_workflow():
 
     assert TOOL_DEFINITIONS_BY_NAME["post_to_discord"]["side_effect"] == "write"
     assert TOOL_DEFINITIONS_BY_NAME["post_to_clan_chat"]["side_effect"] == "write"
+    assert TOOL_DEFINITIONS_BY_NAME["choose_silence"]["side_effect"] == "write"
     assert get_workflow_spec("wake_response").write_tools_allowed is True
-    assert get_workflow_spec("interactive").write_tools_allowed is False
+    assert get_workflow_spec("interactive").write_tools_allowed is True
 
 
 def test_a_declared_round_cap_is_the_cap_actually_used():
@@ -318,13 +351,37 @@ def test_surface_tools_never_leak_into_a_shared_toolset():
 
     for toolset in (ALL_TOOLS, READ_TOOLS, WRITE_TOOLS):
         names = {tool["name"] for tool in toolset}
-        assert not names & {"post_to_discord", "post_to_clan_chat"}
+        assert not names & {"post_to_discord", "post_to_clan_chat", "choose_silence"}
 
 
-def test_the_registry_still_grants_exactly_the_old_write_workflows():
-    """The gate change must be behaviour-preserving for everything that existed
-    before it."""
+def test_the_registry_grants_only_intended_write_workflows():
     from agent.workflow_registry import WORKFLOW_SPECS
 
     granted = {name for name, spec in WORKFLOW_SPECS.items() if spec.write_tools_allowed}
-    assert granted == {"clanops", "awareness", "wake_response", "wake_response_chat"}
+    assert granted == {
+        "interactive",
+        "deck_review",
+        "clanops",
+        "awareness",
+        "wake_response",
+        "wake_response_chat",
+    }
+
+
+def test_interactive_workflows_gain_only_one_bounded_followup_write():
+    from agent.workflow_registry import (
+        BUDGETED_WRITE_TOOLS_BY_WORKFLOW,
+        TOOLSETS_BY_WORKFLOW,
+        WRITE_BUDGET_BY_WORKFLOW,
+    )
+
+    for workflow in ("interactive", "deck_review"):
+        write_names = {
+            tool["name"]
+            for tool in TOOLSETS_BY_WORKFLOW[workflow]
+            if tool["name"]
+            in {"save_clan_memory", "record_leadership_followup", "schedule_followup"}
+        }
+        assert write_names == {"schedule_followup"}
+        assert BUDGETED_WRITE_TOOLS_BY_WORKFLOW[workflow] == {"schedule_followup"}
+        assert WRITE_BUDGET_BY_WORKFLOW[workflow] == 1

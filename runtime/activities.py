@@ -444,8 +444,8 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         purpose="The awareness loop (the central deliberative heartbeat): build "
         "the read, run the brain with its full read + write tool surface, persist "
         "the train of thought, deliver its post plan to the member-facing "
-        "channels, and write a diagnostic to #elixir-log. The brain is the clan's "
-        "sole proactive poster.",
+        "channels, and write a diagnostic to #elixir-log. It shares the single "
+        "delivery owner with the scoped responder.",
         job_id="awareness-loop",
         job_function="_awareness_loop",
         # Wall-clock cron, not an interval: pinned to :05 past the scheduled hours

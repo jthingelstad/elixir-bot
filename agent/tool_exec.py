@@ -1863,7 +1863,7 @@ ADVERTISED_TOOL_EXECUTOR_NAMES = frozenset(
 # per-turn by agent.chassis.surface_tools, gated on the attention's surfaces.
 # Keeping them out of ADVERTISED is what lets the entrypoint smoke test keep
 # asserting that every advertised tool is one a shared workflow may call.
-SURFACE_TOOL_EXECUTOR_NAMES = frozenset({"post_to_discord", "post_to_clan_chat"})
+SURFACE_TOOL_EXECUTOR_NAMES = frozenset({"post_to_discord", "post_to_clan_chat", "choose_silence"})
 
 # Old names remain executable for persisted traces and direct compatibility
 # tests, but no workflow advertises them to the model.
@@ -1957,13 +1957,15 @@ def _execute_post_to_discord(arguments):
 
 
 def _execute_post_to_clan_chat(arguments):
-    """Validate and attach the in-game line to its Discord sibling."""
+    """Validate and stage an in-game line, with or without a Discord sibling."""
     from agent import chassis
     from agent.post_validation import PostRejected, validate_clan_chat_post
 
     staging = chassis.active_staging()
     if staging is None:
         return json.dumps({"error": "post_to_clan_chat is only available inside a chassis turn"})
+    if chassis.SURFACE_CLAN_CHAT not in staging.attention.surfaces:
+        return json.dumps({"error": "clan_chat_not_available"})
     try:
         content = validate_clan_chat_post(
             str(arguments.get("content") or ""), repairs=staging.repairs
@@ -1985,22 +1987,38 @@ def _execute_post_to_clan_chat(arguments):
         return json.dumps({"error": "post_rejected", "reason": reason})
 
     post = staging.attach_clan_chat(content)
-    if post is None:
-        return json.dumps(
-            {
-                "error": "no_discord_post_yet",
-                "reason": "The in-game line rides alongside its Discord sibling. "
-                "Call post_to_discord first, then call this.",
-            }
-        )
     return json.dumps(
         {
             "accepted": True,
+            "standalone": post.get("channel") == chassis.SURFACE_CLAN_CHAT,
             "characters": len(signed[0]),
             "signed_preview": signed[0],
             "note": "Staged. A '- E' signature is appended for you.",
         }
     )
+
+
+def _execute_choose_silence(arguments):
+    """Record an explicit successful-silence decision for this chassis turn."""
+    from agent import chassis
+
+    staging = chassis.active_staging()
+    if staging is None:
+        return json.dumps({"error": "choose_silence is only available inside a chassis turn"})
+    reason = str(arguments.get("reason") or "").strip()
+    if not reason:
+        return json.dumps({"error": "silence_reason_required"})
+    if not staging.attention.silence_allowed:
+        return json.dumps({"error": "silence_not_available"})
+    if staging.posts:
+        return json.dumps(
+            {
+                "error": "posts_already_staged",
+                "reason": "A turn cannot both post and choose silence.",
+            }
+        )
+    staging.choose_silence(reason[:500])
+    return json.dumps({"accepted": True, "intentionally_silent": True})
 
 
 def _execute_tool(name, arguments, workflow=None):
@@ -2012,6 +2030,8 @@ def _execute_tool(name, arguments, workflow=None):
             return _execute_post_to_discord(arguments)
         if name == "post_to_clan_chat":
             return _execute_post_to_clan_chat(arguments)
+        if name == "choose_silence":
+            return _execute_choose_silence(arguments)
         if name == "resolve_member":
             # QA M1: don't hard-filter to active — a recently-departed or observed
             # player must resolve (each match carries its own status field) rather

@@ -28,11 +28,8 @@ ALLOWED_EXPLICIT = {
     # ceiling — the override is the entire point of the retry.
     ("agent/workflows.py", "awareness"),
     ("agent/workflows.py", "deck_review"),
-    # Dynamic workflow families (`event:<name>`, the chassis attention budget,
-    # the per-lane dispatcher) whose names are open-ended, so they cannot have a
-    # policy row and would otherwise fall through to the default.
+    # Shared helpers and explicit retries can override the registry ceiling.
     ("agent/workflows.py", None),
-    ("agent/chassis.py", None),
     ("agent/chat.py", None),
 }
 
@@ -106,12 +103,34 @@ def test_every_named_workflow_that_calls_the_model_has_a_policy_row():
     assert not missing, f"no MODEL_CALL_POLICY row for: {missing}"
 
 
+def test_every_policy_is_projected_from_the_workflow_registry():
+    from agent.workflow_registry import WORKFLOW_SPECS
+
+    assert set(core.MODEL_CALL_POLICY) == set(WORKFLOW_SPECS)
+    for name, spec in WORKFLOW_SPECS.items():
+        policy = core.MODEL_CALL_POLICY[name]
+        assert (policy.max_tokens, policy.effort, policy.timeout) == (
+            spec.max_tokens,
+            spec.effort,
+            spec.timeout,
+        )
+
+
+def test_newly_registered_direct_workflows_preserve_their_effective_model_family():
+    from agent.workflow_registry import workflow_model_family
+
+    # Before registration these names all took the safe lightweight fallback.
+    # Consolidation must not silently promote one-line or evaluator calls.
+    for workflow in ("event_blurb", "help", "war_intel", "post_quality_eval"):
+        assert workflow_model_family(workflow) == "lightweight"
+
+
 @pytest.mark.parametrize("workflow,policy", sorted(core.MODEL_CALL_POLICY.items()))
 def test_policy_values_are_sane(workflow, policy):
     assert policy.effort in ("low", "medium", "high", "xhigh", "max"), workflow
-    # 200 is the smallest real ceiling in use (a one-line release blurb); 16384
+    # 120 is the smallest real ceiling in use (a binary triage); 16384
     # is the largest. Outside that range is a typo, not a decision.
-    assert 200 <= policy.max_tokens <= 16384, workflow
+    assert 120 <= policy.max_tokens <= 16384, workflow
     # A timeout is retried twice by the SDK, so the real wall clock before the
     # caller learns anything is timeout x 3. 300s is already 15 minutes; more
     # than that is a hang, not a slow call.

@@ -3,7 +3,8 @@
 ``run_awareness_loop`` is the central deliberative turn: build the read, hand
 it to the brain (``run_awareness_tick``), persist the train of thought, deliver
 the plan's posts to the member-facing channels, and render a diagnostic to the
-leader-only #thinking channel. The brain is the clan's sole proactive poster.
+leader-only #thinking channel. It is the whole-situation author; the scoped
+responder handles qualifying events between daily runs.
 
 It never raises out of the scheduled path: every failure is logged and folded
 into the returned counters so a bad tick can't crash the scheduler thread.
@@ -19,9 +20,9 @@ log = logging.getLogger("elixir")
 def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
     """Run one awareness loop turn. Returns counters describing the outcome.
 
-    The brain is the clan's sole proactive poster: it runs with its full read +
-    write tool surface, and when ``deliver_fn`` is supplied its plan is posted to
-    the member-facing channels.
+    The brain runs with its full read + write tool surface, and when
+    ``deliver_fn`` is supplied its plan uses the same validator and durable
+    delivery owner as the scoped responder.
 
     ``deliver_fn(read, plan) -> dict`` sends the plan's posts and returns
     ``{"delivered", "failed", "reason", ...}``. A ``failed`` delivery downgrades

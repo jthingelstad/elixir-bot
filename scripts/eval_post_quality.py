@@ -65,8 +65,6 @@ def _depth_judge(copy, intent_type, request_context=""):
             system=_DEPTH_SYSTEM,
             messages=[{"role": "user", "content": evidence}],
             temperature=0.2,
-            max_tokens=120,
-            timeout=30,
         )
         text = (response_text(resp) or "").strip()
         start, end = text.find("{"), text.rfind("}")

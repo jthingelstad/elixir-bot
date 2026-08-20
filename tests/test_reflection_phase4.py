@@ -101,50 +101,56 @@ def test_the_same_reaction_twice_is_recorded_once(engine_conn, posted_intent):
 # --- the lesson caps ----------------------------------------------------------
 
 
-def _lesson(title="Vary the welcome opener", confidence=0.8, evidence="awareness:test1"):
+def _lesson(title="Vary the welcome opener", confidence=0.8, evidence="intent:awareness:test1"):
     return {
         "title": title,
         "body": "Three welcomes opened with the same clause.",
-        "evidence": evidence,
+        "evidence_refs": [evidence] if evidence else [],
         "confidence": confidence,
     }
+
+
+def _persist(engine_conn, lessons, notes=""):
+    refs = {ref for lesson in lessons for ref in (lesson.get("evidence_refs") or []) if ref}
+    return _reflection._persist_lessons(
+        engine_conn,
+        lessons,
+        notes,
+        valid_evidence_refs=refs,
+    )
 
 
 def test_a_lesson_without_evidence_is_dropped(engine_conn):
     """Property 2. An unfalsifiable instruction with a permanent audience is the
     worst thing this job could produce."""
-    written = _reflection._persist_lessons(
-        engine_conn, [_lesson(evidence=""), _lesson(evidence="   ")], ""
-    )
+    written = _persist(engine_conn, [_lesson(evidence=""), _lesson(evidence="")])
     assert written == []
 
 
 def test_a_low_confidence_lesson_is_dropped(engine_conn):
     """It still reaches every turn, so 'possible' is not a high enough bar."""
-    assert _reflection._persist_lessons(engine_conn, [_lesson(confidence=0.2)], "") == []
+    assert _persist(engine_conn, [_lesson(confidence=0.2)]) == []
 
 
 def test_no_more_than_three_lessons_are_written_in_one_night(engine_conn):
     """Property 1, enforced in code rather than requested in the prompt, because
     a request is a suggestion and a model asked for lessons will find some."""
     lessons = [_lesson(title=f"Lesson {i}", evidence=f"awareness:evidence-{i}") for i in range(10)]
-    written = _reflection._persist_lessons(engine_conn, lessons, "")
+    written = _persist(engine_conn, lessons)
     assert len(written) <= _reflection.MAX_LESSONS_PER_NIGHT == 3
 
 
 def test_the_same_evidence_does_not_produce_a_second_copy_of_a_lesson(engine_conn):
     """Deduped on the evidence, not the wording: tomorrow's pass re-reads the
     same 24h window at the boundary and must not restate yesterday's rule."""
-    first = _reflection._persist_lessons(engine_conn, [_lesson()], "")
-    second = _reflection._persist_lessons(
-        engine_conn, [_lesson(title="Completely different words, same evidence")], ""
-    )
+    first = _persist(engine_conn, [_lesson()])
+    second = _persist(engine_conn, [_lesson(title="Completely different words, same evidence")])
     assert len(first) == 1 and second == []
 
 
 def test_a_written_lesson_is_injected_and_carries_its_evidence(engine_conn):
     """The other half of the tagging rule: a real lesson SHOULD reach turns."""
-    [memory_id] = _reflection._persist_lessons(engine_conn, [_lesson()], "")
+    [memory_id] = _persist(engine_conn, [_lesson()])
     tags = {
         r[0]
         for r in engine_conn.execute(
@@ -156,6 +162,18 @@ def test_a_written_lesson_is_injected_and_carries_its_evidence(engine_conn):
         "SELECT body FROM memories WHERE memory_id = ?", (memory_id,)
     ).fetchone()[0]
     assert "EVIDENCE:" in body
+
+
+def test_a_plausible_but_unknown_evidence_reference_is_dropped(engine_conn):
+    assert (
+        _reflection._persist_lessons(
+            engine_conn,
+            [_lesson(evidence="intent:made-up")],
+            "",
+            valid_evidence_refs={"intent:awareness:test1"},
+        )
+        == []
+    )
 
 
 # --- the job's own restraint --------------------------------------------------
@@ -186,7 +204,12 @@ def test_a_quiet_day_makes_no_model_call(engine_conn, monkeypatch):
     monkeypatch.setattr(
         _reflection,
         "build_reflection_context",
-        lambda conn, hours=24: {"intents": [], "reactions": [], "silences": []},
+        lambda conn, hours=24: {
+            "intents": [],
+            "reactions": [],
+            "silences": [],
+            "member_conversations": [],
+        },
     )
     asyncio.run(_reflection._reflection_cycle())
     assert called["n"] == 0
