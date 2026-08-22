@@ -669,6 +669,86 @@ def test_on_raw_reaction_add_marks_actions_action_done():
     assert mock_refresh_card.await_args.args[1]["status"] == "done"
 
 
+def test_responder_relays_share_one_action_identity_for_one_member_moment():
+    observed_at = "2026-08-22T11:50:07Z"
+    tag = "#LQYJG290Y"
+    milestone_key = f"champion_league_reached:{tag}:5"
+    join_key = f"member_joined:{tag}:{observed_at}"
+    posts_and_events = (
+        (
+            {
+                "content": "Grand Champion milestone",
+                "covers_signal_keys": [milestone_key],
+                "clan_chat": ["Ranked milestone relay"],
+            },
+            [
+                {
+                    "signal_key": milestone_key,
+                    "subject_tag": tag,
+                    "observed_at": observed_at,
+                }
+            ],
+        ),
+        (
+            {
+                "content": "Welcome-back announcement",
+                "covers_signal_keys": [join_key],
+                "clan_chat": ["Welcome-back relay"],
+            },
+            [
+                {
+                    "signal_key": join_key,
+                    "subject_tag": tag,
+                    "observed_at": observed_at,
+                }
+            ],
+        ),
+    )
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=_inline_to_thread),
+        patch(
+            "elixir.can_post_leader_action",
+            return_value=(False, "objective_cooldown"),
+        ) as mock_policy,
+    ):
+        for post, events in posts_and_events:
+            assert (
+                asyncio.run(
+                    elixir._awareness_relay_to_clan_chat(
+                        post,
+                        "elixir",
+                        relay_events=events,
+                    )
+                )
+                is False
+            )
+
+    objectives = [call.kwargs["objective"] for call in mock_policy.call_args_list]
+    assert objectives[0] == objectives[1]
+
+
+def test_responder_relay_identity_fails_open_without_one_exact_member_moment():
+    post = {
+        "content": "Multi-member roundup",
+        "covers_signal_keys": ["arena_changed:#AAA:1", "arena_changed:#BBB:1"],
+    }
+    events = [
+        {
+            "signal_key": "arena_changed:#AAA:1",
+            "subject_tag": "#AAA",
+            "observed_at": "2026-08-22T11:50:07Z",
+        },
+        {
+            "signal_key": "arena_changed:#BBB:1",
+            "subject_tag": "#BBB",
+            "observed_at": "2026-08-22T11:50:07Z",
+        },
+    ]
+
+    assert elixir._awareness_relay_moment(post, events) is None
+
+
 def test_actions_reply_records_action_note():
     message = _make_message(
         1513758211206025227,

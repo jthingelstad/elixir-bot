@@ -788,7 +788,12 @@ async def _run_wake_responder(fired: dict) -> dict:
 
     def _relay_fn(post, channel_name):
         fut = asyncio.run_coroutine_threadsafe(
-            _awareness_relay_to_clan_chat(post, channel_name), loop
+            _awareness_relay_to_clan_chat(
+                post,
+                channel_name,
+                relay_events=fired.get("events") or [],
+            ),
+            loop,
         )
         return fut.result(timeout=120)
 
@@ -1134,7 +1139,44 @@ async def _awareness_loop_body(trigger: str):
     return counters
 
 
-async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
+def _awareness_relay_moment(post: dict, relay_events: list[dict] | None) -> dict | None:
+    """Return one authoritative member moment for a responder-authored relay.
+
+    Different responder jobs can legitimately write separate Discord posts for
+    one engine observation (for example, a returning member who reaches a
+    Champion tier in the same materialization). Clan chat should still receive
+    one card for that member moment, not one card per job. Match only events the
+    final, policy-validated post actually covers, and fail open when the post
+    spans multiple members or observation times.
+    """
+    covered = {str(key) for key in (post.get("covers_signal_keys") or []) if str(key).strip()}
+    matched = [
+        event for event in (relay_events or []) if str(event.get("signal_key") or "") in covered
+    ]
+    subject_tags = {
+        str(event.get("subject_tag") or "").strip().upper()
+        for event in matched
+        if str(event.get("subject_tag") or "").strip()
+    }
+    observed_at = {
+        str(event.get("observed_at") or "").strip()
+        for event in matched
+        if str(event.get("observed_at") or "").strip()
+    }
+    if len(subject_tags) != 1 or len(observed_at) != 1:
+        return None
+    return {
+        "subject_tag": next(iter(subject_tags)),
+        "observed_at": next(iter(observed_at)),
+    }
+
+
+async def _awareness_relay_to_clan_chat(
+    post: dict,
+    channel_name: str,
+    *,
+    relay_events: list[dict] | None = None,
+) -> bool:
     """Deliver a post's in-game clan-chat voicing (``clan_chat``) — the sibling
     copy the brain authored for the in-game surface in the same grounded pass — as
     a card in #actions a leader can paste (clan chat has no post API, so a human is
@@ -1152,7 +1194,18 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
     if not content:
         return False
 
-    key_hash = hashlib.sha1(content.encode("utf-8")).hexdigest()[:12]
+    relay_moment = _awareness_relay_moment(post, relay_events)
+    key_material = content
+    target_player_tag = None
+    if relay_moment:
+        # The same observed member moment can reach two responder jobs. Give
+        # both copies one objective identity so the existing objective cooldown
+        # keeps the first (higher-priority, deterministic job order) and drops
+        # the duplicate card. Brain-authored relays have no scoped event list
+        # and retain their content identity.
+        target_player_tag = relay_moment["subject_tag"]
+        key_material = f"member-moment:{target_player_tag}:{relay_moment['observed_at']}"
+    key_hash = hashlib.sha1(key_material.encode("utf-8")).hexdigest()[:12]
     objective = f"awareness_relay:{key_hash}"
     action_key = f"awareness-relay:{key_hash}"
 
@@ -1201,7 +1254,7 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
     baseline = await asyncio.to_thread(
         db.build_leader_action_baseline,
         action_type="in_game_relay",
-        target_player_tag=None,
+        target_player_tag=target_player_tag,
     )
     seq_note = f" ({len(copies)} messages, paste in order)" if len(copies) > 1 else ""
     prompt_text = f"Paste this clan-chat note (from #{channel_name}){seq_note}: {copy_text}"
@@ -1215,7 +1268,7 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
         ),
         target_channel_key="actions",
         target_channel_id=channel_config["id"],
-        target_player_tag=None,
+        target_player_tag=target_player_tag,
         target_player_name=None,
         source_signal_key=action_key,
         source_signal_type="awareness_relay",
