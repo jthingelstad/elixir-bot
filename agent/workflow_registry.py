@@ -368,7 +368,10 @@ _WORKFLOW_SPECS = (
         # price across every token class.
         model_family="lightweight",
         tools_allowed=False,
-        max_tokens=1200,
+        # Two live profiles hit the 1,200-token ceiling on 2026-08-22. This is
+        # a structured internal synthesis rather than a one-line reply, and its
+        # compact output contract still needs room for JSON framing and examples.
+        max_tokens=2048,
         effort="medium",
         timeout=120,
     ),

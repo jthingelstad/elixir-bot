@@ -116,6 +116,15 @@ def test_every_policy_is_projected_from_the_workflow_registry():
         )
 
 
+def test_leader_action_feedback_has_room_for_a_compact_profile():
+    """Two live feedback profiles exhausted 1,200 output tokens on 2026-08-22.
+
+    This internal JSON includes a summary, bounded guidance, and cited examples;
+    it needs output headroom beyond the former cap even though it is toolless.
+    """
+    assert core.policy_for("leader_action_feedback").max_tokens >= 2048
+
+
 def test_newly_registered_direct_workflows_preserve_their_effective_model_family():
     from agent.workflow_registry import workflow_model_family
 
