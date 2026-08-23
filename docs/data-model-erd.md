@@ -49,7 +49,7 @@ erDiagram
 
 | Layer | Representative tables | Contract |
 |---|---|---|
-| API buffer | `raw_api_payloads` | Append-only raw responses, retained for 14 days; never the system of record. |
+| API buffer | `raw_api_payloads` | Append-only raw responses, retained for 60 days; never the system of record. |
 | Diff substrate | `state_baselines` | Latest normalized comparison state; first sight emits no change event. |
 | Streams | `battle_events`, `player_events`, `clan_events`, `war_events` | Durable typed facts with deterministic dedup keys. |
 | Rollups | `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics` | Durable Chicago-day aggregates. (`clan_daily_battle_rollups` dropped in #211 — its writer had lost its caller and the live trend path reads `battle_events`.) |
