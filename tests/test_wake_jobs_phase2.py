@@ -98,6 +98,45 @@ def test_a_role_change_cannot_reach_the_elixir_lane():
     assert "elixir" not in respond.lanes_for(spec)
 
 
+def test_each_discord_job_declares_its_required_primary_surface():
+    """Clan chat is always a sibling except for a personal follow-up.
+
+    Without a structural primary, a milestone turn delivered only an in-game
+    relay card for a bare arena change and silently skipped its #elixir post.
+    """
+    for spec in respond.JOBS:
+        if spec.name == "followup":
+            assert spec.required_surface is None
+            continue
+        assert spec.required_surface in spec.surfaces
+        assert spec.required_surface in {respond._ANNOUNCE, respond._ELIXIR}
+
+
+def test_a_single_arena_change_cannot_reach_clan_chat():
+    spec = respond.job_spec("milestone_batch")
+    surfaces = respond.surfaces_for(spec, [{"event_type": "arena_changed"}])
+    assert surfaces == frozenset({respond._ELIXIR})
+
+
+@pytest.mark.parametrize("event_type", ["champion_league_reached", "ultimate_champion_reached"])
+def test_a_single_champion_arrival_keeps_the_clan_chat_surface(event_type):
+    spec = respond.job_spec("milestone_batch")
+    surfaces = respond.surfaces_for(spec, [{"event_type": event_type}])
+    assert surfaces == frozenset({respond._ELIXIR, respond._CLAN_CHAT})
+
+
+def test_a_real_milestone_batch_keeps_the_clan_chat_surface():
+    spec = respond.job_spec("milestone_batch")
+    surfaces = respond.surfaces_for(
+        spec,
+        [
+            {"event_type": "arena_changed"},
+            {"event_type": "legendary_badge_earned"},
+        ],
+    )
+    assert surfaces == frozenset({respond._ELIXIR, respond._CLAN_CHAT})
+
+
 # ------------------------------------------------------------------- the seed
 
 

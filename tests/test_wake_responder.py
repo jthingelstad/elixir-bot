@@ -74,6 +74,21 @@ def _followup_wake():
     )
 
 
+def _arena_wake():
+    return _wake(
+        reason="1 batch event(s): arena_changed",
+        events=[
+            {
+                "signal_key": "arena_changed:#AAA:54000020",
+                "event_type": "arena_changed",
+                "subject_tag": "#AAA",
+                "observed_at": "2026-08-20T17:07:47Z",
+                "payload": {"name": "blackberry", "arena_name": "Valkalla"},
+            }
+        ],
+    )
+
+
 @pytest.fixture
 def seeded(engine_conn):
     # clan_memberships carries an FK to clans as well as players.
@@ -202,6 +217,62 @@ def test_a_followup_may_stage_clan_chat_without_discord(seeded, monkeypatch):
     assert outcome["consumed"] is True
     assert outcome["intentionally_silent"] is False
     assert captured["plan"]["posts"][0]["channel"] == "clan_chat"
+
+
+def test_a_bare_arena_relay_is_rejected_before_delivery(seeded, monkeypatch):
+    """Natural action 310 was exactly this shape: a bare arena wake staged only
+    clan chat, creating a leader relay that the ratified job contract forbids.
+    The invalid rung must fail upward without reaching the shared outbox.
+    """
+    seen_surfaces = []
+    delivered = []
+
+    def _run(attention, seed, **kw):
+        seen_surfaces.append(attention.surfaces)
+        if _tier(attention) == "lightweight":
+            return _episode(
+                [
+                    {
+                        "channel": "clan_chat",
+                        "content": "blackberry reached Valkalla.",
+                        "clan_chat": ["blackberry reached Valkalla."],
+                        "covers_signal_keys": ["arena_changed:#AAA:54000020"],
+                    }
+                ],
+                job="milestone_batch",
+            )
+        return _episode(
+            [
+                {
+                    "channel": "elixir",
+                    "content": "**Valkalla.** blackberry's climb is backed by a real run.",
+                    "covers_signal_keys": ["arena_changed:#AAA:54000020"],
+                }
+            ],
+            job="milestone_batch",
+            workflow="wake_response_chat",
+        )
+
+    monkeypatch.setattr(chassis, "run_turn", _run)
+    outcome = respond.respond(
+        _arena_wake(),
+        deliver_fn=lambda read, plan: delivered.append(plan) or {"delivered": 1, "failed": False},
+        conn=seeded,
+    )
+
+    assert all(chassis.SURFACE_CLAN_CHAT not in surfaces for surfaces in seen_surfaces)
+    assert outcome["handled"] is True and outcome["tier"] == "chat"
+    assert len(delivered) == 1
+    assert delivered[0]["posts"] == [
+        {
+            "channel": "elixir",
+            "content": "**Valkalla.** blackberry's climb is backed by a real run.",
+            "covers_signal_keys": ["arena_changed:#AAA:54000020"],
+        }
+    ]
+    assert outcome["episode"]["preceding_attempts"][0]["rejections"] == [
+        "missing required surface discord:elixir"
+    ]
 
 
 def test_a_wake_can_only_fail_upward(seeded, monkeypatch):

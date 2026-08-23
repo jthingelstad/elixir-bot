@@ -59,6 +59,8 @@ class JobSpec:
     event_types: frozenset
     surfaces: frozenset
     silence_allowed: bool = False
+    required_surface: str | None = None
+    single_event_clan_chat_types: frozenset | None = None
 
 
 _ANNOUNCE = "discord:announcements"
@@ -72,10 +74,30 @@ _CLAN_CHAT = "clan_chat"
 # (28/28). Milestones never earned their own clan-chat line — the siblings that
 # looked like theirs belonged to a join co-covered by the same post.
 JOBS = (
-    JobSpec("welcome", frozenset({"member_joined"}), frozenset({_ANNOUNCE, _CLAN_CHAT})),
-    JobSpec("farewell", frozenset({"member_left_verified"}), frozenset({_ANNOUNCE, _CLAN_CHAT})),
-    JobSpec("role_change", frozenset({"role_changed"}), frozenset({_ANNOUNCE})),
-    JobSpec("podium", frozenset({"pol_season_podium"}), frozenset({_ANNOUNCE})),
+    JobSpec(
+        "welcome",
+        frozenset({"member_joined"}),
+        frozenset({_ANNOUNCE, _CLAN_CHAT}),
+        required_surface=_ANNOUNCE,
+    ),
+    JobSpec(
+        "farewell",
+        frozenset({"member_left_verified"}),
+        frozenset({_ANNOUNCE, _CLAN_CHAT}),
+        required_surface=_ANNOUNCE,
+    ),
+    JobSpec(
+        "role_change",
+        frozenset({"role_changed"}),
+        frozenset({_ANNOUNCE}),
+        required_surface=_ANNOUNCE,
+    ),
+    JobSpec(
+        "podium",
+        frozenset({"pol_season_podium"}),
+        frozenset({_ANNOUNCE}),
+        required_surface=_ANNOUNCE,
+    ),
     JobSpec(
         "milestone_batch",
         frozenset(
@@ -87,6 +109,13 @@ JOBS = (
             }
         ),
         frozenset({_ELIXIR, _CLAN_CHAT}),
+        required_surface=_ELIXIR,
+        # A lone arena climb or Legendary badge belongs on Discord only. The
+        # measured clan-chat bar is a Champion-tier arrival or a real batch;
+        # keeping this as registry data preserves one generic responder path.
+        single_event_clan_chat_types=frozenset(
+            {"champion_league_reached", "ultimate_champion_reached"}
+        ),
     ),
     # Phase 3. ONE job for the whole war boundary, and the plan asked for two
     # (`war_week.md` + `war_season.md`). Two would have been a bug: at a season
@@ -101,16 +130,27 @@ JOBS = (
         "war_close",
         frozenset({"week_finished", "season_closed", "clan_league_changed"}),
         frozenset({_ELIXIR, _CLAN_CHAT}),
+        required_surface=_ELIXIR,
     ),
     # Its own job, deliberately: a tournament result shares (immediate, chat)
     # with the war boundary but is a different story, and the grouping key is
     # what keeps them from colliding into one confused post.
-    JobSpec("tournament", frozenset({"tournament_finished"}), frozenset({_ELIXIR})),
+    JobSpec(
+        "tournament",
+        frozenset({"tournament_finished"}),
+        frozenset({_ELIXIR}),
+        required_surface=_ELIXIR,
+    ),
     # Annual, and the last hard post that had no job. Without one it would fall
     # to the brain — which this phase cuts to once a day, so the clan's own
     # birthday could arrive up to 24h late. Registering it is what makes the
     # cadence cut safe.
-    JobSpec("clan_birthday", frozenset({"clan_birthday"}), frozenset({_ANNOUNCE, _CLAN_CHAT})),
+    JobSpec(
+        "clan_birthday",
+        frozenset({"clan_birthday"}),
+        frozenset({_ANNOUNCE, _CLAN_CHAT}),
+        required_surface=_ANNOUNCE,
+    ),
     # Phase 5. Both surfaces available, but `followup.md` sends almost every one
     # to clan chat: a check-in is about one person and belongs where they will
     # see it. It is also the one job whose correct answer is often no post at
@@ -145,6 +185,29 @@ def job_spec(job: str) -> JobSpec | None:
 
 def lanes_for(spec: JobSpec) -> tuple:
     return tuple(lane for surface, lane in _LANE_BY_SURFACE.items() if surface in spec.surfaces)
+
+
+def surfaces_for(spec: JobSpec, events: list[dict]) -> frozenset:
+    """Resolve this wake's usable surfaces from the job's data contract."""
+    surfaces = set(spec.surfaces)
+    eligible_single_types = spec.single_event_clan_chat_types
+    if (
+        _CLAN_CHAT in surfaces
+        and eligible_single_types is not None
+        and len(events) == 1
+        and events[0].get("event_type") not in eligible_single_types
+    ):
+        surfaces.remove(_CLAN_CHAT)
+    return frozenset(surfaces)
+
+
+def _has_required_surface(spec: JobSpec, posts: list[dict]) -> bool:
+    if spec.required_surface is None:
+        return True
+    if spec.required_surface == _CLAN_CHAT:
+        return any(post.get("channel") == _CLAN_CHAT or post.get("clan_chat") for post in posts)
+    lane = _LANE_BY_SURFACE.get(spec.required_surface)
+    return bool(lane) and any(post.get("channel") == lane for post in posts)
 
 
 def responder_enabled() -> bool:
@@ -396,7 +459,7 @@ def respond(
             "reason": f"job {job!r} has no surface declaration",
         }
     lanes = lanes_for(spec)
-    surfaces = spec.surfaces
+    surfaces = surfaces_for(spec, events)
 
     attempts = []
     tiers = ["lightweight"]
@@ -482,6 +545,20 @@ def respond(
                 tier,
                 job,
                 episode.get("rejections"),
+            )
+            continue
+        if not _has_required_surface(spec, posts):
+            rejection = f"missing required surface {spec.required_surface}"
+            episode = {
+                **episode,
+                "rejections": [*(episode.get("rejections") or []), rejection],
+            }
+            attempts[-1] = episode
+            log.warning(
+                "wake responder: %s tier missed required surface %s (job=%s)",
+                tier,
+                spec.required_surface,
+                job,
             )
             continue
         if uncovered:
@@ -617,4 +694,5 @@ __all__ = [
     "record_episode",
     "respond",
     "responder_enabled",
+    "surfaces_for",
 ]
