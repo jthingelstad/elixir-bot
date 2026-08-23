@@ -28,7 +28,7 @@ The old "~6 lines/day, read it in full" rule no longer holds — the error log i
 
 ### Telemetry DB — `elixir-telemetry.db`
 
-Split out of the clan DB on 2026-08-03 because every model call was taking the clan database's single write lock. ~119 MB, and **not covered by `scripts/backup_db.py`**.
+Split out of the clan DB on 2026-08-03 because every model call was taking the clan database's single write lock. ~119 MB, and backed up as the optional telemetry member of the shared `scripts/backup_db.py` backup set.
 
 > **Read-only, always.** Per `AGENTS.md`, this file is admin-only and Elixir's behaviour may never depend on it. For triage that means: open it `file:elixir-telemetry.db?mode=ro`, never write, and never let a finding here become an input to something that decides. It is evidence for a human, not state.
 
