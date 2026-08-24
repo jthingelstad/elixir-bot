@@ -290,6 +290,8 @@ Observed: returns ~30-40 battles (most commonly 30).
 | 72000504 | Crazy_Arena_EpicOnly                                                               |
 | 72000505 | Chaos_1v1_Draft                                                                    |
 | 72000506 | Chaos_1v1_TripleDraft                                                              |
+| 72000511 | Crazy_Arena_SuddenDeath (observed August 2026)                                     |
+| 72000512 | Chaos_1v1_MegaDraft_All (observed August 2026)                                     |
 
 Note: `gameMode.name` was observed on 100% of battles across March–April 2026 sampling (all tournament battles
 included). Earlier notes suggesting `name` might be absent on some tournament modes no longer apply — treat `name` as
