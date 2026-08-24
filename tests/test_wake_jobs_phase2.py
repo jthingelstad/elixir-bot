@@ -137,6 +137,11 @@ def test_a_real_milestone_batch_keeps_the_clan_chat_surface():
     assert surfaces == frozenset({respond._ELIXIR, respond._CLAN_CHAT})
 
 
+def test_an_eligible_milestone_requires_its_clan_chat_surface():
+    spec = respond.job_spec("milestone_batch")
+    assert spec.required_when_available == frozenset({respond._CLAN_CHAT})
+
+
 # ------------------------------------------------------------------- the seed
 
 

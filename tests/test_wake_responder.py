@@ -89,6 +89,21 @@ def _arena_wake():
     )
 
 
+def _champion_wake():
+    return _wake(
+        reason="1 immediate event(s): champion_league_reached",
+        events=[
+            {
+                "signal_key": "champion_league_reached:#AAA:5",
+                "event_type": "champion_league_reached",
+                "subject_tag": "#AAA",
+                "observed_at": "2026-08-24T08:32:48Z",
+                "payload": {"league": "Grand Champion", "league_tier": 5},
+            }
+        ],
+    )
+
+
 @pytest.fixture
 def seeded(engine_conn):
     # clan_memberships carries an FK to clans as well as players.
@@ -272,6 +287,49 @@ def test_a_bare_arena_relay_is_rejected_before_delivery(seeded, monkeypatch):
     ]
     assert outcome["episode"]["preceding_attempts"][0]["rejections"] == [
         "missing required surface discord:elixir"
+    ]
+
+
+def test_a_champion_arrival_without_its_eligible_relay_fails_upward(seeded, monkeypatch):
+    """Natural episode 56 contradicted the job contract after posting Discord.
+
+    Champion-tier arrivals retain both surfaces. A composer that omits the
+    eligible clan-chat sibling must fail upward instead of redefining the bar
+    in its closing prose.
+    """
+    delivered = []
+
+    def _run(attention, seed, **kw):
+        discord_post = {
+            "channel": "elixir",
+            "content": "**Grand Champion.** blackberry's Ranked grind is paying off.",
+            "covers_signal_keys": ["champion_league_reached:#AAA:5"],
+        }
+        if _tier(attention) == "lightweight":
+            return _episode([discord_post], job="milestone_batch")
+        return _episode(
+            [
+                {
+                    **discord_post,
+                    "clan_chat": ["blackberry reached Grand Champion in Ranked. Great climb!"],
+                }
+            ],
+            job="milestone_batch",
+            workflow="wake_response_chat",
+        )
+
+    monkeypatch.setattr(chassis, "run_turn", _run)
+    outcome = respond.respond(
+        _champion_wake(),
+        deliver_fn=lambda read, plan: delivered.append(plan) or {"delivered": 1, "failed": False},
+        conn=seeded,
+    )
+
+    assert outcome["handled"] is True and outcome["tier"] == "chat"
+    assert len(delivered) == 1
+    assert delivered[0]["posts"][0]["clan_chat"]
+    assert outcome["episode"]["preceding_attempts"][0]["rejections"] == [
+        "missing required surface clan_chat"
     ]
 
 

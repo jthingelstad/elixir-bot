@@ -51,8 +51,9 @@ class JobSpec:
 
     ``surfaces`` is what the job MAY use, not what it must: the farewell carries
     clan chat because a notable departure deserves it, and ``farewell.md``
-    decides which departures qualify. Availability is data; the editorial call is
-    prose. That is why "notable departures only" needs no code.
+    decides which departures qualify. ``required_when_available`` is the narrow
+    exception for a surface whose eligibility already means the editorial bar
+    cleared. Availability is data; the editorial call is prose.
     """
 
     name: str
@@ -61,6 +62,7 @@ class JobSpec:
     silence_allowed: bool = False
     required_surface: str | None = None
     single_event_clan_chat_types: frozenset | None = None
+    required_when_available: frozenset = frozenset()
 
 
 _ANNOUNCE = "discord:announcements"
@@ -116,6 +118,10 @@ JOBS = (
         single_event_clan_chat_types=frozenset(
             {"champion_league_reached", "ultimate_champion_reached"}
         ),
+        # Eligibility itself is the ratified high bar here: a Champion-tier
+        # arrival or genuine batch gets clan chat; a lone arena/badge wake has
+        # that surface removed above and remains Discord-only.
+        required_when_available=frozenset({_CLAN_CHAT}),
     ),
     # Phase 3. ONE job for the whole war boundary, and the plan asked for two
     # (`war_week.md` + `war_season.md`). Two would have been a bug: at a season
@@ -201,13 +207,20 @@ def surfaces_for(spec: JobSpec, events: list[dict]) -> frozenset:
     return frozenset(surfaces)
 
 
-def _has_required_surface(spec: JobSpec, posts: list[dict]) -> bool:
-    if spec.required_surface is None:
-        return True
-    if spec.required_surface == _CLAN_CHAT:
+def _has_surface(posts: list[dict], surface: str) -> bool:
+    if surface == _CLAN_CHAT:
         return any(post.get("channel") == _CLAN_CHAT or post.get("clan_chat") for post in posts)
-    lane = _LANE_BY_SURFACE.get(spec.required_surface)
+    lane = _LANE_BY_SURFACE.get(surface)
     return bool(lane) and any(post.get("channel") == lane for post in posts)
+
+
+def _missing_required_surfaces(
+    spec: JobSpec, posts: list[dict], available_surfaces: frozenset
+) -> tuple[str, ...]:
+    required = set(spec.required_when_available & available_surfaces)
+    if spec.required_surface is not None:
+        required.add(spec.required_surface)
+    return tuple(sorted(surface for surface in required if not _has_surface(posts, surface)))
 
 
 def responder_enabled() -> bool:
@@ -545,8 +558,10 @@ def respond(
                 episode.get("rejections"),
             )
             continue
-        if not _has_required_surface(spec, posts):
-            rejection = f"missing required surface {spec.required_surface}"
+        missing_surfaces = _missing_required_surfaces(spec, posts, surfaces)
+        if missing_surfaces:
+            missing = ", ".join(missing_surfaces)
+            rejection = f"missing required surface {missing}"
             episode = {
                 **episode,
                 "rejections": [*(episode.get("rejections") or []), rejection],
@@ -555,7 +570,7 @@ def respond(
             log.warning(
                 "wake responder: %s tier missed required surface %s (job=%s)",
                 tier,
-                spec.required_surface,
+                missing,
                 job,
             )
             continue
