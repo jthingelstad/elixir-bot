@@ -108,6 +108,8 @@ def test_workflow_pins_acceptance_and_memory_ownership():
     assert "intelligence and efficiency baseline" in improve
     assert "insufficient_sample" in improve
     assert "On Friday, also take a small team-health pulse" in improve
+    assert "external_game_pulse.py" in game
+    assert "Do not scrape" in game
 
 
 def test_automation_memory_path_uses_env_or_local_fallback(tmp_path, monkeypatch):

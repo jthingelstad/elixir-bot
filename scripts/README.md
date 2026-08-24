@@ -76,6 +76,20 @@ uv run --locked python scripts/clean.py --db      # also removes elixir.db and e
 
 ## Quality & feedback
 
+### `external_game_pulse.py`
+
+Read-only audit for the approved external Clash Royale evidence policy. It reports the
+official, competitive-aggregate, and community-sentiment source tiers and whether the
+existing `meta_decks` snapshot needs a human-reviewed refresh.
+
+```bash
+uv run --locked python AGENT-TEAM/scripts/external_game_pulse.py
+uv run --locked python AGENT-TEAM/scripts/external_game_pulse.py --exit-code
+```
+
+The manifest is `AGENT-TEAM/external_game_sources.toml`. It deliberately performs no
+web scraping, model call, database write, or member-facing action.
+
 ### `audit_game_mode_labels.py`
 
 Read-only check for recently observed battle modes that have no reviewed

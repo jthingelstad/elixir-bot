@@ -32,6 +32,14 @@ Cadence: daily, plus after a material Supercell release or a structural drift al
    the official API contract, and reputable current Clash Royale references. A field's
    presence is not proof of its meaning; connect events, modes, badges, and progress
    only when the payload or authoritative semantics establishes the relationship.
+   At least weekly, and after a material official release, run
+   `uv run --locked python AGENT-TEAM/scripts/external_game_pulse.py` and use its
+   reviewed source manifest. Read the official sources first, then one competitive
+   aggregate and a small manual community sample only when it can sharpen a question.
+   Keep source links and the tiered conclusion in automation memory: official facts,
+   dated aggregate evidence, and community hypotheses are never interchangeable.
+   Do not scrape, retain identities or raw comments, refresh the meta database
+   automatically, or change member-facing behavior from this pulse.
 4. Characterize each candidate with counts, first/last observation, affected entities,
    raw examples, and downstream consumers. Distinguish new from merely rare.
 5. Ask what useful data Elixir captures but does not yet interpret, especially special

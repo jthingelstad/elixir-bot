@@ -1,0 +1,44 @@
+version = 1
+
+# Read-only research sources for Understand Clash Royale. These are inputs to an
+# operator's judgment, never direct instructions for member-facing behavior.
+
+[[source]]
+id = "supercell-news"
+tier = "official"
+cadence = "weekly_and_after_release"
+url = "https://supercell.com/en/games/clashroyale/blog/"
+purpose = "Release intent, balance changes, and seasonal announcements."
+interpretation = "Facts about shipped or announced product changes."
+
+[[source]]
+id = "supercell-support"
+tier = "official"
+cadence = "weekly_and_after_release"
+url = "https://support.supercell.com/clash-royale/en/game/index.html"
+purpose = "Player-facing mechanics, support semantics, and what is new."
+interpretation = "Facts about player-visible rules and surfaces."
+
+[[source]]
+id = "clash-royale-api"
+tier = "official"
+cadence = "weekly_and_after_release"
+url = "https://developer.clashroyale.com/"
+purpose = "Published API contract and data-surface context."
+interpretation = "Contract context only; retained payloads remain the evidence of actual responses."
+
+[[source]]
+id = "royaleapi-meta"
+tier = "competitive_aggregate"
+cadence = "weekly_and_after_balance"
+url = "https://royaleapi.com/"
+purpose = "Comparable deck and card-trend evidence outside one clan."
+interpretation = "Dated aggregate evidence, not an authoritative rule or a member recommendation."
+
+[[source]]
+id = "clashroyale-community"
+tier = "community_sentiment"
+cadence = "after_release"
+url = "https://www.reddit.com/r/ClashRoyale/"
+purpose = "Qualitative player reactions and recurring friction after updates."
+interpretation = "Hypotheses only; sample manually, do not scrape, and never retain identities or raw comments."
