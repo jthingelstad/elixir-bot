@@ -142,7 +142,9 @@ dirty or ahead checkout safe.
 Run Elixir is accountable for the live process. Every four-hour pass compares the
 running revision with `origin/main`, inspects the intervening commits, and deploys
 safe authorized runtime changes. Prompt-only changes hot-load, but still require the
-same human boundary when they affect members.
+same human boundary when they affect members. An originating owner may make the narrow
+backed-up restart exception defined in `WORKFLOW.md` for its own already-pushed runtime
+fix; it does not assume Run Elixir's technical-health acceptance role.
 
 Do not create a deployment ticket solely to move a commit between agents. The commit,
 the running revision, and production verification are the durable record.
@@ -162,11 +164,14 @@ Do not turn it into a chain of internal proposals.
 Use the objective identity for commits and durable issue comments:
 
 ```bash
+uv run --locked python AGENT-TEAM/scripts/prepare_commit.py <current-run paths>
 uv run --locked python AGENT-TEAM/scripts/agent_attribution.py commit <automation-id> -- -m "Commit message"
 uv run --locked python AGENT-TEAM/scripts/agent_attribution.py issue-comment <automation-id> <issue> --body-file <path>
 ```
 
-The commit helper invokes `git commit` itself; pass only its arguments after `--`.
+The prepare helper formats changed Python paths and stages only the named files; it
+refuses a mixed index. The commit helper invokes `git commit` itself and refuses an
+empty index; pass only its arguments after `--`.
 
 The automation IDs remain stable so existing scheduled-task history and memory are
 preserved; their display names and role files now express the objectives.

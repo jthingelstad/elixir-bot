@@ -42,6 +42,9 @@ def prompt(entry: dict, repo: Path = REPO) -> str:
         "before mutation; never publish pre-existing work; preserve human and privacy "
         "boundaries; and end with a clean repository. Keep automation memory to Current "
         "state, Active watches, and one replace-in-place Latest run."
+        " Resolve the memory path with `uv run --locked python "
+        "AGENT-TEAM/scripts/automation_memory.py <automation-id>` so an unset "
+        "CODEX_HOME cannot lose the state."
     )
 
 

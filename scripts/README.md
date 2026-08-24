@@ -76,6 +76,34 @@ uv run --locked python scripts/clean.py --db      # also removes elixir.db and e
 
 ## Quality & feedback
 
+### `audit_game_mode_labels.py`
+
+Read-only check for recently observed battle modes that have no reviewed
+member-facing label.
+
+```bash
+uv run --locked python scripts/audit_game_mode_labels.py --hours 48
+uv run --locked python scripts/audit_game_mode_labels.py --hours 48 --exit-code
+```
+
+The report keeps raw API identifiers separate from labels. `--exit-code` is useful
+when an operator explicitly wants unreviewed modes to fail the check.
+
+### `check_natural_label_acceptance.py`
+
+Read-only closure check for an approved display-label change. It reads delivered-post
+receipts; it never schedules or sends a post.
+
+```bash
+uv run --locked python scripts/check_natural_label_acceptance.py \
+  --since 2026-08-24T12:29:40Z \
+  --label "C.H.A.O.S Sudden Death" \
+  --expires-hours 336
+```
+
+It returns `accepted`, `waiting`, or `expired`; no matching natural event by expiry is
+a healthy no-op.
+
 ### `review_agent_feedback.py`
 Print recent prompt failures and the 👍/👎 reaction feedback recorded against
 agent replies. Useful for triaging what went wrong in production.

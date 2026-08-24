@@ -63,6 +63,17 @@ def _commit(automation_id: str, git_args: list[str]) -> int:
         git_args = git_args[1:]
     if not git_args:
         raise SystemExit("commit requires git commit arguments after --")
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=REPO,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if not staged.stdout.strip():
+        raise SystemExit(
+            "no staged current-run changes; run AGENT-TEAM/scripts/prepare_commit.py first"
+        )
     env = os.environ.copy()
     env["GIT_AUTHOR_NAME"] = name
     env["GIT_AUTHOR_EMAIL"] = _git_email()

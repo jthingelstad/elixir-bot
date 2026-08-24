@@ -50,13 +50,23 @@ Every objective run uses the same loop:
    stop before mutation. Never infer inactivity
    from age plus a clean worktree; use the proof-based stale clear or the explicit
    inspected manual clear documented in `README.md`.
-6. Add regression coverage, run the proportionate focused checks, then run
-   `scripts/gates.sh` before committing.
+6. Add regression coverage. Before the expensive gate, run
+   `uv run --locked python AGENT-TEAM/scripts/prepare_commit.py <current-run paths>`:
+   it formats changed Python files, verifies diff whitespace, and stages only those
+   paths. Review the staged diff, run proportionate focused checks, then run
+   `scripts/gates.sh` before committing. The helper never replaces preflight, review,
+   the full gate, or the commit hook.
 7. Commit and push only the work created by the current run. Never publish an
    unrelated pre-existing commit. The commit is the durable implementation record;
    an issue number is optional.
 8. Run Elixir compares the deployed revision with `origin/main` every cadence and
-   deploys safe committed runtime changes. Revision state is the deployment queue.
+   deploys safe committed runtime changes. Revision state is the deployment queue. An
+   originating owner may perform a narrowly scoped `scripts/admin.sh restart` only for
+   its current-run, already-pushed runtime change when the checkout is clean and
+   synchronized, the objective lease is held, the backed-up restart is recorded with a
+   reason, and the running revision plus confidence evidence are checked afterward. It
+   must not use `upgrade`, pull unrelated work, or turn the restart into synthetic
+   member activity.
 9. Verify the outcome from natural production evidence. Do not manufacture member
    activity, send an early report, or post synthetic Discord traffic for acceptance.
 
@@ -64,7 +74,8 @@ Every objective run uses the same loop:
 
 Run Elixir owns deployment acceptance: the intended revision is running, the process
 is healthy, migrations and scheduled work are sound, and no fresh operational failure
-appeared. The objective that originated a change owns semantic acceptance: Understand
+appeared. A narrowly scoped origin-owner restart under step 8 is an allowed delivery
+exception, not a transfer of that acceptance ownership. The objective that originated a change owns semantic acceptance: Understand
 Clash Royale proves the data now means the right thing, and Improve Elixir proves the
 member or leadership outcome is better from natural evidence. Run reports the deployed
 revision to the originating objective; it does not inherit that objective's judgment.
@@ -158,3 +169,14 @@ Each objective keeps only a compact working set in its automation memory:
 Replace `Latest run` on every pass and remove resolved watches. Commits, issues,
 telemetry, and production ledgers hold history; automation memory must not accumulate
 a narrative of every prior run.
+
+Resolve the path with:
+
+```bash
+uv run --locked python AGENT-TEAM/scripts/automation_memory.py <automation-id>
+```
+
+This uses `CODEX_HOME` when set and the local `~/.codex` fallback otherwise. Each
+natural-acceptance watch names its read-only check, closure condition, and expiry. A
+missing natural event through that expiry is a no-op result, never a reason to force
+member activity.

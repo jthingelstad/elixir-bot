@@ -23,6 +23,8 @@ def _load(name: str, relative: str):
 
 automation_audit = _load("agent_team_automation_audit", "AGENT-TEAM/scripts/automation_audit.py")
 objective_lease = _load("agent_team_objective_lease", "AGENT-TEAM/scripts/objective_lease.py")
+automation_memory = _load("agent_team_automation_memory", "AGENT-TEAM/scripts/automation_memory.py")
+prepare_commit = _load("agent_team_prepare_commit", "AGENT-TEAM/scripts/prepare_commit.py")
 PREFLIGHT = ROOT / "AGENT-TEAM/scripts/preflight.sh"
 
 
@@ -78,6 +80,7 @@ def test_automation_prompt_encodes_end_to_end_ownership_and_human_boundary():
         assert "Current state" in prompt
         assert "Active watches" in prompt
         assert "one replace-in-place Latest run" in prompt
+        assert "automation_memory.py" in prompt
 
 
 def test_workflow_pins_acceptance_and_memory_ownership():
@@ -88,6 +91,8 @@ def test_workflow_pins_acceptance_and_memory_ownership():
     improve = (ROOT / "AGENT-TEAM/improve-elixir.md").read_text()
 
     assert "Run Elixir owns deployment acceptance" in workflow
+    assert "origin-owner restart" in workflow
+    assert "prepare_commit.py" in workflow
     assert "objective that originated a change owns semantic acceptance" in workflow
     assert "Current state" in workflow
     assert "Active watches" in workflow
@@ -103,6 +108,32 @@ def test_workflow_pins_acceptance_and_memory_ownership():
     assert "intelligence and efficiency baseline" in improve
     assert "insufficient_sample" in improve
     assert "On Friday, also take a small team-health pulse" in improve
+
+
+def test_automation_memory_path_uses_env_or_local_fallback(tmp_path, monkeypatch):
+    plan_path = tmp_path / "automations.toml"
+    plan_path.write_text("[[automation]]\nid = 'elixir-data-analyst'\n")
+    monkeypatch.setattr(automation_memory, "DEFAULT_CODEX_HOME", tmp_path / "fallback")
+
+    assert automation_memory.memory_path("elixir-data-analyst", plan_path=plan_path) == (
+        tmp_path / "fallback" / "automations" / "elixir-data-analyst" / "memory.md"
+    )
+    assert automation_memory.memory_path(
+        "elixir-data-analyst", environ={"CODEX_HOME": "/tmp/codex"}, plan_path=plan_path
+    ) == Path("/tmp/codex/automations/elixir-data-analyst/memory.md")
+    with pytest.raises(ValueError, match="unknown automation id"):
+        automation_memory.memory_path("unknown", plan_path=plan_path)
+
+
+def test_prepare_commit_requires_safe_repository_relative_paths(tmp_path):
+    tracked = tmp_path / "tracked.py"
+    tracked.write_text("print('ok')\n")
+
+    assert prepare_commit._relative_paths(["tracked.py"], cwd=tmp_path) == ["tracked.py"]
+    with pytest.raises(ValueError, match="repository-relative"):
+        prepare_commit._relative_paths(["../outside.py"], cwd=tmp_path)
+    with pytest.raises(ValueError, match="not a file"):
+        prepare_commit._relative_paths(["missing.py"], cwd=tmp_path)
 
 
 def test_audit_rejects_any_plan_other_than_one_owner_per_objective(tmp_path):

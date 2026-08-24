@@ -24,6 +24,10 @@ Cadence: daily, plus after a material Supercell release or a structural drift al
      cards, and other new enum values;
    - the four event streams and their current projections;
    - materialization readiness, freshness, and distribution shifts.
+   - `uv run --locked python scripts/audit_game_mode_labels.py --hours 48` for fresh
+     battle-mode sentinels. A mode is safe only when its display label is curated or an
+     explicitly approved generic fallback; otherwise trace its event context before
+     changing member-visible wording.
 3. Check current official game context when needed: Supercell support/release material,
    the official API contract, and reputable current Clash Royale references. A field's
    presence is not proof of its meaning; connect events, modes, badges, and progress
@@ -36,6 +40,11 @@ Cadence: daily, plus after a material Supercell release or a structural drift al
    through events, projections, and capability consumers, then either prove it is not
    useful or correct the missing source representation. Do not create an idea backlog.
 6. Inspect open `objective:game` issues for multi-run context.
+7. For every active natural-acceptance watch, run its named read-only check and close
+   it on the stated evidence. For label watches use
+   `scripts/check_natural_label_acceptance.py` with the deployment timestamp, exact
+   label, and expiry; an expired no-mention watch is a healthy no-op, not permission to
+   manufacture a post.
 
 ## Action
 

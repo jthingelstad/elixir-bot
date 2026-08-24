@@ -420,6 +420,13 @@ _GAME_MODE_LABELS = {
     "TeamVsTeam_Touchdown_Draft": "2v2 Touchdown",
 }
 
+# A newly observed raw mode key must be curated above when the game provides an
+# authoritative title, or explicitly listed here when the structural fallback
+# is the approved member-facing wording. Keeping this empty is intentional:
+# every new key should make the daily audit ask the question instead of silently
+# normalizing a possibly wrong product name.
+_APPROVED_GENERIC_GAME_MODE_KEYS: frozenset[str] = frozenset()
+
 # Structural tokens that describe the ruleset plumbing, not the mode a member
 # would name — dropped from the generic fallback so `Showdown_Friendly` reads
 # "Showdown" and `Event_RestlessDead` reads "Restless Dead".
@@ -450,6 +457,24 @@ def humanize_game_mode(mode_name) -> str | None:
         parts = mode_name.split("_")
     label = " ".join(_split_camel(p) for p in parts).strip()
     return label or None
+
+
+def game_mode_label_status(mode_name) -> tuple[str, str | None]:
+    """Return the review status and member-facing label for a raw mode key.
+
+    ``curated`` means a captured or otherwise authoritative title is in the
+    explicit map. ``approved_generic`` is reserved for a reviewed structural
+    fallback. Every other non-empty key is ``unreviewed`` so the objective's
+    sentinel audit can surface it before it reaches member-facing copy.
+    """
+    if not isinstance(mode_name, str) or not mode_name:
+        return "missing", None
+    label = humanize_game_mode(mode_name)
+    if mode_name in _GAME_MODE_LABELS:
+        return "curated", label
+    if mode_name in _APPROVED_GENERIC_GAME_MODE_KEYS:
+        return "approved_generic", label
+    return "unreviewed", label
 
 
 def pol_rank_improved(old_rank, new_rank) -> bool:
