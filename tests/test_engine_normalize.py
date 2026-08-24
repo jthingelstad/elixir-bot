@@ -100,6 +100,8 @@ def test_live_chaos_event_mode_keys_keep_their_authoritative_labels():
 
     assert humanize_game_mode("Crazy_Arena_EpicOnly") == "C.H.A.O.S Epic Only"
     assert humanize_game_mode("Chaos_1v1_TripleDraft") == "C.H.A.O.S Triple Draft"
+    assert humanize_game_mode("Crazy_Arena_SuddenDeath") == "C.H.A.O.S Sudden Death"
+    assert humanize_game_mode("Chaos_1v1_MegaDraft_All") == "Ken's C.H.A.O.S Mega Draft Tournament"
 
 
 def test_tag_forms_named():

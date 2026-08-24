@@ -408,6 +408,8 @@ _GAME_MODE_LABELS = {
     "Crazy_Arena": "Crazy Arena",
     "Crazy_Arena_EpicOnly": "C.H.A.O.S Epic Only",
     "Chaos_1v1_TripleDraft": "C.H.A.O.S Triple Draft",
+    "Crazy_Arena_SuddenDeath": "C.H.A.O.S Sudden Death",
+    "Chaos_1v1_MegaDraft_All": "Ken's C.H.A.O.S Mega Draft Tournament",
     "Challenge_AllCards_EventDeck_NoSet": "All-Cards Challenge",
     "TeamVsTeam": "2v2",
     "CW_Battle_1v1": "Clan War",
