@@ -410,6 +410,44 @@ def test_a_tier_that_ends_without_posting_is_nudged_before_escalating(seeded, mo
     assert seen[0][1] is None and seen[1][1], "exactly one nudge, on the retry"
 
 
+def test_a_soft_arena_wake_is_not_nudged_into_posting_its_no_post_verdict(seeded, monkeypatch):
+    """A routine arena climb may be left for the daily brain.
+
+    The responder previously told an empty soft wake to call a posting tool,
+    which made its internal "No post — routine arena climb" verdict member
+    visible. Recovery nudges are only valid when the event carries a hard-post
+    obligation.
+    """
+    seen = []
+    delivered = []
+
+    def _run(attention, seed, **kw):
+        seen.append((_tier(attention), kw.get("nudge")))
+        if kw.get("nudge"):
+            return _episode(
+                [
+                    {
+                        "channel": "elixir",
+                        "content": "No post — routine arena climbs.",
+                        "covers_signal_keys": ["arena_changed:#AAA:54000020"],
+                    }
+                ],
+                job="milestone_batch",
+            )
+        return _episode([], job="milestone_batch")
+
+    monkeypatch.setattr(chassis, "run_turn", _run)
+    outcome = respond.respond(
+        _arena_wake(),
+        deliver_fn=lambda read, plan: delivered.append(plan) or {"delivered": 1},
+        conn=seeded,
+    )
+
+    assert outcome["handled"] is False
+    assert delivered == []
+    assert [nudge for _, nudge in seen] == [None, None]
+
+
 def test_a_tier_that_bounced_is_escalated_rather_than_nudged(seeded, monkeypatch):
     """A turn with rejections was trying. Another round at the same tier spends
     money to repeat a failure the model already could not fix."""

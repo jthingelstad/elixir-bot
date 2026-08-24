@@ -489,18 +489,16 @@ def respond(
         episode = chassis.run_turn(attention, seed, on_event=on_event)
         attempts.append(episode)
 
-        # Measured over the Phase 2 gate: 10 of 41 wakes escalated to Sonnet, and
-        # EVERY one of them looked like this — no post, no validator rejection,
-        # `stop_reason=end_turn`, output nowhere near the token ceiling. The model
-        # read its tools and then talked about the post instead of calling the
-        # tool that makes one. That is not a tier being too weak, it is a turn
-        # ending early, and the bounce-and-fix contract already fixes exactly this
-        # class of mistake everywhere else in the chassis. So say so once, at the
-        # same price, before paying for the stronger model.
+        # Measured over the Phase 2 gate: hard-post wakes that ended without a
+        # tool call need one same-tier retry before paying for the stronger model.
+        # A soft wake is different: it may correctly conclude that the moment is
+        # not worth a member-facing post. Nudging it to call a posting tool turns
+        # that internal verdict into literal output (for example, "No post — ...")
+        # instead of leaving the signal for the daily deliberation.
         #
         # Only on the clean signature: a turn that produced rejections was trying
         # and failing, and a nudge would just spend another round on it.
-        if not (
+        if floor and not (
             episode.get("posts")
             or episode.get("intentionally_silent")
             or episode.get("rejections")
