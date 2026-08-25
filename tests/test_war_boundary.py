@@ -337,6 +337,49 @@ def test_attendance_day_never_zeroed_by_reset(engine_conn):
     assert after == 4, "reset re-observation zeroed a finished day's attendance"
 
 
+def test_finish_line_crossing_before_final_day_emits_race_finished(engine_conn):
+    """An early finish is a real mid-week story and keeps its event."""
+    c = engine_conn
+    early = dict(_race(140, 0, 9900, period_type="warDay", period_index=5))
+    finished = dict(early, our_fame=10050)
+    finished["clans"] = {
+        TAG: {"name": "POAP KINGS", "fame": 10050},
+        RIVAL: {"name": "Rival", "fame": 700},
+    }
+    finished["participants"] = {
+        **early["participants"],
+        "#AAA": {**early["participants"]["#AAA"], "fame": 6030},
+        "#BBB": {**early["participants"]["#BBB"], "fame": 4020},
+    }
+
+    _emit(c, early, "2026-08-08T09:00:00Z")
+    _emit(c, finished, "2026-08-08T09:10:00Z")
+
+    row = c.execute("SELECT dedup_key FROM war_events WHERE event_type='race_finished'").fetchone()
+    assert row and row["dedup_key"] == "race_finished:140:0"
+
+
+def test_final_battle_day_crossing_waits_for_week_finished(engine_conn):
+    """Battle Day 4 is the close, not a second mid-week completion story."""
+    c = engine_conn
+    final_day = dict(_race(140, 0, 9900, period_type="warDay", period_index=6))
+    finished = dict(final_day, our_fame=10050)
+    finished["clans"] = {
+        TAG: {"name": "POAP KINGS", "fame": 10050},
+        RIVAL: {"name": "Rival", "fame": 700},
+    }
+    finished["participants"] = {
+        **final_day["participants"],
+        "#AAA": {**final_day["participants"]["#AAA"], "fame": 6030},
+        "#BBB": {**final_day["participants"]["#BBB"], "fame": 4020},
+    }
+
+    _emit(c, final_day, "2026-08-09T09:00:00Z")
+    _emit(c, finished, "2026-08-09T09:10:00Z")
+
+    assert c.execute("SELECT 1 FROM war_events WHERE event_type='race_finished'").fetchone() is None
+
+
 def test_monotonic_participation_never_decreases(engine_conn):
     c = engine_conn
     _emit(c, _race(133, 4, 20000), "2026-07-06T03:00:00Z")  # first sight (silent)

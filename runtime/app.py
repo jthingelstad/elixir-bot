@@ -1,7 +1,6 @@
 """runtime.app — Elixir Discord bot runtime."""
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -32,6 +31,7 @@ from runtime.channel_router import route_message
 from runtime.discord_commands import register_elixir_app_commands
 from runtime.emoji import sync_emoji
 from runtime.leader_action_policy import can_post_leader_action
+from runtime.relay_identity import awareness_relay_identity, war_week_relay_key
 from runtime.system_signals import seed_startup_state
 
 load_dotenv()
@@ -1140,16 +1140,25 @@ async def _awareness_loop_body(trigger: str):
 
 
 def _awareness_relay_moment(post: dict, relay_events: list[dict] | None) -> dict | None:
-    """Return one authoritative member moment for a responder-authored relay.
+    """Return one authoritative domain moment for a relay.
 
     Different responder jobs can legitimately write separate Discord posts for
     one engine observation (for example, a returning member who reaches a
     Champion tier in the same materialization). Clan chat should still receive
-    one card for that member moment, not one card per job. Match only events the
-    final, policy-validated post actually covers, and fail open when the post
-    spans multiple members or observation times.
+    one card for that member moment, not one card per job. Likewise,
+    ``race_finished`` and ``week_finished`` are two lifecycle signals for one
+    completed war week and must share one relay identity across the brain,
+    responder, and weekly recap. Match only signals the final,
+    policy-validated post actually covers, and fail open when the post spans
+    multiple unrelated moments.
     """
     covered = {str(key) for key in (post.get("covers_signal_keys") or []) if str(key).strip()}
+    if war_week_key := war_week_relay_key(covered):
+        return {
+            "relay_key": war_week_key,
+            "source_signal_key": war_week_key,
+            "source_signal_type": "war_week_relay",
+        }
     matched = [
         event for event in (relay_events or []) if str(event.get("signal_key") or "") in covered
     ]
@@ -1165,9 +1174,12 @@ def _awareness_relay_moment(post: dict, relay_events: list[dict] | None) -> dict
     }
     if len(subject_tags) != 1 or len(observed_at) != 1:
         return None
+    subject_tag = next(iter(subject_tags))
+    moment_at = next(iter(observed_at))
     return {
-        "subject_tag": next(iter(subject_tags)),
-        "observed_at": next(iter(observed_at)),
+        "relay_key": f"member-moment:{subject_tag}:{moment_at}",
+        "subject_tag": subject_tag,
+        "observed_at": moment_at,
     }
 
 
@@ -1197,17 +1209,19 @@ async def _awareness_relay_to_clan_chat(
     relay_moment = _awareness_relay_moment(post, relay_events)
     key_material = content
     target_player_tag = None
+    source_signal_key = None
+    source_signal_type = "awareness_relay"
     if relay_moment:
-        # The same observed member moment can reach two responder jobs. Give
-        # both copies one objective identity so the existing objective cooldown
-        # keeps the first (higher-priority, deterministic job order) and drops
-        # the duplicate card. Brain-authored relays have no scoped event list
-        # and retain their content identity.
-        target_player_tag = relay_moment["subject_tag"]
-        key_material = f"member-moment:{target_player_tag}:{relay_moment['observed_at']}"
-    key_hash = hashlib.sha1(key_material.encode("utf-8")).hexdigest()[:12]
-    objective = f"awareness_relay:{key_hash}"
-    action_key = f"awareness-relay:{key_hash}"
+        # Member moments use the scoped event receipts; completed war weeks use
+        # the covered signal keys, which are available to both the responder
+        # and the brain. In either case, give every producer one objective
+        # identity so the first card wins and later copies are idempotent.
+        target_player_tag = relay_moment.get("subject_tag")
+        key_material = relay_moment["relay_key"]
+        source_signal_key = relay_moment.get("source_signal_key")
+        source_signal_type = relay_moment.get("source_signal_type") or source_signal_type
+    objective, action_key = awareness_relay_identity(key_material)
+    source_signal_key = source_signal_key or action_key
 
     allowed, reason = await asyncio.to_thread(
         can_post_leader_action,
@@ -1270,8 +1284,8 @@ async def _awareness_relay_to_clan_chat(
         target_channel_id=channel_config["id"],
         target_player_tag=target_player_tag,
         target_player_name=None,
-        source_signal_key=action_key,
-        source_signal_type="awareness_relay",
+        source_signal_key=source_signal_key,
+        source_signal_type=source_signal_type,
         copy_original_text=copy_text,
         copy_current_text=copy_text,
         baseline=baseline,

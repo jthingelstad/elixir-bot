@@ -21,7 +21,7 @@ from __future__ import annotations
 from engine.change_sets import ChangeSetInvariantError, SeasonCloseChangeSet
 from engine.db import canon_tag, utcnow
 from engine.emitters import insert_stream_event
-from engine.normalize import PERIODS_PER_SECTION
+from engine.normalize import PERIODS_PER_SECTION, WAR_DAYS
 from engine.normalize import war_day as normalize_war_day
 
 
@@ -712,10 +712,20 @@ def emit_race(conn, entity_tag, old, new, observed_at, window_start) -> int:
     # NEVER in Colosseum: there is no finish line there (clock.py, verified
     # live 2026-07-03 — 20,600 fame on day 2 with the race still on). The old
     # 5,000 constant here would have posted a false "race won" every
-    # Colosseum week (cold review 2026-07-04 #3).
+    # Colosseum week (cold review 2026-07-04 #3). A Battle Day 4 crossing is
+    # not mid-week: ``week_finished`` is the authoritative close a day later.
+    # Emitting both gave one completed week two #elixir stories and two relay
+    # cards in production (Season 135 Week 3).
     finish_line = 10_000
     old_fame, new_fame = old.get("our_fame") or 0, new.get("our_fame") or 0
-    if new_type == "warDay" and old_fame < finish_line <= new_fame and new_season is not None:
+    finish_day = normalize_war_day(new_period)
+    is_final_battle_day = bool(finish_day is not None and finish_day.war_day_index == WAR_DAYS - 1)
+    if (
+        new_type == "warDay"
+        and not is_final_battle_day
+        and old_fame < finish_line <= new_fame
+        and new_season is not None
+    ):
         n += _emit(
             conn,
             new_season,

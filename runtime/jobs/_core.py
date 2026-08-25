@@ -41,7 +41,9 @@ from runtime.leader_action_ui import (
     LEADER_ACTION_UI_VERSION,
     post_leader_action_card,
 )
+from runtime.relay_identity import awareness_relay_identity, war_week_relay_key
 from storage.contextual_memory import upsert_weekly_summary_memory
+from storage.leader_actions import get_leader_action_by_key
 
 CHICAGO = pytz.timezone("America/Chicago")
 log = logging.getLogger("elixir")
@@ -902,6 +904,21 @@ async def _weekly_member_report_cycle():
     return {"sent": sent, "total": total}
 
 
+def _latest_completed_war_week_relay_key() -> str | None:
+    """Return the just-closed CR week that Monday's recap is about, if any."""
+    conn = db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT dedup_key FROM war_events "
+            "WHERE event_type = 'week_finished' "
+            "AND datetime(observed_at) >= datetime('now', '-2 days') "
+            "ORDER BY datetime(observed_at) DESC, event_id DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    return war_week_relay_key([row["dedup_key"]]) if row else None
+
+
 async def _weekly_story_relay_card(recap_text: str) -> bool:
     """Offer the recap's best beat as a clan-chat relay card in #actions.
 
@@ -909,6 +926,20 @@ async def _weekly_story_relay_card(recap_text: str) -> bool:
     story reaches them only if a leader pastes it into game chat. One card
     per week, leader-decided; earned frequency learns if these are unwanted.
     """
+    war_week_key = await asyncio.to_thread(_latest_completed_war_week_relay_key)
+    existing_action = None
+    if war_week_key:
+        objective, action_key = awareness_relay_identity(war_week_key)
+        existing_action = await asyncio.to_thread(get_leader_action_by_key, action_key)
+        if existing_action and (
+            existing_action.get("status") != "proposed" or existing_action.get("source_message_id")
+        ):
+            log.info("weekly story relay skipped: %s already has a relay card", war_week_key)
+            return False
+    else:
+        objective = "clan_story"
+        action_key = None
+
     try:
         channel_config = _channel_config_by_key("actions")
     except Exception:
@@ -918,11 +949,22 @@ async def _weekly_story_relay_card(recap_text: str) -> bool:
     if not relay_channel:
         log.info("weekly story relay skipped: actions channel not found")
         return False
-    allowed, reason = await asyncio.to_thread(can_post_leader_action, action_type="in_game_relay")
+    allowed, reason = await asyncio.to_thread(
+        can_post_leader_action,
+        action_type="in_game_relay",
+        objective=objective,
+    )
     if not allowed:
         log.info("weekly story relay skipped by policy: %s", reason)
         return False
 
+    copy = ""
+    if existing_action:
+        copy = (
+            existing_action.get("copy_current_text")
+            or existing_action.get("copy_original_text")
+            or ""
+        ).strip()
     context = (
         "Weekly story relay task:\n"
         "Compress the weekly recap below into ONE Clash Royale clan-chat message.\n"
@@ -932,43 +974,48 @@ async def _weekly_story_relay_card(recap_text: str) -> bool:
         "=== THIS WEEK'S RECAP ===\n"
         f"{recap_text}"
     )
-    generated = await generate_clan_chat_copy(
-        intent="weekly_story_relay",
-        context=context,
-        max_messages=1,
-        max_chars=CLAN_CHAT_ACTION_COPY_LIMIT,
-        forbidden_terms=("http://", "https://", "www.", "Discord"),
-        metadata={
-            "channel": channel_config["name"],
-            "lane": channel_config.get("lane_key") or "actions",
-        },
-    )
-    copy = generated.messages[0] if generated and generated.messages else ""
+    if not copy:
+        generated = await generate_clan_chat_copy(
+            intent="weekly_story_relay",
+            context=context,
+            max_messages=1,
+            max_chars=CLAN_CHAT_ACTION_COPY_LIMIT,
+            forbidden_terms=("http://", "https://", "www.", "Discord"),
+            metadata={
+                "channel": channel_config["name"],
+                "lane": channel_config.get("lane_key") or "actions",
+            },
+        )
+        copy = generated.messages[0] if generated and generated.messages else ""
     if not copy:
         log.info("weekly story relay skipped: no usable clan-chat copy")
         return False
 
     week_key = datetime.now(CHICAGO).strftime("%G-W%V")
-    baseline = await asyncio.to_thread(
-        db.build_leader_action_baseline,
-        action_type="in_game_relay",
-        target_player_tag=None,
-    )
-    action = await asyncio.to_thread(
-        db.create_leader_action_recommendation,
-        action_type="in_game_relay",
-        objective="clan_story",
-        prompt_text=f"Relay this week's story into clan chat: {copy}",
-        rationale="Most members never read Discord; the recap's best story reaches them through game chat.",
-        target_channel_key="actions",
-        target_channel_id=channel_config["id"],
-        source_signal_key=f"weekly_story_relay:{week_key}",
-        source_signal_type="weekly_story_relay",
-        copy_original_text=copy,
-        copy_current_text=copy,
-        ui_version=LEADER_ACTION_UI_VERSION,
-        baseline=baseline,
-    )
+    if existing_action:
+        action = existing_action
+    else:
+        baseline = await asyncio.to_thread(
+            db.build_leader_action_baseline,
+            action_type="in_game_relay",
+            target_player_tag=None,
+        )
+        action = await asyncio.to_thread(
+            db.create_leader_action_recommendation,
+            action_type="in_game_relay",
+            objective=objective,
+            prompt_text=f"Relay this week's story into clan chat: {copy}",
+            rationale="Most members never read Discord; the recap's best story reaches them through game chat.",
+            target_channel_key="actions",
+            target_channel_id=channel_config["id"],
+            source_signal_key=(war_week_key or f"weekly_story_relay:{week_key}"),
+            source_signal_type=("war_week_relay" if war_week_key else "weekly_story_relay"),
+            copy_original_text=copy,
+            copy_current_text=copy,
+            ui_version=LEADER_ACTION_UI_VERSION,
+            baseline=baseline,
+            action_key=action_key,
+        )
     if not action or action.get("source_message_id"):
         return False
     sent_messages = await post_leader_action_card(relay_channel, action, copy_messages=[copy])

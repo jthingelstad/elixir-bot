@@ -728,6 +728,104 @@ def test_responder_relays_share_one_action_identity_for_one_member_moment():
     assert objectives[0] == objectives[1]
 
 
+def test_war_finish_and_close_share_one_relay_identity():
+    early = elixir._awareness_relay_moment(
+        {
+            "covers_signal_keys": [
+                "war_day_opened:135:2:3",
+                "race_finished:135:2",
+            ]
+        },
+        None,
+    )
+    closed = elixir._awareness_relay_moment(
+        {"covers_signal_keys": ["week_finished:135:2"]},
+        None,
+    )
+
+    assert (
+        early
+        == closed
+        == {
+            "relay_key": "war-week:135:2",
+            "source_signal_key": "war-week:135:2",
+            "source_signal_type": "war_week_relay",
+        }
+    )
+
+
+def test_weekly_recap_skips_an_existing_completed_week_relay():
+    from runtime.jobs import _core as core_jobs
+    from runtime.relay_identity import awareness_relay_identity
+
+    _objective, action_key = awareness_relay_identity("war-week:135:2")
+    existing = {
+        "action_key": action_key,
+        "status": "done",
+        "source_message_id": "already-posted",
+    }
+
+    with (
+        patch("runtime.jobs._core.asyncio.to_thread", side_effect=_inline_to_thread),
+        patch(
+            "runtime.jobs._core._latest_completed_war_week_relay_key",
+            return_value="war-week:135:2",
+        ),
+        patch("runtime.jobs._core.get_leader_action_by_key", return_value=existing),
+        patch("runtime.jobs._core.generate_clan_chat_copy", new=AsyncMock()) as mock_generate,
+    ):
+        assert asyncio.run(core_jobs._weekly_story_relay_card("Week 3 recap")) is False
+
+    mock_generate.assert_not_awaited()
+
+
+def test_weekly_recap_creates_the_completed_week_relay_identity():
+    from runtime.jobs import _core as core_jobs
+    from runtime.relay_identity import awareness_relay_identity
+
+    objective, action_key = awareness_relay_identity("war-week:135:2")
+    channel = SimpleNamespace(id=1513758211206025227, name="actions", type="text")
+    action = {"action_id": 99, "source_message_id": None}
+
+    with (
+        patch("runtime.jobs._core.asyncio.to_thread", side_effect=_inline_to_thread),
+        patch(
+            "runtime.jobs._core._latest_completed_war_week_relay_key",
+            return_value="war-week:135:2",
+        ),
+        patch("runtime.jobs._core.get_leader_action_by_key", return_value=None),
+        patch(
+            "runtime.jobs._core._channel_config_by_key",
+            return_value={"id": channel.id, "name": "actions", "lane_key": "actions"},
+        ),
+        patch(
+            "runtime.jobs._core._bot",
+            return_value=SimpleNamespace(get_channel=lambda _channel_id: channel),
+        ),
+        patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
+        patch(
+            "runtime.jobs._core.generate_clan_chat_copy",
+            new=AsyncMock(return_value=SimpleNamespace(messages=["Week 3 story. - E"])),
+        ),
+        patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
+        patch(
+            "runtime.jobs._core.db.create_leader_action_recommendation",
+            return_value=action,
+        ) as mock_create,
+        patch(
+            "runtime.jobs._core.post_leader_action_card",
+            new=AsyncMock(return_value=[SimpleNamespace(id=123)]),
+        ),
+        patch("runtime.jobs._core.db.save_message"),
+    ):
+        assert asyncio.run(core_jobs._weekly_story_relay_card("Week 3 recap")) is True
+
+    assert mock_create.call_args.kwargs["objective"] == objective
+    assert mock_create.call_args.kwargs["action_key"] == action_key
+    assert mock_create.call_args.kwargs["source_signal_key"] == "war-week:135:2"
+    assert mock_create.call_args.kwargs["source_signal_type"] == "war_week_relay"
+
+
 def test_responder_relay_identity_fails_open_without_one_exact_member_moment():
     post = {
         "content": "Multi-member roundup",
