@@ -104,6 +104,28 @@ def _champion_wake():
     )
 
 
+def _arena_batch_wake():
+    return _wake(
+        reason="2 batch event(s): arena_changed",
+        events=[
+            {
+                "signal_key": "arena_changed:#AAA:54000020",
+                "event_type": "arena_changed",
+                "subject_tag": "#AAA",
+                "observed_at": "2026-08-25T21:08:30Z",
+                "payload": {"name": "blackberry", "arena_name": "Valkalla"},
+            },
+            {
+                "signal_key": "arena_changed:#BBB:54000141",
+                "event_type": "arena_changed",
+                "subject_tag": "#BBB",
+                "observed_at": "2026-08-25T21:18:34Z",
+                "payload": {"name": "blueberry", "arena_name": "Magic Academy"},
+            },
+        ],
+    )
+
+
 @pytest.fixture
 def seeded(engine_conn):
     # clan_memberships carries an FK to clans as well as players.
@@ -288,6 +310,44 @@ def test_a_bare_arena_relay_is_rejected_before_delivery(seeded, monkeypatch):
     assert outcome["episode"]["preceding_attempts"][0]["rejections"] == [
         "missing required surface discord:elixir"
     ]
+
+
+def test_a_batch_that_selects_one_arena_post_does_not_force_clan_chat(seeded, monkeypatch):
+    """Natural R320 came from two arena signals that merely co-arrived.
+
+    The composer selected one worthwhile Discord post. Treating input count as
+    a genuine roundup forced five retries until it added a low-value clan-chat
+    sibling, which leadership rejected. Keep the surface available for a real
+    roundup, but do not require it unless a deterministically eligible milestone
+    such as Champion is present.
+    """
+    seen_surfaces = []
+    delivered = []
+
+    def _run(attention, seed, **kw):
+        seen_surfaces.append(attention.surfaces)
+        return _episode(
+            [
+                {
+                    "channel": "elixir",
+                    "content": "**Valkalla.** blackberry's climb is backed by a real run.",
+                    "covers_signal_keys": ["arena_changed:#AAA:54000020"],
+                }
+            ],
+            job="milestone_batch",
+        )
+
+    monkeypatch.setattr(chassis, "run_turn", _run)
+    outcome = respond.respond(
+        _arena_batch_wake(),
+        deliver_fn=lambda read, plan: delivered.append(plan) or {"delivered": 1, "failed": False},
+        conn=seeded,
+    )
+
+    assert seen_surfaces == [frozenset({"discord:elixir", "clan_chat"})]
+    assert outcome["handled"] is True and outcome["tier"] == "lightweight"
+    assert outcome["attempts"] == 1
+    assert delivered[0]["posts"][0].get("clan_chat") is None
 
 
 def test_a_champion_arrival_without_its_eligible_relay_fails_upward(seeded, monkeypatch):

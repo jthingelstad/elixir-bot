@@ -53,7 +53,9 @@ class JobSpec:
     clan chat because a notable departure deserves it, and ``farewell.md``
     decides which departures qualify. ``required_when_available`` is the narrow
     exception for a surface whose eligibility already means the editorial bar
-    cleared. Availability is data; the editorial call is prose.
+    cleared. A milestone batch is subtler: several co-arriving events make clan
+    chat available for a genuine roundup, while only the named mandatory event
+    types make it compulsory. Availability is data; the editorial call is prose.
     """
 
     name: str
@@ -61,7 +63,7 @@ class JobSpec:
     surfaces: frozenset
     silence_allowed: bool = False
     required_surface: str | None = None
-    single_event_clan_chat_types: frozenset | None = None
+    mandatory_clan_chat_event_types: frozenset | None = None
     required_when_available: frozenset = frozenset()
 
 
@@ -115,12 +117,12 @@ JOBS = (
         # A lone arena climb or Legendary badge belongs on Discord only. The
         # measured clan-chat bar is a Champion-tier arrival or a real batch;
         # keeping this as registry data preserves one generic responder path.
-        single_event_clan_chat_types=frozenset(
+        mandatory_clan_chat_event_types=frozenset(
             {"champion_league_reached", "ultimate_champion_reached"}
         ),
-        # Eligibility itself is the ratified high bar here: a Champion-tier
-        # arrival or genuine batch gets clan chat; a lone arena/badge wake has
-        # that surface removed above and remains Discord-only.
+        # Champion-tier arrivals deterministically clear the ratified high bar.
+        # A multi-event wake only makes clan chat available so the composer can
+        # choose it for a genuine roundup; co-arrival alone does not require it.
         required_when_available=frozenset({_CLAN_CHAT}),
     ),
     # Phase 3. ONE job for the whole war boundary, and the plan asked for two
@@ -196,12 +198,12 @@ def lanes_for(spec: JobSpec) -> tuple:
 def surfaces_for(spec: JobSpec, events: list[dict]) -> frozenset:
     """Resolve this wake's usable surfaces from the job's data contract."""
     surfaces = set(spec.surfaces)
-    eligible_single_types = spec.single_event_clan_chat_types
+    mandatory_types = spec.mandatory_clan_chat_event_types
     if (
         _CLAN_CHAT in surfaces
-        and eligible_single_types is not None
+        and mandatory_types is not None
         and len(events) == 1
-        and events[0].get("event_type") not in eligible_single_types
+        and events[0].get("event_type") not in mandatory_types
     ):
         surfaces.remove(_CLAN_CHAT)
     return frozenset(surfaces)
@@ -215,9 +217,23 @@ def _has_surface(posts: list[dict], surface: str) -> bool:
 
 
 def _missing_required_surfaces(
-    spec: JobSpec, posts: list[dict], available_surfaces: frozenset
+    spec: JobSpec,
+    posts: list[dict],
+    available_surfaces: frozenset,
+    events: list[dict],
 ) -> tuple[str, ...]:
     required = set(spec.required_when_available & available_surfaces)
+    mandatory_types = spec.mandatory_clan_chat_event_types
+    if (
+        _CLAN_CHAT in required
+        and mandatory_types is not None
+        and not any(event.get("event_type") in mandatory_types for event in events)
+    ):
+        # A mixed soft batch may earn one clan-chat line, but the model must make
+        # that editorial call. Input multiplicity alone is not evidence that the
+        # whole clan should see it; natural R320 proved that forcing the surface
+        # turns a selected lone arena climb into a low-value relay.
+        required.remove(_CLAN_CHAT)
     if spec.required_surface is not None:
         required.add(spec.required_surface)
     return tuple(sorted(surface for surface in required if not _has_surface(posts, surface)))
@@ -558,7 +574,7 @@ def respond(
                 episode.get("rejections"),
             )
             continue
-        missing_surfaces = _missing_required_surfaces(spec, posts, surfaces)
+        missing_surfaces = _missing_required_surfaces(spec, posts, surfaces, events)
         if missing_surfaces:
             missing = ", ".join(missing_surfaces)
             rejection = f"missing required surface {missing}"
