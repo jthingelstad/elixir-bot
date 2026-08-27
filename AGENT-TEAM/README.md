@@ -14,7 +14,7 @@ part of the current operating model.
 |---|---|---|---|
 | **Run Elixir** | `run-elixir.md` | Every four hours | Is Elixir healthy, reliable, observable, and spending intentionally? |
 | **Understand Clash Royale** | `understand-clash-royale.md` | Daily | What changed in the game or data, and does Elixir understand it correctly? |
-| **Improve Elixir** | `improve-elixir.md` | Daily; deeper Friday pass | Is Elixir acting like an effective agent, and what evidence would make it better? |
+| **Improve Elixir** | `improve-elixir.md` | Daily; deeper Friday pass | Is Elixir turning play and feedback into better stewardship, memory, and member improvement over time? |
 
 There is no separate Build Manager. Building is a capability of every objective
 owner. There is no Product Manager intermediary: new member-visible direction goes
