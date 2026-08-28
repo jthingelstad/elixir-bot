@@ -13,8 +13,8 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 38
-EXPECTED_TABLE_COUNT = 66  # v38 adds member_dossiers + scheduled_followups
+CURRENT_SCHEMA_VERSION = 39
+EXPECTED_TABLE_COUNT = 66  # v39 adds shared active-focus fields to member_dossiers
 
 
 def initialize_empty_database(
@@ -259,6 +259,14 @@ REQUIRED_SCHEMA = {
     },
     "game_events": {"event_id", "dedup_key", "change_key"},
     "member_outreach": {"outreach_id", "player_tag", "field", "status", "consent"},
+    "member_dossiers": {
+        "player_tag",
+        "body",
+        "active_focus",
+        "active_focus_source",
+        "active_focus_period",
+        "active_focus_updated_at",
+    },
     "evergreen_nudges": {"nudge_key", "last_sent_at"},
     "email_verifications": {"player_tag", "code_hash", "expires_at"},
     "tick_history": {"tick_id", "counters_json"},
@@ -1979,6 +1987,15 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+        version = 38
+    if version < 39:
+        try:
+            _apply_v39(conn)
+            conn.execute("PRAGMA user_version = 39")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -2211,8 +2228,9 @@ def _apply_v38(conn: sqlite3.Connection) -> None:
     live here and never in git — the repo is public (plan design rule 6).
 
     ``member_dossiers`` is one row per member: what Elixir knows about someone as
-    a person rather than as a row of statistics. Written only by the nightly
-    reflection and injected by the chassis for members in a turn's scope.
+    a person rather than as a row of statistics. Its human-context body is written
+    only by nightly reflection and injected by the chassis for members in a turn's
+    scope. Later migrations may add separately-provenanced carried intentions.
 
     **There is deliberately no backfill.** A dossier is earned by observation, and
     generating fifty of them from statistics on migration day would manufacture
@@ -2253,6 +2271,27 @@ def _apply_v38(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_scheduled_followups_due "
         "ON scheduled_followups(status, due_at)"
     )
+
+
+def _apply_v39(conn: sqlite3.Connection) -> None:
+    """Give every member dossier one shared, evidence-linked active focus.
+
+    The focus is a carried intention, not a weekly-report archive and not a fact
+    asserted by the member. Weekly reports may set it after successful delivery;
+    scoped member-facing workflows consume it through the ordinary dossier read.
+    Existing dossiers are intentionally left without a focus until a natural
+    workflow produces one from current evidence.
+    """
+    columns = _columns(conn, "member_dossiers")
+    additions = (
+        ("active_focus", "TEXT"),
+        ("active_focus_source", "TEXT"),
+        ("active_focus_period", "TEXT"),
+        ("active_focus_updated_at", "TEXT"),
+    )
+    for column, declaration in additions:
+        if column not in columns:
+            conn.execute(f"ALTER TABLE member_dossiers ADD COLUMN {column} {declaration}")
 
 
 def _apply_v37(conn: sqlite3.Connection) -> None:
@@ -2504,8 +2543,8 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-# v38 (2026-08-19): member_dossiers + scheduled_followups.
-CURRENT_SCHEMA_FINGERPRINT = "b2977bc9431e1d9a674970c58276dce21c1b32515f85cd6619f30a3b9837381b"
+# v39 (2026-08-28): shared active focus inside member_dossiers.
+CURRENT_SCHEMA_FINGERPRINT = "d27d286357002fbf1cbc3520ba78ea962241f4d8d4b980755c0306269f82fad2"
 
 
 __all__ = [

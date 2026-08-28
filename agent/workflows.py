@@ -1509,7 +1509,15 @@ def generate_weekly_recap_email(
     return email or None
 
 
-_MEMBER_REPORT_BLOCKS = ("overview", "standouts", "progress", "meta", "closer")
+_MEMBER_REPORT_BLOCKS = (
+    "overview",
+    "standouts",
+    "progress",
+    "meta",
+    "focus_review",
+    "next_focus",
+    "closer",
+)
 
 
 def generate_elder_standing(facts: str) -> str:
@@ -1558,9 +1566,10 @@ def generate_outreach_ask(facts: str) -> str:
 def generate_member_report(facts: str) -> dict:
     """Generate the narrative blocks for one member's weekly report from a
     facts-only brief (built by runtime.member_report.facts_for_model). Returns a
-    dict of the named blocks plus a ``battle_intros`` map (one per battle type);
-    missing blocks come back as "" (or an empty map) so the renderer can fall back
-    deterministically."""
+    dict of the named blocks plus a ``battle_intros`` map (one per battle type).
+    ``next_focus`` is the shared dossier intention and is required by the sending
+    job before any email leaves; other missing blocks come back as "" (or an empty
+    map) so the renderer can fall back deterministically."""
     user_msg = (
         f"{facts}\n\nWrite this member's personalized weekly report now — the "
         "tagged blocks plus one <battle_intro> per battle type, grounded only in "

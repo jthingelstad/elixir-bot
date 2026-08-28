@@ -894,6 +894,13 @@ def _member_report_system():
         "an opponent, refer to them with gender-neutral they/them — never assume a member's gender "
         "from their name.\n\n"
         "DO NOT write a title or headline — the email's subject line is the title.\n\n"
+        "DOSSIER CONTINUITY: an ACTIVE DOSSIER FOCUS line, when present, is the one "
+        "carried intention Elixir previously gave this member. It is not a fact the member "
+        "said and not proof they acted on it. Compare it only with the current brief. If the "
+        "brief has comparable evidence, explain the movement; otherwise say the sample is "
+        "insufficient. Then choose one evidence-backed next focus for the shared member dossier. "
+        "The dossier is used beyond this email, so write the focus as a concise standalone "
+        "intention, not as report history or a sign-off.\n\n"
         "Write flowing PROSE, not bullet lists or labeled sections. This is a letter, not a form. "
         "VARY what you lead with based on what actually stood out for THIS member THIS week — a big "
         "climb, a hot streak, a fresh card, a war effort, a quiet grind, a rough patch turned "
@@ -914,13 +921,18 @@ def _member_report_system():
         "<meta>ONE sentence tying the clan's hot new card this week (named in the brief) to them — "
         "they may already have it or be chasing it. If the brief names no trending new card, omit "
         "this tag pair entirely.</meta>\n"
+        "<focus_review>When ACTIVE DOSSIER FOCUS is present, 1-2 sentences explicitly revisiting "
+        "it from this week's comparable evidence or saying the sample is insufficient. Omit this "
+        "tag when no active focus is present.</focus_review>\n"
+        "<next_focus>REQUIRED. One concise, specific, grounded next step for this member. It may "
+        "carry the prior focus forward when warranted. No label, preamble, or sign-off.</next_focus>\n"
         "For EACH type listed under BATTLE TYPES THIS WEEK, output one "
         '<battle_intro type="KEY">...</battle_intro> using that type\'s exact quoted KEY (e.g. '
         'type="ladder"): a short paragraph (1-3 sentences) leaning into the cards/deck they ran '
         "there and how those battles went. The email renders that type's battle table directly "
         "below your intro. Write one per type; skip none.\n"
-        "<closer>A short, warm sign-off with ONE fun, specific, grounded challenge or prediction "
-        "for next week (e.g. a trophy target from their numbers). No signature block.</closer>",
+        "<closer>A short, warm sign-off that supports the next focus without introducing a second "
+        "challenge. No signature block.</closer>",
     )
 
 

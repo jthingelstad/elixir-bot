@@ -57,6 +57,70 @@ def test_a_dossier_is_capped_on_the_way_in(engine_conn, member):
     assert len(stored) == dossiers.DOSSIER_MAX_CHARS
 
 
+def test_active_focus_is_shared_without_replacing_member_authored_context(engine_conn, member):
+    dossiers.upsert_dossier(
+        member,
+        "Phone broke, plans to be back.",
+        updated_by="reflection",
+        source_intent_key="message:12",
+        conn=engine_conn,
+    )
+    body_updated_at = dossiers.dossier_for(member, conn=engine_conn)["updated_at"]
+
+    assert dossiers.set_active_focus(
+        member,
+        "Turn one close ladder loss into a win.",
+        source="weekly_member_report",
+        period="2026-W35",
+        conn=engine_conn,
+    )
+
+    stored = dossiers.dossier_for(member, conn=engine_conn)
+    assert stored["body"] == "Phone broke, plans to be back."
+    assert stored["updated_by"] == "reflection"
+    assert stored["source_intent_key"] == "message:12"
+    assert stored["updated_at"] == body_updated_at
+    assert stored["active_focus"] == "Turn one close ladder loss into a win."
+    assert stored["active_focus_source"] == "weekly_member_report"
+    assert stored["active_focus_period"] == "2026-W35"
+    prompt_context = dossiers.dossiers_for([member], conn=engine_conn)[member]
+    assert prompt_context.startswith("Active focus (weekly_member_report, 2026-W35)")
+    assert prompt_context.endswith("Phone broke, plans to be back.")
+
+
+def test_active_focus_can_start_a_dossier_without_manufacturing_a_body(engine_conn, member):
+    assert dossiers.set_active_focus(
+        member,
+        "Play one more war set with the same deck order.",
+        source="weekly_member_report",
+        period="2026-W35",
+        conn=engine_conn,
+    )
+
+    stored = dossiers.dossier_for(member, conn=engine_conn)
+    assert stored["body"] == ""
+    assert stored["active_focus"] == "Play one more war set with the same deck order."
+    assert dossiers.dossiers_for([member], conn=engine_conn) == {
+        member: (
+            "Active focus (weekly_member_report, 2026-W35): "
+            "Play one more war set with the same deck order."
+        )
+    }
+
+
+def test_active_focus_is_capped_on_the_way_in(engine_conn, member):
+    dossiers.set_active_focus(
+        member,
+        "x" * 9000,
+        source="weekly_member_report",
+        conn=engine_conn,
+    )
+
+    assert len(dossiers.dossier_for(member, conn=engine_conn)["active_focus"]) == (
+        dossiers.ACTIVE_FOCUS_MAX_CHARS
+    )
+
+
 def test_a_dossier_for_an_unknown_member_is_dropped_not_raised(engine_conn):
     """A tag the roster has never seen is a hallucinated player or a typo, and
     the FK would take the whole nightly job down with it."""

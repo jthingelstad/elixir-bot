@@ -72,8 +72,11 @@ I write these as if the member might read them, because one day one might.
 Nothing sardonic, nothing clinical, nothing about their skill I would not say to
 them.
 
-A dossier REPLACES the previous note for that member, so I carry forward what is
-still true rather than writing only today's fragment.
+The human-context body I write REPLACES the previous body for that member, so I
+carry forward what is still true rather than writing only today's fragment. A
+dossier may also contain an active focus set by another evidence-grounded
+workflow. That focus is a carried intention, not a member fact; my body update
+does not rewrite or erase it.
 
 ## Output
 

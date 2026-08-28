@@ -15,6 +15,7 @@ __all__ = [
 import asyncio
 import logging
 import os
+import sqlite3
 from datetime import datetime
 
 import discord
@@ -42,6 +43,7 @@ from runtime.leader_action_ui import (
     post_leader_action_card,
 )
 from runtime.relay_identity import awareness_relay_identity, war_week_relay_key
+from storage import dossiers
 from storage.contextual_memory import upsert_weekly_summary_memory
 from storage.leader_actions import get_leader_action_by_key
 
@@ -859,10 +861,35 @@ async def _weekly_member_report_cycle():
         name = rec.get("member_name") or tag
         ctx = member_report.build_member_report_context(tag, name)
         narrative = generate_member_report(member_report.facts_for_model(ctx))
+        next_focus = str((narrative or {}).get("next_focus") or "").strip()
+        if not next_focus:
+            raise RuntimeError("member report omitted required dossier next_focus")
         subject, body = member_report.render_member_report(ctx, narrative)
         outbound.send(to=rec["email"], subject=subject, body=body)
-        if not email_dedup.record_sent("member_report", dedup_key):
-            log.error("arena dispatch: sent to %s but NOT recorded; a re-run will duplicate", tag)
+        # Dossiers and email receipts have different authoritative databases, so
+        # this cannot be one SQLite transaction. Persist the promised continuity
+        # first. If the later receipt fails, the period remains visibly unfulfilled
+        # and may duplicate on retry, but the delivered focus is not lost.
+        focus_recorded = False
+        try:
+            if not dossiers.set_active_focus(
+                tag,
+                next_focus,
+                source="weekly_member_report",
+                period=week_key,
+            ):
+                raise RuntimeError("dossier focus was not recorded")
+            focus_recorded = True
+            if not email_dedup.record_sent("member_report", dedup_key):
+                raise RuntimeError("delivery receipt was not recorded")
+        except (sqlite3.Error, RuntimeError) as exc:
+            log.error(
+                "arena dispatch: sent to %s but post-send state is incomplete "
+                "(focus_recorded=%s); a re-run may duplicate (%s)",
+                tag,
+                focus_recorded,
+                exc,
+            )
             return "unrecorded"
         return "sent"
 

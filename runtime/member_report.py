@@ -21,7 +21,7 @@ from capabilities import members as member_capability
 from engine.event_contracts import BADGE_EVENT_TYPES, RANKED_PROMOTION_EVENT_TYPES
 from engine.normalize import humanize_badge, humanize_game_mode
 from engine.profiles import MODE_DISPLAY, playstyle_line
-from storage import card_catalog, game_events
+from storage import card_catalog, dossiers, game_events
 from storage._formatting import preferred_display_name
 from storage.game_modes import mode_group_label
 from storage.player import NEAR_MISS_TOWER_HP
@@ -654,6 +654,7 @@ def build_member_report_context(
                 "new_events": new_events,
                 "trending_cards": _clan_trending_cards(conn, cutoff),
             },
+            "dossier": dossiers.dossier_for(tag, conn=conn) or {},
         }
         ctx["intel"] = _intelligence(conn, tag, days)
         ctx["progress"] = _progress_items(ctx)
@@ -1041,6 +1042,16 @@ def facts_for_model(ctx: dict) -> str:
         f"PLAYSTYLE: {p.get('identity')}" + (f" — {p['line']}" if p.get("line") else ""),
         _battle_types_brief(ctx),
     ]
+    dossier = ctx.get("dossier") or {}
+    active_focus = (dossier.get("active_focus") or "").strip()
+    if active_focus:
+        source = (dossier.get("active_focus_source") or "unknown source").strip()
+        period = (dossier.get("active_focus_period") or "").strip()
+        origin = f"{source}, {period}" if period else source
+        lines.append(
+            "ACTIVE DOSSIER FOCUS TO REVISIT "
+            f"({origin}; an intention, not a member-authored fact): {active_focus}"
+        )
     if prof.get("donations_week") is not None:
         lines.append(f"DONATIONS THIS WEEK: {prof['donations_week']} cards")
     if prof.get("collection_level"):
@@ -1564,6 +1575,21 @@ def render_member_report(ctx: dict, narrative: dict | None = None) -> tuple[str,
             "taller = more wasted, so shorter is better._"
         )
         parts.append("\n".join(section))
+
+    dossier = ctx.get("dossier") or {}
+    active_focus = (dossier.get("active_focus") or "").strip()
+    if active_focus:
+        focus_review = (nar.get("focus_review") or "").strip()
+        if not focus_review:
+            focus_review = (
+                "This week's record does not give me enough comparable evidence to call that "
+                "focus complete yet."
+            )
+        parts.append(f"**Your active focus**\n\n{active_focus}\n\n{focus_review}")
+
+    next_focus = (nar.get("next_focus") or "").strip()
+    if next_focus:
+        parts.append(f"**Your next focus**\n\n{next_focus}")
 
     parts.append(nar.get("closer") or "Same time next week. Keep the crowns coming. — E")
 

@@ -671,12 +671,13 @@ them.
 forward in time.
 
 Build:
-- Member dossiers: one row per member (DB — **schema migration `_apply_v36`**,
+- Member dossiers: one row per member (DB — **schema migration `_apply_v38`**,
   so this phase is a deploy with the full migration discipline: verify on a
   copy with `ELIXIR_DB_PATH` first). ~500 tokens each: episodic notes ("phone
-  broke, said he'd be back"), preferences, notable history. Written ONLY by the
-  nightly reflection; injected by `assemble_context` for every member in
-  `scope`. Injection-safety: dossier text is model-authored — same
+  broke, said he'd be back"), preferences, notable history. The human-context
+  body is written only by nightly reflection; separately-provenanced carried
+  intentions may share the row. Injected by `assemble_context` for every member
+  in `scope`. Injection-safety: dossier text is model-authored — same
   display-name normalization rules apply.
 - `schedule_followup(when, why, member_tag?)` tool + table (same migration) +
   `followup_due` wake class through the standard evaluator/budget/floor path.
@@ -686,6 +687,11 @@ Build:
 **SHIPPED 2026-08-19** as `_apply_v38` (`member_dossiers`, `scheduled_followups`),
 rehearsed on a copy of the 1.7GB production database before deploy: 0.00s, no row
 counts changed, `integrity_check` ok, `foreign_key_check` clean.
+
+**Extended 2026-08-28** by `_apply_v39`: each dossier can carry one shared,
+source-labelled active focus. Weekly member reports are the first writer, but
+the field belongs to the dossier rather than to report history, and reflection
+body updates preserve it.
 
 **Completed structurally 2026-08-20:** linked Ask Elixir/deck-review messages now
 enter reflection with stable `message:<id>` references; dossier persistence

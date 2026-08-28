@@ -17,6 +17,7 @@ import db
 from runtime import email_dedup, member_report
 from runtime import status as runtime_status
 from runtime.jobs import _core
+from storage import dossiers
 
 _DEFAULT_LOG = [
     {
@@ -47,7 +48,7 @@ _DEFAULT_PROGRESS = [
 ]
 
 
-def _ctx(name="King Thing", *, log=None, trophies=12400, progress=None):
+def _ctx(name="King Thing", *, log=None, trophies=12400, progress=None, dossier=None):
     """A minimal-but-shaped context dict for the render layer. by_type is derived
     from the log with the real helper so the fixture stays consistent."""
     log = _DEFAULT_LOG if log is None else log
@@ -58,6 +59,8 @@ def _ctx(name="King Thing", *, log=None, trophies=12400, progress=None):
             "best_trophies": 13010,
             "arena": "Legendary Arena",
         },
+        "days": 7,
+        "playstyle": {"identity": "ladder regular", "line": "steady ladder week"},
         "battles": {
             "tally": {
                 "wins": 8,
@@ -73,12 +76,22 @@ def _ctx(name="King Thing", *, log=None, trophies=12400, progress=None):
                 "crowns_for": 3,
                 "crowns_against": 1,
                 "mode": "Ladder",
+                "trophy_change": 30,
             },
             "log": log,
             "by_type": member_report._battles_by_type(log),
         },
         "progress": _DEFAULT_PROGRESS if progress is None else progress,
-        "game_stream": {"trending_cards": [], "new_cards": []},
+        "badges": [],
+        "cards": [],
+        "ranked": [],
+        "milestones": [],
+        "arena_changes": [],
+        "war": None,
+        "clan_standing": None,
+        "intel": {},
+        "game_stream": {"trending_cards": [], "new_cards": [], "new_events": []},
+        "dossier": dossier or {},
     }
 
 
@@ -164,6 +177,59 @@ def test_render_progress_section():
     assert "- 🆕 Unlocked Ronin (legendary)" in body
 
 
+def test_render_revisits_and_replaces_the_shared_dossier_focus():
+    ctx = _ctx(
+        dossier={
+            "active_focus": "Turn one close ladder loss into a win.",
+            "active_focus_source": "weekly_member_report",
+            "active_focus_period": "2026-W34",
+        }
+    )
+    _, body = member_report.render_member_report(
+        ctx,
+        {
+            "focus_review": "You converted two of those close games this week.",
+            "next_focus": "Keep the same deck and cut one elixir leak per ladder session.",
+        },
+    )
+
+    assert "**Your active focus**" in body
+    assert "Turn one close ladder loss into a win." in body
+    assert "You converted two of those close games this week." in body
+    assert "**Your next focus**" in body
+    assert "cut one elixir leak" in body
+
+
+def test_model_brief_labels_shared_focus_as_an_intention_not_a_member_fact():
+    ctx = _ctx(
+        dossier={
+            "active_focus": "Turn one close ladder loss into a win.",
+            "active_focus_source": "weekly_member_report",
+            "active_focus_period": "2026-W34",
+        }
+    )
+
+    brief = member_report.facts_for_model(ctx)
+
+    assert "ACTIVE DOSSIER FOCUS TO REVISIT" in brief
+    assert "an intention, not a member-authored fact" in brief
+    assert "Turn one close ladder loss into a win." in brief
+
+
+def test_member_report_parser_returns_both_dossier_continuity_blocks():
+    from agent.workflows import _parse_member_report
+
+    parsed = _parse_member_report(
+        "<overview>Current week.</overview>"
+        "<focus_review>The old focus improved.</focus_review>"
+        "<next_focus>Keep practicing close finishes.</next_focus>"
+        "<closer>Go get it.</closer>"
+    )
+
+    assert parsed["focus_review"] == "The old focus improved."
+    assert parsed["next_focus"] == "Keep practicing close finishes."
+
+
 def test_render_degrades_without_narrative_or_battles():
     ctx = _ctx(log=[], progress=[])
     _, body = member_report.render_member_report(ctx, None)
@@ -202,6 +268,19 @@ def _job_stubs(monkeypatch, sends):
         member_report, "build_member_report_context", lambda tag, name, **kw: _ctx(name)
     )
     monkeypatch.setattr(member_report, "facts_for_model", lambda ctx: "FACTS")
+    conn = db.get_connection()
+    try:
+        conn.executemany(
+            "INSERT OR REPLACE INTO players "
+            "(player_tag, current_name, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)",
+            [
+                ("#AAA", "Ada", "2026-01-01T00:00:00Z", "2026-08-28T00:00:00Z"),
+                ("#BBB", "Ben", "2026-01-01T00:00:00Z", "2026-08-28T00:00:00Z"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def test_weekly_member_report_sends_individually(monkeypatch):
@@ -209,7 +288,7 @@ def test_weekly_member_report_sends_individually(monkeypatch):
     _job_stubs(monkeypatch, sends)
     monkeypatch.setattr(
         "agent.workflows.generate_member_report",
-        lambda facts: {"overview": "o", "closer": "c"},
+        lambda facts: {"overview": "o", "next_focus": "Practice one close finish.", "closer": "c"},
     )
 
     result = asyncio.run(_core._weekly_member_report_cycle())
@@ -218,6 +297,8 @@ def test_weekly_member_report_sends_individually(monkeypatch):
     assert [s["to"] for s in sends] == ["ada@x.com", "ben@x.com"]  # one To: each
     assert all("bcc" not in s for s in sends)  # never BCC
     assert all(s["subject"].endswith("your week in the arena 👑") for s in sends)
+    assert dossiers.dossier_for("#AAA")["active_focus"] == "Practice one close finish."
+    assert dossiers.dossier_for("#AAA")["active_focus_source"] == "weekly_member_report"
 
 
 def test_weekly_member_report_isolates_one_failure(monkeypatch):
@@ -231,7 +312,7 @@ def test_weekly_member_report_isolates_one_failure(monkeypatch):
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("LLM hiccup")
-        return {"overview": "o", "closer": "c"}
+        return {"overview": "o", "next_focus": "Practice one close finish.", "closer": "c"}
 
     monkeypatch.setattr("agent.workflows.generate_member_report", _gen)
     failures: list[str] = []
@@ -245,6 +326,55 @@ def test_weekly_member_report_isolates_one_failure(monkeypatch):
     assert [s["to"] for s in sends] == ["ben@x.com"]
     assert len(failures) == 1
     assert "1/2 fulfilled; 1 failed" in failures[0]
+
+
+def test_weekly_member_report_refuses_to_send_without_a_dossier_focus(monkeypatch):
+    sends: list[dict] = []
+    _job_stubs(monkeypatch, sends)
+    monkeypatch.setattr(
+        "agent.workflows.generate_member_report", lambda facts: {"overview": "o", "closer": "c"}
+    )
+    failures: list[str] = []
+    monkeypatch.setattr(runtime_status, "mark_job_start", lambda name: None)
+    monkeypatch.setattr(
+        runtime_status, "mark_job_success", lambda name, summary=None: pytest.fail(summary)
+    )
+    monkeypatch.setattr(
+        runtime_status, "mark_job_failure", lambda name, error: failures.append(error)
+    )
+
+    result = asyncio.run(_core._weekly_member_report_cycle())
+
+    assert result == {"sent": 0, "total": 2}
+    assert sends == []
+    assert len(failures) == 1
+    assert "0/2 fulfilled; 2 failed" in failures[0]
+
+
+def test_delivery_receipt_is_not_written_when_shared_focus_cannot_be_recorded(monkeypatch):
+    sends: list[dict] = []
+    _job_stubs(monkeypatch, sends)
+    monkeypatch.setattr(
+        "agent.workflows.generate_member_report",
+        lambda facts: {"overview": "o", "next_focus": "Practice one close finish."},
+    )
+    monkeypatch.setattr(dossiers, "set_active_focus", lambda *args, **kwargs: False)
+    monkeypatch.setattr(runtime_status, "mark_job_start", lambda name: None)
+    failures: list[str] = []
+    monkeypatch.setattr(
+        runtime_status, "mark_job_failure", lambda name, error: failures.append(error)
+    )
+
+    result = asyncio.run(_core._weekly_member_report_cycle())
+
+    assert result == {"sent": 0, "total": 2}
+    assert len(sends) == 2  # transport succeeded; only the post-send transaction failed
+    current = _core.datetime.now(_core.CHICAGO)
+    week_key = "{}-W{:02d}".format(*current.isocalendar()[:2])
+    assert not email_dedup.already_sent("member_report", f"#AAA:{week_key}")
+    assert dossiers.dossier_for("#AAA") is None
+    assert len(failures) == 1
+    assert "0/2 fulfilled; 2 failed" in failures[0]
 
 
 def test_catch_up_retries_only_missing_recipients_under_the_owed_key(monkeypatch):
@@ -265,7 +395,7 @@ def test_catch_up_retries_only_missing_recipients_under_the_owed_key(monkeypatch
         if not failed_once:
             failed_once = True
             raise RuntimeError("one recipient failed")
-        return {"overview": "o", "closer": "c"}
+        return {"overview": "o", "next_focus": "Practice one close finish.", "closer": "c"}
 
     monkeypatch.setattr("agent.workflows.generate_member_report", _gen)
     outcomes: list[tuple[str, str]] = []
@@ -299,7 +429,7 @@ def test_sent_without_a_delivery_receipt_does_not_complete_the_period(monkeypatc
     _job_stubs(monkeypatch, sends)
     monkeypatch.setattr(
         "agent.workflows.generate_member_report",
-        lambda facts: {"overview": "o", "closer": "c"},
+        lambda facts: {"overview": "o", "next_focus": "Practice one close finish.", "closer": "c"},
     )
     monkeypatch.setattr(email_dedup, "already_sent", lambda kind, key: False)
     calls = 0
@@ -324,6 +454,8 @@ def test_sent_without_a_delivery_receipt_does_not_complete_the_period(monkeypatc
 
     assert result == {"sent": 1, "total": 2}
     assert len(sends) == 2
+    assert dossiers.dossier_for("#AAA")["active_focus"] == "Practice one close finish."
+    assert dossiers.dossier_for("#BBB")["active_focus"] == "Practice one close finish."
     assert failures == ["period 2026-W32: 1/2 fulfilled; 1 failed"]
 
 

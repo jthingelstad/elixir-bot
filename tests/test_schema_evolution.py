@@ -710,6 +710,44 @@ def test_v7_migration_adds_leader_note_feedback_columns_forward_from_v6(tmp_path
         conn.close()
 
 
+def test_v39_migration_adds_shared_dossier_focus_without_backfill(tmp_path):
+    path = tmp_path / "v38.db"
+    build_database(str(path), None)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+            "VALUES ('#AAA', 'Ada', '2026-01-01T00:00:00Z', '2026-08-28T00:00:00Z')"
+        )
+        conn.execute(
+            "INSERT INTO member_dossiers "
+            "(player_tag, body, updated_at, updated_by, source_intent_key) VALUES "
+            "('#AAA', 'Existing member context.', '2026-08-28T00:00:00Z', 'reflection', 'message:1')"
+        )
+        for column in (
+            "active_focus_updated_at",
+            "active_focus_period",
+            "active_focus_source",
+            "active_focus",
+        ):
+            conn.execute(f"ALTER TABLE member_dossiers DROP COLUMN {column}")
+        conn.execute("PRAGMA user_version = 38")
+        conn.commit()
+
+        apply_schema_migrations(conn)
+
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        row = conn.execute(
+            "SELECT body, active_focus, active_focus_source, active_focus_period, "
+            "active_focus_updated_at FROM member_dossiers WHERE player_tag = '#AAA'"
+        ).fetchone()
+        assert row == ("Existing member context.", None, None, None, None)
+        apply_schema_migrations(conn)
+        assert schema_fingerprint(conn) == CURRENT_SCHEMA_FINGERPRINT
+    finally:
+        conn.close()
+
+
 def test_wrong_generation_database_is_refused_without_enabling_wal(tmp_path):
     path = tmp_path / "old.db"
     conn = sqlite3.connect(path)

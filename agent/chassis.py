@@ -230,9 +230,10 @@ def _dossiers(member_tags) -> dict:
     dossier and letting it shape a member-facing post are different risks, and
     the second one is the one a member would notice.
 
-    The bodies are model-authored text re-entering a model, so they are
-    length-capped at the store. They are facts about a person, never
-    instructions — the job prompt is what tells a turn how to write.
+    Dossier text is model-authored text re-entering a model, so it is
+    length-capped at the store. The body records grounded member context; an
+    active focus is a separately labelled intention, not a member-authored fact
+    or an instruction. The job prompt tells each turn how to use both.
     """
     import os
 

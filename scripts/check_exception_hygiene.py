@@ -63,9 +63,9 @@ BROAD_EXCEPTION_BASELINE = {
     # even with no database; an unavailable floor renders as "read it live"
     # rather than a guessed number.
     "prompts.py": 1,
-    # 37 -> 38 (2026-08-19): the v38 ladder rung, which rolls back and re-raises
+    # 38 -> 39 (2026-08-28): the v39 ladder rung, which rolls back and re-raises
     # exactly like every rung before it.
-    "db/schema.py": 38,  # +1: v37 migration rollback/re-raise (same pattern as v2-v36)
+    "db/schema.py": 39,  # +1: v39 migration rollback/re-raise (same pattern as v2-v38)
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,
