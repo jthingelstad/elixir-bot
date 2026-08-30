@@ -315,7 +315,12 @@ def _admit_player(expected_tag: str, payload, errors: list[str]) -> None:
         "lastPathOfLegendSeasonResult",
         "bestPathOfLegendSeasonResult",
     ):
-        if not isinstance(payload.get(field), dict):
+        # Supercell always includes these fields, but represents no Ranked
+        # history as JSON null.  The emitter and projections intentionally
+        # normalize that nullable shape to an empty mapping.
+        if field not in payload or (
+            payload[field] is not None and not isinstance(payload[field], dict)
+        ):
             errors.append(f"{field}:not_object")
 
 

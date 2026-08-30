@@ -47,6 +47,24 @@ def test_player_contract_rejects_absence_shape_loss_and_identity_mismatch():
     assert "tag:mismatch" in observations.admit("player", player["tag"], wrong_player).errors
 
 
+def test_player_contract_accepts_nullable_ranked_season_results():
+    player = _player_payload()
+    for field in (
+        "currentPathOfLegendSeasonResult",
+        "lastPathOfLegendSeasonResult",
+        "bestPathOfLegendSeasonResult",
+    ):
+        player[field] = None
+
+    assert observations.admit("player", player["tag"], player).accepted
+
+    del player["currentPathOfLegendSeasonResult"]
+    assert (
+        "currentPathOfLegendSeasonResult:not_object"
+        in observations.admit("player", player["tag"], player).errors
+    )
+
+
 def test_clan_and_race_contracts_reject_wrong_entity_or_missing_state():
     clan = load_cr_fixture("clan")
     wrong_clan = copy.deepcopy(clan)
