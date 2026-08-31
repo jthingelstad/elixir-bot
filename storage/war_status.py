@@ -803,11 +803,25 @@ def get_war_season_summary(
     active_members = conn.execute(
         "SELECT COUNT(*) AS cnt FROM clan_memberships WHERE left_at IS NULL"
     ).fetchone()["cnt"]
+    # Per-member attribution is POINTS (war_participation), never fame — fame is
+    # the boat's number alone, capped by the finish line, so dividing it across
+    # members says nothing about contribution. Participation rows are live all
+    # week, so unlike the boat fame above no finalized-week fold-in is needed.
+    total_points = (
+        conn.execute(
+            "SELECT SUM(COALESCE(fame, 0)) AS pts FROM war_participation WHERE season_id = ?",
+            (season_id,),
+        ).fetchone()["pts"]
+        or 0
+    )
     return {
         "season_id": season_id,
         "races": races,
         "total_clan_fame": total_fame,
-        "fame_per_active_member": round(total_fame / active_members, 2) if active_members else 0,
+        "total_member_points": total_points,
+        "points_per_active_member": (
+            round(total_points / active_members, 2) if active_members else 0
+        ),
         "current_week_in_progress": in_progress,
         "top_contributors": top,
         "nonparticipants": nonparticipants,

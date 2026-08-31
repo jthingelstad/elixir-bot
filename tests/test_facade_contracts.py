@@ -38,7 +38,10 @@ def test_db_facade_public_surface_is_reviewed():
     # whose decision was refused instead of ignoring the reaction in silence.
     # (Earlier that day: one rename, get_weekly_digest_summary ->
     # get_weekly_recap_summary, count unchanged at 243.)
-    assert _digest(entries) == "ca3df4d718d62665897ef826213986c4e9b5184facf3fdd3dd7163cd5be6fd3e"
+    # Updated 2026-08-31: one rename, compare_fame_per_member_to_previous_season ->
+    # compare_points_per_member_to_previous_season (fame is the boat's number alone;
+    # per-member attribution is points), count unchanged at 248.
+    assert _digest(entries) == "8d2096916516da4df413477fdb9b2d55dc680a78ba37af22d6146a89ae7ca191"
     assert db._CORE_EXPORTS.isdisjoint(db._FACADE_EXPORTS)
     assert db.__all__ == sorted(db._CORE_EXPORTS | set(db._FACADE_EXPORTS))
 
@@ -85,8 +88,10 @@ def test_war_facade_is_exact_union_of_read_domains():
     assert len(source_names) == len(set(source_names))
     assert storage.war.__all__ == sorted(source_names)
     assert len(storage.war.__all__) == 56
+    # Updated 2026-08-31: compare_fame_per_member_to_previous_season renamed to
+    # compare_points_per_member_to_previous_season, count unchanged at 56.
     assert _digest(storage.war.__all__) == (
-        "e8d415776054b90991b7903869aec1ba1ecdac3a038cb6082b75d9b31f1653b4"
+        "fd724dcb270405e0f490674c373b351014be5c29f3975d3e951e793d15811a9e"
     )
 
 

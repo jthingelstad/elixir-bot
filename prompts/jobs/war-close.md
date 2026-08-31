@@ -47,8 +47,10 @@ a week number or a direction.
 skimming #elixir should get the outcome without opening anything.
 
 **One number that makes the result mean something.** A margin, a comeback, a
-streak of weekly wins, a personal-best fame total. Not five numbers — the war
-already produces plenty and a wall of them reads like a spreadsheet.
+streak of weekly wins, a member's career-best points haul. Not five numbers —
+the war already produces plenty and a wall of them reads like a spreadsheet.
+(Members earn **points**; fame belongs to the boat alone and is capped by the
+finish line, so a fame total is rarely the interesting number — 2026-08-31.)
 
 **Name people when people did it.** A season close has a War Champ and a
 podium; a week we nearly lost has someone who dragged it back. The clan's own

@@ -3576,7 +3576,7 @@ def test_build_clan_status_report_summarizes_operational_clan_state():
             return_value={
                 "races": 2,
                 "total_clan_fame": 23456,
-                "fame_per_active_member": 1116.95,
+                "points_per_active_member": 1116.95,
                 "top_contributors": [
                     {
                         "member_ref": "King Levy (<@1474760692992180429>)",
@@ -3696,7 +3696,7 @@ def test_build_war_status_report_summarizes_current_war_awareness():
             return_value={
                 "races": 2,
                 "total_clan_fame": 30100,
-                "fame_per_active_member": 1204.0,
+                "points_per_active_member": 1204.0,
                 "top_contributors": [
                     {"member_ref": "King Levy", "total_points": 6200},
                     {"member_ref": "Finn", "total_points": 5800},
@@ -3737,7 +3737,7 @@ def test_build_war_status_report_summarizes_current_war_awareness():
     assert "Season points leaders (War Champ race): King Levy 800, Finn 600" in report
     assert "Waiting on: Vijay, Ditika" in report
     assert (
-        "This season: 2 race(s) | total fame 30,100 | fame/member 1,204.00 | top King Levy 6,200, Finn 5,800"
+        "This season: 2 race(s) | total fame 30,100 | points/member 1,204.00 | top King Levy 6,200, Finn 5,800"
         in report
     )
     assert "Live feed: 5 clan(s) in the current river race" in report
@@ -3918,7 +3918,7 @@ def test_build_clan_status_report_prefers_live_recent_join_delta():
             return_value={
                 "races": 1,
                 "total_clan_fame": 1000,
-                "fame_per_active_member": 50.0,
+                "points_per_active_member": 50.0,
                 "top_contributors": [],
                 "nonparticipants": [],
             },
@@ -4125,7 +4125,7 @@ def test_build_clan_status_short_report_is_compact():
         patch(
             "elixir.db.get_war_season_summary",
             return_value={
-                "fame_per_active_member": 1116.95,
+                "points_per_active_member": 1116.95,
                 "top_contributors": [
                     {
                         "member_ref": "King Levy (<@1474760692992180429>)",
@@ -4150,7 +4150,7 @@ def test_build_clan_status_short_report_is_compact():
     assert "Roster: 21/50 | open 29" in report
     assert "War: season 77 | week 2 | boat-rank 1 | boat-fame 12,345 (weekly)" in report
     assert (
-        "Season: fame/member 1,117.0 | top King Levy (<@1474760692992180429>) 3,200, Finn 3,100"
+        "Season: points/member 1,117.0 | top King Levy (<@1474760692992180429>) 3,200, Finn 3,100"
         in report
     )
     assert "Watch: 1 at risk | 1 on cold streaks" in report
@@ -4295,7 +4295,7 @@ def test_build_weekly_clan_recap_context_summarizes_week():
                     "season_id": 77,
                     "races": 3,
                     "total_clan_fame": 50234,
-                    "fame_per_active_member": 2392.1,
+                    "points_per_active_member": 2392.1,
                     "top_contributors": [{"member_ref": "King Levy", "total_points": 3200}],
                 },
                 "recent_war_races": [

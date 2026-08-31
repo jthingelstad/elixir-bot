@@ -395,7 +395,7 @@ def _build_clan_status_report(clan=None, war=None):
         )
         lines.append(
             f"- War season: {season_summary.get('races', 0)} races | total fame {_fmt_num(season_summary.get('total_clan_fame'))} "
-            f"| fame/member {_fmt_num(season_summary.get('fame_per_active_member'), 2)} | top contributors {top_contributors}"
+            f"| points/member {_fmt_num(season_summary.get('points_per_active_member'), 2)} | top contributors {top_contributors}"
         )
         lines.append(
             f"- Watch list: {len(season_summary.get('nonparticipants') or [])} with no war decks this season | "
@@ -578,7 +578,7 @@ def _build_war_status_report(clan=None, war=None):
     if season_summary:
         lines.append(
             f"- This season: {season_summary.get('races', 0)} race(s) | total fame {_fmt_num(season_summary.get('total_clan_fame'))} | "
-            f"fame/member {_fmt_num(season_summary.get('fame_per_active_member'), 2)} | "
+            f"points/member {_fmt_num(season_summary.get('points_per_active_member'), 2)} | "
             f"top {_join_member_bits(season_summary.get('top_contributors') or [], _season_points_label, limit=3)}"
         )
         lines.append(
@@ -633,7 +633,7 @@ def _build_clan_status_short_report(clan=None, war=None):
             limit=2,
         )
         lines.append(
-            f"- Season: fame/member {_fmt_num(season_summary.get('fame_per_active_member'), 1)} | top {top_contributors}"
+            f"- Season: points/member {_fmt_num(season_summary.get('points_per_active_member'), 1)} | top {top_contributors}"
         )
     lines.append(
         f"- Watch: {len((at_risk or {}).get('members') or [])} at risk | {len(slumping or [])} on cold streaks"
@@ -1060,7 +1060,7 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
             "current_war_season: "
             f"season {season_summary.get('season_id')} | races {season_summary.get('races') or 0} | "
             f"total_fame {_fmt_num(season_summary.get('total_clan_fame'))} | "
-            f"fame_per_active_member {_fmt_num(season_summary.get('fame_per_active_member'), 2)} | "
+            f"points_per_active_member {_fmt_num(season_summary.get('points_per_active_member'), 2)} | "
             f"top_contributors {top_contributors or 'n/a'}"
         )
 

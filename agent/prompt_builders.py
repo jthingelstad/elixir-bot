@@ -35,7 +35,7 @@ def _discord_formatting_guidance() -> str:
         "Do not over-format every sentence or force extra paragraph breaks. "
         "Discord does not render markdown tables. Never use pipe-and-dash table syntax. "
         "When you need to show tabular data, use a bulleted or numbered list where each item inlines the fields, "
-        "for example `- **Name** — wins: 12 · losses: 3 · fame: 2400`.\n\n"
+        "for example `- **Name** — wins: 12 · losses: 3 · points: 2400`.\n\n"
         "Discord has a hard 2000-character limit per message and will split longer content at exactly the 2000th character — usually mid-sentence, which looks bad. "
         "Aim to keep each message under 1900 characters. "
         'If the response genuinely needs more room, return `content` as an array of strings like `["first message", "second message"]` and split at a clean paragraph or section break. Each element is sent as its own Discord message.\n\n'
@@ -417,7 +417,7 @@ def _interactive_system(channel_name):
         "Never present personal state ('your decks left', 'your stats') unless the asker's "
         "member identity is resolved — for ambiguous possessives from an unresolved asker, "
         "answer at the clan level and offer to look them up. "
-        "While a war season is still open, the fame leader is the current leader, never the "
+        "While a war season is still open, the points leader is the current leader, never the "
         "'War Champ' — that title exists only after the season closes. "
         "Management policy internals (inactivity thresholds, kick timing rules) are "
         "leadership-only detail: in public channels, refuse the list AND keep the "

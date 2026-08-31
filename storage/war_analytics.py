@@ -173,8 +173,8 @@ __all__ = [
     "INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT",
     "LOOSE_MEMBER_COUNT",
     "TIGHT_MEMBER_COUNT",
-    "compare_fame_per_member_to_previous_season",
     "compare_member_war_to_clan_average",
+    "compare_points_per_member_to_previous_season",
     "get_clan_boat_battle_record",
     "get_demotion_candidates",
     "get_members_at_risk",
@@ -773,9 +773,14 @@ def get_war_score_trend(days: int = 30, conn: Optional[sqlite3.Connection] = Non
 
 
 @managed_connection
-def compare_fame_per_member_to_previous_season(
+def compare_points_per_member_to_previous_season(
     season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None
 ) -> Optional[dict]:
+    """Season-over-season member POINTS per participant (2026-08-31, was
+    fame-per-member): fame is the boat's number alone — capped by the finish
+    line, so dividing it across members says nothing about contribution.
+    Per-member attribution is points from war_participation, which is live all
+    week, so the finalized-week boat-fame fold-in (QA H8) is no longer needed."""
     from storage.war_status import get_current_season_id, get_current_war_status
 
     if season_id is None:
@@ -783,40 +788,25 @@ def compare_fame_per_member_to_previous_season(
     if season_id is None:
         return None
 
-    # QA H8: war_weeks.our_fame is NULL until a week finalizes, so the live
-    # season summed to 0 fame and produced a fake fame-per-member collapse
-    # (e.g. -1966.7). Fold in the live current-week boat fame for whichever
-    # season is in progress (same fix as get_war_season_summary / H7).
-    live = get_current_war_status(conn=conn) or {}
-
     def _season_stats(sid):
         row = conn.execute(
-            "SELECT SUM(COALESCE(our_fame, 0)) AS total_fame, COUNT(*) AS weeks "
-            "FROM war_weeks WHERE season_id = ?",
+            "SELECT SUM(COALESCE(fame, 0)) AS total_points, "
+            "COUNT(DISTINCT CASE WHEN COALESCE(fame, 0) > 0 THEN player_tag END) "
+            "AS participants FROM war_participation WHERE season_id = ?",
             (sid,),
         ).fetchone()
-        total_fame = row["total_fame"] or 0
-        weeks = row["weeks"] or 0
-        if live.get("season_id") == sid and live.get("fame"):
-            cur = conn.execute(
-                "SELECT our_fame FROM war_weeks WHERE season_id = ? AND section_index = ?",
-                (sid, live.get("section_index")),
-            ).fetchone()
-            if not (cur and cur["our_fame"] is not None):
-                total_fame += int(live["fame"])
-                if cur is None:
-                    weeks += 1
-        participants = conn.execute(
-            "SELECT COUNT(DISTINCT player_tag) AS cnt FROM war_participation "
-            "WHERE season_id = ? AND COALESCE(fame, 0) > 0",
+        weeks = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM war_weeks WHERE season_id = ?",
             (sid,),
         ).fetchone()["cnt"]
+        total_points = row["total_points"] or 0
+        participants = row["participants"] or 0
         return {
             "season_id": sid,
-            "total_fame": total_fame,
+            "total_points": total_points,
             "weeks": weeks,
             "participants": participants,
-            "fame_per_member": round(total_fame / participants, 1) if participants else 0,
+            "points_per_member": round(total_points / participants, 1) if participants else 0,
         }
 
     current = _season_stats(int(season_id))
@@ -824,32 +814,30 @@ def compare_fame_per_member_to_previous_season(
     if not previous["weeks"]:
         previous = None
     # If the current season is still in progress (fewer weeks than the finished
-    # one), fame_per_member is a partial total — the change is not a collapse,
+    # one), points_per_member is a partial total — the change is not a collapse,
     # it's an incomplete season. Flag it so consumers don't misread it.
-    current_in_progress = bool(live.get("season_id") == int(season_id) and live.get("fame"))
+    live = get_current_war_status(conn=conn) or {}
+    current_in_progress = bool(live.get("season_id") == int(season_id))
     return {
         "current": current,
         "previous": previous,
         "current_in_progress": current_in_progress,
-        "fame_per_member_change": (
-            round(current["fame_per_member"] - previous["fame_per_member"], 1) if previous else None
+        "points_per_member_change": (
+            round(current["points_per_member"] - previous["points_per_member"], 1)
+            if previous
+            else None
         ),
         "comparison_caveat": (
-            "current season is in progress (partial fame) — not directly comparable "
+            "current season is in progress (partial points) — not directly comparable "
             "to a completed season"
             if current_in_progress and previous
             else None
         ),
-        # QA L8: fame_per_member = the clan's cumulative BOAT fame for the season
-        # (placement + defense — a clan-level number, NOT a sum of member fame)
-        # divided by the count of distinct members who scored. It's an engagement
-        # ratio (clan output per participating member), not an average individual
-        # contribution, and it is not per-week normalized, so a season with more
-        # weeks banks more fame. Compare seasons of equal length for a fair read.
         "metric_basis": (
-            "clan season boat-fame total / distinct scoring participants; a clan-level "
-            "ratio, not a per-member average, and not normalized per week (more weeks = "
-            "more fame). Colosseum weeks contribute their banked fame too."
+            "season member-points total / distinct scoring participants; points are the "
+            "member-attributable war metric (fame belongs to the boat alone). Not "
+            "normalized per week (more weeks = more points), so compare seasons of "
+            "equal length for a fair read."
         ),
     }
 

@@ -1738,7 +1738,7 @@ def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_co
             comparison = state.get("prior_cycle_comparison") or {}
             if comparison.get("direction") and comparison.get("direction") != "unknown":
                 our_state_lines.append(
-                    f"fame-per-member vs prior season: {comparison.get('direction')}"
+                    f"points-per-member vs prior season: {comparison.get('direction')}"
                 )
     except Exception:
         log.warning("intel report: our-side war season context failed", exc_info=True)

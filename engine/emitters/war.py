@@ -10,7 +10,7 @@ DISCOVERED — every season ends with a Colosseum week; the birth of the next
 instance is the same observation as the prior season's death, so
 season_closed for season N fires when the rollover to N+1 is observed.
 
-Q2 at season close: War Champ = top cumulative season fame (the honor,
+Q2 at season close: War Champ = top cumulative season points (the honor,
 unconditional); the Free Pass rotates — never the same player in sequential
 seasons; falls to rank 2. The close change set writes the season row, event,
 and required awards as one invariant-checked transition.

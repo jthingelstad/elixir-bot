@@ -485,7 +485,7 @@ TOOLS = [
         "description": (
             "Get season-level River Race analytics. Use 'aspect' to select the view.\n\n"
             "Aspects:\n"
-            "- summary: season overview with races, fame/member, top contributors, non-participants\n"
+            "- summary: season overview with races, points/member, top contributors, non-participants\n"
             "- standings: members ranked by a war metric. Use the `metric` param: "
             "'points' (default — War Champ leaderboard; 'fame' is accepted as a "
             "back-compat alias), 'win_rate' (highest war-battle "
@@ -502,7 +502,7 @@ TOOLS = [
             "- win_rates: members with highest war-battle win rates (no enrichment)\n"
             "- boat_battles: aggregate boat-battle win/loss/draw record\n"
             "- score_trend: war score/rating direction over time\n"
-            "- season_comparison: fame-per-member vs previous season\n"
+            "- season_comparison: points-per-member vs previous season\n"
             "- trending: members whose war contribution is trending up\n"
             "- perfect_attendance: members with perfect race attendance\n"
             "- no_participation: active members with zero war participation"
@@ -1076,7 +1076,7 @@ TOOLS = [
         "name": "get_clan_intel_report",
         "description": (
             "Build a scouting/threat analysis for a competing clan in OUR current river race. "
-            "Returns roster metrics (trophies, activity, role breakdown), war engagement (fame, "
+            "Returns roster metrics (trophies, activity, role breakdown), war engagement (points, "
             "deck usage, engagement %), and a 1-5 threat rating. Use this for the scheduled "
             "Clan Wars Intel Report and for scouting questions like 'how dangerous is clan #X' "
             "when #X is racing us.\n\n"

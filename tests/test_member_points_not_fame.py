@@ -168,3 +168,42 @@ def test_engagement_day_state_keys_members_as_points():
 
     # The leader is the highest-points member.
     assert leaders[0]["points"] == 300
+
+
+def test_season_summary_attributes_per_member_as_points():
+    """2026-08-31 (Jamie): fame is never attributed to a member — the season
+    summary's per-member ratio is POINTS from war_participation. The clan-level
+    boat total keeps its fame name; the per-member division must not."""
+    conn = db.get_connection()
+    try:
+        _seed_standings(conn)
+        summary = war_status.get_war_season_summary(season_id=SEASON, conn=conn)
+    finally:
+        conn.close()
+
+    assert summary["total_member_points"] == 15000  # 2 weeks x (3000+2500+2000)
+    assert summary["points_per_active_member"] == 5000.0  # / 3 active members
+    assert "fame_per_active_member" not in summary
+    # total_clan_fame stays: it is the boat's number, attributed to the clan.
+    per_member_fame_keys = [k for k in summary if "fame" in k and "member" in k]
+    assert not per_member_fame_keys, f"per-member fame keys leaked: {per_member_fame_keys}"
+
+
+def test_season_comparison_is_points_per_member():
+    """The season-over-season comparison ranks member POINTS per participant
+    (was fame-per-member, which divided a finish-line-capped boat number)."""
+    from storage.war_analytics import compare_points_per_member_to_previous_season
+
+    conn = db.get_connection()
+    try:
+        _seed_standings(conn)
+        cmp = compare_points_per_member_to_previous_season(season_id=SEASON, conn=conn)
+    finally:
+        conn.close()
+
+    assert cmp["current"]["total_points"] == 15000
+    assert cmp["current"]["participants"] == 3
+    assert cmp["current"]["points_per_member"] == 5000.0
+    assert cmp["previous"] is None  # season 139 never happened
+    fame_keys = [k for k in {**cmp, **cmp["current"]} if "fame" in k]
+    assert not fame_keys, f"comparison leaked fame keys: {fame_keys}"

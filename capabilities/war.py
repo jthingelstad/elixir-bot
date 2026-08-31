@@ -415,7 +415,7 @@ def get_war_season_view(
     elif view == "season_comparison":
         data = _invoke(
             source,
-            "compare_fame_per_member_to_previous_season",
+            "compare_points_per_member_to_previous_season",
             season_id=season_id,
             conn=conn,
         )
