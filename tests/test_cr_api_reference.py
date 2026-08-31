@@ -21,6 +21,7 @@ _BATTLES_REFERENCE = (
         (72000504, "Crazy_Arena_EpicOnly"),
         (72000505, "Chaos_1v1_Draft"),
         (72000506, "Chaos_1v1_TripleDraft"),
+        (72000510, "Crazy_Arena_InfiniteElixir"),
         (72000511, "Crazy_Arena_SuddenDeath"),
         (72000512, "Chaos_1v1_MegaDraft_All"),
     ],

@@ -291,6 +291,7 @@ Observed: returns ~30-40 battles (most commonly 30).
 | 72000504 | Crazy_Arena_EpicOnly                                                               |
 | 72000505 | Chaos_1v1_Draft                                                                    |
 | 72000506 | Chaos_1v1_TripleDraft                                                              |
+| 72000510 | Crazy_Arena_InfiniteElixir (observed August 2026)                                  |
 | 72000511 | Crazy_Arena_SuddenDeath (observed August 2026)                                     |
 | 72000512 | Chaos_1v1_MegaDraft_All (observed August 2026)                                     |
 
