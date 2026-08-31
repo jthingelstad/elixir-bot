@@ -234,6 +234,59 @@ def test_reset_then_rollover_finalizes_from_peak(engine_conn):
     assert season["final_rank"] == 1, "season recorded a bogus finish rank"
 
 
+def test_early_finish_week_keeps_boat_fame_not_point_sum(engine_conn):
+    """Player points keep accruing after the boat crosses the finish line, so
+    the participation sum overstates clan fame on every early-finish week. The
+    finalizer must record the snapshot's boat fame, never max() it against the
+    point sum (S134-S135 regression: 28,400 points stored as 10,246-fame week)."""
+    c = engine_conn
+    _emit(c, _race(135, 3, 4000, period_type="warDay", period_index=25), "2026-08-28T03:00:00Z")
+    finished = _race(135, 3, 10246, period_type="warDay", period_index=26)
+    finished["participants"]["#AAA"]["fame"] = 17000  # points, post-finish
+    finished["participants"]["#BBB"]["fame"] = 11400
+    _emit(c, finished, "2026-08-30T04:00:00Z")
+    part = c.execute(
+        "SELECT SUM(fame) f FROM war_participation WHERE season_id=135 AND section_index=3"
+    ).fetchone()
+    assert part["f"] == 28400, "test setup: point sum must exceed boat fame"
+    _emit(c, _race(135, 4, 0, period_type="colosseum", period_index=27), "2026-08-31T10:00:00Z")
+    wk = c.execute(
+        "SELECT our_rank, our_fame FROM war_weeks WHERE season_id=135 AND section_index=3"
+    ).fetchone()
+    assert wk["our_fame"] == 10246, "week fame must be the boat's, not the point sum"
+    assert wk["our_rank"] == 1
+
+
+def test_degenerate_finalize_writes_no_fame(engine_conn):
+    """A finalize handed the reset snapshot (fame 0, participation real) must
+    not invent fame from the point sum — leave fame/rank empty and let a later
+    trustworthy finalize fill them in."""
+    from engine.emitters.war import _finalize_week
+
+    c = engine_conn
+    _emit(c, _race(134, 2, 4000, period_type="warDay", period_index=25), "2026-07-24T03:00:00Z")
+    _emit(c, _race(134, 2, 8000, period_type="warDay", period_index=26), "2026-07-25T04:00:00Z")
+    _finalize_week(
+        c,
+        _race(134, 2, 0, period_type="warDay", period_index=26, rival_fame=0),
+        "2026-07-27T09:00:00Z",
+    )
+    wk = c.execute(
+        "SELECT our_rank, our_fame FROM war_weeks WHERE season_id=134 AND section_index=2"
+    ).fetchone()
+    assert wk["our_fame"] is None, "degenerate finalize must not write point-sum fame"
+    assert wk["our_rank"] is None
+    # a later trustworthy finalize fills the row in
+    _finalize_week(
+        c, _race(134, 2, 10305, period_type="warDay", period_index=26), "2026-07-27T09:30:00Z"
+    )
+    wk = c.execute(
+        "SELECT our_rank, our_fame FROM war_weeks WHERE season_id=134 AND section_index=2"
+    ).fetchone()
+    assert wk["our_fame"] == 10305
+    assert wk["our_rank"] == 1
+
+
 def _race_day(section, period_index, period_type, our_fame, decks_today):
     return {
         "season_id": 140,

@@ -223,10 +223,11 @@ def _finalize_week(conn, state: dict, observed_at: str) -> None:
         return
     # Defense-in-depth (#166): the finalize snapshot can be the API's
     # post-battle 'reset' (our fame collapsed to 0) even though real fame
-    # accrued. Derive our_fame from the peak of {snapshot, participation sum,
-    # already-stored} so a degenerate snapshot can never lower a finished
-    # week's fame. If the snapshot is degenerate, don't trust its rank/standings
-    # either — keep whatever is already recorded.
+    # accrued. The participation sum is only EVIDENCE that the week was real —
+    # it is player POINTS, which keep accruing after the boat crosses the
+    # finish line, so it can never stand in for clan fame (an early-finish
+    # week sums 3-4x the boat's frozen ~10k). On a degenerate snapshot write
+    # no fame/rank/standings at all and keep whatever is already recorded.
     part_fame = (
         conn.execute(
             "SELECT SUM(COALESCE(fame, 0)) FROM war_participation "
@@ -236,8 +237,8 @@ def _finalize_week(conn, state: dict, observed_at: str) -> None:
         or 0
     )
     snap_fame = state.get("our_fame") or 0
-    our_fame = max(part_fame, snap_fame)
-    degenerate = snap_fame == 0 and our_fame > 0
+    degenerate = snap_fame == 0 and part_fame > 0
+    our_fame = None if degenerate else snap_fame
     our_rank = None if degenerate else _our_rank(state)
     conn.execute(
         """INSERT INTO war_weeks (season_id, section_index, period_type,
@@ -246,7 +247,8 @@ def _finalize_week(conn, state: dict, observed_at: str) -> None:
            ON CONFLICT(season_id, section_index) DO UPDATE SET
                finish_time = excluded.finish_time,
                our_rank = COALESCE(excluded.our_rank, war_weeks.our_rank),
-               our_fame = MAX(COALESCE(war_weeks.our_fame, 0), COALESCE(excluded.our_fame, 0)),
+               our_fame = COALESCE(MAX(war_weeks.our_fame, excluded.our_fame),
+                                   war_weeks.our_fame, excluded.our_fame),
                defense_fame = MAX(COALESCE(war_weeks.defense_fame, 0), COALESCE(excluded.defense_fame, 0))""",
         (
             season_id,
