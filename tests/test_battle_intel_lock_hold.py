@@ -53,13 +53,7 @@ def test_an_owned_connection_commits_between_chunks(engine_conn, monkeypatch):
 
 
 def test_the_batch_loop_stops_on_a_short_batch(engine_conn, monkeypatch):
-    """Guards a latent livelock, not just a slow path.
-
-    The incremental WHERE also matches battles whose decks are still
-    facts_complete=0, and the UPDATE does not clear that. A permanently
-    incomplete deck therefore re-selects the same rows every pass, so the old
-    `if not n: break` never fired. A short batch is the real end condition.
-    """
+    """A short batch proves every remaining untagged battle was processed."""
     calls = {"n": 0}
 
     def _stuck(conn, limit=bi._BATTLE_TAG_BATCH, force=False, checkpoint=None):
@@ -73,6 +67,32 @@ def test_the_batch_loop_stops_on_a_short_batch(engine_conn, monkeypatch):
     result = bi.rebuild_interpreted(conn=engine_conn)
     assert calls["n"] == 1
     assert result["battle_tags"] == 7
+
+
+def test_incremental_tags_ignore_already_tagged_incomplete_decks(engine_conn, monkeypatch):
+    """Incomplete card facts must not keep an already-tagged batch runnable forever."""
+    engine_conn.execute(
+        "INSERT INTO deck_profile "
+        "(deck_hash, family, archetype, cards_json, scored_at, facts_complete) "
+        "VALUES ('incomplete', 'x', 'y', '[]', '2026-08-03T00:00:00Z', 0)"
+    )
+    engine_conn.execute(
+        "INSERT INTO battle_events "
+        "(dedup_key, player_tag, battle_time, observed_at, game_mode_name, is_ranked) "
+        "VALUES ('already-tagged', '#T', '2026-08-03T00:00:00Z', "
+        "'2026-08-03T00:00:00Z', 'Ladder', 0)"
+    )
+    engine_conn.execute(
+        "INSERT INTO battle_enrichment "
+        "(battle_dedup_key, player_tag, battle_time, our_deck_hash, "
+        "level_validity, decisive_factor) "
+        "VALUES ('already-tagged', '#T', '2026-08-03T00:00:00Z', 'incomplete', "
+        "'real', 'level_gap')"
+    )
+    engine_conn.commit()
+    monkeypatch.setattr(bi, "_card_facts_map", lambda conn: {(1, 0): {}})
+
+    assert bi._fill_battle_tags(engine_conn) == 0
 
 
 class _WriteSpy(_CommitSpy):

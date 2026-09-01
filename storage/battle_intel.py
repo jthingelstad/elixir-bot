@@ -464,12 +464,10 @@ def _fill_battle_tags(
     where = (
         "1=1"
         if force
-        else (
-            "e.level_validity IS NULL OR EXISTS ("
-            "  SELECT 1 FROM deck_profile dp"
-            "  WHERE dp.deck_hash IN (e.our_deck_hash, e.their_deck_hash)"
-            "    AND COALESCE(dp.facts_complete, 0) = 0)"
-        )
+        # These tags depend only on the battle's mode and stored metrics, not on
+        # card-role coverage. Retrying already-tagged battles just because one
+        # deck is incomplete can make every full batch select itself forever.
+        else "e.level_validity IS NULL OR e.decisive_factor IS NULL"
     )
     sql = (
         "SELECT e.battle_dedup_key, e.our_deck_hash, e.their_deck_hash, e.level_gap, "
