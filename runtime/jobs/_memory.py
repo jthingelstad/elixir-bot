@@ -519,21 +519,27 @@ def _requires_leader_memory_review(item: dict) -> bool:
     category = _contradiction_category(item)
     if category in DERIVED_STATE_CONTRADICTION_CATEGORIES:
         return False
-    if category in LEADER_REVIEW_CONTRADICTION_CATEGORIES:
-        return True
+    explicit_leader_category = category in LEADER_REVIEW_CONTRADICTION_CATEGORIES
+    requires_review = explicit_leader_category
     for key in (
         "needs_leader_review",
         "requires_leader_review",
         "requires_leader_judgment",
     ):
         if item.get(key) is True:
-            return True
+            requires_review = True
     review_scope = str(item.get("review_scope") or "").strip().lower()
     if review_scope in {"leader", "leadership", "human"}:
-        return True
-    if _is_derived_state_contradiction(item):
+        requires_review = True
+    if not explicit_leader_category and _is_derived_state_contradiction(item):
         return False
-    return True
+    if not requires_review:
+        # Unknown categories used to reach leaders by default. Keep the
+        # fail-closed behavior, but require the same actionable proof below.
+        requires_review = True
+    conflict_basis = str(item.get("conflict_basis") or "").strip()
+    leader_question = str(item.get("leader_question") or "").strip()
+    return requires_review and bool(conflict_basis and leader_question)
 
 
 def _auto_expire_contradiction_ids(contradictions: list[dict]) -> list[int]:
@@ -542,6 +548,12 @@ def _auto_expire_contradiction_ids(contradictions: list[dict]) -> list[int]:
         if not isinstance(item, dict):
             continue
         if _requires_leader_memory_review(item):
+            continue
+        if _contradiction_category(item) in LEADER_REVIEW_CONTRADICTION_CATEGORIES:
+            continue
+        if not _is_derived_state_contradiction(item):
+            # An unproven human-context conflict is neither leader work nor a
+            # stale derived value. Preserve it instead of expiring history.
             continue
         memory_id = item.get("memory_id")
         try:
@@ -811,11 +823,17 @@ async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
         memory_id = item.get("memory_id")
         stored = (item.get("stored") or "").strip() or "—"
         live = (item.get("live") or "").strip() or "—"
+        conflict_basis = (item.get("conflict_basis") or "").strip()
         suggested = (item.get("suggested_action") or "").strip() or "review"
+        leader_question = (item.get("leader_question") or "").strip()
         prompt_text = (
-            f"Review memory #{memory_id}: stored `{stored}` but live state shows `{live}`."
+            f"Review memory #{memory_id}: stored `{stored}` but current evidence says `{live}`. "
+            f"Conflict: {conflict_basis} Decision: {leader_question}"
         )
-        rationale = f"Weekly synthesis flagged this memory as contradicting live clan state. Suggested: {suggested}."
+        rationale = (
+            "Weekly synthesis found two claims that cannot both hold in the stated scope. "
+            f"Suggested resolution: {suggested}."
+        )
         action = await asyncio.to_thread(
             db.create_leader_action_recommendation,
             action_type="memory_review",

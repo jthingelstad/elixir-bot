@@ -10,6 +10,7 @@ import db
 # Trigger full runtime init before importing runtime.jobs (which depends on
 # the elixir_agent facade) to avoid circular-import surprises.
 import elixir  # noqa: F401
+import prompts
 import runtime.jobs._memory as memory_job
 from agent.tool_policy import (
     RESPONSE_SCHEMAS_BY_WORKFLOW,
@@ -56,6 +57,13 @@ def test_memory_synthesis_workflow_has_empty_toolset_and_strict_schema():
     schema = RESPONSE_SCHEMAS_BY_WORKFLOW["memory_synthesis"]
     required = set(schema["required"])
     assert required == {"arc_memories", "stale_memory_ids", "contradictions", "digest"}
+
+
+def test_memory_synthesis_prompt_excludes_temporal_progression_from_contradictions():
+    prompt = prompts.agent_prompt("memory-synthesis")
+    assert "Later events are not contradictions" in prompt
+    assert "cannot both be true at the time each claim describes" in prompt
+    assert "one concrete yes/no `leader_question`" in prompt
 
 
 def test_memory_synthesis_bot_proxy_delegates_to_runtime_bot():
@@ -158,7 +166,7 @@ def test_apply_plan_auto_expires_non_leader_contradictions(memdb):
     )
     human_memory = create_memory(
         title="availability note",
-        body="Fullboat is a member camping through war week.",
+        body="A leader says Fullboat is away through September 15.",
         source_type="elixir_inference",
         is_inference=True,
         confidence=0.7,
@@ -179,9 +187,11 @@ def test_apply_plan_auto_expires_non_leader_contradictions(memdb):
             },
             {
                 "memory_id": human_memory["memory_id"],
-                "stored": "Fullboat is a member camping through war week.",
-                "live": "Leader note may mean they are back now.",
-                "suggested_action": "escalate",
+                "stored": "A leader says Fullboat is away through September 15.",
+                "live": "A leader says Fullboat is available now on September 10.",
+                "conflict_basis": "The availability claims overlap on September 10.",
+                "suggested_action": "revise the availability note to say Fullboat is back",
+                "leader_question": "Should Elixir revise the note to say Fullboat is back?",
                 "category": "human_context",
                 "needs_leader_review": True,
             },
@@ -195,6 +205,53 @@ def test_apply_plan_auto_expires_non_leader_contradictions(memdb):
     visible = {m["memory_id"] for m in list_memories(viewer_scope="leadership")}
     assert metric_memory["memory_id"] not in visible
     assert human_memory["memory_id"] in visible
+
+
+def test_apply_plan_preserves_temporal_progression_misclassified_as_human_conflict(memdb):
+    history = create_memory(
+        title="roster history",
+        body="A member left the clan on Sunday.",
+        source_type="elixir_inference",
+        is_inference=True,
+        confidence=0.7,
+        created_by="elixir",
+        scope="leadership",
+    )
+    plan = {
+        "arc_memories": [],
+        "stale_memory_ids": [],
+        "contradictions": [
+            {
+                "memory_id": history["memory_id"],
+                "stored": "A member left the clan on Sunday.",
+                "live": "The member rejoined on Monday.",
+                "suggested_action": "escalate",
+                "category": "human_context",
+                "needs_leader_review": True,
+            }
+        ],
+        "digest": "",
+    }
+
+    stats = _apply_memory_synthesis_plan(plan, week_id=None)
+
+    assert stats["contradictions_auto_expired"] == 0
+    assert stats["contradictions_leader_review"] == 0
+    visible = {m["memory_id"] for m in list_memories(viewer_scope="leadership")}
+    assert history["memory_id"] in visible
+
+
+def test_explicit_human_conflict_proof_is_not_demoted_by_derived_state_words():
+    item = {
+        "stored": "A leader says the role change is paused through September 15.",
+        "live": "A leader says the same role change should happen on September 10.",
+        "conflict_basis": "The two instructions overlap for the same role decision.",
+        "leader_question": "Should Elixir keep the role change paused?",
+        "category": "policy_or_preference",
+        "needs_leader_review": True,
+    }
+
+    assert memory_job._requires_leader_memory_review(item) is True
 
 
 # ---------------------------------------------------------------------------
@@ -484,9 +541,11 @@ def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
             },
             {
                 "memory_id": 42,
-                "stored": "Fullboat is a member camping through war week.",
-                "live": "Leader note may mean they are back now.",
-                "suggested_action": "escalate",
+                "stored": "A leader says Fullboat is away through September 15.",
+                "live": "A leader says Fullboat is available now on September 10.",
+                "conflict_basis": "The availability claims overlap on September 10.",
+                "suggested_action": "revise the availability note to say Fullboat is back",
+                "leader_question": "Should Elixir revise the note to say Fullboat is back?",
                 "category": "human_context",
                 "needs_leader_review": True,
             },
@@ -545,7 +604,14 @@ def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
     # One action card for the leader-judgment contradiction only.
     assert mock_create.call_args.kwargs["action_type"] == "memory_review"
     assert mock_create.call_args.kwargs["source_signal_key"] == "memory_contradiction:42"
-    assert "Fullboat is a member camping" in mock_create.call_args.kwargs["prompt_text"]
+    assert (
+        "Conflict: The availability claims overlap" in mock_create.call_args.kwargs["prompt_text"]
+    )
+    assert "Decision: Should Elixir revise the note" in mock_create.call_args.kwargs["prompt_text"]
+    assert (
+        "Suggested resolution: revise the availability note"
+        in mock_create.call_args.kwargs["rationale"]
+    )
     mock_card.assert_awaited_once()
     assert mock_save.call_args.kwargs["event_type"] == "memory_contradiction"
     mock_elixir_log.assert_awaited_once()
@@ -562,9 +628,12 @@ def test_memory_synthesis_cycle_keeps_success_when_actions_is_unconfigured():
         "contradictions": [
             {
                 "memory_id": 42,
-                "stored": "Leader context says a member is away.",
-                "live": "The current roster cannot verify that context.",
-                "category": "human_context",
+                "stored": "A leader says two Discord accounts belong to different members.",
+                "live": "A newer leader note says both accounts belong to one member.",
+                "conflict_basis": "The accounts cannot represent both one and two people.",
+                "suggested_action": "confirm that both accounts belong to one member",
+                "leader_question": "Should Elixir treat both accounts as one member?",
+                "category": "identity_ambiguity",
                 "needs_leader_review": True,
             }
         ],
