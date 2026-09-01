@@ -407,6 +407,7 @@ _GAME_MODE_LABELS = {
     "Chaos_1v1_Draft": "C.H.A.O.S Draft",
     "Crazy_Arena": "Crazy Arena",
     "Crazy_Arena_EpicOnly": "C.H.A.O.S Epic Only",
+    "Crazy_Arena_InfiniteElixir": "C.H.A.O.S Infinite Elixir",
     "Chaos_1v1_TripleDraft": "C.H.A.O.S Triple Draft",
     "Crazy_Arena_SuddenDeath": "C.H.A.O.S Sudden Death",
     "Chaos_1v1_MegaDraft_All": "Ken's C.H.A.O.S Mega Draft Tournament",

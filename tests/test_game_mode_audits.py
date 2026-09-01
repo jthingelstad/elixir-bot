@@ -47,9 +47,9 @@ def test_game_mode_label_audit_distinguishes_curated_and_unreviewed_modes():
             (
                 1,
                 "battle_game_mode",
-                "72000511",
+                "72000510",
                 "2026-08-24T12:00:00Z",
-                json.dumps({"name": "Crazy_Arena_SuddenDeath", "event_tag": "#A"}),
+                json.dumps({"name": "Crazy_Arena_InfiniteElixir", "event_tag": "#A"}),
             ),
             (
                 2,
@@ -66,7 +66,7 @@ def test_game_mode_label_audit_distinguishes_curated_and_unreviewed_modes():
     assert findings[0]["label_status"] == "unreviewed"
     assert findings[0]["display_label"] == "Future"
     assert findings[1]["label_status"] == "curated"
-    assert findings[1]["display_label"] == "C.H.A.O.S Sudden Death"
+    assert findings[1]["display_label"] == "C.H.A.O.S Infinite Elixir"
 
 
 def _posts_conn() -> sqlite3.Connection:
