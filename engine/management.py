@@ -50,6 +50,9 @@ RANKED_WEIGHT = 0.40
 #   * poapkings.com src/members.njk — "How Elder works", the full spec
 #   * poapkings.com src/faq.njk     — "How do I earn Elder?", the short version
 #   * prompts/POLICY.md             — read by leaders AND injected into 9 prompts
+# tests/test_elder_policy_drift.py pins the numbers all three quote to these
+# constants (the site surfaces when the sibling checkout is present), so a
+# constant change without the matching prose edits fails the suite.
 # The band on the members page is derived from the live member count so it tracks
 # the roster on its own; everything else is hand-typed. Change a constant here and
 # all three need the same edit, or the clan is reading rules the engine no longer
