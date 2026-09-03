@@ -913,6 +913,7 @@ def _clan_context(
     roster_data=None,
     max_members=MAX_CONTEXT_MEMBERS_DEFAULT,
     include_war=True,
+    include_last_seen=False,
 ):
     """Format clan data into a concise context string for the LLM.
 
@@ -920,6 +921,8 @@ def _clan_context(
         include_cards=True). When provided, favorite cards are included per member.
     include_war: whether to append war status section. Set False for non-war
         contexts (Trophy Road observations, card discussions) to reduce noise.
+    include_last_seen: leadership-only roster-badge context. Login timestamps
+        are not engagement evidence and must not bypass public tool scoping.
     """
     # Build a lookup of enriched roster data (cards, etc.) by tag
     roster_by_tag = {}
@@ -938,9 +941,10 @@ def _clan_context(
         line = (
             f"  {m.get('name', '?')} ({m.get('tag', '?')}) | rank #{m.get('clanRank', m.get('clan_rank', '?'))} | "
             f"{m.get('trophies', 0):,} trophies | {m.get('donations', 0)} donations | "
-            f"role: {m.get('role', 'member')} | arena: {arena_name} | "
-            f"last_seen: {m.get('lastSeen', m.get('last_seen', '?'))}"
+            f"role: {m.get('role', 'member')} | arena: {arena_name}"
         )
+        if include_last_seen:
+            line += f" | last_seen: {m.get('lastSeen', m.get('last_seen', '?'))}"
         # Append card data from enriched roster if available
         tag = m.get("tag", "")
         enriched = roster_by_tag.get(tag, {})

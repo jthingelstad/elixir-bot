@@ -1227,6 +1227,7 @@ def respond_in_channel(
             war_data,
             max_members=MAX_CONTEXT_MEMBERS_DEFAULT,
             include_war=war_relevant,
+            include_last_seen=workflow == "clanops",
         )
     )
     trend_context = "" if lightweight_turn else _clan_trend_prompt_context()

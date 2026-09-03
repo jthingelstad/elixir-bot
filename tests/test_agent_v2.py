@@ -1088,6 +1088,54 @@ def test_respond_in_channel_uses_interactive_read_only_workflow():
         assert "=== CLAN TREND SUMMARY ===" in mock_chat.call_args.args[1]
 
 
+@pytest.mark.parametrize("workflow", ["interactive", "clanops"])
+@pytest.mark.parametrize(
+    ("members_key", "last_seen_key"),
+    [("memberList", "lastSeen"), ("members", "last_seen")],
+)
+def test_channel_roster_keeps_login_timestamps_in_leadership(workflow, members_key, last_seen_key):
+    # Natural #ask-elixir reply 4147 (2026-09-02) refused an inactivity list,
+    # then named a member from lastSeen in the preloaded roster without tools.
+    last_seen = "20260825T140000.000Z"
+    clan = {
+        members_key: [
+            {
+                "tag": "#TEST1",
+                "name": "Example member",
+                "clanRank": 1,
+                "trophies": 13500,
+                "donations": 123,
+                "role": "elder",
+                "arena": {"name": "Spirit Square"},
+                last_seen_key: last_seen,
+            }
+        ]
+    }
+    with (
+        patch("elixir_agent._chat_with_tools", return_value=None) as mock_chat,
+        patch("agent.workflows._clan_trend_prompt_context", return_value=""),
+        patch("agent.workflows._war_status_snapshot", return_value=None),
+    ):
+        elixir_agent.respond_in_channel(
+            question="Inactive members in clan",
+            author_name="Asker",
+            channel_name="#ask-elixir" if workflow == "interactive" else "#leaders",
+            workflow=workflow,
+            clan_data=clan,
+            war_data={},
+        )
+
+    user_msg = mock_chat.call_args.args[1]
+    assert "Example member (#TEST1)" in user_msg
+    assert "13,500 trophies | 123 donations" in user_msg
+    assert "role: elder | arena: Spirit Square" in user_msg
+    if workflow == "interactive":
+        assert last_seen not in user_msg
+        assert "last_seen:" not in user_msg
+    else:
+        assert f"last_seen: {last_seen}" in user_msg
+
+
 def test_respond_in_channel_keeps_ask_elixir_lightweight_followups_focused():
     with patch(
         "elixir_agent._chat_with_tools",
