@@ -46,3 +46,11 @@ def test_touchdown_draft_reference_records_current_observation() -> None:
     assert "| 72000051 | TeamVsTeam_Touchdown_Draft (observed August 2026)" in (
         _PLAYERS_REFERENCE.read_text()
     )
+
+
+def test_king_tower_level_reference_records_observed_profile_field() -> None:
+    """Keep the new profile-level parity field distinct from deprecated expLevel."""
+    reference = _PLAYERS_REFERENCE.read_text()
+
+    assert "| `kingTowerLevel`                  | integer" in reference
+    assert "use this field as an API parity signal rather than a replacement authority" in reference
