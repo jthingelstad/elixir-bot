@@ -28,7 +28,7 @@ MCP_URL = "https://elixir.poapkings.com/mcp"
 # The contract generation this integration was built against. A different
 # MAJOR.MINOR is worth a loud log line (the server renames freely in
 # alpha); calls still proceed — the fallback path covers real breakage.
-PINNED_CONTRACT = "0.10"
+PINNED_CONTRACT = "0.11"
 _TIMEOUT_S = 15
 
 _id_lock = threading.Lock()
