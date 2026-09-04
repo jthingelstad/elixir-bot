@@ -12,7 +12,7 @@ part of the current operating model.
 
 | Objective | File | Cadence | Primary question |
 |---|---|---|---|
-| **Run Elixir** | `run-elixir.md` | Every four hours | Is Elixir healthy, reliable, observable, and spending intentionally? |
+| **Run Elixir** | `run-elixir.md` | Every twelve hours | Is Elixir healthy, reliable, observable, and spending intentionally? |
 | **Understand Clash Royale** | `understand-clash-royale.md` | Daily | What changed in the game or data, and does Elixir understand it correctly? |
 | **Improve Elixir** | `improve-elixir.md` | Daily; deeper Friday pass | Is Elixir turning play and feedback into better stewardship, memory, and member improvement over time? |
 
@@ -139,7 +139,7 @@ dirty or ahead checkout safe.
 
 ## Deployment
 
-Run Elixir is accountable for the live process. Every four-hour pass compares the
+Run Elixir is accountable for the live process. Every twelve-hour pass compares the
 running revision with `origin/main`, inspects the intervening commits, and deploys
 safe authorized runtime changes. Prompt-only changes hot-load, but still require the
 same human boundary when they affect members. An originating owner may make the narrow

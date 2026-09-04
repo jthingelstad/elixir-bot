@@ -1,7 +1,7 @@
 # Error Watch
 
 **Owner: Run Elixir** (`run-elixir.md`). This is that objective's error-log
-runbook, not a separate role. It runs every four-hour cadence under the shared
+runbook, not a separate role. It runs every twelve-hour cadence under the shared
 objective workflow and human boundary.
 
 Read `AGENTS.md`, `AGENT-TEAM/WORKFLOW.md`, `AGENT-TEAM/README.md`, and
@@ -49,7 +49,7 @@ following indented line belongs to the traceback above it. The logger name
 call sites carry a stable `<component> failed: k=v k=v` prefix, so the message is
 groupable as-is.
 
-**Cadence:** every Run Elixir pass (every four hours).
+**Cadence:** every Run Elixir pass (every twelve hours).
 
 ## Every run
 

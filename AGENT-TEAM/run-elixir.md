@@ -11,7 +11,7 @@ Read `AGENTS.md`, `AGENT-TEAM/WORKFLOW.md`, `AGENT-TEAM/README.md`, this file, a
 `AGENT-TEAM/error-watch.md`. Use the project `log-triage` and `llm-cost-report`
 skills every cadence; use `awareness-report` when liveness or delivery is in doubt.
 
-Cadence: every four hours, plus after a deploy or a reported incident.
+Cadence: every twelve hours, plus after a deploy or a reported incident.
 
 ## Every run
 

@@ -10,7 +10,7 @@ name = "Run Elixir"
 objective = "run"
 objective_file = "AGENT-TEAM/run-elixir.md"
 status = "ACTIVE"
-rrule = "RRULE:FREQ=HOURLY;INTERVAL=4;BYMINUTE=10"
+rrule = "RRULE:FREQ=HOURLY;INTERVAL=12;BYMINUTE=10"
 model = "gpt-5.6-terra"
 reasoning_effort = "high"
 
