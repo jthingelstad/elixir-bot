@@ -1496,6 +1496,40 @@ TOOLS = [
         },
     },
     {
+        "name": "get_clan_standing",
+        "description": (
+            "Clan-relative win rates from Elixir MCP (the sibling recorded-"
+            "history service): every open member's recorded win rate over a "
+            "window, ranked, with the clan median. THE tool for 'am I above "
+            "average?' and 'who are our strongest/weakest players lately?'. "
+            "Pass member_tag to get that member's rank and percentile "
+            "alongside the table. Covers RECORDED battles only; members "
+            "below min_battles decided battles are counted but unranked. "
+            "Complementary to get_battle_intelligence clan_standing (which "
+            "uses the local enrichment window): this one is windowed, "
+            "ranked, and covers all modes."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "member_tag": {
+                    "type": "string",
+                    "description": "Optional: tag / name / alias to highlight with rank + percentile.",
+                },
+                "days": {
+                    "type": "integer",
+                    "default": 30,
+                    "description": "Window in days (1-90).",
+                },
+                "min_battles": {
+                    "type": "integer",
+                    "default": 20,
+                    "description": "Decided battles required to be ranked.",
+                },
+            },
+        },
+    },
+    {
         "name": "get_awards",
         "description": (
             "Query the clan awards record — the authoritative history of every "
@@ -1638,6 +1672,7 @@ _SHARED_TOOL_NAMES = (
     "schedule_followup",
     "get_game_mode_performance",
     "get_awards",
+    "get_clan_standing",
     "lookup_reference",
 )
 # Chassis surface tools (Agentic Loop v2). Deliberately NOT in

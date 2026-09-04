@@ -567,14 +567,26 @@ Elixir MCP (`~/Projects/elixir-mcp`, https://elixir.poapkings.com) records
 Clash Royale history — battles back to 2026-05, war seasons, snapshots —
 and serves it via a remote MCP server. **The long-term direction (Jamie,
 2026-09-04) is that elixir-bot does less of its own data work and becomes
-a long-lived API-token user of Elixir MCP.** Nothing has moved yet.
+a long-lived API-token user of Elixir MCP.** Phase 1 is LIVE
+(2026-09-04): member trend (get_member include=trend), war attendance
+(get_member_war_detail aspect=attendance), and the get_clan_standing
+tool are served from Elixir MCP DIRECTLY — no shadow mode (Jamie);
+local tables are the ERROR FALLBACK only. Client: `elixir_mcp.py`
+(cr_api.py's error contract: None on any failure, never raises);
+builders: `capabilities/mcp_stats.py` (emit the same local shapes so
+prompts don't change).
 
 - Connection: `https://elixir.poapkings.com/mcp` with a service token
-  (`Authorization: Bearer svt_...`), issued/revoked from the Elixir MCP
-  Admin page; calls are audited there as `svc:elixir-bot`.
-- 17 tools incl. query_battles, get_performance, get_war_history,
-  get_player_summary. Card levels are pre-normalized to the in-game 1-16
-  scale (the shift this repo does in its loader is already applied).
-- When experimenting with moving functionality: reads only at first, one
-  capability at a time, and elixir-bot's own recorder keeps running until
-  a capability is proven equivalent.
+  (`Authorization: Bearer svt_...` from `.env` ELIXIR_MCP_TOKEN),
+  issued/revoked from the Elixir MCP Admin page; calls are audited
+  there as `svc:elixir-bot`.
+- 22 tools, DOMAIN-PREFIXED since contract 0.9.0: players_*, battles_*
+  (battles_query/battles_performance/battles_decks/battles_cards/
+  battles_compare), clans_roster, clans_standings, war_current,
+  war_history, cards_catalog, live_fetch, elixir_* (service). Card
+  levels are pre-normalized to the in-game 1-16 scale. The client pins
+  contract 0.10 and logs loudly on drift.
+- Battle-intelligence views (archetypes, player-adjusted lift,
+  closeness) deliberately STAY on local enrichment tables — analysis is
+  elixir-bot's, plumbing moves. The local recorder keeps running until a
+  capability is proven equivalent.

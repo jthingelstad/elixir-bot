@@ -335,7 +335,7 @@ def test_interactive_workflow_exposes_reads_plus_bounded_followup():
     interactive_names = {tool["name"] for tool in elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]}
 
     # The 16 canonical reads plus the one Phase-5 write members need in this lane.
-    assert len(interactive_names) == 17
+    assert len(interactive_names) == 18
     assert "schedule_followup" in interactive_names
     assert "get_member" in interactive_names
     assert "read_deck_link" in interactive_names

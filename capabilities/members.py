@@ -145,7 +145,13 @@ def get_member_intelligence(
     if "war" in requested:
         result["war"] = _invoke(source, "get_member_war_status", tag, season_id=None, conn=conn)
     if "trend" in requested:
-        result["trend"] = _invoke(
+        # Phase 1 (Jamie, 2026-09-04): trend goes DIRECTLY to Elixir MCP;
+        # local tables are the error fallback only.
+        from capabilities import mcp_stats
+
+        result["trend"] = mcp_stats.trend_context_via_mcp(
+            tag, days=days, window_days=min(days // 4, 7) or 7
+        ) or _invoke(
             source,
             "build_member_trend_summary_context",
             tag,

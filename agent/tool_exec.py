@@ -681,6 +681,27 @@ def _execute_get_awards(arguments):
     )["data"]
 
 
+def _execute_get_clan_standing(arguments):
+    """Clan-relative standings served by Elixir MCP (no local fallback —
+    this capability only exists there; a None reads as unavailable)."""
+    from capabilities import mcp_stats
+
+    member_tag = None
+    if arguments.get("member_tag"):
+        member_tag = _resolve_member_tag(arguments["member_tag"])
+    result = mcp_stats.clan_standing_via_mcp(
+        member_tag,
+        days=int(arguments.get("days") or 30),
+        min_battles=int(arguments.get("min_battles") or 20),
+    )
+    if result is None:
+        return {
+            "error": "elixir_mcp_unavailable",
+            "detail": "Clan standings come from the Elixir MCP service, which did not answer. Say so plainly rather than guessing.",
+        }
+    return result
+
+
 def _execute_get_member_war_detail(arguments):
     """Execute the consolidated get_member_war_detail tool."""
     member_tag = _resolve_member_tag(arguments["member_tag"])
@@ -692,7 +713,14 @@ def _execute_get_member_war_detail(arguments):
     if aspect == "summary":
         result = db.get_member_war_stats(member_tag)
     elif aspect == "attendance":
-        result = db.get_member_war_attendance(member_tag, season_id=None)
+        # Phase 1 (Jamie, 2026-09-04): attendance goes DIRECTLY to Elixir
+        # MCP; local tables are the error fallback only. Identity fields
+        # (name, member_ref) stay locally sourced below either way.
+        from capabilities import mcp_stats
+
+        result = mcp_stats.war_attendance_via_mcp(member_tag) or db.get_member_war_attendance(
+            member_tag, season_id=None
+        )
     elif aspect == "battles":
         result = db.get_member_war_battle_record(member_tag, season_id=None)
     elif aspect == "missed_days":
@@ -1852,6 +1880,7 @@ ADVERTISED_TOOL_EXECUTOR_NAMES = frozenset(
         "record_leadership_followup",
         "schedule_followup",
         "get_awards",
+        "get_clan_standing",
         "get_game_mode_performance",
         "lookup_reference",
     }
@@ -2047,6 +2076,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_member_war_detail(arguments)
         elif name == "get_awards":
             result = _execute_get_awards(arguments)
+        elif name == "get_clan_standing":
+            result = _execute_get_clan_standing(arguments)
         elif name == "get_game_mode_performance":
             result = _execute_get_game_mode_performance(arguments)
         elif name == "lookup_reference":
