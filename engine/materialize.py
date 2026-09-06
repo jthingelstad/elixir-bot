@@ -249,7 +249,14 @@ def _apply_battlelog(
     if inserted:
         polling.update_heat(conn, tag, new_battles=True, now=observation.observed_at)
     projections.refresh_form(conn, tag, now=observation.observed_at)
-    projections.refresh_rollups(conn, tag, chicago_today(now))
+    today = chicago_today(now)
+    projections.refresh_rollups(conn, tag, today)
+    # A poll after local midnight can first capture yesterday's battles (or
+    # older ones after a polling gap). Repeated receipts also repair a stale
+    # rollup, while profile snapshots must remain on the observation day.
+    battle_days = {chicago_today(_as_utc(battle["battleTime"])) for battle in payload}
+    for battle_day in sorted(battle_days - {today}):
+        projections.refresh_battle_rollups(conn, tag, battle_day)
     projections.refresh_management_inputs(conn, tag, now=observation.observed_at)
     if track_poll_freshness:
         polling.note_poll_succeeded(conn, tag, "battlelog", observation.observed_at)

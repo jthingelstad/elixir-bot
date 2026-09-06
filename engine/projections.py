@@ -278,15 +278,27 @@ def refresh_form(conn, player_tag, now=None):
 
 
 def refresh_rollups(conn, player_tag, date_chicago, expected_battle_delta=None):
-    """Upsert player_daily_battle_rollups (+ the day's player_daily_metrics
-    row) for one Chicago day from battle_events.
+    """Refresh today's battle rollups and snapshot current profile metrics."""
+    tag = canon_tag(player_tag)
+    refresh_daily_metrics(conn, tag, date_chicago)
+    refresh_battle_rollups(conn, tag, date_chicago, expected_battle_delta)
+
+
+def refresh_battle_rollups(conn, player_tag, date_chicago, expected_battle_delta=None):
+    """Rebuild one Chicago battle day without rewriting profile history.
 
     expected_battle_delta: the profile battles-count delta across the day —
     the tick computes it from baseline history when available (the old
-    player_profile_snapshots source is gone); None means unknown, matching
-    the carried NULL semantics.
+    player_profile_snapshots source is gone). Preserve an existing day's known
+    delta when no replacement is supplied; otherwise completeness stays unknown.
     """
     tag = canon_tag(player_tag)
+    if expected_battle_delta is None:
+        expected_battle_delta = conn.execute(
+            "SELECT MAX(expected_battle_delta) FROM player_daily_battle_rollups "
+            "WHERE player_tag = ? AND battle_date = ?",
+            (tag, date_chicago),
+        ).fetchone()[0]
     start_utc, end_utc = chicago_day_bounds_utc(date_chicago)
     # One format on both sides, so this is a plain range scan. It used to strip
     # '.000Z'/'Z' off every row and de-punctuate the bounds to meet CR-compact
@@ -303,7 +315,6 @@ def refresh_rollups(conn, player_tag, date_chicago, expected_battle_delta=None):
         "DELETE FROM player_daily_battle_rollups WHERE player_tag = ? AND battle_date = ?",
         (tag, date_chicago),
     )
-    refresh_daily_metrics(conn, tag, date_chicago)
     if not rows:
         return
     buckets: dict = {}
