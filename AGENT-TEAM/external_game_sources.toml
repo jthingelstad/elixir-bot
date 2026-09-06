@@ -6,10 +6,26 @@ version = 1
 [[source]]
 id = "supercell-news"
 tier = "official"
-cadence = "weekly_and_after_release"
+cadence = "daily_and_after_release"
 url = "https://supercell.com/en/games/clashroyale/blog/"
 purpose = "Release intent, balance changes, and seasonal announcements."
 interpretation = "Facts about shipped or announced product changes."
+
+[[source]]
+id = "crl-rulebook"
+tier = "official"
+cadence = "daily_calendar_check_and_after_revision"
+url = "https://supr.cl/CRL26_Rulebook"
+purpose = "Current CRL season schedule, qualifiers, World Finals, format, and qualification stakes."
+interpretation = "Official competition facts; open the current revision and replace the season-specific link when a new year's rules are published."
+
+[[source]]
+id = "crl-live-events"
+tier = "official"
+cadence = "daily_and_around_competitions"
+url = "https://event.supercell.com/clashroyale/en"
+purpose = "Upcoming CRL broadcasts, viewing information, and competition milestones."
+interpretation = "Official event information; an old landing page is not proof that no newer event is announced. Follow official broadcasts or rulebook updates."
 
 [[source]]
 id = "supercell-support"
@@ -30,15 +46,15 @@ interpretation = "Contract context only; retained payloads remain the evidence o
 [[source]]
 id = "royaleapi-meta"
 tier = "competitive_aggregate"
-cadence = "weekly_and_after_balance"
+cadence = "daily_scan_and_after_balance"
 url = "https://royaleapi.com/"
-purpose = "Comparable deck and card-trend evidence outside one clan."
-interpretation = "Dated aggregate evidence, not an authoritative rule or a member recommendation."
+purpose = "Deck and card trends outside one clan, season previews, new modes, and tournament reporting."
+interpretation = "Distinguish specialist reporting from dated aggregate evidence. For statistics retain the mode, population, window, and sample; verify announced facts against primary sources."
 
 [[source]]
 id = "clashroyale-community"
 tier = "community_sentiment"
-cadence = "after_release"
+cadence = "daily_small_manual_sample"
 url = "https://www.reddit.com/r/ClashRoyale/"
-purpose = "Qualitative player reactions and recurring friction after updates."
+purpose = "Qualitative player reactions, excitement, confusion, and recurring friction as the game evolves."
 interpretation = "Hypotheses only; sample manually, do not scrape, and never retain identities or raw comments."

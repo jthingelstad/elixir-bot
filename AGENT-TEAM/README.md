@@ -13,7 +13,7 @@ part of the current operating model.
 | Objective | File | Cadence | Primary question |
 |---|---|---|---|
 | **Run Elixir** | `run-elixir.md` | Every twelve hours | Is Elixir healthy, reliable, observable, and spending intentionally? |
-| **Understand Clash Royale** | `understand-clash-royale.md` | Daily | What changed in the game or data, and does Elixir understand it correctly? |
+| **Understand Clash Royale** | `understand-clash-royale.md` | Daily | What is changing across the game, competitive scene, and community; what is coming next; and does Elixir understand it? |
 | **Improve Elixir** | `improve-elixir.md` | Daily; deeper Friday pass | Is Elixir turning play and feedback into better stewardship, memory, and member improvement over time? |
 
 There is no separate Build Manager. Building is a capability of every objective
@@ -31,7 +31,7 @@ retired handoff pipeline.
 | Need | Owner | Decision standard |
 |---|---|---|
 | Better reasoning, learned context, tool choice, and editorial judgment | **Improve Elixir** | Exact natural behavior must improve, not merely an offline score. |
-| Newly useful Clash Royale or clan data | **Understand Clash Royale** | Trace receipts through events and capabilities before calling a signal meaningful. |
+| External game intelligence and newly useful clan data | **Understand Clash Royale** | Discover and verify web signals, keep upcoming competitions and releases current, then trace relevant facts through game knowledge and capabilities. |
 | Spend, retries, cache efficiency, and model-call reliability | **Run Elixir** | A lower bill is a win only when it preserves the relevant quality outcome. |
 
 Run supplies the canonical cost and reliability evidence. Improve owns quality

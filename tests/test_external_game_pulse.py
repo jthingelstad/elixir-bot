@@ -82,6 +82,9 @@ def test_external_pulse_handles_fresh_or_missing_meta_snapshot():
     fresh = pulse.audit(conn, sources=pulse.load_sources(), now=now)
     assert fresh["meta_snapshot"]["state"] == "fresh"
     assert fresh["meta_snapshot"]["age_hours"] == 2.0
+    # A local snapshot must never be interpreted as a completed external review.
+    assert fresh["web_review"] == {"required": True, "performed": False}
+    assert missing["web_review"] == fresh["web_review"]
 
 
 def test_source_manifest_rejects_missing_evidence_tier(tmp_path):

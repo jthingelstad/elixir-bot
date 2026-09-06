@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit the bounded, source-linked external evidence for Clash Royale."""
+"""List web research sources and local meta context; this helper does not browse."""
 
 from __future__ import annotations
 
@@ -95,14 +95,14 @@ def audit(
             "deck_count": int(row["deck_count"]),
             "source_count": int(row["source_count"]),
         }
-    due = meta["state"] != "fresh"
     return {
         "sources": sources,
         "meta_snapshot": meta,
+        "web_review": {"required": True, "performed": False},
         "next_action": (
-            "Perform the source-linked external review; do not scrape or change member behavior."
-            if due
-            else "Continue the scheduled source-linked review."
+            "Browse current official news, CRL schedules and broadcasts, competitive analysis, "
+            "and a small manual community sample every run; do not scrape or change member "
+            "behavior. This helper has not performed that review, regardless of meta freshness."
         ),
     }
 

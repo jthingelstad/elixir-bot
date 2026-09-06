@@ -32,9 +32,19 @@ def prompt(entry: dict, repo: Path = REPO) -> str:
         repo / entry["objective_file"],
     ]
     rendered = ", ".join(f"`{path}`" for path in paths)
+    external_brief = (
+        "After preflight, browse current web sources before the detailed database audit: "
+        "official game news, new modes and releases, CRL and other tournaments, competitive "
+        "meta, and a small manual community sample. Keep a dated outlook of what changed, "
+        "what is coming next, and why it matters for POAP KINGS. A fresh database or local "
+        "pulse helper does not substitute for web research. "
+        if entry["objective"] == "game"
+        else ""
+    )
     return (
         f"Follow the project instructions already loaded by Codex. Read {rendered} "
         f"completely, then pursue the `{entry['objective']}` objective exactly as written. "
+        f"{external_brief}"
         "Measure current evidence before changing anything. Own a clear gap through source "
         "fix, regression coverage, verification, deployment or restart when required, and "
         "natural acceptance. Use issues only for multi-run work, external blockers, durable "
