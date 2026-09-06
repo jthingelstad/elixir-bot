@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import sqlite3
 from dataclasses import dataclass, field
 
 log = logging.getLogger("elixir")
@@ -215,12 +216,29 @@ def assemble_context(attention: Attention, seed: dict) -> dict:
     """
     context = dict(seed or {})
     context["lessons"] = _editorial_lessons()
+    if SURFACE_CLAN_CHAT in attention.surfaces:
+        feedback = _leader_action_feedback("in_game_relay")
+        if feedback:
+            context["leader_action_feedback"] = feedback
     if attention.scope.lanes:
         context["recent_posts"] = _recent_posts(attention.scope.lanes)
     dossiers = _dossiers(attention.scope.member_tags)
     if dossiers:
         context["dossiers"] = dossiers
     return context
+
+
+def _leader_action_feedback(action_type: str) -> dict | None:
+    """Load action-specific human guidance only for turns that can use it."""
+    try:
+        from storage.leader_actions import get_leader_action_feedback_profile
+
+        return get_leader_action_feedback_profile(action_type=action_type)
+    except ImportError, RuntimeError, ValueError, sqlite3.Error:
+        # Human feedback improves a turn; an unavailable profile must not stop
+        # a hard-post floor from reaching members.
+        log.debug("chassis: leader-action feedback unavailable", exc_info=True)
+        return None
 
 
 def _dossiers(member_tags) -> dict:
@@ -378,6 +396,7 @@ def run_turn(
         "tool_trace": tool_stats.get("tool_trace") or [],
         "error": error,
         "lessons_injected": len(context.get("lessons") or []),
+        "leader_feedback_injected": bool(context.get("leader_action_feedback")),
     }
 
 

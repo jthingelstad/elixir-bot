@@ -27,6 +27,7 @@ _EXPECTED_KEYS = {
     "hard_post_signals",
     "channel_memory",
     "recent_agent_writes",
+    "leader_action_feedback",
     "leader_action_board",
     "due_revisits",
 }
@@ -146,6 +147,27 @@ def test_open_relay_copy_reaches_the_brain_for_duplicate_judgment(engine_conn):
             "decided_at": None,
         }
     ]
+
+
+def test_in_game_relay_feedback_profile_reaches_the_brain(engine_conn):
+    """A synthesized profile is useful only if a later author can read it."""
+    db.upsert_leader_action_feedback_profile(
+        action_type="in_game_relay",
+        profile={
+            "summary": "Leaders reject generic status updates.",
+            "guidance": ["Require concrete clan news."],
+            "evidence": [{"action_id": 337, "lesson": "Status alone is not enough."}],
+        },
+        conn=engine_conn,
+    )
+
+    from runtime.awareness.read import _leader_action_feedback
+
+    feedback = _leader_action_feedback(engine_conn)
+
+    assert feedback["action_type"] == "in_game_relay"
+    assert "generic status" in feedback["guidance"]
+    assert "R337" in feedback["guidance"]
 
 
 # ---------------------------------------------------------------------------

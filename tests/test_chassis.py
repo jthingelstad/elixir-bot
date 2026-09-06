@@ -73,6 +73,33 @@ def test_lessons_are_injected_without_the_caller_asking(monkeypatch):
     assert context["lessons"], "every chassis turn gets the lessons for free"
 
 
+def test_clan_chat_turn_gets_in_game_relay_feedback(monkeypatch):
+    feedback = {
+        "action_type": "in_game_relay",
+        "guidance": "Avoid generic status statements.",
+    }
+    monkeypatch.setattr(chassis, "_leader_action_feedback", lambda action_type: feedback)
+
+    context = chassis.assemble_context(_attention(), {"events": []})
+
+    assert context["leader_action_feedback"] == feedback
+
+
+def test_discord_only_turn_does_not_load_relay_feedback(monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        chassis,
+        "_leader_action_feedback",
+        lambda action_type: called.append(action_type) or {},
+    )
+    attention = _attention(surfaces=frozenset({chassis.SURFACE_DISCORD_ELIXIR}))
+
+    context = chassis.assemble_context(attention, {"events": []})
+
+    assert "leader_action_feedback" not in context
+    assert called == []
+
+
 def test_a_broken_lesson_store_does_not_stop_the_turn(monkeypatch):
     """A turn without lessons is worse. A turn that does not happen is far
     worse — the floor still owes the clan a post."""

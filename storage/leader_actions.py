@@ -774,6 +774,44 @@ def _feedback_event_id(action_type: str | None) -> str:
     return f"leader_action_feedback:{clean}"
 
 
+@managed_connection
+def get_leader_action_feedback_profile(
+    *, action_type: str, conn: Optional[sqlite3.Connection] = None
+) -> dict | None:
+    """Return the active human-feedback profile for one action type.
+
+    The synthesis writer has always described these rows as guidance for later
+    authoring, but until 2026-09-06 nothing read them after persistence. Keep
+    retrieval keyed to the exact action type so an in-game relay lesson does
+    not leak into unrelated member-facing work.
+    """
+    clean_type = (action_type or "").strip()
+    if not clean_type:
+        return None
+
+    from memory_store import list_memories
+
+    rows = list_memories(
+        viewer_scope="system_internal",
+        include_system_internal=True,
+        filters={
+            "event_type": LEADER_ACTION_FEEDBACK_EVENT_TYPE,
+            "event_id": _feedback_event_id(clean_type),
+        },
+        limit=1,
+        conn=conn,
+    )
+    if not rows:
+        return None
+    memory = rows[0]
+    return {
+        "action_type": clean_type,
+        "summary": memory.get("summary"),
+        "guidance": memory.get("body"),
+        "updated_at": memory.get("updated_at"),
+    }
+
+
 def _profile_summary(profile: dict) -> str:
     summary = " ".join(str(profile.get("summary") or "").split())
     if len(summary) <= 220:
@@ -1773,6 +1811,7 @@ __all__ = [
     "create_leader_action_recommendation",
     "decide_leader_action",
     "decide_leader_action_by_message",
+    "get_leader_action_feedback_profile",
     "get_leader_action_by_id",
     "get_leader_action_by_key",
     "get_leader_action_by_message",

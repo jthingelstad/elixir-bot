@@ -798,6 +798,19 @@ def _editorial_guidance(conn, limit: int = 12) -> list[dict]:
     ]
 
 
+def _leader_action_feedback(conn) -> dict:
+    """Human-derived guidance for the action type the brain can author.
+
+    The awareness brain may add an in-game sibling to any suitable post. Its
+    durable feedback profile therefore belongs in the read independently of
+    the bounded general editorial-lesson pool.
+    """
+    return (
+        leader_actions.get_leader_action_feedback_profile(action_type="in_game_relay", conn=conn)
+        or {}
+    )
+
+
 def _leader_action_board(conn) -> dict:
     """Open #actions cards (undecided asks) + recent decisions."""
     open_cards = leader_actions.list_leader_actions(status="proposed", limit=15, conn=conn)
@@ -1040,6 +1053,9 @@ def build_read(conn=None) -> dict:
             ),
             "editorial_guidance": _load(
                 "editorial_guidance", lambda: _editorial_guidance(conn), []
+            ),
+            "leader_action_feedback": _load(
+                "leader_action_feedback", lambda: _leader_action_feedback(conn), {}
             ),
             "leader_action_board": _load(
                 "leader_action_board",
