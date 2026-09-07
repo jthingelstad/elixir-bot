@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv  # noqa: E402
 
-load_dotenv("/Users/otto/Projects/elixir-bot/.env")
+load_dotenv("/Users/otto/Projects/clash-royale/elixir-bot/.env")
 
 import db  # noqa: E402
 from runtime import member_report  # noqa: E402

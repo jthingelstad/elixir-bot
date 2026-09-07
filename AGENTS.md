@@ -500,7 +500,7 @@ The `system_signals` queue was retired in #212 — it had no drain, so nothing i
 
 Elixir also posts a startup check-in to the #elixir-log webhook with the running build hash and a short Clash Royale-flavored line.
 
-**CR API truth lives in `~/Projects/cr-agent-api-docs`** (github `jthingelstad/cr-agent-api-docs`), a standalone repo — NOT vendored here. This repo used to carry a copy at `docs/cr-api-docs/`; it drifted in both directions and was removed 2026-09-07. Real observations had sat stranded in it for months (the fame vs periodPoints distinction, `kingTowerLevel`, seven game mode IDs) before being recovered upstream. Do not re-vendor it.
+**CR API truth lives in `~/Projects/clash-royale/cr-agent-api-docs`** (github `jthingelstad/cr-agent-api-docs`), a standalone repo — NOT vendored here. This repo used to carry a copy at `docs/cr-api-docs/`; it drifted in both directions and was removed 2026-09-07. Real observations had sat stranded in it for months (the fame vs periodPoints distinction, `kingTowerLevel`, seven game mode IDs) before being recovered upstream. Do not re-vendor it.
 
 When drift is characterized, **write the finding into that repo and push** — that is where it becomes durable and reaches the other CR projects. Push only what holds for any caller (endpoint shapes, field semantics, nullability, timing); never clan-specific material or notes about downstream consumers. The repo's build guards observed values, so a mode ID or enum we have seen cannot be silently dropped.
 
@@ -567,7 +567,7 @@ pages). The comment above `ELDER_BAND_FLOOR` names them all.
 
 ## Elixir MCP (the sibling data service)
 
-Elixir MCP (`~/Projects/elixir-mcp`, https://elixir.poapkings.com) records
+Elixir MCP (`~/Projects/clash-royale/elixir-mcp`, https://elixir.poapkings.com) records
 Clash Royale history — battles back to 2026-05, war seasons, snapshots —
 and serves it via a remote MCP server. **The long-term direction (Jamie,
 2026-09-04) is that elixir-bot does less of its own data work and becomes

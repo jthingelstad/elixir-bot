@@ -5,7 +5,7 @@ description: Assess the live v5.1 awareness loop from thoughts, delivered posts,
 
 # Awareness Report
 
-Read `/Users/otto/Projects/elixir-bot/elixir-v51.db` and assess whether the
+Read `/Users/otto/Projects/clash-royale/elixir-bot/elixir-v51.db` and assess whether the
 single live awareness loop is making good editorial decisions. This is a
 read-only report. It answers “is Elixir making good calls?”; `log-triage`
 answers “is the runtime alive?”

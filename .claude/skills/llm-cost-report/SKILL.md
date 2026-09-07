@@ -19,7 +19,7 @@ must be reported separately.
 
 ## Canonical report path
 
-Run the repository tool from `/Users/otto/Projects/elixir-bot`:
+Run the repository tool from `/Users/otto/Projects/clash-royale/elixir-bot`:
 
 ```bash
 uv run --locked python scripts/llm_cost_report.py --days 7 --json

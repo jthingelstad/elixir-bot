@@ -9,7 +9,7 @@ read [README.md](README.md).
 Elixir supports Python 3.14. Reproduce the locked development environment:
 
 ```bash
-cd ~/Projects/elixir-bot
+cd ~/Projects/clash-royale/elixir-bot
 uv sync --locked
 uv lock --check
 uv run --locked pytest tests/ -q

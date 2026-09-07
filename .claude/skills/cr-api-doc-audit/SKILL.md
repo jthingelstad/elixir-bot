@@ -1,17 +1,17 @@
 ---
 name: cr-api-doc-audit
-description: Cross-check live Clash Royale API payloads stored in raw_api_payloads against ~/Projects/cr-agent-api-docs/ and recommend concrete documentation patches — undocumented fields, new enum values, type or nullability drift, shape changes
+description: Cross-check live Clash Royale API payloads stored in raw_api_payloads against ~/Projects/clash-royale/cr-agent-api-docs/ and recommend concrete documentation patches — undocumented fields, new enum values, type or nullability drift, shape changes
 ---
 
 # CR API Doc Audit
 
-Read live API responses out of `elixir-v51.db` and compare them to the agent-facing reference in `~/Projects/cr-agent-api-docs/`. The goal is a tight, evidence-backed list of **doc patches worth making** — not a wall of field tables.
+Read live API responses out of `elixir-v51.db` and compare them to the agent-facing reference in `~/Projects/clash-royale/cr-agent-api-docs/`. The goal is a tight, evidence-backed list of **doc patches worth making** — not a wall of field tables.
 
 Pairs with `log-triage` (runtime health) and `awareness-report` (agent quality). This skill answers: *is our CR API reference keeping up with what Supercell is actually shipping?*
 
 ## Scope
 
-Source of truth for live behavior: `/Users/otto/Projects/elixir-bot/elixir-v51.db` → table `raw_api_payloads`.
+Source of truth for live behavior: `/Users/otto/Projects/clash-royale/elixir-bot/elixir-v51.db` → table `raw_api_payloads`.
 
 Every successful Supercell API call is persisted as a raw payload (hash-deduped) by the hook in `cr_api._persist_raw_payload`. Endpoint labels in `raw_api_payloads`:
 
@@ -111,7 +111,7 @@ Put this in a temporary file or run it inline via `Bash`. Do **not** commit it �
 import json, sqlite3
 from collections import defaultdict
 
-conn = sqlite3.connect("file:/Users/otto/Projects/elixir-bot/elixir-v51.db?mode=ro", uri=True)
+conn = sqlite3.connect("file:/Users/otto/Projects/clash-royale/elixir-bot/elixir-v51.db?mode=ro", uri=True)
 conn.row_factory = sqlite3.Row
 
 def flatten(obj, prefix=""):
@@ -162,7 +162,7 @@ for path, types in sorted(path_types.items()):
         print(f"{path:50s} coverage={coverage:.0%} types={dict(types)}")
 ```
 
-Outputs a list of interesting paths with coverage and observed types. Diff this against `~/Projects/cr-agent-api-docs/players.md`'s field table.
+Outputs a list of interesting paths with coverage and observed types. Diff this against `~/Projects/clash-royale/cr-agent-api-docs/players.md`'s field table.
 
 ## What to look for
 
@@ -216,7 +216,7 @@ Keep the report tight — under ~40 lines when there's little drift. If nothing 
 
 ## Doc-patch style
 
-Match the existing doc voice — terse, table-driven, specific. Look at `~/Projects/cr-agent-api-docs/players.md` as the reference style:
+Match the existing doc voice — terse, table-driven, specific. Look at `~/Projects/clash-royale/cr-agent-api-docs/players.md` as the reference style:
 
 - Field tables use `| Field | Type | Notes |` format.
 - Enum tables show `| ID | Name |` or `| type | Description | Game Modes |`.
@@ -235,7 +235,7 @@ Bad proposed patches look like:
 
 Read-only analysis by default. The skill produces a report and stops.
 
-Only edit `~/Projects/cr-agent-api-docs/*.md` when the user explicitly asks. When they do, apply only the patches they approved from the report — do not batch in cosmetic rewrites.
+Only edit `~/Projects/clash-royale/cr-agent-api-docs/*.md` when the user explicitly asks. When they do, apply only the patches they approved from the report — do not batch in cosmetic rewrites.
 
 ## Arguments
 

@@ -16,7 +16,7 @@
 ## 1. Design principles
 
 1. **One module owns the quirk catalog:** `engine/normalize.py` — pure
-   functions, each rule citing `~/Projects/cr-agent-api-docs/` or the live incident that
+   functions, each rule citing `~/Projects/clash-royale/cr-agent-api-docs/` or the live incident that
    taught it. `cr_knowledge.py` keeps prose game knowledge; normalize.py owns
    the math.
 2. **Normalize at the projection boundary.** L1 (`raw_api_payloads`) stays

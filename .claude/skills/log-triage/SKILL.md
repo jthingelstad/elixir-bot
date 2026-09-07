@@ -55,7 +55,7 @@ Error: in prepare, unable to open database file (14)
 Open it plainly and issue only `SELECT`s:
 
 ```bash
-cd /Users/otto/Projects/elixir-bot && sqlite3 -header elixir-v51.db "SELECT ..."
+cd /Users/otto/Projects/clash-royale/elixir-bot && sqlite3 -header elixir-v51.db "SELECT ..."
 ```
 
 This is safe: in WAL mode readers never block the writer and a `SELECT` takes no write lock. The read-write *handle* only buys the right to create the `-shm` file, which is exactly what was missing. (An earlier version of this skill claimed the opposite and told you to use `mode=ro`; that advice blocked two triage passes before it was measured.)
@@ -101,7 +101,7 @@ Default to the last 24 hours unless the user specifies a window (e.g. "since the
 Run these against the read-only URIs. They are the standing set; widen or narrow the window as the user's scope requires.
 
 ```bash
-cd /Users/otto/Projects/elixir-bot && sqlite3 -header "file:elixir-telemetry.db?mode=ro" "
+cd /Users/otto/Projects/clash-royale/elixir-bot && sqlite3 -header "file:elixir-telemetry.db?mode=ro" "
 SELECT recorded_at, call_site, held_ms, statements, outcome, sites_json
 FROM db_transactions
 WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-1 day')
@@ -109,13 +109,13 @@ ORDER BY held_ms DESC LIMIT 10;"
 ```
 
 ```bash
-cd /Users/otto/Projects/elixir-bot && sqlite3 -header "file:elixir-telemetry.db?mode=ro" "
+cd /Users/otto/Projects/clash-royale/elixir-bot && sqlite3 -header "file:elixir-telemetry.db?mode=ro" "
 SELECT recorded_at, call_site, open_ms FROM db_stalls
 WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-7 day') ORDER BY recorded_at DESC;"
 ```
 
 ```bash
-cd /Users/otto/Projects/elixir-bot && sqlite3 -header "file:elixir-telemetry.db?mode=ro" "
+cd /Users/otto/Projects/clash-royale/elixir-bot && sqlite3 -header "file:elixir-telemetry.db?mode=ro" "
 SELECT workflow, model, count(*) n, substr(max(error),1,80) sample
 FROM llm_calls WHERE ok=0 AND recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-1 day')
 GROUP BY workflow, model ORDER BY n DESC;"
@@ -126,7 +126,7 @@ truncation or a wasted round trip is a *successful* call by `ok`, so these will
 not appear in the query above:
 
 ```bash
-cd /Users/otto/Projects/elixir-bot && sqlite3 -header "file:elixir-telemetry.db?mode=ro" "
+cd /Users/otto/Projects/clash-royale/elixir-bot && sqlite3 -header "file:elixir-telemetry.db?mode=ro" "
 SELECT workflow, stop_reason, max_tokens, effort, attempts, timeout_s, count(*) n
 FROM llm_calls
 WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-1 day')
@@ -139,14 +139,14 @@ GROUP BY workflow, stop_reason, max_tokens, effort, attempts, timeout_s;"
 - A `block_census` showing a `thinking` block but no `text` or `tool_use` is a response that spent its whole budget thinking and returned nothing — a real failure wearing a successful `stop_reason`.
 
 ```bash
-cd /Users/otto/Projects/elixir-bot && sqlite3 -header "file:elixir-telemetry.db?mode=ro" "
+cd /Users/otto/Projects/clash-royale/elixir-bot && sqlite3 -header "file:elixir-telemetry.db?mode=ro" "
 SELECT job, workflow, tier, handled, delivered, count(*) n, substr(max(reason),1,60) reason
 FROM wake_episodes WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-1 day')
 GROUP BY job, workflow, tier, handled, delivered;"
 ```
 
 ```bash
-cd /Users/otto/Projects/elixir-bot && sqlite3 -header elixir-v51.db "
+cd /Users/otto/Projects/clash-royale/elixir-bot && sqlite3 -header elixir-v51.db "
 SELECT job_name, updated_at,
        json_extract(status_json,'\$.failure_count') failures,
        json_extract(status_json,'\$.last_failure_at') last_failure,
@@ -155,7 +155,7 @@ FROM runtime_job_status ORDER BY updated_at DESC;"
 ```
 
 ```bash
-cd /Users/otto/Projects/elixir-bot && sqlite3 -header elixir-v51.db "
+cd /Users/otto/Projects/clash-royale/elixir-bot && sqlite3 -header elixir-v51.db "
 SELECT recorded_at, workflow, failure_type, failure_stage, channel_name, substr(question,1,60) q
 FROM prompt_failures WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%S','now','-2 day')
 ORDER BY recorded_at DESC LIMIT 20;"
