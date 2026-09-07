@@ -751,6 +751,46 @@ def test_eval_ask_elixir_alignment_flags_donation_topic_mismatch(tmp_path):
     assert result["findings"]["topic_mismatches"][0]["domain"] == "donations"
 
 
+def test_eval_ask_elixir_alignment_accepts_war_attendance_answer(tmp_path):
+    """Playing war decks is attendance, not necessarily a deck-building request."""
+    from scripts import eval_ask_elixir_alignment
+
+    db_path = tmp_path / "ask-elixir-war-attendance.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_ask_elixir_alignment_schema(conn)
+        _insert_alignment_message(
+            conn,
+            content="Did I play all of my war decks yesterday?",
+            summary="Did I play all of my war decks yesterday?",
+        )
+        _insert_alignment_message(
+            conn,
+            message_id=2,
+            discord_message_id="5002",
+            author_type="assistant",
+            content=(
+                "Zero missed war days all season — 20 for 20 tracked days, including yesterday."
+            ),
+            summary="Perfect war attendance.",
+            created_at="2026-06-25T17:24:30Z",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = eval_ask_elixir_alignment.evaluate(
+        db_path,
+        since=eval_ask_elixir_alignment._parse_time("2026-06-25T00:00:00Z"),
+        end=eval_ask_elixir_alignment._parse_time("2026-06-26T00:00:00Z"),
+        log_paths=[],
+    )
+
+    assert result["passed"] is True
+    assert result["metrics"]["topic_mismatch_count"]["value"] == 0
+    assert eval_ask_elixir_alignment._domain_for_question("Review my war decks") == "deck"
+
+
 def test_eval_ask_elixir_alignment_flags_not_for_bot_in_open_lane(tmp_path):
     from scripts import eval_ask_elixir_alignment
 

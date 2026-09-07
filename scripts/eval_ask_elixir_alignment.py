@@ -52,6 +52,24 @@ DOMAIN_RULES = {
         "question": ("war champ",),
         "answer": ("war champ", "fame", "standings"),
     },
+    "war_attendance": {
+        "question": (
+            "war attendance",
+            "war participation",
+            "missed war",
+            "play all of my war decks",
+            "played all of my war decks",
+            "use all of my war decks",
+            "used all of my war decks",
+        ),
+        "answer": (
+            "war deck",
+            "war day",
+            "tracked day",
+            "attendance",
+            "battled list",
+        ),
+    },
     "deck": {
         "question": ("deck", "cards in", "card levels"),
         "answer": ("deck", "card"),
