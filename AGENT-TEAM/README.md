@@ -13,7 +13,7 @@ part of the current operating model.
 | Objective | File | Cadence | Primary question |
 |---|---|---|---|
 | **Run Elixir** | `run-elixir.md` | Every twelve hours | Is Elixir healthy, reliable, observable, and spending intentionally? |
-| **Understand Clash Royale** | `understand-clash-royale.md` | Daily | What is changing across the game, competitive scene, and community; what is coming next; and does Elixir understand it? |
+| **Represent the Game** | `represent-the-game.md` | Daily | Can Elixir represent and retrieve what the game actually does, from payload through capability? |
 | **Improve Elixir** | `improve-elixir.md` | Daily; deeper Friday pass | Is Elixir turning play and feedback into better stewardship, memory, and member improvement over time? |
 
 There is no separate Build Manager. Building is a capability of every objective
@@ -31,7 +31,7 @@ retired handoff pipeline.
 | Need | Owner | Decision standard |
 |---|---|---|
 | Better reasoning, learned context, tool choice, and editorial judgment | **Improve Elixir** | Exact natural behavior must improve, not merely an offline score. |
-| External game intelligence and newly useful clan data | **Understand Clash Royale** | Discover and verify web signals, keep upcoming competitions and releases current, then trace relevant facts through game knowledge and capabilities. |
+| Elixir's model of the game, and newly useful clan data | **Represent the Game** | Trace a fact from payload through events, projections, and capabilities. External game intelligence is the domain team's; consume its outlook rather than reproducing it. |
 | Spend, retries, cache efficiency, and model-call reliability | **Run Elixir** | A lower bill is a win only when it preserves the relevant quality outcome. |
 
 Run supplies the canonical cost and reliability evidence. Improve owns quality
@@ -51,7 +51,7 @@ Jamie can start with the outcome instead of choosing a role or preparing a ticke
 - `Resume the active watch for <objective or issue>.`
 
 Choose **Run Elixir** for execution, delivery, persistence, health, recovery, or cost;
-**Understand Clash Royale** for game facts, payload meaning, projections, or source
+**Represent the Game** for game facts, payload meaning, projections, or source
 semantics; and **Improve Elixir** when the sources are sound but behavior, judgment,
 timing, grounding, or usefulness is wrong. Cross-cutting work keeps one originating
 owner through acceptance.
@@ -77,7 +77,7 @@ The project skills are procedures, not roles:
 
 - **Run Elixir:** `.claude/skills/log-triage`, `llm-cost-report`, and
   `new-release`; use `awareness-report` when delivery or liveness is implicated.
-- **Understand Clash Royale:** `.claude/skills/cr-api-doc-audit`; use
+- **Represent the Game:** `.claude/skills/cr-api-doc-audit`; use
   `awareness-report` to see whether current data reaches editorial decisions.
 - **Improve Elixir:** `.claude/skills/awareness-report` plus the repository's
   `scripts/eval_*.py`, feedback, and leader-decision reports.
@@ -96,7 +96,7 @@ Open issues use exactly one ownership label:
 | Label | Owner |
 |---|---|
 | `objective:run` | Run Elixir |
-| `objective:game` | Understand Clash Royale |
+| `objective:game` | Represent the Game |
 | `objective:agent` | Improve Elixir |
 
 `decision` means Jamie must answer before the objective can continue. Descriptive

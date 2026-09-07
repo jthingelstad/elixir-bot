@@ -17,7 +17,7 @@ Read order for every run:
 | Objective | Owner file | Outcome |
 |---|---|---|
 | Run Elixir | `run-elixir.md` | Elixir reliably performs its intended work and its cost is visible and controlled. |
-| Understand Clash Royale | `understand-clash-royale.md` | Elixir's model of the game and clan data remains current, complete, and accurate. |
+| Represent the Game | `represent-the-game.md` | Elixir's model of the game and clan data remains current, complete, and accurate. |
 | Improve Elixir | `improve-elixir.md` | Elixir closes the clan learning loop through trusted stewardship, durable memory, and longitudinal member improvement. |
 
 These are accountability boundaries, not file ownership. If solving an objective

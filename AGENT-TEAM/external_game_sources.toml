@@ -1,6 +1,7 @@
 version = 1
 
-# Read-only research sources for Understand Clash Royale. These are inputs to an
+# Read-only research sources for the domain objective Understand Clash Royale
+# (~/Projects/clash-royale/AGENT-TEAM/). These are inputs to an
 # operator's judgment, never direct instructions for member-facing behavior.
 
 [[source]]

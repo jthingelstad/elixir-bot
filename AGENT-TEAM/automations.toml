@@ -16,9 +16,9 @@ reasoning_effort = "high"
 
 [[automation]]
 id = "elixir-data-analyst"
-name = "Understand Clash Royale"
+name = "Represent the Game"
 objective = "game"
-objective_file = "AGENT-TEAM/understand-clash-royale.md"
+objective_file = "AGENT-TEAM/represent-the-game.md"
 status = "ACTIVE"
 rrule = "RRULE:FREQ=DAILY;BYHOUR=6;BYMINUTE=30"
 model = "gpt-5.6-terra"

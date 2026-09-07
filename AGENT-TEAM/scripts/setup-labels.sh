@@ -21,7 +21,7 @@ remove() {
 
 echo "==> Objective ownership"
 upsert "objective:run"   "D93F0B" "Owned end-to-end by Run Elixir"
-upsert "objective:game"  "1D76DB" "Owned end-to-end by Understand Clash Royale"
+upsert "objective:game"  "1D76DB" "Owned end-to-end by Represent the Game"
 upsert "objective:agent" "FBCA04" "Owned end-to-end by Improve Elixir"
 upsert "decision"        "D4C5F9" "Jamie must answer before this objective continues"
 

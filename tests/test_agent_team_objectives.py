@@ -87,7 +87,7 @@ def test_workflow_pins_acceptance_and_memory_ownership():
     workflow = (ROOT / "AGENT-TEAM/WORKFLOW.md").read_text()
     readme = (ROOT / "AGENT-TEAM/README.md").read_text()
     run = (ROOT / "AGENT-TEAM/run-elixir.md").read_text()
-    game = (ROOT / "AGENT-TEAM/understand-clash-royale.md").read_text()
+    game = (ROOT / "AGENT-TEAM/represent-the-game.md").read_text()
     improve = (ROOT / "AGENT-TEAM/improve-elixir.md").read_text()
 
     assert "Run Elixir owns deployment acceptance" in workflow
@@ -108,7 +108,6 @@ def test_workflow_pins_acceptance_and_memory_ownership():
     assert "intelligence and efficiency baseline" in improve
     assert "insufficient_sample" in improve
     assert "On Friday, also take a small team-health pulse" in improve
-    assert "external_game_pulse.py" in game
     assert "Do not scrape" in game
 
 
@@ -355,7 +354,7 @@ def test_active_error_watch_uses_objective_routing():
 
     assert "**Data Analyst**" not in runbook
     assert "**Lane:**" not in runbook
-    assert "Understand Clash Royale" in runbook
+    assert "Represent the Game" in runbook
     assert "objective:game" in runbook
 
 

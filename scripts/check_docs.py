@@ -43,7 +43,7 @@ RETIRED_GUIDANCE_TERMS = {
         "elixir-v5-events.db",
         "v5-reactive-tick",
     ),
-    "AGENT-TEAM/understand-clash-royale.md": (
+    "AGENT-TEAM/represent-the-game.md": (
         "event_core/",
         "elixir-v5.db",
         "elixir-v5-events.db",

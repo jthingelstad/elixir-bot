@@ -115,7 +115,7 @@ groupable as-is.
      novelty only; `last_seen_at` was dropped with the touch that maintained it.
 
    This alert is deliberately thin — it says *something changed*, nothing more.
-   Record it for **Understand Clash Royale** to characterize on its next daily pass.
+   Record it for **Represent the Game** to characterize on its next daily pass.
    Retain an `objective:game` issue only when the finding needs multiple runs, is
    blocked, or otherwise needs a durable record. Run Elixir works it directly only
    when ingest is actively failing, which is an operational outage.
