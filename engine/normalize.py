@@ -2,7 +2,7 @@
 quirks (docs/reference/v5.1/normalize.md).
 
 Principles: (1) this module owns the quirk catalog — every rule cites
-docs/cr-api-docs/ or the live incident that taught it; (2) normalization
+~/Projects/cr-agent-api-docs/ or the live incident that taught it; (2) normalization
 happens at the projection boundary — the L1 raw log stays byte-true;
 (3) the direct-API tool ANNOTATES (derived fields alongside raw ones,
 via `annotate`) — it never mutates or hides what the API said.
@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-# --- war-week structure (docs/cr-api-docs/models/clans.md; verified against
+# --- war-week structure (~/Projects/cr-agent-api-docs/models/clans.md; verified against
 # 259 archived currentriverrace payloads 2026-07: periodIndex // 7 ==
 # sectionIndex; % 7 gives 0-2 training, 3-6 battle days) -----------------------
 PERIODS_PER_SECTION = 7
@@ -91,7 +91,7 @@ def canonical_utc_timestamp(value) -> str | None:
 
 def card_display_level(level, max_level) -> int | None:
     """API card levels are rarity-relative (1..maxLevel); the in-game display
-    level is `level + (16 - maxLevel)` (docs/cr-api-docs/cards.md — a max-level
+    level is `level + (16 - maxLevel)` (~/Projects/cr-agent-api-docs/cards.md — a max-level
     common is maxLevel 14 shown as 14+2... every rarity tops out displayed as
     16 with evolutions era). Math verbatim from the pre-normalizer
     db._card_level / engine emitter copies this replaced.
@@ -165,7 +165,7 @@ RANKED_LEAGUES = {
     6: "Royal Champion",
     7: "Ultimate Champion",
 }
-LEGACY_POL_LEAGUES = {  # pre-rework Path of Legends scale (docs/cr-api-docs)
+LEGACY_POL_LEAGUES = {  # pre-rework Path of Legends scale (~/Projects/cr-agent-api-docs)
     1: "Challenger I",
     2: "Challenger II",
     3: "Challenger III",
@@ -480,7 +480,7 @@ def game_mode_label_status(mode_name) -> tuple[str, str | None]:
 
 def pol_rank_improved(old_rank, new_rank) -> bool:
     """Path of Legends global ranks are lower-is-better (rank 1 beats 100) —
-    docs/cr-api-docs/leaderboards.md. Newly attained (old None) counts."""
+    ~/Projects/cr-agent-api-docs/leaderboards.md. Newly attained (old None) counts."""
     if not isinstance(new_rank, int):
         return False
     if old_rank is None:

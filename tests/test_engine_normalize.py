@@ -49,7 +49,7 @@ def test_parse_cr_time_rejects_garbage():
 
 
 def test_card_display_level_per_rarity():
-    # docs/cr-api-docs/cards.md: display = level + (16 − maxLevel);
+    # ~/Projects/cr-agent-api-docs/cards.md: display = level + (16 − maxLevel);
     # every rarity's max card displays as 16.
     for max_level in (14, 12, 11, 8, 5, 4):  # common..champion-era values
         assert card_display_level(max_level, max_level) == 16

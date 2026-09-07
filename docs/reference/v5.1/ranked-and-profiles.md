@@ -26,7 +26,7 @@
   `{leagueNumber, trophies, rank}`. Observed live: OllieTurtle current
   league 7 @ 1867, last-season 7 @ 1619, best 10 @ 1896; Fullboat current 4,
   best **10 @ 1596** (a former Ultimate Champion we never celebrate).
-- Semantics (docs/cr-api-docs/game-modes.md): leagues advance in steps 1–10;
+- Semantics (~/Projects/cr-agent-api-docs/game-modes.md): leagues advance in steps 1–10;
   league 10 (Ultimate Champion) uses an open rating (`eloRating` on ranking
   endpoints). `trophies` = ranked rating; `rank` = global leaderboard rank
   (null unless charted). `best…` is a **season-end** snapshot (observed:

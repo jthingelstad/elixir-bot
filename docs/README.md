@@ -8,7 +8,6 @@
 | `reference/v5.1/` | The locked v5.1 build specification plus post-cut design addenda. | Preserve the original rationale; `AGENTS.md` wins when later production decisions supersede it. |
 | `tasks/` | Active long-form designs and product-team reports only. | Move completed work to `archive/`. |
 | `archive/` | Shipped plans, point-in-time assessments, and completed reports. | Frozen provenance; links must still resolve. |
-| `cr-api-docs/` | Vendored Clash Royale API reference with its own tooling. | Update through its own workflow. |
 
 ## Source-of-truth order
 

@@ -500,6 +500,10 @@ The `system_signals` queue was retired in #212 — it had no drain, so nothing i
 
 Elixir also posts a startup check-in to the #elixir-log webhook with the running build hash and a short Clash Royale-flavored line.
 
+**CR API truth lives in `~/Projects/cr-agent-api-docs`** (github `jthingelstad/cr-agent-api-docs`), a standalone repo — NOT vendored here. This repo used to carry a copy at `docs/cr-api-docs/`; it drifted in both directions and was removed 2026-09-07. Real observations had sat stranded in it for months (the fame vs periodPoints distinction, `kingTowerLevel`, seven game mode IDs) before being recovered upstream. Do not re-vendor it.
+
+When drift is characterized, **write the finding into that repo and push** — that is where it becomes durable and reaches the other CR projects. Push only what holds for any caller (endpoint shapes, field semantics, nullability, timing); never clan-specific material or notes about downstream consumers. The repo's build guards observed values, so a mode ID or enum we have seen cannot be silently dropped.
+
 ## Query Layer (Current)
 
 Elixir’s core member/leader questions should be answered from structured capabilities, query helpers, and tools, not prompt reconstruction. Shared domain answers live in `capabilities/`; LLM tools are adapters over those contracts rather than their sole owners. The versioned capability layer covers canonical game truth, clan game modes, live/season war intelligence, facet-based member intelligence, deck and clan-local metagame intelligence, authoritative management decisions, and provisional-versus-durable awards. These contracts feed tools, awareness, reports, memory synthesis, and admin reads. External API refresh remains outside member capabilities, and management capabilities package the engine verdict without rescoring it.

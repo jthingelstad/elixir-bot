@@ -10,7 +10,7 @@ Why this module exists
 The CR API cannot tell you it is Colosseum week during that week's PRACTICE days:
 ``periodType`` only flips to ``colosseum`` once battle days begin, and a
 Colosseum-week practice day is byte-for-byte indistinguishable from a normal-week
-practice day (verified by payload diff; see ``docs/cr-api-docs/clans.md``). On
+practice day (verified by payload diff; see ``~/Projects/cr-agent-api-docs/clans.md``). On
 2026-07-27 that gap produced clan-war advice to add boat defenses during a
 Colosseum week, when the boat is parked and no defenses exist.
 

@@ -134,7 +134,7 @@ A card can hold **both** an Evo and a Hero form — Knight and Wizard appear at
   new leaf module (`engine/deck_hash.py`), shared by the hash, the views, and
   Features 2–3. Treat `>=2` as `hero` until the level-3 semantics are confirmed.
 - **Docs debt**: this `evolution_level` overload (2 = Hero) is an undocumented
-  CR API semantic — flag it for `docs/cr-api-docs/` via the cr-api-doc-audit
+  CR API semantic — flag it for `~/Projects/cr-agent-api-docs` via the cr-api-doc-audit
   skill when this ships.
 
 ### Metrics

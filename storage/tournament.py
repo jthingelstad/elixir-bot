@@ -51,7 +51,7 @@ _DECK_SELECTION_LABELS = {
 # Player-facing CR tournament game-mode names by API id. The mapping is
 # empirical — observed ids carry over, but the API does not publish a stable
 # public table — so build it opportunistically as we host or observe each
-# mode (see docs/cr-api-docs/tournaments.md for the documented ids). We keep
+# mode (see ~/Projects/cr-agent-api-docs/tournaments.md for the documented ids). We keep
 # the lookup at this seam, the signal-emission boundary, so every emitted
 # signal carries the player-facing name regardless of whether the LLM ever
 # sees the raw id.
