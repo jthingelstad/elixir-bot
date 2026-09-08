@@ -28,7 +28,13 @@ MCP_URL = "https://elixir.poapkings.com/mcp"
 # The contract generation this integration was built against. A different
 # MAJOR.MINOR is worth a loud log line (the server renames freely in
 # alpha); calls still proceed — the fallback path covers real breakage.
-PINNED_CONTRACT = "0.19"
+#
+# Bumped 0.19 -> 0.30 on 2026-09-08 after eleven contract versions of warning
+# on every boot. A pin that is always wrong stops being a signal, which is the
+# exact drift this pin exists to catch. The four tools this client calls
+# (players_timeline, battles_performance, war_history, clans_standings) are
+# unchanged across that span; the pin was stale, not the integration.
+PINNED_CONTRACT = "0.30"
 _TIMEOUT_S = 15
 
 _id_lock = threading.Lock()

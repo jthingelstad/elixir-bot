@@ -584,12 +584,24 @@ prompts don't change).
   (`Authorization: Bearer svt_...` from `.env` ELIXIR_MCP_TOKEN),
   issued/revoked from the Elixir MCP Admin page; calls are audited
   there as `svc:elixir-bot`.
-- 22 tools, DOMAIN-PREFIXED since contract 0.9.0: players_*, battles_*
-  (battles_query/battles_performance/battles_decks/battles_cards/
-  battles_compare), clans_roster, clans_standings, war_current,
-  war_history, cards_catalog, live_fetch, elixir_* (service). Card
-  levels are pre-normalized to the in-game 1-16 scale. The client pins
-  contract 0.10 and logs loudly on drift.
+- **37 tools at contract 0.30** (2026-09-08), domain-prefixed since 0.9.0:
+  players_*, battles_* (query/performance/decks/cards/compare/levels/trends/
+  meta_decks/meta_cards), clans_roster, clans_standings, clans_pilot_scores,
+  war_current, war_history, war_rivals, game_clock, cards_catalog,
+  collections_*, live_fetch, elixir_* (service). Card levels are
+  pre-normalized to the in-game 1-16 scale. The client pins the contract and
+  logs loudly on drift — **check `elixir_changelog(since=...)` rather than
+  trusting this list**, which is a snapshot and will go stale the way the
+  previous one did (it said "22 tools, contract 0.10" for eleven versions).
+- **game_clock** answers what season and war day it is with no clan and no
+  player. Prefer it over deriving the calendar from a river race.
+- **elixir-bot still authenticates as Jamie's PERSON account**, deliberately,
+  while every other consumer has moved to its own principal. Elixir MCP now has
+  three kinds — person / agent / integration — and a clan agent gets its own
+  identity, key, event cursor and feedback inbox (elixir-mcp-discord runs as
+  one). Migrating elixir-bot is additive and unstarted: create an agent, add
+  the clan, swap ELIXIR_MCP_TOKEN and the URL. Nothing moves, because reads are
+  universal and the claims stay on Jamie's account.
 - Battle-intelligence views (archetypes, player-adjusted lift,
   closeness) deliberately STAY on local enrichment tables — analysis is
   elixir-bot's, plumbing moves. The local recorder keeps running until a
