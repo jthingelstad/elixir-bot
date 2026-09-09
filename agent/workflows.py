@@ -458,15 +458,33 @@ def synthesize_leader_action_feedback(context: dict):
         "decision standards, and follow-up expectations.\n\n"
         f"```json\n{json.dumps(public_context, indent=2, default=str)}\n```\n"
     )
-    return _chat_with_tools(
-        _leader_action_feedback_system(),
-        user_msg,
-        workflow="leader_action_feedback",
-        allowed_tools=TOOLSETS_BY_WORKFLOW["leader_action_feedback"],
-        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["leader_action_feedback"],
-        strict_json=True,
-        return_errors=True,
+
+    def _synthesize(message, *, max_tokens=None):
+        return _chat_with_tools(
+            _leader_action_feedback_system(),
+            message,
+            workflow="leader_action_feedback",
+            allowed_tools=TOOLSETS_BY_WORKFLOW["leader_action_feedback"],
+            response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["leader_action_feedback"],
+            strict_json=True,
+            return_errors=True,
+            max_tokens=max_tokens,
+        )
+
+    result = _synthesize(user_msg)
+    if not _is_truncation_error(result):
+        return result
+
+    log.warning(
+        "leader_action_feedback truncated (max_tokens=2048, phase=%s); retrying once with headroom",
+        result["_error"].get("phase"),
     )
+    retry_msg = user_msg + (
+        "\n\nYour previous attempt reached the response limit and was discarded. "
+        "Return a concise but complete profile with every required JSON field, "
+        "and finish the JSON object."
+    )
+    return _synthesize(retry_msg, max_tokens=4096)
 
 
 def run_reflection(context: dict):

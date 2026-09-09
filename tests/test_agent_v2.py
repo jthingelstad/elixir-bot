@@ -1777,6 +1777,38 @@ def test_synthesize_leader_action_feedback_uses_strict_profile_schema():
     assert captured["kwargs"]["strict_json"] is True
 
 
+def test_synthesize_leader_action_feedback_retries_a_truncated_profile():
+    calls = []
+    completed = {
+        "action_type": "welcome_relay",
+        "sample_count": 1,
+        "summary": "Keep welcomes short.",
+        "guidance": ["Use native clan-chat phrasing."],
+        "evidence": [{"action_id": 12, "lesson": "Leader shortened the welcome."}],
+    }
+    responses = [
+        {"_error": {"kind": "truncation", "phase": "initial_response"}},
+        completed,
+    ]
+
+    def fake_chat_with_tools(_system_prompt, user_message, **kwargs):
+        calls.append((user_message, kwargs))
+        return responses.pop(0)
+
+    with patch("elixir_agent._chat_with_tools", side_effect=fake_chat_with_tools):
+        result = elixir_agent.synthesize_leader_action_feedback(
+            {
+                "action_type": "welcome_relay",
+                "recent_actions": [{"action_id": 12, "decision_note": "shortened"}],
+            }
+        )
+
+    assert result == completed
+    assert len(calls) == 2
+    assert "previous attempt reached the response limit" in calls[1][0]
+    assert calls[1][1]["max_tokens"] == 4096
+
+
 def test_generate_clan_chat_copy_uses_dedicated_no_tool_workflow():
     captured = {}
 

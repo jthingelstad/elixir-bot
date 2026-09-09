@@ -28,6 +28,7 @@ ALLOWED_EXPLICIT = {
     # ceiling — the override is the entire point of the retry.
     ("agent/workflows.py", "awareness"),
     ("agent/workflows.py", "deck_review"),
+    ("agent/workflows.py", "leader_action_feedback"),
     # Shared helpers and explicit retries can override the registry ceiling.
     ("agent/workflows.py", None),
     ("agent/chat.py", None),
