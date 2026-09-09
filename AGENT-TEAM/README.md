@@ -13,8 +13,8 @@ part of the current operating model.
 | Objective | File | Cadence | Primary question |
 |---|---|---|---|
 | **Run Elixir** | `run-elixir.md` | Every twelve hours | Is Elixir healthy, reliable, observable, and spending intentionally? |
-| **Represent the Game** | `represent-the-game.md` | Daily | Can Elixir represent and retrieve what the game actually does, from payload through capability? |
-| **Improve Elixir** | `improve-elixir.md` | Daily; deeper Friday pass | Is Elixir turning play and feedback into better stewardship, memory, and member improvement over time? |
+| **Represent the Game** | `represent-the-game.md` | Daily 07:30 | Can Elixir represent and retrieve what the game actually does, from payload through capability? |
+| **Improve Elixir** | `improve-elixir.md` | Weekdays 17:45; Saturday and Sunday 07:00 | Is Elixir turning play and feedback into better stewardship, memory, and member improvement over time? |
 
 There is no separate Build Manager. Building is a capability of every objective
 owner. There is no Product Manager intermediary: new member-visible direction goes
@@ -181,3 +181,14 @@ preserved; their display names and role files now express the objectives.
 Every objective serves one end: help POAP KINGS become a stronger, more connected,
 more memorable clan. Prefer signal over noise, facts over assumptions, and a source
 fix over a permanent warning.
+
+## Calendar implementation
+
+All times above are America/Chicago. Scheduled starts can run a minute or two
+late because the app adds jitter. Autonomous checks can finish outside Jamie's
+project windows; nonurgent decisions wait for early morning or early evening.
+The manifest records the installed schedule and prompt, including the explicit
+repository directory when the app launches from Projects.
+
+Entries with `schedule_of` are extra time slots for the same owner. They must
+use the original automation's memory and checkout lease, not a separate history.

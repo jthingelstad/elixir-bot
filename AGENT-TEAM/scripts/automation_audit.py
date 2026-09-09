@@ -26,6 +26,8 @@ VALID_STATUSES = {"ACTIVE", "PAUSED"}
 
 
 def prompt(entry: dict, repo: Path = REPO) -> str:
+    if "prompt" in entry:
+        return entry["prompt"]
     paths = [
         repo / "AGENT-TEAM/WORKFLOW.md",
         repo / "AGENT-TEAM/README.md",
@@ -69,12 +71,22 @@ def validate(plan: dict, repo: Path = REPO) -> list[str]:
         failures.append("registry must contain at least one automation")
         return failures
     ids = [entry.get("id") for entry in entries]
-    objectives = [entry.get("objective") for entry in entries]
+    objectives = [entry.get("objective") for entry in entries if not entry.get("schedule_of")]
     if len(ids) != len(set(ids)):
         failures.append("automation ids must be unique")
     if len(objectives) != len(set(objectives)):
         failures.append("objectives must have exactly one owner")
+    by_id = {entry.get("id"): entry for entry in entries}
     for entry in entries:
+        if entry.get("schedule_of"):
+            owner = by_id.get(entry["schedule_of"], {})
+            if (
+                not owner
+                or owner.get("schedule_of")
+                or owner.get("objective") != entry.get("objective")
+                or owner.get("objective_file") != entry.get("objective_file")
+            ):
+                failures.append(f"{entry.get('id')}: schedule_of must name the same primary owner")
         missing = sorted(REQUIRED_KEYS - entry.keys())
         if missing:
             failures.append(f"{entry.get('id', '(unknown)')}: missing {', '.join(missing)}")
@@ -97,7 +109,7 @@ def expected(entry: dict, repo: Path = REPO) -> dict:
         "model": entry["model"],
         "reasoning_effort": entry["reasoning_effort"],
         "execution_environment": "local",
-        "cwds": [str(repo)],
+        "cwds": [str((repo / entry.get("launch_cwd", ".")).resolve())],
     }
 
 
@@ -140,7 +152,10 @@ def main() -> int:
         successes: list[str] = []
         failures = validate(plan)
         if not failures:
-            successes.append(f"OK  registry  {len(plan['automation'])} objective owners")
+            successes.append(
+                f"OK  registry  {len({entry['objective'] for entry in plan['automation']})} "
+                "objective owners"
+            )
     else:
         successes, failures = audit(plan)
     for success in successes:

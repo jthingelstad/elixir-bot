@@ -34,7 +34,13 @@ def memory_path(
 ) -> Path:
     if automation_id not in registered_ids(plan_path):
         raise ValueError(f"unknown automation id: {automation_id}")
-    return codex_home(environ) / "automations" / automation_id / "memory.md"
+    entries = tomllib.loads(plan_path.read_text()).get("automation", [])
+    entry = next(item for item in entries if item["id"] == automation_id)
+    owner_id = entry.get("schedule_of", automation_id)
+    owner = next((item for item in entries if item["id"] == owner_id), None)
+    if owner is None or owner.get("schedule_of"):
+        raise ValueError(f"invalid primary automation owner: {owner_id}")
+    return codex_home(environ) / "automations" / owner_id / "memory.md"
 
 
 def main() -> int:

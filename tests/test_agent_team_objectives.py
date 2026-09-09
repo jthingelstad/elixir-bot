@@ -60,7 +60,7 @@ def test_registry_has_exactly_three_active_objective_owners():
 
     assert plan["version"] == 2
     assert plan["repo"] == "."
-    assert len(entries) == 3
+    assert len([entry for entry in entries if not entry.get("schedule_of")]) == 3
     assert {entry["objective"] for entry in entries} == {"run", "game", "agent"}
     assert all(entry["status"] == "ACTIVE" for entry in entries)
     assert all((ROOT / entry["objective_file"]).is_file() for entry in entries)
@@ -362,3 +362,34 @@ def test_retired_dispatcher_files_are_absent():
     assert not (ROOT / "AGENT-TEAM/dispatch.toml").exists()
     assert not (ROOT / "AGENT-TEAM/dispatcher.md").exists()
     assert not (ROOT / "AGENT-TEAM/scripts/dispatcher.py").exists()
+
+
+def test_additional_time_slots_preserve_one_owner_and_explicit_launch_contract():
+    from copy import deepcopy
+
+    plan = tomllib.loads((ROOT / "AGENT-TEAM/automations.toml").read_text())
+    owner = next(entry for entry in plan["automation"] if not entry.get("schedule_of"))
+    alias = dict(owner, id="test-additional-slot", schedule_of=owner["id"])
+    candidate = deepcopy(plan)
+    candidate["automation"].append(alias)
+    assert automation_audit.validate(candidate) == []
+    alias["schedule_of"] = "missing-owner"
+    assert any("same primary owner" in error for error in automation_audit.validate(candidate))
+    alias["schedule_of"] = owner["id"]
+    alias["objective_file"] = "AGENT-TEAM/README.md"
+    assert any("same primary owner" in error for error in automation_audit.validate(candidate))
+    alias["objective_file"] = owner["objective_file"]
+    alias.pop("schedule_of")
+    assert "objectives must have exactly one owner" in automation_audit.validate(candidate)
+    override = dict(
+        owner, prompt="Calendar check first; preserve the due-day boundary.", launch_cwd=".."
+    )
+    expected = automation_audit.expected(override)
+    assert expected["prompt"] == override["prompt"]
+    assert expected["cwds"] == [str(ROOT.parent)]
+
+
+def test_weekend_slot_resolves_the_primary_objective_memory():
+    assert automation_memory.memory_path(
+        "elixir-quality-manager-weekend"
+    ) == automation_memory.memory_path("elixir-quality-manager")

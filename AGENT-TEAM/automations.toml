@@ -2,7 +2,12 @@ version = 2
 repo = "."
 timezone = "America/Chicago"
 
-# Stable ids preserve Codex task history while names express durable objectives.
+# Approved September 9, 2026. Calendar starts use local Chicago time.
+# schedule_of entries share the original objective, lease, and automation memory.
+# Interval activities use an initial prompt date check because the installed app
+# miscalculates interval timezones. Preserve that check when reinstalling.
+# launch_cwd records the app launch directory relative to this checkout.
+# Event-driven follow-ups remain explicit starts; these are calendar schedules.
 
 [[automation]]
 id = "elixir-operations-manager"
@@ -13,6 +18,9 @@ status = "ACTIVE"
 rrule = "RRULE:FREQ=HOURLY;INTERVAL=12;BYMINUTE=10"
 model = "gpt-5.6-terra"
 reasoning_effort = "high"
+execution_environment = "local"
+launch_cwd = "../.."
+prompt = "Use `/Users/otto/Projects/clash-royale/elixir-bot` as the working directory for this scheduled activity. Before running commands, change to that directory and read its `AGENTS.md` plus any applicable parent instructions. Follow the project instructions already loaded by Codex. Read `/Users/otto/Projects/clash-royale/elixir-bot/AGENT-TEAM/WORKFLOW.md`, `/Users/otto/Projects/clash-royale/elixir-bot/AGENT-TEAM/README.md`, `/Users/otto/Projects/clash-royale/elixir-bot/AGENT-TEAM/run-elixir.md` completely, then pursue the `run` objective exactly as written. Measure current evidence before changing anything. Own a clear gap through source fix, regression coverage, verification, deployment or restart when required, and natural acceptance. Use issues only for multi-run work, external blockers, durable audits, or Jamie decisions. Run preflight first; acquire the objective lease only before mutation; never publish pre-existing work; preserve human and privacy boundaries; and end with a clean repository. Keep automation memory to Current state, Active watches, and one replace-in-place Latest run. Resolve the memory path with `uv run --locked python AGENT-TEAM/scripts/automation_memory.py <automation-id>` so an unset CODEX_HOME cannot lose the state."
 
 [[automation]]
 id = "elixir-data-analyst"
@@ -20,10 +28,12 @@ name = "Represent the Game"
 objective = "game"
 objective_file = "AGENT-TEAM/represent-the-game.md"
 status = "ACTIVE"
-# Runs after the domain outlook (06:00) it consumes.
-rrule = "RRULE:FREQ=DAILY;BYHOUR=7;BYMINUTE=0"
-model = "gpt-5.6-terra"
+rrule = "RRULE:FREQ=DAILY;BYHOUR=7;BYMINUTE=30"
+model = "gpt-6-astra"
 reasoning_effort = "high"
+execution_environment = "local"
+launch_cwd = "../.."
+prompt = "Use `/Users/otto/Projects/clash-royale/elixir-bot` as the working directory for this scheduled activity. Before running commands, change to that directory and read its `AGENTS.md` plus any applicable parent instructions. Follow the project instructions already loaded by Codex. Read `/Users/otto/Projects/clash-royale/elixir-bot/AGENT-TEAM/WORKFLOW.md`, `/Users/otto/Projects/clash-royale/elixir-bot/AGENT-TEAM/README.md`, `/Users/otto/Projects/clash-royale/elixir-bot/AGENT-TEAM/represent-the-game.md` completely, then pursue the `game` objective exactly as written. Measure current evidence before changing anything. Own a clear gap through source fix, regression coverage, verification, deployment or restart when required, and natural acceptance. Use issues only for multi-run work, external blockers, durable audits, or Jamie decisions. Run preflight first; acquire the objective lease only before mutation; never publish pre-existing work; preserve human and privacy boundaries; and end with a clean repository. Keep automation memory to Current state, Active watches, and one replace-in-place Latest run. Resolve the memory path with `uv run --locked python AGENT-TEAM/scripts/automation_memory.py <automation-id>` so an unset CODEX_HOME cannot lose the state."
 
 [[automation]]
 id = "elixir-quality-manager"
@@ -31,6 +41,23 @@ name = "Improve Elixir"
 objective = "agent"
 objective_file = "AGENT-TEAM/improve-elixir.md"
 status = "ACTIVE"
-rrule = "RRULE:FREQ=DAILY;BYHOUR=8;BYMINUTE=0"
+rrule = "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=17;BYMINUTE=45"
 model = "gpt-5.6-sol"
 reasoning_effort = "xhigh"
+execution_environment = "local"
+launch_cwd = "../.."
+prompt = "Use `/Users/otto/Projects/clash-royale/elixir-bot` as the working directory for this scheduled activity. Before running commands, change to that directory and read its `AGENTS.md` plus any applicable parent instructions. Follow the project instructions already loaded by Codex. Read `/Users/otto/Projects/clash-royale/elixir-bot/AGENT-TEAM/WORKFLOW.md`, `/Users/otto/Projects/clash-royale/elixir-bot/AGENT-TEAM/README.md`, `/Users/otto/Projects/clash-royale/elixir-bot/AGENT-TEAM/improve-elixir.md` completely, then pursue the `agent` objective exactly as written. Measure current evidence before changing anything. Own a clear gap through source fix, regression coverage, verification, deployment or restart when required, and natural acceptance. Use issues only for multi-run work, external blockers, durable audits, or Jamie decisions. Run preflight first; acquire the objective lease only before mutation; never publish pre-existing work; preserve human and privacy boundaries; and end with a clean repository. Keep automation memory to Current state, Active watches, and one replace-in-place Latest run. Resolve the memory path with `uv run --locked python AGENT-TEAM/scripts/automation_memory.py <automation-id>` so an unset CODEX_HOME cannot lose the state."
+
+[[automation]]
+id = "elixir-quality-manager-weekend"
+name = "Improve Elixir (weekend)"
+objective = "agent"
+objective_file = "AGENT-TEAM/improve-elixir.md"
+schedule_of = "elixir-quality-manager"
+status = "ACTIVE"
+rrule = "RRULE:FREQ=WEEKLY;BYDAY=SA,SU;BYHOUR=7;BYMINUTE=0"
+model = "gpt-5.6-sol"
+reasoning_effort = "xhigh"
+execution_environment = "local"
+launch_cwd = "../.."
+prompt = "This is the weekend schedule for the same objective as elixir-quality-manager. Use its existing checkout lease and read/update its canonical automation memory at `/Users/otto/.codex/automations/elixir-quality-manager/memory.md`; do not create a separate objective or memory history. Use `/Users/otto/Projects/clash-royale/elixir-bot` as the working directory for this scheduled activity. Before running commands, change to that directory and read its `AGENTS.md` plus any applicable parent instructions. Follow the project instructions already loaded by Codex. Read `/Users/otto/Projects/clash-royale/elixir-bot/AGENT-TEAM/WORKFLOW.md`, `/Users/otto/Projects/clash-royale/elixir-bot/AGENT-TEAM/README.md`, `/Users/otto/Projects/clash-royale/elixir-bot/AGENT-TEAM/improve-elixir.md` completely, then pursue the `agent` objective exactly as written. Measure current evidence before changing anything. Own a clear gap through source fix, regression coverage, verification, deployment or restart when required, and natural acceptance. Use issues only for multi-run work, external blockers, durable audits, or Jamie decisions. Run preflight first; acquire the objective lease only before mutation; never publish pre-existing work; preserve human and privacy boundaries; and end with a clean repository. Keep automation memory to Current state, Active watches, and one replace-in-place Latest run. Resolve the memory path with `uv run --locked python AGENT-TEAM/scripts/automation_memory.py <automation-id>` so an unset CODEX_HOME cannot lose the state."
