@@ -63,9 +63,11 @@ BROAD_EXCEPTION_BASELINE = {
     # even with no database; an unavailable floor renders as "read it live"
     # rather than a guessed number.
     "prompts.py": 1,
-    # 38 -> 39 (2026-08-28): the v39 ladder rung, which rolls back and re-raises
-    # exactly like every rung before it.
-    "db/schema.py": 39,  # +1: v39 migration rollback/re-raise (same pattern as v2-v38)
+    # v40 (2026-09-08): migration rollback/re-raise, as in preceding rungs.
+    "db/schema.py": 40,
+    # A failed event snapshot must undo its partial writes before the ingress
+    # handles the error. Roll back to the savepoint and re-raise every failure.
+    "storage/game_mode_contexts.py": 1,
     "engine/chronicles.py": 1,
     "engine/emitters/clan.py": 2,
     "engine/game_check.py": 1,

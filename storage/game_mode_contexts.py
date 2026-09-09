@@ -7,6 +7,7 @@ import sqlite3
 from typing import Optional
 
 from db import _json_or_none, _rowdicts, _utcnow, managed_connection
+from db._event_snapshot import event_snapshot_items, event_source_key
 
 
 def _context_source_key(value, fallback: str) -> str:
@@ -26,6 +27,7 @@ def _upsert_context(
     leaderboard_id: int | None = None,
     source_endpoint: str | None = None,
     raw=None,
+    is_current: bool = False,
 ) -> None:
     now = _utcnow()
     raw_json = _json_or_none(raw)
@@ -33,9 +35,9 @@ def _upsert_context(
         """
         INSERT INTO game_mode_contexts (
             context_type, source_key, display_name, game_mode_id, game_mode_name,
-            event_tag, leaderboard_id, source_endpoint, first_seen_at, last_seen_at, raw_json
+            event_tag, leaderboard_id, source_endpoint, first_seen_at, last_seen_at, raw_json, is_current
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(context_type, source_key) DO UPDATE SET
             display_name = excluded.display_name,
             game_mode_id = excluded.game_mode_id,
@@ -44,7 +46,8 @@ def _upsert_context(
             leaderboard_id = excluded.leaderboard_id,
             source_endpoint = excluded.source_endpoint,
             last_seen_at = excluded.last_seen_at,
-            raw_json = excluded.raw_json
+            raw_json = excluded.raw_json,
+            is_current = excluded.is_current
         """,
         (
             context_type,
@@ -58,6 +61,7 @@ def _upsert_context(
             now,
             now,
             raw_json,
+            int(is_current),
         ),
     )
 
@@ -66,34 +70,34 @@ def _upsert_context(
 def upsert_game_mode_contexts_from_events(
     payload, conn: Optional[sqlite3.Connection] = None
 ) -> int:
-    items = (
-        payload
-        if isinstance(payload, list)
-        else (payload or {}).get("items")
-        if isinstance(payload, dict)
-        else []
-    )
-    count = 0
-    for index, event in enumerate(items or []):
-        if not isinstance(event, dict):
-            continue
-        event_tag = event.get("eventTag")
-        title = event.get("title") or event.get("name")
-        game_mode = event.get("gameMode") if isinstance(event.get("gameMode"), dict) else {}
-        source_key = _context_source_key(event_tag or title, f"event:{index}")
-        _upsert_context(
-            conn,
-            context_type="event",
-            source_key=source_key,
-            display_name=title,
-            game_mode_id=game_mode.get("id") if game_mode else None,
-            game_mode_name=game_mode.get("name") if game_mode else None,
-            event_tag=event_tag,
-            source_endpoint="events",
-            raw=event,
-        )
-        count += 1
-    return count
+    items = event_snapshot_items(payload)
+    if items is None:
+        return 0
+    # Keep the caller's transaction intact, but never commit a partial snapshot
+    # if one context fails after the previous current set has been cleared.
+    conn.execute("SAVEPOINT event_snapshot")
+    try:
+        conn.execute("UPDATE game_mode_contexts SET is_current = 0 WHERE context_type = 'event'")
+        for event in items:
+            game_mode = event.get("gameMode") or {}
+            _upsert_context(
+                conn,
+                context_type="event",
+                source_key=event_source_key(event),
+                display_name=event.get("title") or event.get("name"),
+                game_mode_id=game_mode.get("id"),
+                game_mode_name=game_mode.get("name"),
+                event_tag=event.get("eventTag"),
+                source_endpoint="events",
+                raw=event,
+                is_current=True,
+            )
+    except Exception:
+        conn.execute("ROLLBACK TO event_snapshot")
+        conn.execute("RELEASE event_snapshot")
+        raise
+    conn.execute("RELEASE event_snapshot")
+    return len(items)
 
 
 @managed_connection
@@ -125,12 +129,16 @@ def list_game_mode_contexts(
     context_type: str | None = None,
     limit: int = 25,
     conn: Optional[sqlite3.Connection] = None,
+    *,
+    current_only: bool = False,
 ) -> list[dict]:
     where = []
     params = []
     if context_type:
         where.append("context_type = ?")
         params.append(context_type)
+    if current_only:
+        where.append("is_current = 1")
     sql = (
         "SELECT context_type, source_key, display_name, game_mode_id, game_mode_name, "
         "event_tag, leaderboard_id, source_endpoint, first_seen_at, last_seen_at, raw_json "

@@ -100,8 +100,10 @@ def _get_clan_game_modes(
         mode["top_members"] = list(leaders.get(label) or [])
         modes[group.get("mode_group") or "other"] = mode
 
-    total_battles = sum(int(mode.get("battles") or 0) for mode in modes.values())
-    total_event_battles = int((modes.get("special_event") or {}).get("battles") or 0)
+    totals = summary.get("event_totals") or {}
+    total_battles = int(totals.get("clan_battles") or 0)
+    total_event_battles = int(totals.get("event_battles") or 0)
+    total_special_battles = int(totals.get("special_event_battles") or 0)
     event_leaders: dict[tuple, list[dict]] = {}
     for member in summary.get("event_top_members") or []:
         event_leaders.setdefault(_event_identity(member), []).append(member)
@@ -113,8 +115,13 @@ def _get_clan_game_modes(
         event["share_of_clan_battles"] = (
             round(battles / total_battles, 4) if total_battles else None
         )
-        event["share_of_special_event_battles"] = (
+        event["share_of_event_battles"] = (
             round(battles / total_event_battles, 4) if total_event_battles else None
+        )
+        event["share_of_special_event_battles"] = (
+            round(int(event.get("special_event_battles") or 0) / total_special_battles, 4)
+            if total_special_battles
+            else None
         )
         event["top_members"] = list(event_leaders.get(_event_identity(event)) or [])[:top_members]
         event_activity.append(event)

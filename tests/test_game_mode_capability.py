@@ -186,3 +186,62 @@ def test_capability_keeps_special_events_distinct_with_per_event_context(engine_
     assert events["#EVENT_B"]["top_members"][0]["member_ref"] == "Bravo"
     assert events["#EVENT_B"]["previous_window_battles"] == 0
     assert events["#EVENT_B"]["new_in_window"] is True
+
+
+def test_tagged_2v2_events_keep_identity_mode_and_unlimited_denominators(engine_conn):
+    _seed_player(engine_conn, "#A", "Alpha", 1, 100)
+    _seed_player(engine_conn, "#B", "Bravo", 1, 100)
+    db.upsert_game_mode_contexts_from_events(
+        [
+            {
+                "eventTag": "#LEAGUE",
+                "title": "2v2 League",
+                "gameMode": {"id": 72000014, "name": "TeamVsTeam"},
+            },
+            {"eventTag": "#CLASSIC", "title": "Classic 2v2"},
+            {"eventTag": "#DRAFT", "title": "Draft Festival"},
+        ],
+        conn=engine_conn,
+    )
+    for key, player, group, tag in [
+        ("league-a", "#A", "two_v_two", "#LEAGUE"),
+        ("league-b", "#B", "two_v_two", "#LEAGUE"),
+        ("classic", "#B", "two_v_two", "#CLASSIC"),
+        ("unknown", "#A", "two_v_two", "#UNKNOWN"),
+        ("untagged", "#A", "two_v_two", None),
+        ("draft", "#A", "special_event", "#DRAFT"),
+        ("ladder", "#A", "ladder", None),
+    ]:
+        _seed_battle(engine_conn, key, player, group)
+        engine_conn.execute(
+            "UPDATE battle_events SET event_tag=?, is_special_event=?, game_mode_id=?, game_mode_name=? WHERE dedup_key=?",
+            (
+                tag,
+                int(group == "special_event"),
+                72000014 if group == "two_v_two" else 999,
+                "TeamVsTeam" if group == "two_v_two" else "Other",
+                key,
+            ),
+        )
+    result = get_clan_game_modes(days=7, limit=50, top_members=1, conn=engine_conn)
+    events = {e["event_tag"]: e for e in result["events"]["activity"]}
+    assert set(events) == {"#LEAGUE", "#CLASSIC", "#UNKNOWN", "#DRAFT"}
+    league = events["#LEAGUE"]
+    assert league["event_name"] == "2v2 League"
+    assert league["mode_group"] == "two_v_two"
+    assert league["battles"] == league["members_active"] == 2
+    assert league["top_members"][0]["event_battles"] == 1
+    assert league["share_of_clan_battles"] == 0.2857
+    assert league["share_of_event_battles"] == 0.4
+    assert league["share_of_special_event_battles"] == 0
+    assert events["#DRAFT"]["share_of_special_event_battles"] == 1
+    assert events["#UNKNOWN"].get("event_name") is None
+    assert result["modes"]["two_v_two"]["battles"] == 5
+    participants = [p for p in result["events"]["participation"] if p["event_tag"] == "#LEAGUE"]
+    assert sum(p["event_battles"] for p in participants) == 2
+    for filtered in (None, "special_event"):
+        limited = get_clan_game_modes(days=7, limit=1, mode_group=filtered, conn=engine_conn)
+        assert limited["events"]["activity"][0]["share_of_event_battles"] == 0.4
+        assert limited["events"]["activity"][0]["share_of_clan_battles"] == 0.2857
+        if filtered:
+            assert {r["event_tag"] for r in limited["game_modes"]} == {"#DRAFT"}

@@ -13,8 +13,8 @@ import os
 import re
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 39
-EXPECTED_TABLE_COUNT = 66  # v39 adds shared active-focus fields to member_dossiers
+CURRENT_SCHEMA_VERSION = 40
+EXPECTED_TABLE_COUNT = 66  # v40 adds current event membership to game_mode_contexts
 
 
 def initialize_empty_database(
@@ -274,6 +274,7 @@ REQUIRED_SCHEMA = {
     "pol_season_results": {"pol_season_id", "player_tag"},
     "memories": {"memory_id", "kind", "scope"},
     "memory_tags": {"memory_id", "tag"},
+    "game_mode_contexts": {"context_type", "source_key", "is_current"},
     "raw_api_payloads": {
         "payload_id",
         "endpoint",
@@ -1996,6 +1997,14 @@ def apply_schema_migrations(conn: sqlite3.Connection) -> None:
         except Exception:
             conn.rollback()
             raise
+    if version < 40:
+        try:
+            _apply_v40(conn)
+            conn.execute("PRAGMA user_version = 40")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     assert_current_schema(conn)
 
 
@@ -2357,6 +2366,40 @@ def _apply_v37(conn: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v40(conn: sqlite3.Connection) -> None:
+    """Separate current event membership from durable historical labels."""
+    if "is_current" in _columns(conn, "game_mode_contexts"):
+        return
+    from db._event_snapshot import event_snapshot_items, event_source_key
+
+    conn.execute(
+        "ALTER TABLE game_mode_contexts ADD COLUMN is_current INTEGER NOT NULL "
+        "DEFAULT 0 CHECK (is_current IN (0, 1))"
+    )
+    # Receipt order matters: a response may repeat an older deduplicated body.
+    # This one-time seed is retained in the projection after payload expiry.
+    rows = conn.execute(
+        "SELECT p.payload_json FROM api_observation_receipts r "
+        "LEFT JOIN raw_api_payloads p ON p.payload_id = r.payload_id "
+        "WHERE r.endpoint = 'events' ORDER BY r.receipt_id DESC"
+    )
+    for row in rows:
+        if row[0] is None:
+            break  # No retained evidence of the latest state; do not revive old events.
+        try:
+            items = event_snapshot_items(json.loads(row[0]))
+        except TypeError, ValueError:
+            continue
+        if items is None:
+            continue
+        conn.executemany(
+            "UPDATE game_mode_contexts SET is_current = 1 "
+            "WHERE context_type = 'event' AND source_key = ?",
+            [(event_source_key(item),) for item in items],
+        )
+        break
+
+
 def assert_current_schema(conn: sqlite3.Connection) -> None:
     """Raise with a precise diagnosis when a caller bypasses DB initialization."""
     version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -2543,8 +2586,8 @@ def schema_fingerprint(conn: sqlite3.Connection) -> str:
 
 
 # Updated deliberately whenever the fresh-build schema changes.
-# v39 (2026-08-28): shared active focus inside member_dossiers.
-CURRENT_SCHEMA_FINGERPRINT = "d27d286357002fbf1cbc3520ba78ea962241f4d8d4b980755c0306269f82fad2"
+# v40 (2026-09-08): durable current event membership.
+CURRENT_SCHEMA_FINGERPRINT = "2de4aea6f787931b411fc39151b879b9e0caf0b4882759783633d66a705e09b5"
 
 
 __all__ = [

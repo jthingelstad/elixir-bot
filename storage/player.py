@@ -1004,7 +1004,7 @@ def _enrich_special_event_item(item: dict, context_index: dict[str, dict]) -> di
     event_tag = item.get("event_tag")
     if event_tag:
         context = context_index["by_tag"].get(str(event_tag))
-    if context is None and item.get("game_mode_id") is not None:
+    if context is None and not event_tag and item.get("game_mode_id") is not None:
         context = context_index["by_mode_id"].get(int(item["game_mode_id"]))
     if context:
         item["event_name"] = context.get("event_name")
@@ -1015,17 +1015,25 @@ def _enrich_special_event_item(item: dict, context_index: dict[str, dict]) -> di
     return item
 
 
-def _special_event_activity(days: int, limit: int, conn) -> list[dict]:
+# Event identity and mode classification are orthogonal: a league can be 2v2.
+_EVENT_BATTLE_PREDICATE = "(bf.is_special_event = 1 OR COALESCE(bf.event_tag, '') <> '')"
+
+
+def _special_event_activity(days: int, limit: int, conn, *, special_only=False) -> list[dict]:
     window_days = max(1, int(days or 30))
     now = datetime.now(timezone.utc)
     current_cutoff = (now - timedelta(days=window_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     previous_cutoff = (now - timedelta(days=window_days * 2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     event_contexts = _special_event_context_index(conn)
+    predicate = "bf.is_special_event = 1" if special_only else _EVENT_BATTLE_PREDICATE
     rows = conn.execute(
         "SELECT CASE WHEN COUNT(DISTINCT CASE WHEN bf.battle_time >= ? THEN bf.game_mode_id END) = 1 "
         "THEN MIN(CASE WHEN bf.battle_time >= ? THEN bf.game_mode_id END) END AS game_mode_id, "
         "CASE WHEN COUNT(DISTINCT CASE WHEN bf.battle_time >= ? THEN bf.game_mode_name END) = 1 "
         "THEN MIN(CASE WHEN bf.battle_time >= ? THEN bf.game_mode_name END) END AS game_mode_name, "
+        "CASE WHEN COUNT(DISTINCT CASE WHEN bf.battle_time >= ? THEN bf.mode_group END) = 1 "
+        "THEN MIN(CASE WHEN bf.battle_time >= ? THEN bf.mode_group END) END AS mode_group, "
+        "SUM(CASE WHEN bf.battle_time >= ? AND bf.is_special_event = 1 THEN 1 ELSE 0 END) AS special_event_battles, "
         "MIN(NULLIF(bf.event_tag, '')) AS event_tag, "
         "COUNT(DISTINCT CASE WHEN bf.battle_time >= ? THEN bf.player_tag END) AS members_active, "
         "SUM(CASE WHEN bf.battle_time >= ? THEN 1 ELSE 0 END) AS battles, "
@@ -1037,7 +1045,7 @@ def _special_event_activity(days: int, limit: int, conn) -> list[dict]:
         "COUNT(DISTINCT CASE WHEN bf.battle_time < ? THEN bf.player_tag END) AS previous_window_members_active, "
         "SUM(CASE WHEN bf.battle_time < ? THEN 1 ELSE 0 END) AS previous_window_battles "
         "FROM battle_events bf "
-        "WHERE bf.is_special_event = 1 AND bf.battle_time >= ? "
+        f"WHERE {predicate} AND bf.battle_time >= ? "
         "GROUP BY CASE WHEN COALESCE(bf.event_tag, '') <> '' "
         "THEN 'tag:' || bf.event_tag "
         "ELSE 'mode:' || COALESCE(CAST(bf.game_mode_id AS TEXT), '') || ':' || COALESCE(bf.game_mode_name, '') END "
@@ -1045,6 +1053,9 @@ def _special_event_activity(days: int, limit: int, conn) -> list[dict]:
         "ORDER BY battles DESC, latest_battle DESC, COALESCE(bf.game_mode_id, 0) ASC "
         "LIMIT ?",
         (
+            current_cutoff,
+            current_cutoff,
+            current_cutoff,
             current_cutoff,
             current_cutoff,
             current_cutoff,
@@ -1066,8 +1077,9 @@ def _special_event_activity(days: int, limit: int, conn) -> list[dict]:
     activity = []
     for row in rows:
         item = {
-            "mode_group": "special_event",
-            "label": mode_group_label("special_event"),
+            "mode_group": row["mode_group"],
+            "label": mode_group_label(row["mode_group"]) if row["mode_group"] else "Events",
+            "special_event_battles": int(row["special_event_battles"] or 0),
             "game_mode_id": row["game_mode_id"],
             "game_mode_name": row["game_mode_name"],
             "event_tag": row["event_tag"],
@@ -1111,7 +1123,7 @@ def _special_event_participation(
         "MAX(bf.battle_time) AS latest_event_battle "
         "FROM battle_events bf "
         "JOIN players m ON m.player_tag = bf.player_tag "
-        "WHERE bf.is_special_event = 1 AND bf.battle_time >= ? "
+        f"WHERE {_EVENT_BATTLE_PREDICATE} AND bf.battle_time >= ? "
         "GROUP BY bf.player_tag, CASE WHEN COALESCE(bf.event_tag, '') <> '' "
         "THEN 'tag:' || bf.event_tag "
         "ELSE 'mode:' || COALESCE(CAST(bf.game_mode_id AS TEXT), '') || ':' || COALESCE(bf.game_mode_name, '') END "
@@ -1146,7 +1158,7 @@ def _special_event_top_members(days: int, per_event: int, conn) -> list[dict]:
     )
     event_contexts = _special_event_context_index(conn)
     rows = conn.execute(
-        """
+        f"""
         WITH event_members AS (
           SELECT m.player_tag AS member_id,
                  m.player_tag AS tag,
@@ -1166,7 +1178,7 @@ def _special_event_top_members(days: int, per_event: int, conn) -> list[dict]:
                  MAX(bf.battle_time) AS latest_event_battle
           FROM battle_events bf
           JOIN players m ON m.player_tag = bf.player_tag
-          WHERE bf.is_special_event = 1 AND bf.battle_time >= ?
+          WHERE {_EVENT_BATTLE_PREDICATE} AND bf.battle_time >= ?
           GROUP BY bf.player_tag, event_key
         ), ranked AS (
           SELECT *,
@@ -1425,6 +1437,16 @@ def get_clan_game_mode_summary(
 
     event_badge_completions = _special_event_badge_completions(days, conn)
     event_activity = _special_event_activity(days, limit, conn)
+    # Totals cover the whole window, independently of result limits or mode filters.
+    event_totals = dict(
+        conn.execute(
+            f"SELECT COUNT(*) AS clan_battles, "
+            f"COALESCE(SUM(bf.is_special_event = 1), 0) AS special_event_battles, "
+            f"COALESCE(SUM({_EVENT_BATTLE_PREDICATE}), 0) AS event_battles "
+            "FROM battle_events bf WHERE bf.battle_time >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
+            (f"-{days} day",),
+        ).fetchone()
+    )
     event_participation = _special_event_participation(
         days,
         limit,
@@ -1437,7 +1459,12 @@ def get_clan_game_mode_summary(
         "by_group": sorted(
             by_group.values(), key=lambda item: (-item["battles"], item["mode_group"])
         ),
-        "by_game_mode": event_activity if mode_group == "special_event" else by_game_mode[:limit],
+        "by_game_mode": (
+            _special_event_activity(days, limit, conn, special_only=True)
+            if mode_group == "special_event"
+            else by_game_mode[:limit]
+        ),
+        "event_totals": event_totals,
         "event_activity": event_activity,
         "ranked_activity": ranked_activity,
         "ranked_profiles": ranked_profiles[:limit],
@@ -1449,7 +1476,9 @@ def get_clan_game_mode_summary(
             for completions in event_badge_completions.values()
             for completion in completions
         ][:limit],
-        "active_events": list_game_mode_contexts("event", limit=limit, conn=conn),
+        "active_events": list_game_mode_contexts(
+            "event", limit=limit, conn=conn, current_only=True
+        ),
         "leaderboards": list_game_mode_contexts("leaderboard", limit=limit, conn=conn),
     }
 

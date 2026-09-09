@@ -22,6 +22,15 @@
 > `materialization_inputs` links admitted observations to scheduled/interactive
 > generations; `awareness_delivery_intents` is the production per-post outbox.
 
+> **Schema v40 amendment (2026-09-08):** `game_mode_contexts.is_current`
+> records membership in the latest valid `/events` snapshot separately from the
+> retained historical event labels. A successful empty snapshot clears current
+> membership; malformed or failed refreshes preserve it. Migration seeds membership
+> from receipt order, so repeated bodies remain authoritative. Product reads then
+> use this durable projection independently of raw-payload retention. Event-tagged
+> battle activity is grouped by event identity across mode groups (including 2v2);
+> this does not change the battle's mode classification or attach badges to events.
+
 ## 1. Conventions
 
 - **Keys (§7):** if the CR API identifies it with a tag, the tag is the key
