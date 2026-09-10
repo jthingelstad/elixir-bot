@@ -110,3 +110,9 @@ def test_client_returns_none_without_token(monkeypatch):
 
     monkeypatch.delenv("ELIXIR_MCP_TOKEN", raising=False)
     assert elixir_mcp.call_tool("players_summary", {}) is None
+
+
+def test_client_pin_matches_the_reviewed_mcp_contract():
+    import elixir_mcp
+
+    assert elixir_mcp.PINNED_CONTRACT == "0.43"
