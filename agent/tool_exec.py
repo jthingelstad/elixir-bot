@@ -323,9 +323,21 @@ def _resolve_member_tag(value):
     query = (value or "").strip()
     if not query:
         raise ValueError("member reference is required")
+    # A '#'-prefixed string used to pass straight through untouched, so
+    # "#King Thing" reached Elixir MCP as a player_tag and came back
+    # invalid_tag (review 2026-09-10 §4.4). A tag is '#' plus a short run of
+    # letters and digits; anything else with a '#' on it is a name to resolve
+    # like any other. (Shape, not the strict CR alphabet: the server refuses
+    # a wrong letter with invalid_tag and elixir_mcp logs it now.)
     if query.startswith("#"):
-        return query
-    if re.fullmatch(r"[0289PYLQGRJCUV]{3,15}", query.upper()):
+        bare = query[1:].strip().upper()
+        if re.fullmatch(r"[A-Z0-9]{3,15}", bare):
+            return f"#{bare}"
+        log.warning("member_reference_not_a_tag query=%r", query)
+        query = query.lstrip("#").strip()
+        if not query:
+            raise ValueError("member reference is required")
+    elif re.fullmatch(r"[0289PYLQGRJCUV]{3,15}", query.upper()):
         return f"#{query.upper()}"
 
     matches = db.resolve_member(query, limit=5)
