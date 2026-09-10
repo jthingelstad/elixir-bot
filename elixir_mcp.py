@@ -25,16 +25,18 @@ load_dotenv()
 log = logging.getLogger("elixir.mcp")
 
 MCP_URL = "https://elixir.poapkings.com/mcp"
-# The contract generation this integration was built against. A different
-# MAJOR.MINOR is worth a loud log line (the server renames freely in
-# alpha); calls still proceed — the fallback path covers real breakage.
+# The contract MAJOR this integration was built against. The contract's own
+# semver rule (elixir-mcp packages/contracts) is that a breaking change is a
+# major bump and a minor is additive, so a different major is worth a loud
+# log line and a minor is not: pinning MAJOR.MINOR ("0.43") warned on every
+# release the contract itself said was safe, and a pin that is always wrong
+# stops being a signal. Calls still proceed either way — the fallback path
+# covers real breakage.
 #
-# Bumped 0.30 -> 0.43 on 2026-09-10 after reviewing the changelog and live
-# response shapes. The intervening additions and statistical corrections do
-# not change the fields this client consumes from players_timeline,
-# battles_performance, war_history, or clans_standings. A pin that is always
-# wrong stops being a signal, which is the exact drift this pin exists to catch.
-PINNED_CONTRACT = "0.43"
+# Moved to "1" on 2026-09-10 with the 1.0.0 shapes (notes[], applied{}) in
+# capabilities/mcp_stats.py. Bump it when the changelog's `breaking` entry
+# names a field this client reads.
+PINNED_CONTRACT = "1"
 _TIMEOUT_S = 15
 
 _id_lock = threading.Lock()
@@ -83,22 +85,57 @@ def call_tool(name: str, arguments: dict | None = None) -> dict | None:
         return None
     try:
         envelope = resp.json()
+    except ValueError as exc:
+        log.warning("elixir-mcp: %s malformed response: %s", name, exc)
+        return None
+    if isinstance(envelope, dict) and "error" in envelope and "result" not in envelope:
+        # A JSON-RPC-level refusal (rate limit -32029, unknown tool, bad
+        # params) has no tool body at all; say what it was rather than
+        # "malformed".
+        rpc_err = envelope.get("error") or {}
+        log.warning(
+            "elixir-mcp: %s rpc error %s: %s %s",
+            name,
+            rpc_err.get("code"),
+            rpc_err.get("message"),
+            _describe_args(arguments),
+        )
+        return None
+    try:
         content = envelope["result"]["content"][0]["text"]
         body = json.loads(content)
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         log.warning("elixir-mcp: %s malformed response: %s", name, exc)
         return None
-    if envelope["result"].get("isError"):
-        err = body.get("error", {})
+    if envelope["result"].get("isError") or isinstance(body.get("error"), dict):
+        # The refusal's code is from the contract's closed set (invalid_tag,
+        # not_entitled, not_recorded, not_found, quota_exceeded, ...). Log it
+        # with WHAT was sent — the argument keys and the tag, never other
+        # values — so the next refusal is readable here and not only in the
+        # server's audit log (review 2026-09-10 §4.4: 32 invalid_tag refusals
+        # on this surface in a week and not one line client-side).
+        err = body.get("error") or {}
         log.warning(
-            "elixir-mcp: %s tool error %s: %s",
+            "elixir-mcp: %s tool error %s: %s %s",
             name,
             err.get("code"),
             err.get("message"),
+            _describe_args(arguments),
         )
         return None
     _check_contract(body)
     return body
+
+
+def _describe_args(arguments: dict | None) -> str:
+    """Argument KEYS plus the subject tag, for a log line. Nothing else —
+    the other values (queries, on_behalf_of ids) do not belong in a log."""
+    args = arguments or {}
+    parts = [f"args={sorted(args)}"]
+    for key in ("player_tag", "clan_tag"):
+        if key in args:
+            parts.append(f"{key}={args[key]!r}")
+    return " ".join(parts)
 
 
 def _check_contract(body: dict) -> None:
@@ -106,11 +143,11 @@ def _check_contract(body: dict) -> None:
     if _contract_warned:
         return
     version = (body.get("meta") or {}).get("contract_version") or ""
-    if version and not version.startswith(PINNED_CONTRACT + "."):
+    if version and version.split(".")[0] != PINNED_CONTRACT:
         _contract_warned = True
         log.warning(
-            "elixir-mcp: contract drift — server %s, integration built for %s.x; "
-            "review the tool surface",
+            "elixir-mcp: contract drift — server %s, integration built for major %s "
+            "(breaking = major, per the contract's semver rule); review the tool surface",
             version,
             PINNED_CONTRACT,
         )

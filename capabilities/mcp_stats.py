@@ -138,7 +138,8 @@ def war_attendance_via_mcp(tag: str) -> dict | None:
             "participation_rate": round(recent_played / len(last4), 4) if last4 else 0,
         },
         "source": "elixir-mcp",
-        "note": body.get("note"),
+        # 1.0.0: caveats are `notes: string[]` (one sentence each), not `note`.
+        "notes": list(body.get("notes") or []),
     }
 
 
@@ -157,15 +158,24 @@ def clan_standing_via_mcp(
         if mine and ranked_members:
             mine = dict(mine)
             mine["percentile"] = round(1 - (mine["rank"] - 1) / ranked_members, 3)
+    # 1.0.0: the one echo block. `applied.days` echoes the sugar we sent;
+    # `applied.window` carries the resolved bounds and whether they were
+    # given or defaulted. The old `basis` paragraph is now a line in `notes`.
+    applied = body.get("applied") or {}
+    window = applied.get("window") or {}
     return {
         "clan_tag": body.get("clan_tag"),
-        "window_days": body.get("window_days"),
-        "basis": body.get("basis"),
+        "window_days": applied.get("days") or days,
+        "window": {
+            "from": window.get("from"),
+            "to": window.get("to"),
+            "source": window.get("source"),
+        },
         "median_win_rate": body.get("median_win_rate"),
         "ranked_members": ranked_members,
         "standings": members,
         "asker": mine,
         "below_floor_count": len(body.get("below_floor") or []),
-        "note": body.get("note"),
+        "notes": list(body.get("notes") or []),
         "source": "elixir-mcp",
     }
