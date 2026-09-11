@@ -62,8 +62,10 @@ Elixir must be able to represent.
 
 Do not scrape, retain identities or raw comments, or change member-facing behavior
 from an audit. Clan-specific interpretation stays here; anything true for *any* CR
-caller belongs in the shared reference, which the domain objective owns — send it
-there rather than writing a second copy.
+caller belongs in the standalone shared reference. The domain objective stewards
+its meaning; product owners may contribute directly evidenced API corrections
+under that repository's rules, with no mandatory routing handoff. Never write a
+second copy. Product owners retain their own implementation fixes.
 
 ## Action
 

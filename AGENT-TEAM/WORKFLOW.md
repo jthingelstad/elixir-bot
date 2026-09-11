@@ -75,8 +75,8 @@ Every objective run uses the same loop:
 Run Elixir owns deployment acceptance: the intended revision is running, the process
 is healthy, migrations and scheduled work are sound, and no fresh operational failure
 appeared. A narrowly scoped origin-owner restart under step 8 is an allowed delivery
-exception, not a transfer of that acceptance ownership. The objective that originated a change owns semantic acceptance: Understand
-Clash Royale proves the data now means the right thing, and Improve Elixir proves the
+exception, not a transfer of that acceptance ownership. The objective that originated a change owns semantic acceptance: Represent
+the Game proves the bot's data now means the right thing, and Improve Elixir proves the
 member or leadership outcome is better from natural evidence. Run reports the deployed
 revision to the originating objective; it does not inherit that objective's judgment.
 
@@ -180,3 +180,13 @@ This uses `CODEX_HOME` when set and the local `~/.codex` fallback otherwise. Eac
 natural-acceptance watch names its read-only check, closure condition, and expiry. A
 missing natural event through that expiry is a no-op result, never a reason to force
 member activity.
+
+## Calendar and due work
+
+`automations.toml` owns the calendar; `SCHEDULE.md` is its generated view.
+Keep the installed prompt's interval guards and anchors. For weekly, monthly
+or quarterly subtasks, retain last successful evidence and the next due date
+in compact current state. A retry checks that receipt before repeating work;
+a blocked due subtask remains due at the next eligible invocation. Required
+every-run baselines still run. Explicit incident/deploy starts do not invent
+automatic triggers or authorize early member activity.

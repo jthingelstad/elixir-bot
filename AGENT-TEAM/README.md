@@ -10,11 +10,13 @@ part of the current operating model.
 
 ## The team
 
-| Objective | File | Cadence | Primary question |
-|---|---|---|---|
-| **Run Elixir** | `run-elixir.md` | Every twelve hours | Is Elixir healthy, reliable, observable, and spending intentionally? |
-| **Represent the Game** | `represent-the-game.md` | Daily 07:30 | Can Elixir represent and retrieve what the game actually does, from payload through capability? |
-| **Improve Elixir** | `improve-elixir.md` | Weekdays 17:45; Saturday and Sunday 07:00 | Is Elixir turning play and feedback into better stewardship, memory, and member improvement over time? |
+| Objective | File | Primary question |
+|---|---|---|
+| **Run Elixir** | `run-elixir.md` | Is Elixir healthy, reliable, observable, and spending intentionally? |
+| **Represent the Game** | `represent-the-game.md` | Can Elixir represent and retrieve what the game actually does, from payload through capability? |
+| **Improve Elixir** | `improve-elixir.md` | Is Elixir turning play and feedback into better stewardship, memory, and member improvement over time? |
+
+Calendar cadence: [generated schedule](SCHEDULE.md), sourced from `automations.toml`.
 
 There is no separate Build Manager. Building is a capability of every objective
 owner. There is no Product Manager intermediary: new member-visible direction goes
