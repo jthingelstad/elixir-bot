@@ -625,7 +625,8 @@ def test_validate_war_deck_suggestion_accepts_4_decks_of_8_unique_cards():
     from agent.workflows import _validate_war_deck_suggestion
 
     decks = [[f"d{d}c{c}" for c in range(8)] for d in range(4)]
-    assert _validate_war_deck_suggestion({"proposed_decks": decks}) is None
+    content = [", ".join(deck) for deck in decks]
+    assert _validate_war_deck_suggestion({"proposed_decks": decks, "content": content}) is None
 
 
 def test_validate_war_deck_suggestion_rejects_overlap():
@@ -651,6 +652,156 @@ def test_validate_war_deck_suggestion_rejects_short_deck():
     decks[2] = decks[2][:7]  # only 7 cards in deck 3
     error = _validate_war_deck_suggestion({"proposed_decks": decks})
     assert error and "exactly 8" in error
+
+
+def _war_suggestion_fixture():
+    from engine.deck_links import build_deck_link
+
+    decks = [[f"d{d}c{c}" for c in range(8)] for d in range(4)]
+    index = {
+        name: 26000000 + d * 8 + c for d, deck in enumerate(decks) for c, name in enumerate(deck)
+    }
+    links = [build_deck_link([index[name] for name in reversed(deck)]) for deck in decks]
+    return decks, index, links
+
+
+def test_war_suggestion_rejects_hidden_decks_missing_from_visible_answer():
+    """2026-09-11: four hidden decks passed while the member received only two."""
+    from agent.workflows import _validate_war_deck_suggestion
+
+    decks, index, links = _war_suggestion_fixture()
+    error = _validate_war_deck_suggestion(
+        {"proposed_decks": decks, "content": links[:2]}, card_ids_by_name=index
+    )
+    assert error and "Deck 3" in error and "content" in error
+
+
+def test_war_suggestion_accepts_four_visible_matching_links_in_any_card_order():
+    from agent.workflows import _validate_war_deck_suggestion
+
+    decks, index, links = _war_suggestion_fixture()
+    assert (
+        _validate_war_deck_suggestion(
+            {"proposed_decks": decks, "content": "\n\n".join(links)}, card_ids_by_name=index
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("bad_link", ["duplicate", "partial", "wrong_cards", "missing_tower"])
+def test_war_suggestion_does_not_count_unusable_or_unrelated_links(bad_link):
+    from agent.workflows import _validate_war_deck_suggestion
+    from engine.deck_links import build_deck_link
+
+    decks, index, links = _war_suggestion_fixture()
+    links[3] = {
+        "duplicate": links[0],
+        "partial": "clashroyale://copyDeck?deck=26000024;26000025",
+        "wrong_cards": build_deck_link(range(26000100, 26000108)),
+        "missing_tower": links[3].split("&tt=")[0],
+    }[bad_link]
+    error = _validate_war_deck_suggestion(
+        {"proposed_decks": decks, "content": links}, card_ids_by_name=index
+    )
+    assert error and "Deck 4" in error
+
+
+def test_war_suggestion_accepts_card_names_when_a_link_is_unavailable():
+    from agent.workflows import _validate_war_deck_suggestion
+
+    decks, index, links = _war_suggestion_fixture()
+    links[3] = ", ".join(decks[3]).upper()
+    assert (
+        _validate_war_deck_suggestion(
+            {"proposed_decks": decks, "content": links}, card_ids_by_name=index
+        )
+        is None
+    )
+
+
+def test_war_suggestion_requires_visible_content_not_summary_or_hidden_cards():
+    from agent.workflows import _validate_war_deck_suggestion
+
+    decks, _, _ = _war_suggestion_fixture()
+    error = _validate_war_deck_suggestion({"proposed_decks": decks, "summary": str(decks)})
+    assert error and "content" in error
+
+
+def test_war_suggestion_repairs_visible_completeness_before_returning():
+    from unittest.mock import patch
+
+    from agent import workflows
+
+    decks, index, links = _war_suggestion_fixture()
+    partial = {"proposed_decks": decks, "content": links[:2]}
+    complete = {"proposed_decks": decks, "content": links}
+    with (
+        patch.object(workflows, "_chat_with_tools", side_effect=[partial, complete]) as chat,
+        patch.object(workflows, "card_catalog_index", return_value=index),
+    ):
+        result = workflows.respond_in_deck_review(
+            "build four war decks", "Tester", "#ask-elixir", mode="war", subject="suggest"
+        )
+    assert result == complete
+    assert chat.call_count == 2
+    assert "Deck 3" in chat.call_args.args[1]
+    assert "content" in chat.call_args.args[1]
+
+
+def test_war_suggestion_exhausted_repairs_never_publish_the_partial_answer():
+    from unittest.mock import patch
+
+    from agent import workflows
+
+    decks, index, links = _war_suggestion_fixture()
+    partial = {"proposed_decks": decks, "content": links[:2]}
+    with (
+        patch.object(workflows, "_chat_with_tools", return_value=partial) as chat,
+        patch.object(workflows, "card_catalog_index", return_value=index),
+    ):
+        result = workflows.respond_in_deck_review(
+            "build four war decks", "Tester", "#ask-elixir", mode="war", subject="suggest"
+        )
+    assert chat.call_count == 3
+    assert result["_error"]["kind"] == "validation"
+    assert "Deck 3" in result["_error"]["detail"]
+    assert "content" not in result and "proposed_decks" not in result
+
+
+def test_war_suggestion_preserves_api_errors_without_repairing_them():
+    from unittest.mock import patch
+
+    from agent import workflows
+
+    error = {"_error": {"kind": "llm_api_error", "detail": "unavailable"}}
+    with (
+        patch.object(workflows, "_chat_with_tools", return_value=error) as chat,
+        patch.object(workflows, "card_catalog_index", return_value={}),
+    ):
+        result = workflows.respond_in_deck_review(
+            "build four war decks", "Tester", "#ask-elixir", mode="war", subject="suggest"
+        )
+    assert result == error
+    assert chat.call_count == 1
+
+
+def test_war_suggestion_catalog_failure_still_accepts_complete_visible_names():
+    import sqlite3
+    from unittest.mock import patch
+
+    from agent import workflows
+
+    decks, _, _ = _war_suggestion_fixture()
+    complete = {"proposed_decks": decks, "content": [", ".join(deck) for deck in decks]}
+    with (
+        patch.object(workflows, "_chat_with_tools", return_value=complete) as chat,
+        patch.object(workflows, "card_catalog_index", side_effect=sqlite3.OperationalError("busy")),
+    ):
+        result = workflows.respond_in_deck_review(
+            "build four war decks", "Tester", "#ask-elixir", mode="war", subject="suggest"
+        )
+    assert result == complete
+    assert chat.call_count == 1
 
 
 # ── New-war-player flow: war review with no reconstructable decks ─────────────

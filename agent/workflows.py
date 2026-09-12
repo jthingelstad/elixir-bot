@@ -49,6 +49,8 @@ from agent.prompt_builders import (
 from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
 from capabilities import members as member_capability
 from capabilities import war as war_capability
+from engine.deck_links import parse_deck_link
+from storage.card_catalog import card_index as card_catalog_index
 
 
 def _chat_with_tools(*args, **kwargs):
@@ -774,8 +776,8 @@ def respond_in_reception(question, author_name, clan_data, memory_context=None):
     )
 
 
-def _validate_war_deck_suggestion(result):
-    """Validate war+suggest LLM response: 4 decks of 8 unique cards, 32 unique total.
+def _validate_war_deck_suggestion(result, *, card_ids_by_name=None):
+    """Validate four disjoint decks and their member-visible card coverage.
 
     Returns None when valid, otherwise an error string describing the violation.
     """
@@ -808,6 +810,36 @@ def _validate_war_deck_suggestion(result):
         return (
             f"These cards appear in more than one deck (no-overlap rule): {', '.join(duplicates)}."
         )
+
+    # Structured cards are not delivered to Discord. On 2026-09-11 all four
+    # hidden decks passed while content presented only two. Check the actual
+    # handoff: each proposed deck needs all eight names or its matching share
+    # link. Reuse the canonical parser and catalog; counting URLs alone would
+    # accept duplicate or unrelated decks.
+    content = result.get("content")
+    parts = content if isinstance(content, list) else [content]
+    visible = "\n\n".join(part for part in parts if isinstance(part, str)).casefold()
+    index = {name.casefold(): card_id for name, card_id in (card_ids_by_name or {}).items()}
+    linked_decks = set()
+    for url in re.findall(
+        r"https?://link\.clashroyale\.com/[^\s<>]+|clashroyale://copyDeck[^\s<>]+",
+        visible,
+        flags=re.IGNORECASE,
+    ):
+        parsed = parse_deck_link(url)
+        if parsed and len(set(parsed["card_ids"])) == 8 and parsed["tower_troop_id"]:
+            linked_decks.add(frozenset(parsed["card_ids"]))
+    for idx, deck in enumerate(decks, start=1):
+        names = [name.strip().casefold() for name in deck]
+        if all(re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", visible) for name in names):
+            continue
+        if all(name in index for name in names):
+            if frozenset(index[name] for name in names) in linked_decks:
+                continue
+        return (
+            f"Deck {idx} is missing from content: include all 8 card names or its "
+            "matching complete copy link. All four decks must be visible to the member."
+        )
     return None
 
 
@@ -829,9 +861,9 @@ def respond_in_deck_review(
     mode: 'regular' or 'war'
     subject: 'review' or 'suggest'
 
-    For war+suggest, validates the proposed_decks structured field and asks the
-    LLM to revise (up to 2 attempts) when the no-overlap or 32-unique constraint
-    is violated.
+    For war+suggest, validates disjointness and member-visible coverage, with
+    up to two revisions. Exhausted validation returns an error, never the
+    invalid answer.
     """
     target_line = ""
     if target_member_tag:
@@ -1014,10 +1046,16 @@ def respond_in_deck_review(
     base_user_msg += _format_memory_context(memory_context)
     system_prompt = _deck_review_system(channel_name, mode=mode, subject=subject)
     validate = mode == "war" and subject == "suggest"
+    card_ids_by_name = {}
+    if validate:
+        try:
+            card_ids_by_name = card_catalog_index()
+        except sqlite3.Error as exc:
+            # Names still prove coverage when catalog reads are unavailable.
+            log.warning("war-suggest card index unavailable: %s", exc)
     max_attempts = 3 if validate else 1
     history = list(conversation_history or [])
     user_msg = _with_image_blocks(base_user_msg, image_blocks)
-    last_result = None
 
     def _run_deck_turn(turn_user_msg):
         def _run(message, max_tokens):
@@ -1076,10 +1114,9 @@ def respond_in_deck_review(
 
     for attempt in range(max_attempts):
         result = _run_deck_turn(user_msg)
-        last_result = result
-        if not validate:
+        if not validate or (isinstance(result, dict) and result.get("_error")):
             return result
-        error = _validate_war_deck_suggestion(result)
+        error = _validate_war_deck_suggestion(result, card_ids_by_name=card_ids_by_name)
         if error is None:
             return result
         log.warning(
@@ -1097,9 +1134,10 @@ def respond_in_deck_review(
         user_msg = (
             f"VALIDATION FAILED on your previous war-deck suggestion: {error}\n"
             "Revise the four decks so all 32 cards are unique and every card is owned by the player. "
-            "Return the same JSON shape with the corrected proposed_decks."
+            "Present every deck in content with all eight card names or its complete copy link. "
+            "Return the same JSON shape with corrected proposed_decks and content."
         )
-    return last_result
+    return {"_error": {"kind": "validation", "phase": "war_deck_suggestion", "detail": error}}
 
 
 def respond_to_help_request(
