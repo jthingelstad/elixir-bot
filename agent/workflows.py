@@ -715,7 +715,8 @@ def repair_awareness_plan(situation: dict, plan: dict, violations: list[str]):
         )
     system = (
         "You repair a structured Discord post plan that failed deterministic copy policy. "
-        "Return JSON only with the same awareness plan shape. Preserve every channel, "
+        "Return only the repaired plan JSON object, in the same shape as the supplied plan. "
+        "The copy-policy evidence is context, not part of the returned plan. Preserve every channel, "
         "covers_signal_keys value, leads_with value, member identity fields, and relay decision. "
         "Preserve every factual number unless a violation-specific instruction explicitly "
         "allows removing it. Change only the minimum wording needed to clear the violations. "
@@ -738,11 +739,13 @@ def repair_awareness_plan(situation: dict, plan: dict, violations: list[str]):
         "race_ranked": (situation.get("war_season") or {}).get("race_ranked"),
         "canonical_game_truth": get_game_truth(topic="river_race", live_war=live_war),
         "violations": violations,
-        "plan": plan,
     }
     return _chat_with_tools(
         system,
-        "Repair this plan:\n" + json.dumps(truth, indent=2, default=str),
+        "Copy-policy evidence (context only):\n"
+        + json.dumps(truth, indent=2, default=str)
+        + "\n\nRepair this plan (return this JSON object only):\n"
+        + json.dumps(plan, indent=2, default=str),
         workflow="awareness_repair",
         allowed_tools=[],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["awareness_repair"],

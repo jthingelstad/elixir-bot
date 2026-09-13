@@ -587,6 +587,65 @@ def test_repair_awareness_plan_has_headroom_for_multi_post_plans():
     assert core.policy_for("awareness_repair").max_tokens >= 16384
 
 
+def test_repair_request_separates_evidence_from_the_plan_it_returns():
+    """A natural repair echoed the evidence wrapper as its plan (#276)."""
+    import json
+
+    import agent.workflows as workflows
+    from runtime.awareness.policy import validate_plan, validate_repair
+
+    plan = {
+        "posts": [
+            {
+                "channel": "elixir",
+                "leads_with": "milestone",
+                "content": "She crossed 13,000 trophies.",
+                "covers_signal_keys": ["best_trophies_peak:#A:13000"],
+                "member_tags": ["#A"],
+            },
+            {
+                "channel": "announcements",
+                "content": "Welcome Newcomer!",
+                "covers_signal_keys": ["member_joined:#B:t"],
+                "member_tags": ["#B"],
+            },
+        ],
+        "skipped_reason": None,
+    }
+    read = {
+        "war_season": {"race_ranked": False},
+        "hard_post_signals": [{"signal_key": "member_joined:#B:t", "event_type": "member_joined"}],
+    }
+    violations = validate_plan(read, plan)
+
+    def echo_editable_object(system, user_msg, **kwargs):
+        evidence_text, plan_text = user_msg.split(
+            "\n\nRepair this plan (return this JSON object only):\n"
+        )
+        evidence = json.loads(evidence_text.split("\n", 1)[1])
+        assert evidence["race_ranked"] is False
+        assert evidence["canonical_game_truth"]["available"] is True
+        assert evidence["violations"] == violations
+        assert "plan" not in evidence and "posts" not in evidence
+        editable = json.loads(plan_text)
+        assert editable == plan
+        assert kwargs["allowed_tools"] == []
+        assert kwargs["strict_json"] is True
+        assert kwargs["return_errors"] is True
+        editable["posts"][0]["content"] = "They crossed 13,000 trophies."
+        editable["posts"][1]["clan_chat"] = ["Welcome Newcomer! - E"]
+        return editable
+
+    with patch.object(workflows, "_chat_with_tools", side_effect=echo_editable_object):
+        repaired = workflows.repair_awareness_plan(read, plan, violations)
+
+    assert set(repaired) == set(plan)
+    assert validate_repair(plan, repaired) == []
+    assert validate_plan(read, repaired) == []
+    assert plan["posts"][0]["content"] == "She crossed 13,000 trophies."
+    assert "clan_chat" not in plan["posts"][1]
+
+
 def test_run_awareness_tick_serializes_the_full_read_compactly():
     """Prompt compaction removes formatting tokens without dropping data."""
     import agent.workflows as workflows
