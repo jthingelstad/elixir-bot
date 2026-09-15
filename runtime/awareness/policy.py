@@ -67,7 +67,8 @@ _NEGATIVE_WAR_PARTICIPATION = tuple(
         r"(?:at\s+)?(?:only\s+)?(?:low|light|thin|weak|\d+\s*(?:/|of)\s*\d+|"
         r"\d+(?:\.\d+)?%)(?=\s|[.!?,;:]|$)",
         r"\b(?:low|light|thin|weak)\s+(?:war\s+)?(?:participation|turnout)\b",
-        r"\b\d+(?:\.\d+)?%\s+(?:war\s+)?(?:participation|turnout)\b",
+        r"(?<![\d.])(?!100(?:\.0+)?%\s)\d+(?:\.\d+)?%\s+"
+        r"(?:war\s+)?(?:participation|turnout)\b",
         r"\b(?:at|on)\s+(?:zero|0)\s+(?:war\s+)?(?:decks?|battles?|participation)\b",
         r"\b(?:zero|no)\s+war\s+participation\b",
         r"\b(?:waiting\s+on|still\s+need)\s+(?:the\s+)?\d+\s+"

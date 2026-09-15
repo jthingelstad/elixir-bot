@@ -874,6 +874,66 @@ def test_positive_war_policy_allows_participant_recognition():
     ]
 
 
+def test_positive_war_policy_allows_perfect_participation_recognition():
+    """A promotion may celebrate perfect participation without looking like a nag."""
+    sent = []
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        for rate in ("100%", "100.0%"):
+            plan = {
+                "posts": [
+                    {
+                        "channel": "announcements",
+                        "leads_with": "clan_event",
+                        "content": (
+                            f"Mega Goblin earns Elder after {rate} war participation "
+                            "across two weeks."
+                        ),
+                    }
+                ]
+            }
+            result = deliver_mod.deliver_posts(
+                {},
+                plan,
+                post_fn=lambda channel_id, copy: sent.append((channel_id, copy)) or 92,
+                record_fn=lambda **_: None,
+            )
+            assert result["failed"] is False
+
+    assert sent == [
+        (
+            111,
+            "Mega Goblin earns Elder after 100% war participation across two weeks.",
+        ),
+        (
+            111,
+            "Mega Goblin earns Elder after 100.0% war participation across two weeks.",
+        ),
+    ]
+
+
+def test_positive_war_policy_still_blocks_imperfect_percentage_framing():
+    plan = {
+        "posts": [
+            {
+                "channel": "announcements",
+                "leads_with": "clan_event",
+                "content": "A member has 99% war participation across two weeks.",
+            }
+        ]
+    }
+
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {},
+            plan,
+            post_fn=lambda *_: 92,
+            record_fn=lambda **_: None,
+        )
+
+    assert result["failed"] is True
+    assert "negative_war_participation" in result["reason"]
+
+
 def test_positive_war_policy_blocks_participant_count_as_roster_ratio():
     plan = {
         "posts": [
