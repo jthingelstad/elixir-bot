@@ -33,10 +33,11 @@ MCP_URL = "https://elixir.poapkings.com/mcp"
 # stops being a signal. Calls still proceed either way — the fallback path
 # covers real breakage.
 #
-# Moved to "1" on 2026-09-10 with the 1.0.0 shapes (notes[], applied{}) in
-# capabilities/mcp_stats.py. Bump it when the changelog's `breaking` entry
-# names a field this client reads.
-PINNED_CONTRACT = "1"
+# Reviewed through 3.8.0 on 2026-09-16 (#278): majors 2 and 3 change the
+# unused event feed only. All four mcp_stats callers retain their 1.0 shapes
+# (including notes[] and applied{}). Review every breaking entry before
+# advancing the pin, even when none of our consumed fields changed.
+PINNED_CONTRACT = "3"
 _TIMEOUT_S = 15
 
 _id_lock = threading.Lock()

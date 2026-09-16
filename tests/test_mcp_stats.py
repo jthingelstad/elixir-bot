@@ -4,6 +4,8 @@ to local tables — member Q&A must survive an Elixir MCP incident)."""
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 import capabilities.mcp_stats as mcp_stats
 
 
@@ -127,10 +129,11 @@ def test_client_returns_none_without_token(monkeypatch):
 def test_client_pin_is_the_contract_major():
     import elixir_mcp
 
-    assert elixir_mcp.PINNED_CONTRACT == "1"
+    assert elixir_mcp.PINNED_CONTRACT == "3"
 
 
-def test_contract_drift_warns_on_major_only(monkeypatch, caplog):
+@pytest.mark.parametrize("different_major", ["1.10.0", "2.0.0", "4.0.0"])
+def test_contract_drift_warns_on_major_only(monkeypatch, caplog, different_major):
     """The contract's semver rule: a minor is additive, a major is breaking.
     Pinning MAJOR.MINOR warned on every safe release, so the pin is the major."""
     import logging
@@ -139,12 +142,16 @@ def test_contract_drift_warns_on_major_only(monkeypatch, caplog):
 
     monkeypatch.setattr(elixir_mcp, "_contract_warned", False)
     with caplog.at_level(logging.WARNING, logger="elixir.mcp"):
-        elixir_mcp._check_contract({"meta": {"contract_version": "1.7.0"}})
+        for version in ("3.0.0", "3.8.0", "3.9.1"):
+            elixir_mcp._check_contract({"meta": {"contract_version": version}})
     assert "contract drift" not in caplog.text
+    assert not elixir_mcp._contract_warned
     with caplog.at_level(logging.WARNING, logger="elixir.mcp"):
-        elixir_mcp._check_contract({"meta": {"contract_version": "2.0.0"}})
+        elixir_mcp._check_contract({"meta": {"contract_version": different_major}})
+        elixir_mcp._check_contract({"meta": {"contract_version": different_major}})
     assert "contract drift" in caplog.text
-    assert "server 2.0.0" in caplog.text
+    assert f"server {different_major}" in caplog.text
+    assert caplog.text.count("contract drift") == 1
 
 
 class _FakeResponse:
