@@ -8,6 +8,13 @@ The autouse fixtures protect the live database and the Anthropic API:
   explicit connection or database path keep full control of their storage.
 - `_block_real_llm_calls` patches `agent.core._get_client` so any test that
   reaches the bottom-level API call raises a loud RuntimeError.
+- `_block_real_mcp_calls` empties the Elixir MCP token for every test, so a
+  code path that reaches `elixir_mcp.call_tool` takes its documented
+  "not configured" branch (None, local fallback) instead of the live door.
+  Until 2026-09-18 the gates hit elixir.poapkings.com with the placeholder
+  tag #ABC123 on every run: 39 war_history invalid_tag refusals in the hub's
+  audit log in fourteen days, every one this suite. Tests that want the
+  client patch `elixir_mcp.call_tool` themselves, as before.
 
 The schema template is built once per session through `db.schema`, the same
 public builder used by runtime cold starts. Its private migration-0 DDL keeps a
@@ -306,6 +313,21 @@ def _flush_async_status_writes(_isolate_default_sqlite_db):
     from runtime import status as runtime_status
 
     runtime_status.flush_status_writes()
+
+
+# Imported at collection, on purpose: the module's load_dotenv() runs once
+# here, before any test's delenv below, so a first import inside a test can
+# never put the real token back into the environment.
+import elixir_mcp as _elixir_mcp  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _block_real_mcp_calls(monkeypatch):
+    """Never reach the live Elixir MCP door from a test. The token comes
+    from the (emptied) process environment only; a test that wants the
+    client sets ELIXIR_MCP_TOKEN itself and mocks requests.post."""
+    monkeypatch.delenv("ELIXIR_MCP_TOKEN", raising=False)
+    monkeypatch.setattr(_elixir_mcp, "_token", lambda: os.environ.get("ELIXIR_MCP_TOKEN") or None)
 
 
 @pytest.fixture(autouse=True)
