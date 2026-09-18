@@ -35,10 +35,9 @@ def trend_context_via_mcp(tag: str, days: int = 30, window_days: int = 7) -> str
     battle_trophy_delta (trophies actually won/lost in battles).
     """
     now = datetime.now(timezone.utc)
-    # 3.17.0: the series is `series`, one point per game day keyed `day`
-    # (`date` rides beside it until 4.0.0); `metrics` names the columns
-    # (trophies is the default, best_trophies is the profile's lifetime
-    # best on the same row).
+    # The series is `series`, one point per game day keyed `day` (4.0.0:
+    # date is gone); `metrics` names the columns (trophies is the default,
+    # best_trophies is the profile's lifetime best on the same row).
     timeline = elixir_mcp.call_tool(
         "players_timeline",
         {
@@ -61,7 +60,7 @@ def trend_context_via_mcp(tag: str, days: int = 30, window_days: int = 7) -> str
     latest = points[-1] if points else {}
 
     def _day(p: dict) -> str | None:
-        return p.get("day") or p.get("date")
+        return p.get("day")
 
     def _snapshot_delta(start: datetime, end: datetime) -> int | None:
         lo, hi = _iso_date(start), _iso_date(end)

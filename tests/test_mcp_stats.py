@@ -16,37 +16,33 @@ def _days_ago(n):
 def test_trend_block_matches_local_labels(monkeypatch):
     def fake_call(name, arguments=None):
         if name == "players_timeline":
-            # 3.17.0 wire: `series`, points keyed `day` (with `date` beside
-            # it until 4.0.0), the metrics asked for on the row.
+            # 4.0.0 wire: `series`, points keyed `day`, the metrics asked
+            # for on the row.
             assert arguments["metrics"] == ["trophies", "best_trophies"]
             return {
                 "series": [
                     {
                         "day": _days_ago(13),
-                        "date": _days_ago(13),
                         "trophies": 12400,
                         "best_trophies": 12600,
                     },
                     {
                         "day": _days_ago(8),
-                        "date": _days_ago(8),
                         "trophies": 12450,
                         "best_trophies": 12600,
                     },
                     {
                         "day": _days_ago(6),
-                        "date": _days_ago(6),
                         "trophies": 12480,
                         "best_trophies": 12600,
                     },
                     {
                         "day": _days_ago(0),
-                        "date": _days_ago(0),
                         "trophies": 12510,
                         "best_trophies": 12622,
                     },
                 ],
-                "meta": {"contract_version": "3.17.0"},
+                "meta": {"contract_version": "4.0.0"},
             }
         if name == "battles_performance":
             return {
@@ -153,10 +149,10 @@ def test_client_returns_none_without_token(monkeypatch):
 def test_client_pin_is_the_contract_major():
     import elixir_mcp
 
-    assert elixir_mcp.PINNED_CONTRACT == "3"
+    assert elixir_mcp.PINNED_CONTRACT == "4"
 
 
-@pytest.mark.parametrize("different_major", ["1.10.0", "2.0.0", "4.0.0"])
+@pytest.mark.parametrize("different_major", ["1.10.0", "3.18.0", "5.0.0"])
 def test_contract_drift_warns_on_major_only(monkeypatch, caplog, different_major):
     """The contract's semver rule: a minor is additive, a major is breaking.
     Pinning MAJOR.MINOR warned on every safe release, so the pin is the major."""
@@ -166,7 +162,7 @@ def test_contract_drift_warns_on_major_only(monkeypatch, caplog, different_major
 
     monkeypatch.setattr(elixir_mcp, "_contract_warned", False)
     with caplog.at_level(logging.WARNING, logger="elixir.mcp"):
-        for version in ("3.0.0", "3.8.0", "3.9.1"):
+        for version in ("4.0.0", "4.3.0", "4.9.1"):
             elixir_mcp._check_contract({"meta": {"contract_version": version}})
     assert "contract drift" not in caplog.text
     assert not elixir_mcp._contract_warned

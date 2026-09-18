@@ -33,11 +33,13 @@ MCP_URL = "https://elixir.poapkings.com/mcp"
 # stops being a signal. Calls still proceed either way — the fallback path
 # covers real breakage.
 #
-# Reviewed through 3.8.0 on 2026-09-16 (#278): majors 2 and 3 change the
-# unused event feed only. All four mcp_stats callers retain their 1.0 shapes
-# (including notes[] and applied{}). Review every breaking entry before
-# advancing the pin, even when none of our consumed fields changed.
-PINNED_CONTRACT = "3"
+# Reviewed through 4.0.0 on 2026-09-18: the major retired the names the
+# 3.14.0-3.18.0 releases had doubled. Of the four mcp_stats callers only
+# players_timeline changed shape here (day, never date; the bot read day
+# since 3.17.0); war_history, battles_performance and clans_standings keep
+# every field the bot reads. Review every breaking entry before advancing
+# the pin, even when none of our consumed fields changed.
+PINNED_CONTRACT = "4"
 _TIMEOUT_S = 15
 
 _id_lock = threading.Lock()
