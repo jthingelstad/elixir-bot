@@ -116,10 +116,15 @@ def call_tool(name: str, arguments: dict | None = None) -> dict | None:
         # server's audit log (review 2026-09-10 §4.4: 32 invalid_tag refusals
         # on this surface in a week and not one line client-side).
         err = body.get("error") or {}
-        log.warning(
-            "elixir-mcp: %s tool error %s: %s %s",
+        # Since contract 3.18.0 the error carries a class; `retry` means the
+        # call was fine and the answer is not in hand yet (a queued live
+        # read, a cancelled analytical read), so it is a line, not a warning.
+        err_class = err.get("class")
+        (log.info if err_class == "retry" else log.warning)(
+            "elixir-mcp: %s tool error %s%s: %s %s",
             name,
             err.get("code"),
+            f" [{err_class}]" if err_class else "",
             err.get("message"),
             _describe_args(arguments),
         )
