@@ -35,9 +35,17 @@ def trend_context_via_mcp(tag: str, days: int = 30, window_days: int = 7) -> str
     battle_trophy_delta (trophies actually won/lost in battles).
     """
     now = datetime.now(timezone.utc)
+    # 3.17.0: the series is `series`, one point per game day keyed `day`
+    # (`date` rides beside it until 4.0.0); `metrics` names the columns
+    # (trophies is the default, best_trophies is the profile's lifetime
+    # best on the same row).
     timeline = elixir_mcp.call_tool(
         "players_timeline",
-        {"player_tag": tag, "from": _iso_date(now - timedelta(days=days))},
+        {
+            "player_tag": tag,
+            "from": _iso_date(now - timedelta(days=days)),
+            "metrics": ["trophies", "best_trophies"],
+        },
     )
     perf = elixir_mcp.call_tool(
         "battles_performance",
@@ -49,13 +57,15 @@ def trend_context_via_mcp(tag: str, days: int = 30, window_days: int = 7) -> str
     )
     if timeline is None or perf is None:
         return None
-    points = timeline.get("points") or timeline.get("series") or []
+    points = timeline.get("series") or []
     latest = points[-1] if points else {}
 
+    def _day(p: dict) -> str | None:
+        return p.get("day") or p.get("date")
+
     def _snapshot_delta(start: datetime, end: datetime) -> int | None:
-        window = [
-            p for p in points if p.get("date") and _iso_date(start) <= p["date"] <= _iso_date(end)
-        ]
+        lo, hi = _iso_date(start), _iso_date(end)
+        window = [p for p in points if (d := _day(p)) is not None and lo <= d <= hi]
         vals = [p.get("trophies") for p in window if p.get("trophies") is not None]
         if len(vals) < 2:
             return None
@@ -77,8 +87,8 @@ def trend_context_via_mcp(tag: str, days: int = 30, window_days: int = 7) -> str
         f"player_tag: {tag}",
         f"window_days: {days}",
         (
-            f"latest_snapshot: {latest.get('date') or 'n/a'} | "
-            f"trophies {latest.get('trophies')} | best_trophies n/a"
+            f"latest_snapshot: {_day(latest) or 'n/a'} | "
+            f"trophies {latest.get('trophies')} | best_trophies {latest.get('best_trophies', 'n/a')}"
         ),
         (
             f"current_{window_days}d_vs_previous_{window_days}d: "

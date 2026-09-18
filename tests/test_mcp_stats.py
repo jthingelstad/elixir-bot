@@ -16,14 +16,37 @@ def _days_ago(n):
 def test_trend_block_matches_local_labels(monkeypatch):
     def fake_call(name, arguments=None):
         if name == "players_timeline":
+            # 3.17.0 wire: `series`, points keyed `day` (with `date` beside
+            # it until 4.0.0), the metrics asked for on the row.
+            assert arguments["metrics"] == ["trophies", "best_trophies"]
             return {
                 "series": [
-                    {"date": _days_ago(13), "trophies": 12400},
-                    {"date": _days_ago(8), "trophies": 12450},
-                    {"date": _days_ago(6), "trophies": 12480},
-                    {"date": _days_ago(0), "trophies": 12510},
+                    {
+                        "day": _days_ago(13),
+                        "date": _days_ago(13),
+                        "trophies": 12400,
+                        "best_trophies": 12600,
+                    },
+                    {
+                        "day": _days_ago(8),
+                        "date": _days_ago(8),
+                        "trophies": 12450,
+                        "best_trophies": 12600,
+                    },
+                    {
+                        "day": _days_ago(6),
+                        "date": _days_ago(6),
+                        "trophies": 12480,
+                        "best_trophies": 12600,
+                    },
+                    {
+                        "day": _days_ago(0),
+                        "date": _days_ago(0),
+                        "trophies": 12510,
+                        "best_trophies": 12622,
+                    },
                 ],
-                "meta": {"contract_version": "0.10.0"},
+                "meta": {"contract_version": "3.17.0"},
             }
         if name == "battles_performance":
             return {
@@ -41,6 +64,7 @@ def test_trend_block_matches_local_labels(monkeypatch):
     assert "record 18-11-1 vs 9-10-1" in block
     assert "battle_trophy_delta 44 vs -12" in block
     assert "trophies 30 vs 50" in block  # snapshot deltas, separated from battle deltas
+    assert "best_trophies 12622" in block
     assert "source: elixir-mcp" in block
 
 
