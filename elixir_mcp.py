@@ -33,7 +33,11 @@ MCP_URL = "https://elixir.poapkings.com/mcp"
 # stops being a signal. Calls still proceed either way — the fallback path
 # covers real breakage.
 #
-# Reviewed through 5.0.0 on 2026-09-19: the major removed Pilot Score
+# Reviewed through 6.0.0 on 2026-09-19: the major moved battles_query's
+# flat elixir_leaked / elixir_leaked_differential under one `elixir` object
+# (null differential on duels); battles_query is not called here and
+# nothing reads those fields. The four callers and every field they read
+# are unchanged. 5.0.0 (same day) removed Pilot Score
 # (battles_levels and clans_pilot_scores, neither called here) and replaced
 # the integer `evolution` key on deck cards with `form`; none of the four
 # mcp_stats callers (players_timeline, battles_performance, war_history,
@@ -42,7 +46,7 @@ MCP_URL = "https://elixir.poapkings.com/mcp"
 # players_timeline changed shape here (day, never date). Review every
 # breaking entry before advancing the pin, even when none of our consumed
 # fields changed.
-PINNED_CONTRACT = "5"
+PINNED_CONTRACT = "6"
 _TIMEOUT_S = 15
 
 _id_lock = threading.Lock()
