@@ -689,8 +689,13 @@ def register_scheduled_activities(
 
 
 def format_scheduler_startup_summary(runtime_module: Any) -> str:
+    """Only what register_scheduled_activities actually registered: an
+    activity that is off (enabled_by_default=False) must not be announced
+    as scheduled (2026-09-18, the Arena Dispatch)."""
     parts = []
     for spec in schedule_specs_from_registry(runtime_module):
+        if not spec["enabled_by_default"]:
+            continue
         parts.append(f"{spec['activity_key']} — {spec['schedule']}")
     return ", ".join(parts)
 
