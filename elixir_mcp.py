@@ -33,13 +33,16 @@ MCP_URL = "https://elixir.poapkings.com/mcp"
 # stops being a signal. Calls still proceed either way — the fallback path
 # covers real breakage.
 #
-# Reviewed through 4.0.0 on 2026-09-18: the major retired the names the
-# 3.14.0-3.18.0 releases had doubled. Of the four mcp_stats callers only
-# players_timeline changed shape here (day, never date; the bot read day
-# since 3.17.0); war_history, battles_performance and clans_standings keep
-# every field the bot reads. Review every breaking entry before advancing
-# the pin, even when none of our consumed fields changed.
-PINNED_CONTRACT = "4"
+# Reviewed through 5.0.0 on 2026-09-19: the major removed Pilot Score
+# (battles_levels and clans_pilot_scores, neither called here) and replaced
+# the integer `evolution` key on deck cards with `form`; none of the four
+# mcp_stats callers (players_timeline, battles_performance, war_history,
+# clans_standings) reads a deck card, and every field they read survives.
+# 4.0.0 (2026-09-18) had retired the names 3.14.0-3.18.0 doubled; only
+# players_timeline changed shape here (day, never date). Review every
+# breaking entry before advancing the pin, even when none of our consumed
+# fields changed.
+PINNED_CONTRACT = "5"
 _TIMEOUT_S = 15
 
 _id_lock = threading.Lock()

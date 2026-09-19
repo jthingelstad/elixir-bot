@@ -149,10 +149,10 @@ def test_client_returns_none_without_token(monkeypatch):
 def test_client_pin_is_the_contract_major():
     import elixir_mcp
 
-    assert elixir_mcp.PINNED_CONTRACT == "4"
+    assert elixir_mcp.PINNED_CONTRACT == "5"
 
 
-@pytest.mark.parametrize("different_major", ["1.10.0", "3.18.0", "5.0.0"])
+@pytest.mark.parametrize("different_major", ["1.10.0", "3.18.0", "4.0.0"])
 def test_contract_drift_warns_on_major_only(monkeypatch, caplog, different_major):
     """The contract's semver rule: a minor is additive, a major is breaking.
     Pinning MAJOR.MINOR warned on every safe release, so the pin is the major."""
@@ -162,7 +162,7 @@ def test_contract_drift_warns_on_major_only(monkeypatch, caplog, different_major
 
     monkeypatch.setattr(elixir_mcp, "_contract_warned", False)
     with caplog.at_level(logging.WARNING, logger="elixir.mcp"):
-        for version in ("4.0.0", "4.3.0", "4.9.1"):
+        for version in ("5.0.0", "5.3.0", "5.9.1"):
             elixir_mcp._check_contract({"meta": {"contract_version": version}})
     assert "contract drift" not in caplog.text
     assert not elixir_mcp._contract_warned

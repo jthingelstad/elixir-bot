@@ -5,6 +5,7 @@ actually build. These tests pin that, plus the two measurement traps the feature
 designed around: rarity-relative card levels, and the absence of win rates.
 """
 
+import datetime
 import json
 import sqlite3
 
@@ -423,11 +424,14 @@ def test_recommendations_read_the_field_this_member_actually_meets(rich):
         "INSERT INTO deck_profile VALUES ('H_OPP','bait','Log Bait',3.2,?,2,1,1,1,1,1)",
         (_deck([(9, 0)] * 8),),  # an opponent deck built from a card the member lacks
     )
+    # The field is the last 60 days: a fixed day rots out of the window (it
+    # did on 2026-09-18, sixty days after the 2026-07-20 it carried).
+    recent = (datetime.date.today() - datetime.timedelta(days=5)).isoformat()
     for i in range(14):
         rich.execute("INSERT INTO battle_events VALUES (?, ?, 'L')", (f"x{i}", TAG))
         rich.execute(
-            "INSERT INTO battle_enrichment VALUES (?, ?, '2026-07-20', 'H_OK', 'H_OPP')",
-            (f"x{i}", TAG),
+            "INSERT INTO battle_enrichment VALUES (?, ?, ?, 'H_OK', 'H_OPP')",
+            (f"x{i}", TAG, recent),
         )
     r = get_deck_recommendations(view="discover", member_tag=TAG, conn=rich)
     field = r["your_field"]

@@ -26,6 +26,7 @@ def _dispatch_not_moved(monkeypatch):
     sends it); these tests cover the cycle itself, so run it as if not."""
     monkeypatch.setattr(_core, "WEEKLY_MEMBER_MAIL_MOVED_TO_ELIXIR", False)
 
+
 _DEFAULT_LOG = [
     {
         "battle_time": "20260707T144643.000Z",
