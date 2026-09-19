@@ -19,6 +19,13 @@ from runtime import status as runtime_status
 from runtime.jobs import _core
 from storage import dossiers
 
+
+@pytest.fixture(autouse=True)
+def _dispatch_not_moved(monkeypatch):
+    """The Arena Dispatch is off in production since 2026-09-18 (Elixir MCP
+    sends it); these tests cover the cycle itself, so run it as if not."""
+    monkeypatch.setattr(_core, "WEEKLY_MEMBER_MAIL_MOVED_TO_ELIXIR", False)
+
 _DEFAULT_LOG = [
     {
         "battle_time": "20260707T144643.000Z",

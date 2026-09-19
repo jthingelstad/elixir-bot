@@ -591,6 +591,15 @@ async def post_release_relay_card(clanchat_text: str, *, tag: str) -> bool:
     return True
 
 
+# The weekly member mail moved to Elixir MCP on 2026-09-18 (its docs/EMAIL.md
+# and /docs/email): the Monday clan report and Tuesday's "Your week in the
+# Arena" now come from elixir.poapkings.com, built from the record with no
+# model in the loop. The BCC recap email and the Arena Dispatch are off HERE
+# so nobody gets both; the Discord #announcements recap post is unchanged.
+# Flip back only if Elixir's sends stop.
+WEEKLY_MEMBER_MAIL_MOVED_TO_ELIXIR = True
+
+
 async def _weekly_clan_recap():
     runtime_status.mark_job_start("weekly_clan_recap")
     try:
@@ -679,11 +688,14 @@ async def _weekly_clan_recap():
     # the end is how the 2026-08-03 report went missing with a green job status.
     emailed = 0
     email_error: str | None = None
-    try:
-        emailed = await _email_weekly_recap(recap_text, recap_context)
-    except Exception as exc:  # noqa: BLE001 - reported below, not swallowed
-        email_error = f"{type(exc).__name__}: {exc}"
-        log.warning("weekly recap email failed", exc_info=True)
+    if WEEKLY_MEMBER_MAIL_MOVED_TO_ELIXIR:
+        log.info("weekly recap email: sent by Elixir MCP since 2026-09-18; not emailed here")
+    else:
+        try:
+            emailed = await _email_weekly_recap(recap_text, recap_context)
+        except Exception as exc:  # noqa: BLE001 - reported below, not swallowed
+            email_error = f"{type(exc).__name__}: {exc}"
+            log.warning("weekly recap email failed", exc_info=True)
     # (POAP KINGS website weekly-recap sync + blog post removed 2026-06-21 — the
     # site has its own update script now. The Discord #announcements recap above
     # and the story relay below are unchanged.)
@@ -835,6 +847,15 @@ async def _weekly_member_report_cycle():
     from agent.mail import outbound
     from agent.workflows import generate_member_report
     from runtime import member_report
+
+    if WEEKLY_MEMBER_MAIL_MOVED_TO_ELIXIR:
+        # The activity is also unregistered (enabled_by_default=False); this
+        # guard covers a manual trigger.
+        runtime_status.mark_job_success(
+            "weekly_member_report",
+            "skipped: the Arena Dispatch is sent by Elixir MCP since 2026-09-18",
+        )
+        return {"sent": 0, "total": 0}
 
     if not outbound.enabled():
         runtime_status.mark_job_success("weekly_member_report", "skipped: mail not configured")

@@ -300,6 +300,11 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         # the old obligation would really send the new week's report before its
         # Monday slot, so the old period is superseded instead.
         catch_up_same_period_only=True,
+        # Off since 2026-09-18: Elixir MCP sends "Your week in the Arena" to
+        # the same people on Tuesdays (runtime/jobs/_core.py,
+        # WEEKLY_MEMBER_MAIL_MOVED_TO_ELIXIR). Not deleted: the builder is the
+        # reference the Elixir report was designed from.
+        enabled_by_default=False,
     ),
     ActivityDefinition(
         activity_key="weekly-elder-standing",
