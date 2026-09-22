@@ -246,6 +246,39 @@ _PURGE_TARGETS = [
 
 _PURGE_DATE_TARGETS = []
 
+# Retention is idempotent, so it must not monopolize SQLite's one writer while
+# deleting a week's worth of raw API history.  The 2026-09-20 maintenance pass
+# held the writer for 8.55 seconds; short commits let the ten-minute engine tick
+# interleave with this low-priority work instead of missing its slot.
+_PURGE_BATCH_SIZE = 1_000
+
+
+def _delete_expired_rows(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    predicate: str,
+    cutoff: str,
+) -> int:
+    """Delete one retention target in short, independently committed batches.
+
+    A completed batch is safe to retain when a later batch fails: the next
+    maintenance pass uses the same cutoff rule and resumes from what remains.
+    ``rowid`` is available on every retention target in the v5.1 schema.
+    """
+    deleted = 0
+    while True:
+        cursor = conn.execute(
+            f"DELETE FROM {table} WHERE rowid IN ("
+            f"SELECT rowid FROM {table} WHERE {predicate} < ? LIMIT ?)",
+            (cutoff, _PURGE_BATCH_SIZE),
+        )
+        batch_count = cursor.rowcount
+        deleted += batch_count
+        conn.commit()
+        if batch_count < _PURGE_BATCH_SIZE:
+            return deleted
+
 
 @managed_connection
 def purge_old_data(conn: Optional[sqlite3.Connection] = None) -> dict[str, int]:
@@ -259,12 +292,10 @@ def purge_old_data(conn: Optional[sqlite3.Connection] = None) -> dict[str, int]:
             cutoff = _date_cutoff(days).replace("-", "")
         else:
             predicate, cutoff = column, _utc_cutoff(days)
-        cursor = conn.execute(f"DELETE FROM {table} WHERE {predicate} < ?", (cutoff,))
-        stats[table] = cursor.rowcount
+        stats[table] = _delete_expired_rows(conn, table=table, predicate=predicate, cutoff=cutoff)
     for table, column, days in _PURGE_DATE_TARGETS:
         cutoff = _date_cutoff(days)
-        cursor = conn.execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff,))
-        stats[table] = cursor.rowcount
+        stats[table] = _delete_expired_rows(conn, table=table, predicate=column, cutoff=cutoff)
     # LLM blob pruning moved with the table (2026-08-03). Retention for the
     # telemetry database runs on ITS connection so a clan-DB maintenance pass can
     # never be what blocks it -- the whole point of the split.
