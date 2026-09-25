@@ -66,11 +66,6 @@ RETIRED_GUIDANCE_TERMS = {
         "/Users/jamie",
         "`elixir.db`",
     ),
-    ".claude/skills/cr-api-doc-audit/SKILL.md": (
-        "/Users/jamie",
-        "`elixir.db`",
-        "180 days",
-    ),
     ".claude/skills/llm-cost-report/SKILL.md": (
         "/Users/jamie",
         "`elixir.db`",

@@ -79,8 +79,11 @@ The project skills are procedures, not roles:
 
 - **Run Elixir:** `.claude/skills/log-triage`, `llm-cost-report`, and
   `new-release`; use `awareness-report` when delivery or liveness is implicated.
-- **Represent the Game:** `.claude/skills/cr-api-doc-audit`; use
-  `awareness-report` to see whether current data reaches editorial decisions.
+- **Represent the Game:** Elixir MCP's reference audit
+  (`../elixir-mcp/.claude/skills/reference-audit/`) for payload/reference
+  drift across its whole archive, with `api_sentinel_observations` as this
+  bot's early warning; use `awareness-report` to see whether current data
+  reaches editorial decisions.
 - **Improve Elixir:** `.claude/skills/awareness-report` plus the repository's
   `scripts/eval_*.py`, feedback, and leader-decision reports.
 

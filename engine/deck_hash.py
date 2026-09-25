@@ -26,7 +26,7 @@ def card_form(evolution_level) -> str:
 
     NULL/absent/0 -> base, 1 -> evo, >=2 -> hero. The ``>=2`` fold treats the
     rare level-3 tier (Wizard/Knight, ~20 plays) as ``hero`` until its semantics
-    are confirmed via the cr-api-doc-audit skill (plan §2).
+    are confirmed in cr-agent-api-docs (Elixir MCP's reference audit; plan §2).
     """
     if not isinstance(evolution_level, int) or evolution_level <= 0:
         return "base"

@@ -12,9 +12,13 @@ outlook; you do not reproduce it. If it is stale or missing, say so and continue
 with the evidence you have rather than browsing in its place.
 
 Read `AGENTS.md`, `AGENT-TEAM/WORKFLOW.md`, `AGENT-TEAM/README.md`, and this file.
-Use `.claude/skills/cr-api-doc-audit` for payload/reference drift and
-`awareness-report` when checking whether available game data reaches Elixir's
-decisions. A database audit alone does fulfil this objective; discovering the
+For payload/reference drift use Elixir MCP's reference audit
+(`../elixir-mcp/.claude/skills/reference-audit/`): it diffs every payload the
+hub has archived, across every recorded clan and 15 endpoints, against
+`cr-agent-api-docs`; this bot's `api_sentinel_observations` stay the early
+warning for a new path. It replaced `.claude/skills/cr-api-doc-audit` (one
+clan's 60-day buffer) on 2026-09-25. Use `awareness-report` when checking
+whether available game data reaches Elixir's decisions. A database audit alone does fulfil this objective; discovering the
 outside world does not.
 
 Cadence: daily, plus after a drift alert or a domain outlook naming a change that
