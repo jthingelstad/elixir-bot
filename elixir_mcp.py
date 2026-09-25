@@ -8,8 +8,9 @@ no shadow mode — with local tables as the error fallback only.
 Error contract mirrors cr_api.py: every public helper returns the parsed
 tool body on success and None on ANY failure (network, HTTP, tool error,
 malformed body). Callers branch on None and fall back to local data —
-nothing here raises across the module boundary. Tool errors and contract
-drift are logged loudly so failures are visible in #elixir-log triage.
+nothing here raises across the module boundary. Tool errors are logged
+loudly so failures are visible in #elixir-log triage; the served contract
+version is logged as information, never as drift (see _note_contract).
 """
 
 import json
@@ -25,33 +26,26 @@ load_dotenv()
 log = logging.getLogger("elixir.mcp")
 
 MCP_URL = "https://elixir.poapkings.com/mcp"
-# The contract MAJOR this integration was built against. The contract's own
-# semver rule (elixir-mcp packages/contracts) is that a breaking change is a
-# major bump and a minor is additive, so a different major is worth a loud
-# log line and a minor is not: pinning MAJOR.MINOR ("0.43") warned on every
-# release the contract itself said was safe, and a pin that is always wrong
-# stops being a signal. Calls still proceed either way — the fallback path
-# covers real breakage.
+# No contract pin. The hub's rule since 2026-09-25 (elixir-mcp
+# docs/DECISIONS.md, "MCP majors track domain shifts, not agent-visible wire
+# cleanup"): removing an unreliable response field is a PATCH, and a major
+# is reserved for a domain-model change. So the version number cannot tell
+# this program whether a field it reads survived. A major pin would miss
+# exactly that case while warning on every major that changed nothing we
+# read: pinned at 6, every process opened with a "contract drift" warning
+# once the hub moved past 6.x (server 8.1.0 on 2026-09-25).
 #
-# Reviewed through 6.0.0 on 2026-09-19: the major moved battles_query's
-# flat elixir_leaked / elixir_leaked_differential under one `elixir` object
-# (null differential on duels); battles_query is not called here and
-# nothing reads those fields. The four callers and every field they read
-# are unchanged. 5.0.0 (same day) removed Pilot Score
-# (battles_levels and clans_pilot_scores, neither called here) and replaced
-# the integer `evolution` key on deck cards with `form`; none of the four
-# mcp_stats callers (players_timeline, battles_performance, war_history,
-# clans_standings) reads a deck card, and every field they read survives.
-# 4.0.0 (2026-09-18) had retired the names 3.14.0-3.18.0 doubled; only
-# players_timeline changed shape here (day, never date). Review every
-# breaking entry before advancing the pin, even when none of our consumed
-# fields changed.
-PINNED_CONTRACT = "6"
+# The check that tracks the wire is in the readers instead. Every builder
+# in capabilities/mcp_stats.py treats an absent or null field as
+# UNAVAILABLE, never as 0: a count an answer depends on makes the builder
+# return None, so the caller falls back to local data (or says the answer
+# is unavailable where there is no local copy). The served version is
+# still logged, as information.
 _TIMEOUT_S = 15
 
 _id_lock = threading.Lock()
 _next_id = 0
-_contract_warned = False
+_contract_seen: str | None = None
 
 
 def _token() -> str | None:
@@ -138,7 +132,7 @@ def call_tool(name: str, arguments: dict | None = None) -> dict | None:
             _describe_args(arguments),
         )
         return None
-    _check_contract(body)
+    _note_contract(body)
     return body
 
 
@@ -153,16 +147,14 @@ def _describe_args(arguments: dict | None) -> str:
     return " ".join(parts)
 
 
-def _check_contract(body: dict) -> None:
-    global _contract_warned
-    if _contract_warned:
-        return
-    version = (body.get("meta") or {}).get("contract_version") or ""
-    if version and version.split(".")[0] != PINNED_CONTRACT:
-        _contract_warned = True
-        log.warning(
-            "elixir-mcp: contract drift — server %s, integration built for major %s "
-            "(breaking = major, per the contract's semver rule); review the tool surface",
-            version,
-            PINNED_CONTRACT,
-        )
+def _note_contract(body: dict) -> None:
+    """Log the served contract version once per distinct value, at INFO.
+
+    Information only: the first answer after boot, and again when the hub
+    deploys a new contract while the bot runs. No version is treated as
+    drift (see the note above MCP_URL)."""
+    global _contract_seen
+    version = (body.get("meta") or {}).get("contract_version") or None
+    if version and version != _contract_seen:
+        _contract_seen = version
+        log.info("elixir-mcp: server contract %s", version)

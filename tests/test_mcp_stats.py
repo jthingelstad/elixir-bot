@@ -107,6 +107,131 @@ def test_war_attendance_shapes_and_semantics(monkeypatch):
     assert "note" not in out
 
 
+_WAR_WEEKS = [
+    {"season_id": 135, "section_index": 4},
+    {"season_id": 135, "section_index": 3},
+    {"season_id": 135, "section_index": 2},
+    {"season_id": 134, "section_index": 4},
+    {"season_id": 134, "section_index": 3},
+]
+_ABSENT = object()
+
+
+@pytest.mark.parametrize(
+    ("member_weeks", "field"),
+    [
+        (_ABSENT, "member_weeks"),
+        (None, "member_weeks"),
+        # A current-season week without decks_used, absent or null.
+        ([{"season_id": 135, "section_index": 4, "points": 900}], "member_weeks[].decks_used"),
+        (
+            [{"season_id": 135, "section_index": 4, "points": 900, "decks_used": None}],
+            "member_weeks[].decks_used",
+        ),
+        # A last-four week from the previous season is counted too.
+        ([{"season_id": 134, "section_index": 4, "points": 1600}], "member_weeks[].decks_used"),
+        # A played week without points.
+        ([{"season_id": 135, "section_index": 4, "decks_used": 4}], "member_weeks[].points"),
+        (
+            [{"season_id": 135, "section_index": 4, "decks_used": 4, "points": None}],
+            "member_weeks[].points",
+        ),
+        ([{"section_index": 4, "points": 900, "decks_used": 4}], "member_weeks[].season_id"),
+    ],
+)
+def test_war_attendance_absent_field_is_unavailable_not_zero(
+    monkeypatch, caplog, member_weeks, field
+):
+    """Jamie 2026-09-25: a missing field reads as UNAVAILABLE, not 0. The
+    hub removes an unreliable field as a patch, and `or 0` would have made
+    a withdrawn decks_used into a member who played no war decks. None
+    sends the caller to the local tables."""
+    import logging
+
+    body = {"weeks": _WAR_WEEKS, "notes": [], "meta": {"contract_version": "9.0.1"}}
+    if member_weeks is not _ABSENT:
+        body["member_weeks"] = member_weeks
+    monkeypatch.setattr(mcp_stats.elixir_mcp, "call_tool", lambda name, arguments=None: body)
+    with caplog.at_level(logging.WARNING, logger="elixir.mcp_stats"):
+        assert mcp_stats.war_attendance_via_mcp("#20JJJ2CCRU") is None
+    assert f"war_history {field}" in caplog.text
+    assert "absent or null for #20JJJ2CCRU" in caplog.text
+
+
+def test_war_attendance_checks_only_the_rows_it_counts(monkeypatch):
+    """An EMPTY member_weeks is a real answer (no race rows: zero played),
+    and a null on a week the counts never read (outside the current season
+    and the latest four) does not withdraw the answer."""
+    body = {"weeks": _WAR_WEEKS, "member_weeks": [], "notes": []}
+    monkeypatch.setattr(mcp_stats.elixir_mcp, "call_tool", lambda name, arguments=None: body)
+    out = mcp_stats.war_attendance_via_mcp("#20JJJ2CCRU")
+    assert out["season"]["races_played"] == 0
+    assert out["season"]["total_races"] == 3
+    assert out["last_4_weeks"]["races_played"] == 0
+
+    body["member_weeks"] = [
+        {"season_id": 135, "section_index": 4, "points": 900, "decks_used": 4},
+        {"season_id": 134, "section_index": 3, "points": None, "decks_used": None},
+    ]
+    out = mcp_stats.war_attendance_via_mcp("#20JJJ2CCRU")
+    assert out["season"]["races_played"] == 1
+    assert out["season"]["total_points"] == 900
+    assert out["season"]["total_decks_used"] == 4
+
+
+def test_attendance_tool_falls_back_to_local_when_decks_used_is_withdrawn(monkeypatch):
+    """End to end through the tool: the MCP answer without decks_used is
+    unavailable, so get_member_war_detail answers from the local tables
+    rather than reporting a member who played nothing."""
+    from unittest.mock import patch
+
+    from agent import tool_exec
+
+    body = {
+        "weeks": _WAR_WEEKS,
+        "member_weeks": [{"season_id": 135, "section_index": 4, "points": 900}],
+        "notes": [],
+    }
+    monkeypatch.setattr(mcp_stats.elixir_mcp, "call_tool", lambda name, arguments=None: body)
+    local = {"season": {"races_played": 1, "total_races": 3}, "source": "local"}
+    with (
+        patch.object(tool_exec.db, "get_member_war_attendance", return_value=local) as local_read,
+        patch.object(tool_exec, "_enrich_war_player_type"),
+        patch.object(tool_exec, "_annotate_roster_status"),
+    ):
+        out = tool_exec._execute_get_member_war_detail(
+            {"member_tag": "#20JJJ2CCRU", "aspect": "attendance"}
+        )
+    assert out is local
+    local_read.assert_called_once_with("#20JJJ2CCRU", season_id=None)
+
+
+def test_clan_standing_absent_counts_are_unavailable_not_zero(monkeypatch):
+    body = {
+        "clan_tag": "#J2RGCRVG",
+        "members": [{"player_tag": "#20JJJ2CCRU", "rank": 4, "win_rate": 0.55}],
+        "notes": [],
+    }
+    monkeypatch.setattr(mcp_stats.elixir_mcp, "call_tool", lambda name, arguments=None: body)
+    out = mcp_stats.clan_standing_via_mcp("#20JJJ2CCRU")
+    assert out["ranked_members"] is None
+    assert out["below_floor_count"] is None
+    # No percentile without the denominator.
+    assert "percentile" not in out["asker"]
+
+
+def test_trend_record_does_not_invent_zero_draws(monkeypatch):
+    def fake_call(name, arguments=None):
+        if name == "players_timeline":
+            return {"series": []}
+        return {"before": {"wins": 9, "losses": 10}, "after": {"wins": 18, "losses": 11}}
+
+    monkeypatch.setattr(mcp_stats.elixir_mcp, "call_tool", fake_call)
+    block = mcp_stats.trend_context_via_mcp("#20JJJ2CCRU")
+    assert "record 18-11-None vs 9-10-None" in block
+    assert "18-11-0" not in block
+
+
 def test_clan_standing_marks_asker_with_percentile(monkeypatch):
     body = {
         "clan_tag": "#J2RGCRVG",
@@ -146,32 +271,26 @@ def test_client_returns_none_without_token(monkeypatch):
     assert elixir_mcp.call_tool("players_summary", {}) is None
 
 
-def test_client_pin_is_the_contract_major():
-    import elixir_mcp
-
-    assert elixir_mcp.PINNED_CONTRACT == "6"
-
-
-@pytest.mark.parametrize("different_major", ["1.10.0", "4.0.0", "5.0.0"])
-def test_contract_drift_warns_on_major_only(monkeypatch, caplog, different_major):
-    """The contract's semver rule: a minor is additive, a major is breaking.
-    Pinning MAJOR.MINOR warned on every safe release, so the pin is the major."""
+def test_served_contract_is_information_never_drift(monkeypatch, caplog):
+    """No major pin (hub DECISIONS 2026-09-25: removing an unreliable field
+    is a patch, so the major cannot tell this program a field it reads
+    went away). Pinned at 6, every process warned "contract drift" once
+    the hub moved past 6.x. The version is logged at INFO once per
+    distinct value, and no version, major or not, is a warning."""
     import logging
 
     import elixir_mcp
 
-    monkeypatch.setattr(elixir_mcp, "_contract_warned", False)
-    with caplog.at_level(logging.WARNING, logger="elixir.mcp"):
-        for version in ("6.0.0", "6.1.0", "6.9.1"):
-            elixir_mcp._check_contract({"meta": {"contract_version": version}})
-    assert "contract drift" not in caplog.text
-    assert not elixir_mcp._contract_warned
-    with caplog.at_level(logging.WARNING, logger="elixir.mcp"):
-        elixir_mcp._check_contract({"meta": {"contract_version": different_major}})
-        elixir_mcp._check_contract({"meta": {"contract_version": different_major}})
-    assert "contract drift" in caplog.text
-    assert f"server {different_major}" in caplog.text
-    assert caplog.text.count("contract drift") == 1
+    monkeypatch.setattr(elixir_mcp, "_contract_seen", None)
+    with caplog.at_level(logging.DEBUG, logger="elixir.mcp"):
+        for version in ("6.0.0", "9.0.1", "9.0.1", "10.0.0"):
+            elixir_mcp._note_contract({"meta": {"contract_version": version}})
+        elixir_mcp._note_contract({"meta": {}})
+    assert "drift" not in caplog.text
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert caplog.text.count("server contract 9.0.1") == 1
+    assert "server contract 6.0.0" in caplog.text
+    assert "server contract 10.0.0" in caplog.text
 
 
 class _FakeResponse:
