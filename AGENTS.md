@@ -580,28 +580,45 @@ local tables are the ERROR FALLBACK only. Client: `elixir_mcp.py`
 builders: `capabilities/mcp_stats.py` (emit the same local shapes so
 prompts don't change).
 
-- Connection: `https://elixir.poapkings.com/mcp` with a service token
-  (`Authorization: Bearer svt_...` from `.env` ELIXIR_MCP_TOKEN),
-  issued/revoked from the Elixir MCP Admin page; calls are audited
-  there as `svc:elixir-bot`.
-- **37 tools at contract 0.30** (2026-09-08), domain-prefixed since 0.9.0:
-  players_*, battles_* (query/performance/decks/cards/compare/levels/trends/
-  meta_decks/meta_cards), clans_roster, clans_standings, clans_pilot_scores,
-  war_current, war_history, war_rivals, game_clock, cards_catalog,
-  collections_*, live_fetch, elixir_* (service). Card levels are
-  pre-normalized to the in-game 1-16 scale. The client pins the contract and
-  logs loudly on drift — **check `elixir_changelog(since=...)` rather than
-  trusting this list**, which is a snapshot and will go stale the way the
-  previous one did (it said "22 tools, contract 0.10" for eleven versions).
+- **What the hub serves** is its generated tool reference,
+  https://elixir.poapkings.com/docs/tools, and `elixir_changelog(since=...)`
+  says what changed. Do not copy the list here: the last copy said "37 tools
+  at contract 0.30" and still named two tools hub 5.0.0 had removed, and the
+  one before it said "22 tools, contract 0.10" for eleven versions.
+- **What this bot calls:** four tools, all from `capabilities/mcp_stats.py`
+  (grep `call_tool(` to re-count):
+
+  | Hub tool | Serves | When MCP has no answer |
+  |---|---|---|
+  | `players_timeline` + `battles_performance` | `get_member` include=trend | local trend summary |
+  | `war_history` | `get_member_war_detail` aspect=attendance | local attendance |
+  | `clans_standings` | `get_clan_standing` | `elixir_mcp_unavailable` (no local copy) |
+
+- **No version pin; a missing field is unavailable, not 0** (Jamie,
+  2026-09-25). The hub's rule is that MCP majors track domain shifts, and
+  removing an unreliable response field is a patch (elixir-mcp
+  `docs/DECISIONS.md`). So the contract version cannot tell this program
+  that a field it reads has gone. The client logs the served version at
+  INFO and never warns on it. The builders treat an absent or null field as
+  unavailable: when an answer depends on the field, the builder returns None
+  and the caller falls back; a pass-through field stays null. A
+  `war_history … absent or null` warning in the log means the hub's wire
+  changed under us. Read `elixir_changelog` and adapt the builder.
+- **Auth, as the code does it:** `elixir_mcp.py` POSTs JSON-RPC `tools/call`
+  to the personal resource `https://elixir.poapkings.com/mcp` with
+  `Authorization: Bearer <ELIXIR_MCP_TOKEN>` from `.env`. That key is an
+  owner-issued service token bound to **Jamie's person account**. The hub
+  refuses agent and integration keys at `/mcp` (`wrong_resource`), so the
+  bot acts with Jamie's identity and entitlements, and the hub's audit files
+  its calls under the token's surface, `svc:elixir-bot`. These are one fact,
+  not two. Every other consumer has its own principal (person / agent /
+  integration; elixir-mcp-discord runs as a clan agent with its own key,
+  event cursor and feedback inbox). Moving elixir-bot is additive and
+  unstarted: create an agent, add the clan, swap `ELIXIR_MCP_TOKEN`, and point
+  `MCP_URL` at the agent's own URL. Nothing else moves, because reads are
+  universal and the claims stay on Jamie's account.
 - **game_clock** answers what season and war day it is with no clan and no
   player. Prefer it over deriving the calendar from a river race.
-- **elixir-bot still authenticates as Jamie's PERSON account**, deliberately,
-  while every other consumer has moved to its own principal. Elixir MCP now has
-  three kinds — person / agent / integration — and a clan agent gets its own
-  identity, key, event cursor and feedback inbox (elixir-mcp-discord runs as
-  one). Migrating elixir-bot is additive and unstarted: create an agent, add
-  the clan, swap ELIXIR_MCP_TOKEN and the URL. Nothing moves, because reads are
-  universal and the claims stay on Jamie's account.
 - Battle-intelligence views (archetypes, player-adjusted lift,
   closeness) deliberately STAY on local enrichment tables — analysis is
   elixir-bot's, plumbing moves. The local recorder keeps running until a
