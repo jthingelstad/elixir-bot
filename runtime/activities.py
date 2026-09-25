@@ -380,8 +380,8 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ActivityDefinition(
         activity_key="db-backup",
         owner_lane="elixir-log",
-        purpose="Daily compressed snapshot of the operational + memory databases "
-        "to iCloud Drive (offsite via sync).",
+        purpose="Daily compressed snapshots of the operational and telemetry databases "
+        "in the rolling local historical archive.",
         job_id="db-backup",
         job_function="_db_backup",
         schedule_kind="cron",
@@ -389,7 +389,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "hour": _attr("DB_BACKUP_HOUR", 3),
             "minute": 37,
         },
-        delivery_targets=("Backup: timestamped iCloud database snapshot",),
+        delivery_targets=("Backup: timestamped local database snapshots",),
         activity_role="observer",
         catch_up_period="daily",
     ),

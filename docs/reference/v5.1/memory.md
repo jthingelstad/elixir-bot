@@ -40,7 +40,7 @@ retired synthetic ids (known debt since migration T12).
 ### 2.1 One store, in the engine DB *(D1)*
 
 New tables live in `elixir-v51.db`. The separate memory DB was a Gen-era
-artifact; one DB means one backup (iCloud daily now), real joins
+artifact; one DB means one rolling backup archive, real joins
 (memories ↔ players ↔ events), and the Observatory sees memory like
 everything else. `elixir-v5-memory.db` retires to the archive family after
 content migration. This also **undoes the T12 half-move** — conversation and

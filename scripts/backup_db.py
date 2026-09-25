@@ -227,13 +227,12 @@ def create_backup(
     }
 
     try:
-        # Stage EVERYTHING in a LOCAL temp dir, then atomically move the final
-        # .gz into dest_dir. dest_dir is often iCloud/a network mount: writing
-        # temps there (old bug) meant a hard restart mid-backup left 0-byte
-        # tmp*.db turds in the backup folder AND a stale offsite copy (live
-        # 2026-07-05). Local staging + os.replace means the destination only
-        # ever sees a complete file, and any interruption strands temps locally
-        # (auto-reaped), never in iCloud.
+        # Stage EVERYTHING in a private temp dir, then atomically move the final
+        # .gz into dest_dir. Writing temps in the destination (the old bug) meant
+        # a hard restart mid-backup left 0-byte tmp*.db files in the backup folder
+        # and a stale recovery copy (live 2026-07-05). Local staging + os.replace
+        # means the destination only ever sees a complete file, and any interruption
+        # strands temps in the auto-reaped staging directory.
         stage = Path(tempfile.mkdtemp(prefix="elixir-backup-"))
         tmp_path = str(stage / "snapshot.db")
         stage_gz = stage / filename
@@ -272,7 +271,7 @@ def create_backup(
                 # artifact before the atomic publish. The destination must
                 # never observe a recovery copy at the caller's ambient umask.
                 os.chmod(stage_gz, _BACKUP_FILE_MODE)
-                os.replace(stage_gz, dest)  # atomic move into (possibly iCloud) dest_dir
+                os.replace(stage_gz, dest)  # atomic move into dest_dir
                 os.chmod(dest, _BACKUP_FILE_MODE)
 
                 result["size_compressed"] = os.path.getsize(dest)

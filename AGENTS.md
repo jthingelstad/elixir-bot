@@ -182,7 +182,7 @@ Four database files exist, with distinct roles:
   > change what Elixir does, the episode moves to the clan DB first.
 - **`elixir-v5-archive-2026H2.db`** — the pre-cut cold archive. Read-only (chmod 444), never written; open with `file:…?immutable=1`. **Not present on this workstation** — `db.schema.build_database()` and the test fixture treat it as optional and fall back to the frozen private migration-0 SQL in `db/`, which is why nothing has failed. Do not assume it is reachable; verify before planning any recovery around it.
 
-**Historical recovery actually comes from the rolling backups** in `$ELIXIR_BACKUP_DIR` (see `scripts/backup_db.py`). Each nightly `.db.gz` froze the short-retention `raw_api_payloads` window as it stood on its own date, so their UNION reaches much further back than any single snapshot. `scripts/backfill_battle_fields.py` is the current worked example: it reads the live database plus every backup through the current extractor.
+**Historical recovery actually comes from the rolling local backups** in `$ELIXIR_BACKUP_DIR` (see `scripts/backup_db.py`). Each nightly `.db.gz` froze the short-retention `raw_api_payloads` window as it stood on its own date, so their UNION reaches much further back than any single snapshot. `scripts/backfill_battle_fields.py` is the current worked example: it reads the live database plus every backup through the current extractor. The independent Projects critical-state system publishes its own current disaster-recovery snapshots to private S3; it does not replace this local analysis archive.
 
 The engine DB follows the layered retention model (`docs/reference/v5.1/schema.md`):
 

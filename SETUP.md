@@ -278,10 +278,11 @@ the main log's threshold. The error log is always ERROR+.
   conversation, and durable memory.
 - `elixir-v51.db-wal` / `elixir-v51.db-shm` — SQLite WAL sidecars while live.
 - `elixir-v5-archive-2026H2.db` — immutable cold archive (absent here; optional).
-- `$ELIXIR_BACKUP_DIR/*.db.gz` — rolling nightly backups. Each froze the
+- `$ELIXIR_BACKUP_DIR/*.db.gz` — rolling nightly local backups. Each froze the
   short-retention `raw_api_payloads` window on its own date, so together they
   are the real historical record; treat them as recoverable evidence, not just
-  disaster-recovery copies.
+  disaster-recovery copies. The Projects critical-state system independently
+  publishes current disaster-recovery snapshots to private S3.
 - `elixir-v5.log` — active launchd log.
 - `.env` — local secrets; never commit it.
 
