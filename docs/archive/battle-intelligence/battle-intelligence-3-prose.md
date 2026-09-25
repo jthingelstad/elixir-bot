@@ -1,3 +1,5 @@
+> **Archived 2026-09-25: the prose feature is dead.** It was built, judged a failure on live data, retired, and its storage dropped in schema v32. Do not resume it.
+
 # Battle Intelligence — Feature 3: Per-battle prose (gated)
 
 Status: **draft** (2026-07-30). Part of [Battle Intelligence

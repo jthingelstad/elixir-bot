@@ -1,3 +1,5 @@
+> **Archived 2026-09-25:** the prose feature (Feature 3) is dead; Features 1, 2 (deck profiling) and 4 and the v2 interpreted layer shipped and are live. Current behaviour is `AGENTS.md` and the code, not the statuses below.
+
 # Battle Intelligence — v1 Overview
 
 > **Feature 3 (per-battle prose) is RETIRED, and as of schema v32 its storage is

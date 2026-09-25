@@ -1,5 +1,6 @@
 """Form-aware deck identity — the pure hash and card-form helpers shared by
-Battle Intelligence Features 1-3 (docs/plans/battle-intelligence-1-data.md §2).
+Battle Intelligence Features 1-3
+(docs/archive/battle-intelligence/battle-intelligence-1-data.md §2).
 
 Card form (base / Evolution / Hero) is part of card identity: CR overloaded
 ``evolution_level`` as a FORM discriminator when Heroes shipped (``1`` = Evo,

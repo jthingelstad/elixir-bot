@@ -4,8 +4,9 @@
 The CR API gives us NOTHING behavioral (only id/name/elixirCost/rarity/maxLevel),
 so the structured facts every downstream layer needs — what a card targets, whether
 it flies, whether it answers air or tanks — cannot be derived and must be enriched.
-This is the one genuine LLM job in Battle Intelligence v2 (docs/plans/
-battle-intelligence-5-interpreted.md): rare, batch, on immutable card identity.
+This is the one genuine LLM job in Battle Intelligence v2
+(docs/archive/battle-intelligence/battle-intelligence-5-interpreted.md): rare,
+batch, on immutable card identity.
 
 Design:
   * **Opus + native web_search** so facts come from current sources, not a training

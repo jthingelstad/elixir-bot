@@ -1,3 +1,5 @@
+> **Archived 2026-09-25:** shipped as the battle-bound `level_gap` only, with no profile fetch. The status below is historical.
+
 # Battle Intelligence — Feature 4: Player strength (battle-bound only)
 
 Status: **re-scoped 2026-07-30 — profile fetch DELETED (not deferred)**. Part of

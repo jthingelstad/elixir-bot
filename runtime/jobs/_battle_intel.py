@@ -1,4 +1,5 @@
-"""Battle Intelligence Stage-A worker (docs/plans/battle-intelligence-1-data.md).
+"""Battle Intelligence Stage-A worker
+(docs/archive/battle-intelligence/battle-intelligence-1-data.md).
 
 Computed enrichment only — no LLM. Extends ``battle_card_plays`` and
 ``battle_enrichment`` for un-enriched 1v1 battles each interval. Self-catching-up

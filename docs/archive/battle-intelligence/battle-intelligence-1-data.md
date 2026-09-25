@@ -1,3 +1,5 @@
+> **Archived 2026-09-25:** shipped and live (`battle_card_plays`, `battle_enrichment`, the Stage-A worker, `get_battle_intelligence`); "ready to build" below is historical. The prose feature it unblocked is dead.
+
 # Battle Intelligence — Feature 1: Battle data + computed intelligence
 
 Status: **ready to build** (2026-07-30). Part of [Battle Intelligence

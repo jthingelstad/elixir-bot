@@ -1,5 +1,6 @@
 """Pure per-battle computed metrics for Battle Intelligence Feature 1
-(docs/plans/battle-intelligence-1-data.md §2). No model, no DB, no I/O.
+(docs/archive/battle-intelligence/battle-intelligence-1-data.md §2).
+No model, no DB, no I/O.
 
 All formulas verified against 12,433 live 1v1 battles (2026-07-30):
 - The princess-HP JSON array lists ONLY surviving towers; a destroyed king

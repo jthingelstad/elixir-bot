@@ -1384,7 +1384,8 @@ def _apply_v26(conn: sqlite3.Connection) -> None:
 def _apply_v27(conn: sqlite3.Connection) -> None:
     """Battle Intelligence Feature 1: the computed foundation.
 
-    Two derived, dedup-keyed tables (docs/plans/battle-intelligence-1-data.md):
+    Two derived, dedup-keyed tables
+    (docs/archive/battle-intelligence/battle-intelligence-1-data.md):
 
     * ``battle_card_plays`` — every card played on BOTH sides of every 1v1
       battle (member + opponent), form-aware. The subject member's tag is

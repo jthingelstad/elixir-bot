@@ -1,3 +1,5 @@
+> **Archived 2026-09-25:** deck profiling shipped and is live; the matchup matrix was removed in schema v32 (below), and the prose feature it unblocked is dead. "draft" below is historical.
+
 # Battle Intelligence — Feature 2: Deck & matchup intelligence
 
 > **SUPERSEDED IN PART (2026-08-01, schema v32): the matchup matrix is gone.**

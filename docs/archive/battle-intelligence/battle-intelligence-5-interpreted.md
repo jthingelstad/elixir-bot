@@ -1,3 +1,5 @@
+> **Archived 2026-09-25:** shipped and live (card facts, deck role coverage, the `coaching` and `newcomer` views). It replaced Feature 3's per-battle prose, which is dead.
+
 # Battle Intelligence — v2: the interpreted layer (card facts → deck facts → battle tags → summarizer)
 
 Status: **designed 2026-07-31**. Owner: Jamie. Supersedes Feature 3 (per-battle prose).
