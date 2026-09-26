@@ -1,5 +1,20 @@
 # Elixir Codex instructions
 
+> **Retired 2026-09-26.** Elixir Bot no longer runs. It was POAP KINGS' clan
+> agent from February to September 2026, and the projects that replaced it grew
+> out of it:
+> [Elixir MCP](https://github.com/jthingelstad/elixir-mcp) records the game for
+> many clans,
+> [elixir-mcp-collector](https://github.com/jthingelstad/elixir-mcp-collector)
+> fetches from the API,
+> [elixir-mcp-discord](https://github.com/jthingelstad/elixir-mcp-discord) is
+> the Discord agent,
+> [Elixir Clan](https://github.com/jthingelstad/clan.poapkings.com) handles
+> clan management and awards, and
+> [Elixir Drop](https://github.com/jthingelstad/drop.poapkings.com) is the game.
+> The code and history are kept here as they were on the last day. Nothing in
+> this repository is operated or maintained any more; do not restart it.
+
 This concise Codex entry point keeps the automatically loaded instruction chain within
 Codex's project-document budget. `AGENTS.md` remains the full architecture reference;
 read only the sections relevant to the current objective or change.

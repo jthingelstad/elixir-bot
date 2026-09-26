@@ -62,7 +62,8 @@ def test_registry_has_exactly_three_active_objective_owners():
     assert plan["repo"] == "."
     assert len([entry for entry in entries if not entry.get("schedule_of")]) == 3
     assert {entry["objective"] for entry in entries} == {"run", "game", "agent"}
-    assert all(entry["status"] == "ACTIVE" for entry in entries)
+    # Retired 2026-09-26: every objective is paused with the bot.
+    assert all(entry["status"] == "PAUSED" for entry in entries)
     assert all((ROOT / entry["objective_file"]).is_file() for entry in entries)
     assert all("dispatch_label" not in entry for entry in entries)
 

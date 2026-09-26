@@ -11,7 +11,7 @@ Event follow-ups are explicit starts. Due subtasks use completion receipts.
 
 | Activity | Status | Schedule | Primary owner |
 |---|---|---|---|
-| Run Elixir | ACTIVE | Every 12 hours, minute 10 | `elixir-operations-manager` |
-| Represent the Game | ACTIVE | Daily at 07:30 | `elixir-data-analyst` |
-| Improve Elixir | ACTIVE | Monday, Tuesday, Wednesday, Thursday, Friday at 17:45 | `elixir-quality-manager` |
-| Improve Elixir (weekend) | ACTIVE | Saturday, Sunday at 07:00 | `elixir-quality-manager` |
+| Run Elixir | PAUSED | Every 12 hours, minute 10 | `elixir-operations-manager` |
+| Represent the Game | PAUSED | Daily at 07:30 | `elixir-data-analyst` |
+| Improve Elixir | PAUSED | Monday, Tuesday, Wednesday, Thursday, Friday at 17:45 | `elixir-quality-manager` |
+| Improve Elixir (weekend) | PAUSED | Saturday, Sunday at 07:00 | `elixir-quality-manager` |
